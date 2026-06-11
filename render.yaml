@@ -10,7 +10,7 @@ services:
                              # For a throwaway demo you can switch this to "free"
                              # (data resets on each restart) and delete the disk block.
     region: oregon
-    branch: claude/quirky-mendel-efkvao
+    branch: main
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /

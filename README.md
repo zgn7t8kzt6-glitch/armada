@@ -143,7 +143,7 @@ so no shell access is needed.
 - The blueprint uses Render's **Starter** plan ($7/mo) so a 1 GB persistent disk
   keeps your data across restarts. For a throwaway demo, change `plan` to `free`
   and remove the `disk:` block in `render.yaml` (data resets on each restart).
-- `render.yaml` deploys the `claude/quirky-mendel-efkvao` branch. Change `branch:`
+- `render.yaml` deploys the `main` branch. Change `branch:`
   if you merge to `main` later.
 - Turn off the public pilot before entering any real client data.
 

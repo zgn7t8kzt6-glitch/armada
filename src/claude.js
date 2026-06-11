@@ -442,6 +442,18 @@ export async function generateShiftTasks(careCard) {
 // plain object — never throws — so an admin can read the result.
 export async function aiHealth() {
   const base = { provider: PROVIDER, model: MODEL, deidentify: DEID, configured: claudeConfigured() };
+  // Surface the *real* reason behind a generic "Connection error" — the SDK
+  // wraps the underlying network/credential failure in e.cause / e.status.
+  const describe = (e) => {
+    if (!e) return 'unknown error';
+    const parts = [];
+    if (e.name && e.name !== 'Error') parts.push(e.name);
+    if (e.status) parts.push('HTTP ' + e.status);
+    if (e.message) parts.push(e.message);
+    const c = e.cause;
+    if (c) parts.push('cause: ' + [c.code, c.name, c.message].filter(Boolean).join(' ') || String(c));
+    return parts.join(' — ');
+  };
   if (!base.configured) {
     return { ...base, ok: false, structuredOutput: false, error: PROVIDER === 'bedrock'
       ? 'No AWS credentials/region found (set AWS_REGION + credentials or use an instance role).'
@@ -474,12 +486,13 @@ export async function aiHealth() {
         messages: [{ role: 'user', content: 'Say ready.' }],
       });
       plainOk = Boolean(r2.content.find((b) => b.type === 'text'));
-    } catch (e2) { plainErr = e2.message; }
+    } catch (e2) { plainErr = describe(e2); }
+    if (!plainOk) console.error('[aiHealth] AI call failed:', plainErr || describe(e));
     return {
       ...base, ok: plainOk, structuredOutput: false,
       error: plainOk
-        ? `Connected, but structured outputs (output_config/json_schema) failed on this provider: ${e.message}. The app can fall back to tool-use JSON mode here.`
-        : `AI call failed: ${plainErr || e.message}`,
+        ? `Connected, but structured outputs (output_config/json_schema) failed on this provider: ${describe(e)}. The app can fall back to tool-use JSON mode here.`
+        : `AI call failed: ${plainErr || describe(e)}`,
     };
   }
 }

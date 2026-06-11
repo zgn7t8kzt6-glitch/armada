@@ -1,7 +1,8 @@
 :root{
-  --navy:#1d2a44;--navy-2:#26344f;--gold:#b08d57;--gold-soft:#d9c4a3;
-  --cream:#f7f4ee;--ink:#2a2a2a;--muted:#6b7280;--line:#e6e1d8;
-  --good:#2f7a4f;--danger:#9b2c2c;--shadow:0 6px 24px rgba(29,42,68,.10);
+  /* Armada Recovery brand palette: deep teal + warm sand */
+  --navy:#2a585d;--navy-2:#316b6f;--gold:#c89461;--gold-soft:#e6cfa9;
+  --cream:#f6f3ec;--ink:#2a2a2a;--muted:#6b7280;--line:#e5e0d6;
+  --good:#2f7a4f;--danger:#9b2c2c;--shadow:0 6px 24px rgba(42,88,93,.12);
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:"Georgia","Times New Roman",serif;color:var(--ink);background:var(--cream)}
@@ -14,13 +15,14 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
   background:linear-gradient(135deg,var(--navy),var(--navy-2))}
 .login-card{background:#fff;padding:36px 34px;border-radius:14px;width:340px;text-align:center;
   box-shadow:0 20px 60px rgba(0,0,0,.3);border-top:4px solid var(--gold)}
-.login-card h1{margin:8px 0 2px;font-size:20px;color:var(--navy)}
-.login-card .tag{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:18px}
 .login-card label{text-align:left}
 .err{color:var(--danger);font-size:13px;min-height:18px;margin-top:8px;font-family:sans-serif}
-.crest{width:44px;height:44px;border:2px solid var(--gold);border-radius:50%;display:inline-flex;
-  align-items:center;justify-content:center;color:var(--gold);font-size:20px}
-.crest.big{width:56px;height:56px;font-size:26px;margin:0 auto}
+/* brand logo */
+.brand-mark{width:84px;height:auto;display:block;margin:0 auto 6px}
+.brand-word{margin:0;font-size:38px;line-height:1;color:var(--navy);letter-spacing:.5px}
+.brand-rec{font-size:13px;letter-spacing:6px;text-transform:uppercase;color:var(--navy);margin:2px 0 4px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.login-card .tag{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);margin-bottom:18px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.header-mark{width:40px;height:40px;flex:0 0 auto;filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))}
 
 header{background:linear-gradient(135deg,var(--navy),var(--navy-2));color:#fff;padding:16px 28px;
   display:flex;align-items:center;gap:16px;border-bottom:3px solid var(--gold)}

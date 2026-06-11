@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 196" role="img" aria-label="Armada Recovery">
+  <defs>
+    <linearGradient id="armadaGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E5A05E"/>
+      <stop offset="0.42" stop-color="#A7BA86"/>
+      <stop offset="0.72" stop-color="#6FB6B7"/>
+      <stop offset="1" stop-color="#54AEC6"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#armadaGrad)" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round">
+    <!-- outer pyramid faces: apex to the two front base corners -->
+    <path d="M100 12 L34 150"/>
+    <path d="M100 12 L166 150"/>
+    <!-- base rhombus (square base seen in perspective) -->
+    <path d="M34 150 L100 120 L166 150 L100 182 Z"/>
+    <!-- center edge: apex down to top of the sun, and below the horizon to the front corner -->
+    <path d="M100 12 L100 128"/>
+    <path d="M100 150 L100 182"/>
+    <!-- horizon line -->
+    <path d="M64 150 L136 150"/>
+    <!-- rising sun (upper semicircle resting on the horizon) -->
+    <path d="M78 150 A22 22 0 0 1 122 150"/>
+  </g>
+</svg>

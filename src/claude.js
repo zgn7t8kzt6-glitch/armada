@@ -78,7 +78,7 @@ export async function generateShiftTasks(careCard) {
     system: SYSTEM,
     output_config: {
       effort: 'low',
-      format: { type: 'json_schema', name: 'shift_tasks', schema: SCHEMA },
+      format: { type: 'json_schema', schema: SCHEMA },
     },
     messages: [
       {

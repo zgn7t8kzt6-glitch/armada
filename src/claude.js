@@ -7,6 +7,20 @@ import { STANDARD_PRIMER } from './standard.js';
 // Every Claude feature is grounded in The Armada Standard.
 const G = STANDARD_PRIMER + '\n\n';
 
+// De-identification: on by default. No client names/identifiers are sent to
+// Claude. Set AI_DEIDENTIFY=false only if you hold a signed Anthropic BAA.
+export const DEID = process.env.AI_DEIDENTIFY !== 'false';
+// Remove a person's name(s) from free text, replacing with a neutral token.
+export function scrub(text, names = []) {
+  if (!DEID || !text) return text || '';
+  let out = String(text);
+  for (const n of names) {
+    if (!n || String(n).trim().length < 2) continue;
+    out = out.replace(new RegExp(String(n).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'the client');
+  }
+  return out;
+}
+
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
 const ROLES = ['All', 'BHT / Tech', 'Nurse', 'Therapist', 'Kitchen'];
 
@@ -140,14 +154,14 @@ const AMA_SCHEMA = {
   additionalProperties: false,
 };
 
-function pulsesText(pulses = []) {
+function pulsesText(pulses = [], names = []) {
   if (!pulses.length) return 'No Daily Pulse check-ins logged yet.';
   return pulses
     .map((p) => {
       const trig = (p.triggers && p.triggers.length) ? ` | signs: ${p.triggers.join(', ')}` : '';
       const eng = p.engagement ? ` | engagement: ${p.engagement}` : '';
-      const st = p.statements ? ` | said: "${p.statements}"` : '';
-      const note = p.note ? ` | note: ${p.note}` : '';
+      const st = p.statements ? ` | said: "${scrub(p.statements, names)}"` : '';
+      const note = p.note ? ` | note: ${scrub(p.note, names)}` : '';
       return `- ${p.date} ${p.shift} | concern: ${p.concern}${eng}${trig}${st}${note}`;
     })
     .join('\n');
@@ -281,7 +295,7 @@ export async function scanNote(text, clientName) {
     max_tokens: 700,
     system: G + NOTE_SYSTEM,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: NOTE_SCHEMA } },
-    messages: [{ role: 'user', content: `Client: ${clientName || 'unknown'}\n\nNOTE:\n${text}` }],
+    messages: [{ role: 'user', content: `Client: ${DEID ? 'the client (name withheld)' : (clientName || 'unknown')}\n\nNOTE:\n${scrub(text, [clientName])}` }],
   });
   if (response.stop_reason === 'refusal') throw new Error('Declined.');
   const t = response.content.find((b) => b.type === 'text');
@@ -292,8 +306,9 @@ export async function scanNote(text, clientName) {
 
 export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   const client = new Anthropic();
+  const names = [careCard.name, careCard.pref];
   const handoffText = handoffs.length
-    ? handoffs.map((h) => `- ${h.note}`).join('\n')
+    ? handoffs.map((h) => `- ${scrub(h.note, names)}`).join('\n')
     : 'None.';
 
   const response = await client.messages.create({
@@ -309,7 +324,7 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
         role: 'user',
         content:
           `Assess this client's AMA risk.\n\n=== CARE CARD ===\n${careCardText(careCard)}\n\n` +
-          `=== RECENT DAILY PULSES (newest first) ===\n${pulsesText(pulses)}\n\n` +
+          `=== RECENT DAILY PULSES (newest first) ===\n${pulsesText(pulses, names)}\n\n` +
           `=== RECENT HANDOFF NOTES ===\n${handoffText}`,
       },
     ],
@@ -329,17 +344,18 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
 }
 
 function careCardText(c) {
-  const line = (label, val) => (val && val.trim() ? `${label}: ${val.trim()}\n` : '');
+  const names = [c.name, c.pref];
+  const v = (x) => scrub(x, names);
+  const line = (label, val) => (val && String(val).trim() ? `${label}: ${v(val).trim()}\n` : '');
   return (
-    line('Preferred name', c.pref) +
-    line('Full name', c.name) +
+    (DEID ? 'Client: the client (name withheld for privacy)\n' : (line('Preferred name', c.pref) + line('Full name', c.name))) +
     line('Program / level of care', c.program) +
     line('Personal touch (what makes them feel cared for)', c.touch) +
     line('Preferences', c.prefs) +
     line('Goals this week', c.goals) +
     line('Triggers / handle with care', c.triggers) +
-    line('Safety / medical watch items', c.safety) +
-    line('Support system', c.support)
+    line('Safety / sensitivities', c.safety) +
+    (DEID ? '' : line('Support system', c.support))
   ) || 'No details provided.';
 }
 

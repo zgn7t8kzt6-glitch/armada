@@ -12,7 +12,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -412,7 +412,7 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
   res.json({ entries: db.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all() });
 });
 
-app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined }));
+app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined, deidentify: DEID }));
 
 // Change my own password.
 app.post('/api/change-password', requireAuth, (req, res) => {
@@ -711,7 +711,9 @@ app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
 });
 
 function buildClientContext(c) {
-  const line = (l, v) => (v && String(v).trim() ? `${l}: ${v}\n` : '');
+  const names = [c.name, c.pref];
+  const s = (x) => scrub(x, names);
+  const line = (l, v) => (v && String(v).trim() ? `${l}: ${s(v).trim()}\n` : '');
   const ama = latestAmaRead(c.id);
   const pulses = recentPulses(c.id, 5);
   const goals = db.prepare(`SELECT text, status FROM goals WHERE client_id = ?`).all(c.id);
@@ -719,35 +721,45 @@ function buildClientContext(c) {
   const concerns = db.prepare(`SELECT text FROM concerns WHERE client_id = ? AND status = 'Open'`).all(c.id);
   const visit = db.prepare(`SELECT contact_name, date FROM visits WHERE client_id = ? AND date >= date('now') AND status = 'Scheduled' ORDER BY date LIMIT 1`).get(c.id);
   return `Brief this client for the team today.\n\n` +
-    line('Preferred name', c.pref) + line('Name', c.name) + line('Program', c.program) +
-    line('Admitted', c.admit) + line('Sobriety date', c.sober) + line('Personal touch', c.touch) +
+    (DEID ? 'Client: the client (name & dates withheld for privacy)\n' : (line('Preferred name', c.pref) + line('Name', c.name) + line('Admitted', c.admit) + line('Sobriety date', c.sober) + line('Support', c.support))) +
+    line('Program', c.program) + line('Personal touch', c.touch) +
     line('Preferences', c.prefs) + line('Goals (free text)', c.goals) + line('Triggers', c.triggers) +
-    line('Safety', c.safety) +
-    line('Support', c.support) + line('Welcome plan', c.welcome_plan) +
-    (ama ? `\nAMA risk: ${ama.level}. ${ama.summary || ''} Underlying: ${ama.underlying || ''}\n` : '') +
-    (goals.length ? `\nGoals:\n` + goals.map((g) => `- ${g.text} [${g.status}]`).join('\n') + '\n' : '') +
-    (pulses.length ? `\nRecent pulses:\n` + pulses.map((p) => `- ${p.date} ${p.shift} concern:${p.concern} ${(p.triggers || []).join(', ')} ${p.statements || ''}`).join('\n') + '\n' : '') +
-    (visit ? `\nUpcoming family visit: ${visit.contact_name || 'family'} on ${visit.date}\n` : '') +
-    (reqs.length ? `\nOpen requests: ` + reqs.map((r) => `${r.department}: ${r.text}`).join('; ') + '\n' : '') +
-    (concerns.length ? `\nOpen concerns: ` + concerns.map((r) => r.text).join('; ') + '\n' : '');
+    line('Safety', c.safety) + line('Welcome plan', c.welcome_plan) +
+    (ama ? `\nAMA risk: ${ama.level}. ${s(ama.summary)} Underlying: ${s(ama.underlying)}\n` : '') +
+    (goals.length ? `\nGoals:\n` + goals.map((g) => `- ${s(g.text)} [${g.status}]`).join('\n') + '\n' : '') +
+    (pulses.length ? `\nRecent pulses:\n` + pulses.map((p) => `- ${p.date} ${p.shift} concern:${p.concern} ${(p.triggers || []).join(', ')} ${s(p.statements || '')}`).join('\n') + '\n' : '') +
+    (visit && !DEID ? `\nUpcoming family visit: ${visit.contact_name || 'family'} on ${visit.date}\n` : (visit ? '\nUpcoming family visit scheduled.\n' : '')) +
+    (reqs.length ? `\nOpen requests: ` + reqs.map((r) => `${r.department}: ${s(r.text)}`).join('; ') + '\n' : '') +
+    (concerns.length ? `\nOpen concerns: ` + concerns.map((r) => s(r.text)).join('; ') + '\n' : '');
 }
 
+// House context. In de-identified mode, clients are labelled "Client A/B/…";
+// returns { text, map } so the caller can swap labels back to real names in the
+// AI's output (names never reach Claude).
 function buildHouseContext(shift) {
   const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room`).all();
+  const map = {};
   let ctx = `Shift briefing for ${shift || 'this'} shift. ${clients.length} active clients.\n\n`;
-  clients.forEach((c) => {
+  clients.forEach((c, i) => {
+    const label = DEID ? `Client ${String.fromCharCode(65 + (i % 26))}${i >= 26 ? Math.floor(i / 26) : ''}` : (c.pref || c.name);
+    if (DEID) map[label] = c.pref || c.name;
+    const names = [c.name, c.pref];
     const ama = latestAmaRead(c.id);
     const reqs = db.prepare(`SELECT text FROM requests WHERE client_id = ? AND status != 'Done'`).all(c.id);
     const parts = [];
-    if (ama && ama.level !== 'Low') parts.push(`AMA risk ${ama.level}: ${ama.summary || ''}`);
-    if (c.safety) parts.push(`safety: ${c.safety}`);
-    if (reqs.length) parts.push(`open requests: ${reqs.map((r) => r.text).join('; ')}`);
-    if (c.touch) parts.push(`personal touch: ${c.touch}`);
-    ctx += `• ${c.pref || c.name}${c.room ? ' (Room ' + c.room + ')' : ''}: ${parts.join(' | ') || 'stable'}\n`;
+    if (ama && ama.level !== 'Low') parts.push(`AMA risk ${ama.level}: ${scrub(ama.summary, names)}`);
+    if (c.safety) parts.push(`safety: ${scrub(c.safety, names)}`);
+    if (reqs.length) parts.push(`open requests: ${reqs.map((r) => scrub(r.text, names)).join('; ')}`);
+    if (c.touch) parts.push(`personal touch: ${scrub(c.touch, names)}`);
+    ctx += `• ${label}${(!DEID && c.room) ? ' (Room ' + c.room + ')' : ''}: ${parts.join(' | ') || 'stable'}\n`;
   });
-  const oc = db.prepare(`SELECT co.text, c.pref FROM concerns co JOIN clients c ON c.id = co.client_id WHERE co.status = 'Open'`).all();
-  if (oc.length) ctx += `\nOpen concerns: ` + oc.map((o) => `${o.pref}: ${o.text}`).join('; ') + '\n';
-  return ctx;
+  return { text: ctx, map };
+}
+function reidentify(text, map) {
+  if (!text || !map) return text;
+  let out = text;
+  for (const [label, name] of Object.entries(map)) out = out.split(label).join(name);
+  return out;
 }
 
 app.post('/api/clients/:id/care-brief', requireAuth, async (req, res) => {
@@ -764,7 +776,8 @@ app.post('/api/clients/:id/care-brief', requireAuth, async (req, res) => {
 app.post('/api/shift-briefing', requireAuth, async (req, res) => {
   if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured (set ANTHROPIC_API_KEY).' });
   try {
-    const brief = await generateShiftBriefing(buildHouseContext(req.body?.shift));
+    const { text, map } = buildHouseContext(req.body?.shift);
+    const brief = reidentify(await generateShiftBriefing(text), map);
     audit({ user: req.user, action: 'SHIFT_BRIEF', ip: req.ip });
     res.json({ brief });
   } catch (e) { res.status(502).json({ error: e.message }); }
@@ -830,14 +843,15 @@ app.post('/api/assistant', requireAuth, async (req, res) => {
   const q = (req.body?.question || '').trim();
   if (!q) return res.status(400).json({ error: 'Ask a question.' });
   try {
-    let ctx;
+    let ctx, map = null;
     if (req.body?.client_id) {
       const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.body.client_id);
       ctx = c ? buildClientContext(c) : 'No such client.';
     } else {
-      ctx = buildHouseContext('current');
+      const h = buildHouseContext('current'); ctx = h.text; map = h.map;
     }
-    const answer = await askAssistant(q, ctx);
+    const qOut = DEID ? scrub(q, db.prepare(`SELECT name, pref FROM clients WHERE active = 1`).all().flatMap((c) => [c.name, c.pref]).filter(Boolean)) : q;
+    const answer = reidentify(await askAssistant(qOut, ctx), map);
     audit({ user: req.user, action: 'ASSISTANT', detail: q.slice(0, 80), ip: req.ip });
     res.json({ answer });
   } catch (e) { res.status(502).json({ error: e.message }); }

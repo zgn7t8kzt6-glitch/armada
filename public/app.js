@@ -1065,7 +1065,7 @@ async function todayBriefing(){
 /* ---- ask AI ---- */
 async function loadAskAI(){
   await fillClientSelect($('ai_client'), 'The whole house');
-  $('aiHint').textContent = META.claude ? '' : 'Claude is not configured — set ANTHROPIC_API_KEY to enable.';
+  $('aiHint').textContent = (META.claude ? '' : 'Claude is not configured — set ANTHROPIC_API_KEY to enable. ') + (META.deidentify ? '🔒 Privacy: AI runs on de-identified data — client names are not sent to Claude.' : '');
   $('aiAskBtn').disabled = !META.claude;
 }
 async function askAI(){

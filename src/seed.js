@@ -38,14 +38,14 @@ export function ensureSampleData() {
     'Vegetarian. Decaf after 2pm. Reads before bed. Values quiet morning time.',
     'Attend all 3 groups daily. Call sponsor Dave each evening. Finish Step 4 worksheet.',
     'Crowded rooms raise anxiety — offer a seat near the door. Avoid discussing her ex.',
-    'Mild fall risk — stay nearby in shower. Penicillin allergy. Monitor withdrawal s/s through day 5.',
+    'Gets discouraged in the afternoons — check in and offer a walk. Sensitive about feeling judged.',
     'Mother Carol calls Sundays. Sponsor: Dave. Daughter: Mia, 7.'
   );
   const cid = info.lastInsertRowid;
   const ins = db.prepare(`INSERT INTO tasks (client_id, shift, job_role, text, priority, sort) VALUES (?,?,?,?,?,?)`);
   [
     ['Morning', 'BHT / Tech', 'Gentle wake-up, bring oat-milk coffee', 'Normal'],
-    ['Morning', 'Nurse', 'Morning meds + withdrawal check (day-5 watch)', 'High'],
+    ['Morning', 'BHT / Tech', 'Warm welcome — ask about her daughter Mia', 'Normal'],
     ['Day', 'Therapist', 'Check Step 4 worksheet progress in 1:1', 'Normal'],
     ['Evening', 'BHT / Tech', 'Remind + give privacy for sponsor call to Dave', 'Normal'],
     ['Evening', 'Kitchen', 'Vegetarian dinner plate; decaf only', 'Normal'],

@@ -63,7 +63,10 @@ real client data.)
 - **Client 360 Journey.** One screen per client pulling together preferences, safety, health, goals, schedule, risk, requests, concerns, delights, pulses, and family — with an AI Care Brief for today.
 - **Treatment goals** with progress, plus **health** (allergies, medications) on the Care Card.
 - **AI Shift Briefing.** Claude reads the whole house and writes the shift huddle: who needs extra care, what to close out, delights to deliver, and a line for the team.
-- **Nursing station.** Structured medications with a MAR (Given/Refused/Held), vitals, and withdrawal scales (CIWA-Ar / COWS) — surfaced on the Journey and fed to the AI briefs. Decision support, verified per clinical protocol.
+- **Employee accountability.** Tracks how often each teammate engaged in the care system (pulses, delights, requests, surveys, handoffs) and how many assigned shifts had no logged care action — with a monthly **Care Champion** (fewest misses) for recognition, and a house care-gap list of missed client check-ins.
+- **Proactive alerts.** The moment a client's signals turn (High-concern pulse, High/Elevated AMA read, high-priority request, serious incident) an alert surfaces on Today — no one has to go looking.
+- **Alumni & continuing care.** Discharged clients stay in the family — milestones, aftercare-call status, and logged touchpoints.
+- **Client-facing kiosk.** A simple, code-gated tablet page where clients submit their own requests and take surveys (anonymous unless they pick their name).
 - **Family engagement.** Family contacts, shared updates, and visit scheduling — easing the outside pressure that drives AMA.
 - **Admissions & bed board.** An intake pipeline (Inquiry → Screening → Scheduled → Admitted) that creates a Care Card on admit, plus a live bed board.
 - **Team.** Daily Service-Value training acknowledgement, peer kudos, and (for admins) a 7-day staff-wellbeing trend.

@@ -64,7 +64,7 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
   res.json({ client: c });
 });
 
-const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'welcome_plan', 'aftercare_plan', 'allergies', 'medications'];
+const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'welcome_plan', 'aftercare_plan'];
 
 function saveTasks(clientId, tasks = []) {
   db.prepare(`DELETE FROM tasks WHERE client_id = ?`).run(clientId);
@@ -143,6 +143,10 @@ app.post('/api/pulses', requireAuth, async (req, res) => {
 
   // Auto-generate the recap + action plan when concern is High.
   let autoPlan = false;
+  if (b.concern === 'High') {
+    const c = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(b.client_id);
+    createAlert(b.client_id, 'concern', 'High', `${c?.pref || c?.name || 'A client'} — High-concern pulse${b.statements ? `: "${b.statements}"` : ''}. Check in now.`);
+  }
   if (b.concern === 'High' && claudeConfigured()) {
     const client = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(b.client_id);
     if (client) {
@@ -165,6 +169,14 @@ function latestAmaRead(clientId) {
   return { ...r, triggers: safeArr(r.triggers), actions: safeArr(r.actions), cared_for: safeArr(r.cared_for) };
 }
 
+// Proactive alert: surfaced the moment a client's signals turn. De-duped so we
+// don't repeat the same open alert for the same client+kind.
+function createAlert(client_id, kind, level, message) {
+  const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id = ? AND kind = ? AND status = 'New' AND created_at >= datetime('now','-1 day') LIMIT 1`).get(client_id, kind);
+  if (dup) return;
+  db.prepare(`INSERT INTO alerts (client_id, kind, level, message) VALUES (?, ?, ?, ?)`).run(client_id || null, kind, level || null, message);
+}
+
 // Gather context, ask Claude, store the read. Reused by the button and by
 // auto-generation when a High-concern pulse is logged.
 async function runAndStoreAmaRead(client, user, ip) {
@@ -177,6 +189,8 @@ async function runAndStoreAmaRead(client, user, ip) {
   ).run(client.id, read.level, read.summary, JSON.stringify(read.triggers),
     JSON.stringify(read.actions), read.approach, read.underlying || null,
     JSON.stringify(read.cared_for || []), read.best_play || null, user.id);
+  if (read.level === 'High' || read.level === 'Elevated')
+    createAlert(client.id, 'risk', read.level, `${client.pref || client.name} — AMA risk ${read.level}: ${read.summary || 'review the action plan'}`);
   audit({ user, action: 'AMA_READ', entity: 'client', entity_id: client.id, detail: read.level, ip });
   return read;
 }
@@ -522,6 +536,7 @@ app.post('/api/requests', requireAuth, (req, res) => {
   if (!department || !text?.trim()) return res.status(400).json({ error: 'Missing department or text' });
   db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?)`)
     .run(client_id || null, department, text.trim(), priority === 'High' ? 'High' : 'Normal', req.user.id, req.user.name);
+  if (priority === 'High') createAlert(client_id || null, 'request', 'High', `High-priority request — ${department}: ${text.trim().slice(0, 80)}`);
   audit({ user: req.user, action: 'REQUEST', entity: 'client', entity_id: client_id ? +client_id : null, detail: department, ip: req.ip });
   res.json({ ok: true });
 });
@@ -579,9 +594,6 @@ app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
     goals: db.prepare(`SELECT * FROM goals WHERE client_id = ? ORDER BY (status = 'Met'), id DESC`).all(c.id),
     schedule: db.prepare(`SELECT * FROM schedule_items WHERE client_id = ? AND date = ? ORDER BY time`).all(c.id, today),
     followups: db.prepare(`SELECT * FROM followups WHERE client_id = ? AND status = 'Pending' ORDER BY due_date`).all(c.id),
-    meds: db.prepare(`SELECT * FROM meds WHERE client_id = ? AND active = 1 ORDER BY name`).all(c.id),
-    vitals: db.prepare(`SELECT * FROM vitals WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(c.id) || null,
-    withdrawal: db.prepare(`SELECT * FROM withdrawal_scores WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(c.id) || null,
     family: db.prepare(`SELECT * FROM family_contacts WHERE client_id = ? ORDER BY id`).all(c.id),
     visits: db.prepare(`SELECT * FROM visits WHERE client_id = ? AND date >= date('now') AND status = 'Scheduled' ORDER BY date, time`).all(c.id),
   } });
@@ -594,22 +606,16 @@ function buildClientContext(c) {
   const goals = db.prepare(`SELECT text, status FROM goals WHERE client_id = ?`).all(c.id);
   const reqs = db.prepare(`SELECT department, text FROM requests WHERE client_id = ? AND status != 'Done'`).all(c.id);
   const concerns = db.prepare(`SELECT text FROM concerns WHERE client_id = ? AND status = 'Open'`).all(c.id);
-  const vit = db.prepare(`SELECT * FROM vitals WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(c.id);
-  const wd = db.prepare(`SELECT * FROM withdrawal_scores WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(c.id);
-  const meds = db.prepare(`SELECT name FROM meds WHERE client_id = ? AND active = 1`).all(c.id);
   const visit = db.prepare(`SELECT contact_name, date FROM visits WHERE client_id = ? AND date >= date('now') AND status = 'Scheduled' ORDER BY date LIMIT 1`).get(c.id);
-  const nursing = (vit ? `Latest vitals: BP ${vit.bp || '-'}, HR ${vit.hr || '-'}, Temp ${vit.temp || '-'}. ` : '') +
-    (wd ? `Latest ${wd.scale}: ${wd.score}. ` : '') + (meds.length ? `Active meds: ${meds.map((m) => m.name).join(', ')}. ` : '');
   return `Brief this client for the team today.\n\n` +
     line('Preferred name', c.pref) + line('Name', c.name) + line('Program', c.program) +
     line('Admitted', c.admit) + line('Sobriety date', c.sober) + line('Personal touch', c.touch) +
     line('Preferences', c.prefs) + line('Goals (free text)', c.goals) + line('Triggers', c.triggers) +
-    line('Safety', c.safety) + line('Allergies', c.allergies) + line('Medications', c.medications) +
+    line('Safety', c.safety) +
     line('Support', c.support) + line('Welcome plan', c.welcome_plan) +
     (ama ? `\nAMA risk: ${ama.level}. ${ama.summary || ''} Underlying: ${ama.underlying || ''}\n` : '') +
-    (goals.length ? `\nTreatment goals:\n` + goals.map((g) => `- ${g.text} [${g.status}]`).join('\n') + '\n' : '') +
+    (goals.length ? `\nGoals:\n` + goals.map((g) => `- ${g.text} [${g.status}]`).join('\n') + '\n' : '') +
     (pulses.length ? `\nRecent pulses:\n` + pulses.map((p) => `- ${p.date} ${p.shift} concern:${p.concern} ${(p.triggers || []).join(', ')} ${p.statements || ''}`).join('\n') + '\n' : '') +
-    (nursing ? `\nNursing: ${nursing}\n` : '') +
     (visit ? `\nUpcoming family visit: ${visit.contact_name || 'family'} on ${visit.date}\n` : '') +
     (reqs.length ? `\nOpen requests: ` + reqs.map((r) => `${r.department}: ${r.text}`).join('; ') + '\n' : '') +
     (concerns.length ? `\nOpen concerns: ` + concerns.map((r) => r.text).join('; ') + '\n' : '');
@@ -725,52 +731,13 @@ app.post('/api/incidents', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.type || !b.description?.trim()) return res.status(400).json({ error: 'Missing' });
   db.prepare(`INSERT INTO incidents (client_id, type, severity, description, action_taken, reported_by, reported_by_name) VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, req.user.id, req.user.name);
+  if (b.severity === 'High' || b.severity === 'Critical') createAlert(b.client_id || null, 'incident', b.severity, `${b.severity} incident (${b.type}): ${b.description.trim().slice(0, 80)}`);
   audit({ user: req.user, action: 'INCIDENT', entity: 'client', entity_id: b.client_id ? +b.client_id : null, detail: `${b.type}/${b.severity}`, ip: req.ip });
   res.json({ ok: true });
 });
 app.post('/api/incidents/:id/status', requireAuth, (req, res) => {
   const st = ['Open', 'Reviewed', 'Closed'].includes(req.body?.status) ? req.body.status : 'Reviewed';
   db.prepare(`UPDATE incidents SET status = ? WHERE id = ?`).run(st, req.params.id);
-  res.json({ ok: true });
-});
-
-/* ---------------- Nursing: meds (MAR), vitals, withdrawal ---------------- */
-app.get('/api/clients/:id/nursing', requireAuth, (req, res) => {
-  const cid = req.params.id;
-  res.json({
-    meds: db.prepare(`SELECT * FROM meds WHERE client_id = ? AND active = 1 ORDER BY name`).all(cid),
-    recentAdmin: db.prepare(`SELECT m.given_at, m.status, md.name FROM med_admin m JOIN meds md ON md.id = m.med_id WHERE m.client_id = ? ORDER BY m.id DESC LIMIT 15`).all(cid),
-    vitals: db.prepare(`SELECT * FROM vitals WHERE client_id = ? ORDER BY id DESC LIMIT 10`).all(cid),
-    withdrawal: db.prepare(`SELECT * FROM withdrawal_scores WHERE client_id = ? ORDER BY id DESC LIMIT 10`).all(cid),
-  });
-});
-app.post('/api/meds', requireAuth, (req, res) => {
-  const b = req.body || {}; if (!b.client_id || !b.name?.trim()) return res.status(400).json({ error: 'Missing' });
-  db.prepare(`INSERT INTO meds (client_id, name, dose, route, schedule, prn, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(b.client_id, b.name.trim(), b.dose || null, b.route || null, b.schedule || null, b.prn ? 1 : 0, b.notes || null);
-  audit({ user: req.user, action: 'MED_ADD', entity: 'client', entity_id: +b.client_id, detail: b.name, ip: req.ip });
-  res.json({ ok: true });
-});
-app.post('/api/meds/:id/stop', requireAuth, (req, res) => { db.prepare(`UPDATE meds SET active = 0 WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
-app.post('/api/meds/:id/admin', requireAuth, (req, res) => {
-  const med = db.prepare(`SELECT * FROM meds WHERE id = ?`).get(req.params.id);
-  if (!med) return res.status(404).json({ error: 'Not found' });
-  const st = ['Given', 'Refused', 'Held'].includes(req.body?.status) ? req.body.status : 'Given';
-  db.prepare(`INSERT INTO med_admin (med_id, client_id, status, note, given_by) VALUES (?, ?, ?, ?, ?)`)
-    .run(med.id, med.client_id, st, req.body?.note || null, req.user.id);
-  audit({ user: req.user, action: 'MED_ADMIN', entity: 'client', entity_id: med.client_id, detail: `${med.name}: ${st}`, ip: req.ip });
-  res.json({ ok: true });
-});
-app.post('/api/vitals', requireAuth, (req, res) => {
-  const b = req.body || {}; if (!b.client_id) return res.status(400).json({ error: 'Missing' });
-  db.prepare(`INSERT INTO vitals (client_id, bp, hr, temp, resp, o2, weight, note, taken_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(b.client_id, b.bp || null, b.hr || null, b.temp || null, b.resp || null, b.o2 || null, b.weight || null, b.note || null, req.user.id);
-  res.json({ ok: true });
-});
-app.post('/api/withdrawal', requireAuth, (req, res) => {
-  const b = req.body || {}; if (!b.client_id || b.score == null) return res.status(400).json({ error: 'Missing' });
-  db.prepare(`INSERT INTO withdrawal_scores (client_id, scale, score, note, taken_by) VALUES (?, ?, ?, ?, ?)`)
-    .run(b.client_id, b.scale || 'CIWA-Ar', Number(b.score), b.note || null, req.user.id);
   res.json({ ok: true });
 });
 
@@ -979,6 +946,128 @@ function maybeSendWeeklyReport() {
 }
 setInterval(maybeSendWeeklyReport, 60 * 60 * 1000);
 maybeSendWeeklyReport();
+
+/* ---------------- Proactive alerts ---------------- */
+app.get('/api/alerts', requireAuth, (req, res) => {
+  const status = req.query.status || 'New';
+  const rows = db.prepare(`SELECT a.*, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id ${status === 'all' ? '' : 'WHERE a.status = ?'} ORDER BY a.id DESC LIMIT 100`)
+    .all(...(status === 'all' ? [] : [status]));
+  res.json({ alerts: rows, newCount: db.prepare(`SELECT COUNT(*) n FROM alerts WHERE status = 'New'`).get().n });
+});
+app.post('/api/alerts/:id/ack', requireAuth, (req, res) => {
+  db.prepare(`UPDATE alerts SET status = 'Ack', ack_by = ?, ack_name = ?, ack_at = datetime('now') WHERE id = ?`).run(req.user.id, req.user.name, req.params.id);
+  res.json({ ok: true });
+});
+
+/* ---------------- Employee accountability ---------------- */
+// "Used" = care actions logged; "Missed" = assigned shifts with no logged action.
+app.get('/api/accountability', requireAuth, requireAdmin, (req, res) => {
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : new Date().toISOString().slice(0, 7);
+  const start = month + '-01';
+  const [y, m] = month.split('-').map(Number);
+  const end = (m === 12 ? (y + 1) + '-01' : `${y}-${String(m + 1).padStart(2, '0')}`) + '-01';
+
+  const users = db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1`).all();
+  const stat = {}; users.forEach((u) => { stat[u.id] = { id: u.id, name: u.name, job_role: u.job_role, actions: 0, breakdown: {}, assigned: 0, covered: 0, missed: 0 }; });
+
+  // Care-action sources → (user, date). Each query has exactly two ? (start, end).
+  const sources = {
+    pulse: `SELECT author_id uid, date d FROM pulses WHERE date >= ? AND date < ?`,
+    delight: `SELECT by_id uid, substr(created_at,1,10) d FROM delights WHERE created_at >= ? AND created_at < ?`,
+    wow: `SELECT by_id uid, substr(created_at,1,10) d FROM wows WHERE created_at >= ? AND created_at < ?`,
+    handoff: `SELECT author_id uid, substr(created_at,1,10) d FROM handoffs WHERE created_at >= ? AND created_at < ?`,
+    'task done': `SELECT done_by uid, substr(done_at,1,10) d FROM completions WHERE done_at >= ? AND done_at < ?`,
+    'request done': `SELECT done_by uid, substr(done_at,1,10) d FROM requests WHERE status = 'Done' AND done_at >= ? AND done_at < ?`,
+    'family update': `SELECT by_id uid, substr(created_at,1,10) d FROM family_updates WHERE created_at >= ? AND created_at < ?`,
+    survey: `SELECT submitted_by uid, substr(created_at,1,10) d FROM survey_responses WHERE created_at >= ? AND created_at < ?`,
+    concern: `SELECT owner_id uid, substr(created_at,1,10) d FROM concerns WHERE created_at >= ? AND created_at < ?`,
+  };
+  const activeSet = new Set();  // uid|date
+  for (const [label, sql] of Object.entries(sources)) {
+    for (const r of db.prepare(sql).all(start, end)) {
+      if (!r.uid || !stat[r.uid]) continue;
+      stat[r.uid].actions++;
+      stat[r.uid].breakdown[label] = (stat[r.uid].breakdown[label] || 0) + 1;
+      if (r.d) activeSet.add(r.uid + '|' + r.d);
+    }
+  }
+  // Assigned shifts → covered / missed
+  const today = new Date().toISOString().slice(0, 10);
+  for (const a of db.prepare(`SELECT a.user_id uid, s.date d FROM assignments a JOIN shifts s ON s.id = a.shift_id WHERE s.date >= ? AND s.date < ?`).all(start, end)) {
+    if (!stat[a.uid] || a.d > today) continue;
+    stat[a.uid].assigned++;
+    if (activeSet.has(a.uid + '|' + a.d)) stat[a.uid].covered++; else stat[a.uid].missed++;
+  }
+  const staff = Object.values(stat).sort((x, y) => (x.missed - y.missed) || (y.actions - x.actions));
+  const eligible = staff.filter((s) => s.assigned > 0);
+  const champion = (eligible.length ? eligible : staff.filter((s) => s.actions > 0)).sort((x, y) => (x.missed - y.missed) || (y.actions - x.actions))[0] || null;
+
+  // House care gaps: active client-days this month (up to today) with no pulse.
+  const pulsed = new Set(db.prepare(`SELECT client_id || '|' || date k FROM pulses WHERE date >= ? AND date < ?`).all(start, end).map((r) => r.k));
+  const clients = db.prepare(`SELECT id, pref, name, admit FROM clients WHERE active = 1`).all();
+  let gapCount = 0; const gaps = [];
+  for (const c of clients) {
+    let d = new Date(Math.max(new Date(start).getTime(), c.admit ? new Date(c.admit + 'T00:00').getTime() : 0));
+    const stop = new Date(Math.min(new Date(end).getTime(), new Date(today + 'T00:00').getTime() + 864e5));
+    for (; d < stop; d = new Date(d.getTime() + 864e5)) {
+      const ds = d.toISOString().slice(0, 10);
+      if (!pulsed.has(c.id + '|' + ds)) { gapCount++; if (gaps.length < 30) gaps.push({ client: c.pref || c.name, date: ds }); }
+    }
+  }
+  res.json({ month, staff, champion, gaps: { count: gapCount, recent: gaps } });
+});
+
+/* ---------------- Alumni / continuing care ---------------- */
+app.get('/api/alumni', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT id, pref, name, room, program, sober, discharge_status, discharge_date FROM clients WHERE discharge_status IN ('Completed','AMA') ORDER BY discharge_date DESC`).all();
+  const now = Date.now();
+  for (const c of rows) {
+    c.daysSober = c.sober ? Math.floor((now - new Date(c.sober + 'T00:00').getTime()) / 864e5) : null;
+    c.openCalls = db.prepare(`SELECT COUNT(*) n FROM followups WHERE client_id = ? AND status = 'Pending'`).get(c.id).n;
+    c.lastTouch = db.prepare(`SELECT created_at FROM alumni_notes WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(c.id)?.created_at || null;
+  }
+  res.json({ alumni: rows });
+});
+app.get('/api/alumni/:id/notes', requireAuth, (req, res) => {
+  res.json({ notes: db.prepare(`SELECT * FROM alumni_notes WHERE client_id = ? ORDER BY id DESC LIMIT 50`).all(req.params.id) });
+});
+app.post('/api/alumni/:id/notes', requireAuth, (req, res) => {
+  if (!req.body?.text?.trim()) return res.status(400).json({ error: 'Missing' });
+  db.prepare(`INSERT INTO alumni_notes (client_id, text, by_id, by_name) VALUES (?, ?, ?, ?)`).run(req.params.id, req.body.text.trim(), req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+
+/* ---------------- Client-facing kiosk (no staff login; guarded by a code) ---------------- */
+function kioskOk(req) { return (req.query.code || req.body?.code) === (process.env.KIOSK_CODE || 'armada'); }
+app.get('/api/kiosk/data', (req, res) => {
+  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+  const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 AND key IN ('experience','meals') ORDER BY sort`).all();
+  for (const s of surveys) s.questions = db.prepare(`SELECT id, category, text, type FROM survey_questions WHERE survey_id = ? ORDER BY sort, id`).all(s.id);
+  res.json({
+    clients: db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all(),
+    departments: DEPARTMENTS, surveys,
+  });
+});
+app.post('/api/kiosk/request', (req, res) => {
+  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+  const b = req.body || {}; if (!b.text?.trim()) return res.status(400).json({ error: 'Tell us what you need' });
+  db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, 'Normal', ?)`)
+    .run(b.client_id || null, b.department || 'Front Desk / Concierge', b.text.trim(), 'Client (kiosk)');
+  res.json({ ok: true });
+});
+app.post('/api/kiosk/survey', (req, res) => {
+  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+  const b = req.body || {};
+  const survey = db.prepare(`SELECT id FROM surveys WHERE id = ?`).get(b.survey_id);
+  if (!survey || !Array.isArray(b.answers) || !b.answers.length) return res.status(400).json({ error: 'No answers' });
+  const info = db.prepare(`INSERT INTO survey_responses (survey_id, client_id) VALUES (?, ?)`).run(survey.id, b.client_id || null);
+  const ins = db.prepare(`INSERT INTO survey_answers (response_id, question_id, value_num, value_text) VALUES (?, ?, ?, ?)`);
+  for (const a of b.answers) {
+    if (a.question_id == null) continue;
+    ins.run(info.lastInsertRowid, a.question_id, (a.num === 0 || a.num) ? Number(a.num) : null, a.text?.trim() || null);
+  }
+  res.json({ ok: true });
+});
 
 /* ---------------- static ---------------- */
 app.use(express.static(path.join(__dirname, 'public')));

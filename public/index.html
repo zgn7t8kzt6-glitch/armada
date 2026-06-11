@@ -50,11 +50,12 @@
     <button data-view="surveys">Surveys</button>
     <button data-view="concierge">Concierge</button>
     <button data-view="program">Program</button>
-    <button data-view="nursing">Nursing</button>
     <button data-view="incidents">Incidents</button>
     <button data-view="askai">Ask AI</button>
     <button data-view="family">Family</button>
     <button data-view="admissions">Admissions</button>
+    <button data-view="alumni">Alumni</button>
+    <button data-view="accountability" data-admin>Accountability</button>
     <button data-view="team">Team</button>
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
@@ -74,7 +75,14 @@
         </div>
         <div id="todayBrief"></div>
       </div>
-      <div class="card"><div id="todayKpis" class="ret-cards"></div></div>
+      <div class="card" id="alertsCard" style="display:none;border-left:4px solid var(--danger)">
+        <h3>⚡ Proactive alerts <span id="alertCount" class="badge"></span></h3>
+        <p class="sub sans">The moment a client's signals turn — surfaced here without anyone having to look.</p>
+        <div id="alertsList"></div>
+      </div>
+      <div class="card"><div id="todayKpis" class="ret-cards"></div>
+        <div class="toolbar" style="margin-top:10px"><a class="btn btn-ghost btn-sm sans" href="/kiosk.html" target="_blank">Open client kiosk ↗</a></div>
+      </div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
         <div class="card" style="flex:2;min-width:320px">
           <h3>Needs attention today</h3>
@@ -113,10 +121,10 @@
     <section id="incidents" class="view">
       <div class="card no-print">
         <h3>Incident &amp; Safety Reports</h3>
-        <p class="sub sans">Document safety events for review and follow-up — falls, medical, behavioral, medication errors, elopement.</p>
+        <p class="sub sans">Document safety events for review and follow-up — behavioral, property, elopement/AMA, and other.</p>
         <div class="grid3">
           <div><label>Client (optional)</label><select id="in_client"></select></div>
-          <div><label>Type</label><select id="in_type"><option>Behavioral</option><option>Medical</option><option>Fall</option><option>Medication error</option><option>Property</option><option>Elopement/AMA</option><option>Other</option></select></div>
+          <div><label>Type</label><select id="in_type"><option>Behavioral</option><option>Property</option><option>Elopement/AMA</option><option>Conflict</option><option>Other</option></select></div>
           <div><label>Severity</label><select id="in_sev"><option>Low</option><option>Moderate</option><option>High</option><option>Critical</option></select></div>
         </div>
         <label>What happened</label><textarea id="in_desc"></textarea>
@@ -124,6 +132,27 @@
         <div class="toolbar"><button class="btn btn-gold sans" onclick="addIncident()">File report</button></div>
       </div>
       <div class="card"><h3>Reports</h3><div id="inList"></div></div>
+    </section>
+
+    <!-- ALUMNI -->
+    <section id="alumni" class="view">
+      <div class="card">
+        <h3>Alumni &amp; Continuing Care</h3>
+        <p class="sub sans">The relationship doesn't end at discharge. Stay connected, celebrate milestones, keep them in the family.</p>
+        <div id="alumniList"></div>
+      </div>
+    </section>
+
+    <!-- ACCOUNTABILITY -->
+    <section id="accountability" class="view">
+      <div class="card no-print">
+        <h3>Employee Accountability</h3>
+        <p class="sub sans">How often each teammate showed up in the care system — and where check-ins were missed. The teammate who missed the least each month earns recognition.</p>
+        <div class="controls"><div class="field"><label>Month</label><input id="ac_month" type="month"/></div><button class="btn btn-ghost sans" onclick="loadAccountability()">Show</button></div>
+      </div>
+      <div id="championCard"></div>
+      <div class="card"><h3>Leaderboard</h3><div id="acTable"></div></div>
+      <div class="card"><h3>Care gaps — client check-ins missed</h3><div id="acGaps"></div></div>
     </section>
 
     <!-- SHIFT REPORT -->
@@ -214,16 +243,6 @@
 
     <!-- JOURNEY (client 360) -->
     <section id="journey" class="view"><div id="journeyBody"></div></section>
-
-    <!-- NURSING -->
-    <section id="nursing" class="view">
-      <div class="card no-print">
-        <h3>Nursing Station</h3>
-        <p class="sub sans">Medications (MAR), vitals, and withdrawal scales (CIWA-Ar / COWS). Decision support — verify per your clinical protocol.</p>
-        <div class="controls"><div class="field"><label>Client</label><select id="nu_client"></select></div><button class="btn btn-ghost sans" onclick="loadNursing()">Open chart</button></div>
-      </div>
-      <div id="nursingArea"></div>
-    </section>
 
     <!-- FAMILY -->
     <section id="family" class="view">
@@ -328,10 +347,6 @@
           <div><label>⚠ Safety / Medical Watch Items</label><textarea id="f_safety"></textarea></div>
         </div>
         <label>Support System / Family Contacts</label><textarea id="f_support"></textarea>
-        <div class="grid2">
-          <div><label>⚕ Allergies</label><input id="f_allergies" placeholder="e.g. Penicillin, latex"/></div>
-          <div><label>⚕ Current medications</label><input id="f_medications" placeholder="e.g. Suboxone, Sertraline"/></div>
-        </div>
         <div class="grid2">
           <div><label>☀ Welcome / first-72-hours plan (the arrival)</label><textarea id="f_welcome_plan" placeholder="Greet by name. Warm welcome gesture. Pair with a peer buddy. Ease first-night anxiety — the highest-risk window."></textarea></div>
           <div><label>🤝 Aftercare / continuity plan (the farewell)</label><textarea id="f_aftercare_plan" placeholder="Sober-living / outpatient, sponsor, meeting schedule, who follows up. Used when the client is discharged."></textarea></div>

@@ -358,6 +358,27 @@ CREATE TABLE IF NOT EXISTS training_ack (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Proactive alerts: surfaced the moment a client's signals turn.
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,        -- risk | concern | request | incident | survey
+  level TEXT,                -- High | Elevated | Critical | ...
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'New',  -- New | Ack
+  ack_by INTEGER REFERENCES users(id), ack_name TEXT, ack_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Alumni / continuing-care touchpoints (after a completed discharge).
+CREATE TABLE IF NOT EXISTS alumni_notes (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Incident / safety reports (quality & compliance).
 CREATE TABLE IF NOT EXISTS incidents (
   id INTEGER PRIMARY KEY,

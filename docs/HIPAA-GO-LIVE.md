@@ -22,12 +22,24 @@ controls; your organization owns the agreements and policies.
 
 ## ❗ Still required before real client data — your side
 
-### 1. Choose a HIPAA-eligible host and sign a BAA
+### 1. Choose a HIPAA-eligible host and sign a BAA  →  RECOMMENDED: Render
 A **Business Associate Agreement (BAA)** is a contract where the vendor agrees to
-protect PHI. Options (pick one):
-- **Aptible** — purpose-built HIPAA PaaS, signs a BAA readily, easiest path. (~$300/mo)
-- **AWS** (Elastic Beanstalk / ECS + RDS) — sign the AWS BAA in the console; most control.
-- **Render** — HIPAA is available on their Organization/Enterprise tier with a BAA (confirm current eligibility with Render sales). The free/Starter pilot is **not** for PHI.
+protect PHI.
+
+**Recommended for this app: Render's HIPAA workspace.** This app stores data in a
+SQLite file on a persistent disk, so it needs a host with a **persistent encrypted
+disk** — which Render provides (with daily encrypted snapshots), meaning **no code
+rewrite**. Steps:
+  1. Render dashboard → **Workspace Settings → Compliance** → start the BAA flow →
+     upgrade to the **Scale** plan → sign the BAA (Render emails the link).
+  2. Render enables the HIPAA workspace (auto after ~72h or on demand) and redeploys
+     services to access-restricted, encrypted hosts.
+  3. Confirm `NODE_ENV=production`, the persistent disk (in `render.yaml`), a strong
+     `ADMIN_PASS`, a custom `KIOSK_CODE`, and leave `AI_DEIDENTIFY` on.
+
+Alternatives: **AWS** (EC2/Lightsail + encrypted EBS; BAA free/self-serve; ~$30–100/mo,
+you manage the box). **Aptible** is excellent for HIPAA but expects a managed Postgres
+(ephemeral app disk) — it would require migrating this app off SQLite first.
 
 ### 2. Sign BAAs with every vendor that touches PHI
 - **Anthropic (Claude)** — required, because notes/Care Cards are sent to Claude. Request a BAA via Anthropic sales / the Trust Center. **Until signed, keep AI features on fake data only.**

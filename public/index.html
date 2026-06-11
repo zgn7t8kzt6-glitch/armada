@@ -36,6 +36,7 @@
     </div>
     <div class="userbox sans">
       <span id="whoami"></span>
+      <button class="btn btn-ghost btn-sm" onclick="changeMyPassword()">Change password</button>
       <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign out</button>
     </div>
   </header>
@@ -85,7 +86,7 @@
         <div id="alertsList"></div>
       </div>
       <div class="card"><div id="todayKpis" class="ret-cards"></div>
-        <div class="toolbar" style="margin-top:10px"><a class="btn btn-ghost btn-sm sans" href="/kiosk.html" target="_blank">Open client kiosk ↗</a></div>
+        <div class="toolbar" style="margin-top:10px"><a class="btn btn-ghost btn-sm sans" href="/kiosk.html" target="_blank">Open client kiosk ↗</a><span id="kioskCodeHint" class="hint" style="align-self:center"></span></div>
       </div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
         <div class="card" style="flex:2;min-width:320px">

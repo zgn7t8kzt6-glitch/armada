@@ -7,7 +7,7 @@ import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, s
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import {
-  cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
+  cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser, changePassword,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
@@ -33,7 +33,7 @@ app.use((req, res, next) => {
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
 const JOB_ROLES = ['BHT / Tech', 'Nurse', 'Therapist', 'Kitchen'];
-const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
+const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nurse / Medical (comfort, not feeling well)', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
 /* ---------------- auth ---------------- */
@@ -381,7 +381,16 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
   res.json({ entries: db.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all() });
 });
 
-app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES }));
+app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? (process.env.KIOSK_CODE || 'armada') : undefined }));
+
+// Change my own password.
+app.post('/api/change-password', requireAuth, (req, res) => {
+  const { current, next } = req.body || {};
+  if (!next || String(next).length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  if (!changePassword(req.user.id, current || '', next)) return res.status(400).json({ error: 'Current password is incorrect.' });
+  audit({ user: req.user, action: 'PASSWORD_CHANGE', ip: req.ip });
+  res.json({ ok: true });
+});
 
 /* ---------------- Ritz modules: farewell, ownership, delight, culture, voice, outcomes ---------------- */
 

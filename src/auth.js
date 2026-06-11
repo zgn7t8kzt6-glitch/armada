@@ -63,6 +63,13 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
+export function changePassword(userId, current, next) {
+  const u = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId);
+  if (!u || !bcrypt.compareSync(current, u.password_hash)) return false;
+  db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hashPassword(next), userId);
+  return true;
+}
+
 function safeUser(u) {
   return { id: u.id, name: u.name, username: u.username, role: u.role, job_role: u.job_role };
 }

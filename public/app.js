@@ -26,6 +26,12 @@ $('loginForm').addEventListener('submit', async e => {
   } catch(err){ $('loginErr').textContent = err.message; }
 });
 async function doLogout(){ await api('/logout',{method:'POST'}); location.reload(); }
+async function changeMyPassword(){
+  const current = prompt('Current password:'); if(current===null) return;
+  const next = prompt('New password (at least 6 characters):'); if(!next) return;
+  try { await api('/change-password',{method:'POST',body:JSON.stringify({current,next})}); alert('Password changed.'); }
+  catch(e){ alert(e.message); }
+}
 
 async function boot(){
   $('loginScreen').style.display='none'; $('app').style.display='block';
@@ -58,7 +64,7 @@ const GROUP_OF={today:'today',
   report:'care',clients:'care',editor:'care',journey:'care',concierge:'care',program:'care',
   retention:'clinical',surveys:'clinical',incidents:'clinical',
   family:'people',team:'people',lineup:'people',assign:'people',
-  admissions:'admissions',alumni:'people',accountability:'insights',team:'people',
+  admissions:'admissions',alumni:'people',accountability:'insights',
   standard:'learn',library:'learn',training:'learn',
   outcomes:'insights','report-view':'insights',users:'insights',audit:'insights',
   askai:'ask'};
@@ -782,6 +788,7 @@ async function careBrief(clientId){
 async function loadToday(){
   const t = await api('/today');
   $('todayDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  if(META.kioskCode) $('kioskCodeHint').innerHTML = 'kiosk code: <strong>'+esc(META.kioskCode)+'</strong>';
   if(t.claude) $('todayBriefBtn').style.display='inline-block';
   const m=t.metrics;
   $('todayKpis').innerHTML = `

@@ -54,6 +54,7 @@ function show(v){
   if(v==='report') loadPlaybook();
   if(v==='users') loadUsers();
   if(v==='audit') loadAudit();
+  if(v==='report-view') loadReport();
   if(v==='assign') loadAssign();
 }
 
@@ -479,6 +480,23 @@ async function addUser(){
       name:$('u_name').value,username:$('u_user').value,password:$('u_pass').value,role:$('u_role').value,job_role:$('u_job').value})});
     $('u_name').value=$('u_user').value=$('u_pass').value=''; loadUsers();
   }catch(e){ alert(e.message); }
+}
+
+/* ---- weekly report ---- */
+async function loadReport(){
+  const { html, emailConfigured } = await api('/report/weekly');
+  $('reportPreview').innerHTML = html;
+  const btn = $('sendReportBtn');
+  btn.style.display = emailConfigured ? 'inline-block' : 'none';
+  $('reportEmailHint').textContent = emailConfigured
+    ? 'Auto-sends every Monday. You can also send it now.'
+    : 'Email isn\'t set up yet — you can still print or save as PDF. To enable email + the weekly auto-send, set RESEND_API_KEY and REPORT_TO in Render.';
+}
+async function sendReport(){
+  const btn = $('sendReportBtn'); btn.disabled = true; const l = btn.textContent; btn.textContent = 'Sending…';
+  try { await api('/report/send',{method:'POST'}); $('reportEmailHint').textContent = '✓ Sent to leadership.'; }
+  catch(e){ $('reportEmailHint').textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = l; }
 }
 
 /* ---- audit ---- */

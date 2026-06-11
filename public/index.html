@@ -48,6 +48,7 @@
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
     <button data-view="assign" data-admin>Assign Staff</button>
+    <button data-view="report-view" data-admin>Report</button>
     <button data-view="users" data-admin>Staff</button>
     <button data-view="audit" data-admin>Audit Log</button>
   </nav>
@@ -250,6 +251,20 @@
         <button class="btn btn-primary sans" style="margin-top:14px" onclick="addUser()">Add staff</button>
       </div>
       <div class="card"><h3>Staff</h3><div id="userList"></div></div>
+    </section>
+
+    <!-- REPORT -->
+    <section id="report-view" class="view">
+      <div class="card no-print">
+        <h3>Weekly Leadership Report</h3>
+        <p class="sub sans">Outcomes, wow stories, delights, and open concerns for the past 7 days.</p>
+        <div class="toolbar" style="justify-content:flex-start">
+          <button class="btn btn-ghost sans" onclick="window.print()">Print / Save PDF</button>
+          <button class="btn btn-gold sans" id="sendReportBtn" onclick="sendReport()">Email to leadership now</button>
+        </div>
+        <div id="reportEmailHint" class="hint"></div>
+      </div>
+      <div class="card"><div id="reportPreview"></div></div>
     </section>
 
     <!-- AUDIT -->

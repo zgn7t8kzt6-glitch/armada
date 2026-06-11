@@ -5,8 +5,10 @@ Card** once per client, and the app produces a live **Shift Playbook** telling
 each staff member exactly what to do for each client on their shift — so every
 client feels genuinely, individually cared for.
 
-This is now a **multi-user web app** with logins, roles, shift assignment, task
-check-off, handoff notes, and an audit log.
+It is a **multi-user web app** with logins and roles, a Claude-powered AMA
+(against-medical-advice) early-warning system, a retention dashboard, the full
+Ritz service model (arrival, daily lineup, wow stories, fond farewell), and a
+weekly leadership report.
 
 ## ► Deploy it live (one click)
 
@@ -36,8 +38,31 @@ real client data.)
 - **Handoff notes.** Per-client notes passed to the next shift.
 - **Assign staff** to specific shifts; assigned names show on the playbook header.
 - **Audit log.** Every view/create/update/delete of client data is recorded (admin-only) — a core HIPAA requirement.
-- **✦ Draft tasks with Claude.** On a Care Card, Claude reads the client's preferences, goals, triggers, and safety items and drafts specific per-shift, per-role tasks for staff to review and edit. Safety items are flagged High priority and routed to nursing; no medical orders are invented. Requires `ANTHROPIC_API_KEY` (get one at console.anthropic.com); the button hides automatically when it isn't set. Staff always review and edit before saving — Claude drafts, humans decide.
-- **Print** a clean playbook for the shift huddle.
+- **✦ Draft tasks with Claude.** Claude reads a Care Card and drafts per-shift, per-role tasks for staff to review/edit. Safety items are flagged High and routed to nursing; no medical orders are invented. Requires `ANTHROPIC_API_KEY`.
+- **AMA early-warning system.** A 30-second **Daily Pulse** per client (warning signs, engagement, statements). Claude turns the Care Card + pulses + handoffs into a **Ritz recap & action plan**: the underlying emotional reason, the best play to keep them, personalized "feel cared for" gestures, per-shift tasks, and how to talk with them. Auto-generates on a High-concern pulse; one click applies it to the Care Card or prints it.
+- **Retention dashboard.** Every client by risk, who still needs a pulse today, and trending warning signs.
+- **The Ritz bookends.** Care Cards carry a **Welcome / first-72-hours plan** (arrival) and an **Aftercare plan** (farewell); discharging a client auto-schedules **24h / 48h / 30-day aftercare calls**.
+- **Lateral ownership + delight log.** Raise a concern (you own it until resolved) and log "whatever it takes" caring gestures, right from the playbook.
+- **Daily Lineup.** Service Value of the day, Wow Stories, and a staff wellbeing pulse.
+- **Client voice.** A "how cared for do you feel?" check-in from the client's side.
+- **Outcomes dashboard.** AMA rate, completion rate, felt-care average, open concerns, delights, and upcoming sobriety milestones.
+- **Weekly leadership report.** A branded summary (outcomes, wow stories, delights, concerns, aftercare) — viewable in-app, printable, and auto-emailed weekly. Requires `RESEND_API_KEY` + `REPORT_TO`.
+- **Print** a clean playbook, plan, or report.
+
+## Configuration (environment variables)
+
+All are optional except `ADMIN_PASS` in production.
+
+| Variable | Purpose |
+|---|---|
+| `ADMIN_USER` / `ADMIN_PASS` | First admin account, created on boot. |
+| `ANTHROPIC_API_KEY` | Enables all Claude features (task drafting + AMA action plans). [console.anthropic.com](https://console.anthropic.com) |
+| `RESEND_API_KEY` | Enables emailing the weekly report. [resend.com](https://resend.com) |
+| `REPORT_TO` | Comma-separated recipient emails for the weekly report. |
+| `REPORT_FROM` | Optional sender (default `onboarding@resend.dev`; use a verified domain in production). |
+| `REPORT_DAY` / `REPORT_HOUR` | When the weekly auto-send fires (UTC; default Monday 13:00). |
+| `SEED_SAMPLE` | `true` loads a demo client/staff on first boot. |
+| `ARMADA_DB` | Path to the SQLite file (default `./data/armada.db`). |
 
 ## Run it locally
 

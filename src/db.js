@@ -192,6 +192,12 @@ CREATE TABLE IF NOT EXISTS client_experience (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Small key/value store for app state (e.g., last weekly report sent).
+CREATE TABLE IF NOT EXISTS app_state (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+
 -- Audit log: every access/modification of client data (HIPAA requirement)
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,
@@ -218,6 +224,14 @@ addColumn('clients', 'welcome_plan', 'TEXT');
 addColumn('clients', 'aftercare_plan', 'TEXT');
 addColumn('clients', 'discharge_status', 'TEXT');
 addColumn('clients', 'discharge_date', 'TEXT');
+
+export function getState(key) {
+  return db.prepare(`SELECT value FROM app_state WHERE key = ?`).get(key)?.value ?? null;
+}
+export function setState(key, value) {
+  db.prepare(`INSERT INTO app_state (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
+}
 
 export function audit({ user, action, entity = null, entity_id = null, detail = null, ip = null }) {
   db.prepare(

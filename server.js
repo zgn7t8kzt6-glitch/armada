@@ -2,7 +2,8 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, audit } from './src/db.js';
+import { db, audit, getState, setState } from './src/db.js';
+import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured } from './src/report.js';
 import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
@@ -502,6 +503,36 @@ app.get('/api/outcomes', requireAuth, (req, res) => {
     feltCare: ce.a ? Math.round(ce.a * 10) / 10 : null, feltCareN: ce.n,
     openConcerns, delights30, milestones });
 });
+
+// Weekly leadership report (admin): preview the HTML, or send it now.
+app.get('/api/report/weekly', requireAuth, requireAdmin, (req, res) => {
+  res.json({ html: renderReportHtml(buildWeeklyData()), emailConfigured: emailConfigured() });
+});
+app.post('/api/report/send', requireAuth, requireAdmin, async (req, res) => {
+  if (!emailConfigured()) return res.status(503).json({ error: 'Email not set up. Add RESEND_API_KEY and REPORT_TO.' });
+  try {
+    await sendWeeklyReport();
+    audit({ user: req.user, action: 'REPORT_SEND', detail: 'weekly', ip: req.ip });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// In-app weekly scheduler (no external cron needed; the web service is always-on).
+function maybeSendWeeklyReport() {
+  if (!emailConfigured()) return;
+  const now = new Date();
+  const wantDay = Number(process.env.REPORT_DAY ?? 1);   // 0=Sun … 1=Mon
+  const wantHour = Number(process.env.REPORT_HOUR ?? 13); // UTC hour (~8am ET)
+  if (now.getUTCDay() !== wantDay || now.getUTCHours() !== wantHour) return;
+  const todayStr = now.toISOString().slice(0, 10);
+  if (getState('weekly_report_sent') === todayStr) return;
+  setState('weekly_report_sent', todayStr);
+  sendWeeklyReport().catch((e) => console.error('Weekly report failed:', e.message));
+}
+setInterval(maybeSendWeeklyReport, 60 * 60 * 1000);
+maybeSendWeeklyReport();
 
 /* ---------------- static ---------------- */
 app.use(express.static(path.join(__dirname, 'public')));

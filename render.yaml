@@ -30,6 +30,10 @@ services:
         sync: false                  # Render will prompt you to enter this secret
       - key: ANTHROPIC_API_KEY
         sync: false                  # optional: enables "Draft tasks with Claude" (key from console.anthropic.com)
+      - key: RESEND_API_KEY
+        sync: false                  # optional: enables the weekly leadership email (key from resend.com)
+      - key: REPORT_TO
+        sync: false                  # optional: who gets the weekly report (comma-separated emails)
     disk:
       name: armada-data
       mountPath: /var/data

@@ -1,0 +1,34 @@
+# Render Blueprint for Armada Care Standards.
+# In Render: New + → Blueprint → connect this repo → Apply.
+# Then set ADMIN_PASS (and optionally ADMIN_USER) when prompted — they're marked
+# sync:false so Render asks you for them instead of storing them in git.
+services:
+  - type: web
+    name: armada-care
+    runtime: node
+    plan: starter            # Starter ($7/mo) is needed for a persistent disk.
+                             # For a throwaway demo you can switch this to "free"
+                             # (data resets on each restart) and delete the disk block.
+    region: oregon
+    branch: claude/quirky-mendel-efkvao
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: ARMADA_DB
+        value: /var/data/armada.db   # store the SQLite file on the persistent disk
+      - key: SEED_SAMPLE
+        value: "true"                # load the demo client/staff on first boot
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASS
+        sync: false                  # Render will prompt you to enter this secret
+    disk:
+      name: armada-data
+      mountPath: /var/data
+      sizeGB: 1

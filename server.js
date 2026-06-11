@@ -6,6 +6,12 @@ import { db, audit } from './src/db.js';
 import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
+import { ensureAdmin, ensureSampleData } from './src/seed.js';
+
+// On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
+// Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
+ensureAdmin();
+if (process.env.SEED_SAMPLE === 'true') ensureSampleData();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();

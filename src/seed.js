@@ -1,29 +1,36 @@
-// Seed: creates a first admin account + a sample client so you can log in immediately.
-// Run once with: npm run seed
+// Seeding helpers. Used two ways:
+//   1. Automatically on server boot (ensureAdmin) so a fresh deploy is usable.
+//   2. Manually via `npm run seed` for local setup / sample data.
 import { db } from './db.js';
 import { createUser } from './auth.js';
 
-const adminUser = process.env.ADMIN_USER || 'admin';
-const adminPass = process.env.ADMIN_PASS || 'changeme123';
-
-const existing = db.prepare(`SELECT id FROM users WHERE username = ?`).get(adminUser);
-if (!existing) {
+// Create the first admin if no admin exists yet. Idempotent and safe to run every boot.
+// Reads ADMIN_USER / ADMIN_PASS from the environment (set these in Render).
+export function ensureAdmin({ quiet = false } = {}) {
+  const adminUser = (process.env.ADMIN_USER || 'admin').toLowerCase().trim();
+  const adminPass = process.env.ADMIN_PASS || 'changeme123';
+  const hasAnyAdmin = db.prepare(`SELECT id FROM users WHERE role = 'admin' AND active = 1 LIMIT 1`).get();
+  if (hasAnyAdmin) return;
+  const existing = db.prepare(`SELECT id FROM users WHERE username = ?`).get(adminUser);
+  if (existing) return;
   createUser({ name: 'Administrator', username: adminUser, password: adminPass, role: 'admin', job_role: 'Nurse' });
-  console.log(`Created admin user "${adminUser}" with password "${adminPass}" — change it after first login.`);
-} else {
-  console.log(`Admin "${adminUser}" already exists.`);
+  if (!quiet) {
+    const usingDefault = !process.env.ADMIN_PASS;
+    console.log(`Created admin user "${adminUser}".` +
+      (usingDefault ? ' WARNING: using default password "changeme123" — set ADMIN_PASS and change it.' : ''));
+  }
 }
 
-// Sample staff
-for (const s of [
-  { name: 'Maria Reyes', username: 'maria', password: 'staff123', role: 'staff', job_role: 'BHT / Tech' },
-  { name: 'David Okafor', username: 'david', password: 'staff123', role: 'staff', job_role: 'Therapist' },
-]) {
-  if (!db.prepare(`SELECT id FROM users WHERE username = ?`).get(s.username)) createUser(s);
-}
+// Demo staff + one fully-filled client, so a pilot has something to look at.
+export function ensureSampleData() {
+  for (const s of [
+    { name: 'Maria Reyes', username: 'maria', password: 'staff123', role: 'staff', job_role: 'BHT / Tech' },
+    { name: 'David Okafor', username: 'david', password: 'staff123', role: 'staff', job_role: 'Therapist' },
+  ]) {
+    if (!db.prepare(`SELECT id FROM users WHERE username = ?`).get(s.username)) createUser(s);
+  }
+  if (db.prepare(`SELECT id FROM clients LIMIT 1`).get()) return;
 
-// Sample client
-if (!db.prepare(`SELECT id FROM clients LIMIT 1`).get()) {
   const info = db.prepare(`INSERT INTO clients (name, pref, room, program, admit, sober, touch, prefs, goals, triggers, safety, support)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     'Jane Doe', 'Janie', '204', 'Residential — Phase 2', '2026-06-02', '2026-05-30',
@@ -43,7 +50,11 @@ if (!db.prepare(`SELECT id FROM clients LIMIT 1`).get()) {
     ['Evening', 'BHT / Tech', 'Remind + give privacy for sponsor call to Dave', 'Normal'],
     ['Evening', 'Kitchen', 'Vegetarian dinner plate; decaf only', 'Normal'],
   ].forEach((t, i) => ins.run(cid, t[0], t[1], t[2], t[3], i));
-  console.log('Created sample client "Janie".');
 }
 
-console.log('Seed complete.');
+// Allow `npm run seed` to set up admin + sample data locally.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  ensureAdmin();
+  ensureSampleData();
+  console.log('Seed complete.');
+}

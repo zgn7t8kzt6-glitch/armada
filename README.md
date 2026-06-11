@@ -51,7 +51,38 @@ src/auth.js      bcrypt + DB-backed session cookies, requireAuth / requireAdmin
 src/seed.js      first admin + sample data
 public/          index.html · styles.css · app.js  (front-end)
 data/armada.db   SQLite database (gitignored)
+render.yaml      Render deployment blueprint
 ```
+
+## Deploy a live pilot on Render (fake data)
+
+This gets you a real `https://…onrender.com` URL your team can log into. **Use
+made-up / de-identified clients only** until the HIPAA steps below are done.
+
+The app auto-creates the admin account on first boot from environment variables,
+so no shell access is needed.
+
+**One-time, click-by-click:**
+
+1. Push this branch to GitHub (already done if you're reading this in the repo).
+2. Go to <https://render.com>, sign up, and click **New + → Blueprint**.
+3. Connect your GitHub and select the **`armada`** repository. Render reads
+   `render.yaml` automatically.
+4. When prompted, enter a value for **`ADMIN_PASS`** — this becomes the admin
+   login password. Pick something strong.
+5. Click **Apply**. Render builds and deploys (~2–3 minutes).
+6. Open the service URL. Log in as **`admin`** with the password you set.
+   - The pilot comes pre-loaded with sample staff (`maria` / `staff123`,
+     `david` / `staff123`) and one demo client, because `SEED_SAMPLE=true`.
+   - To start empty instead, set `SEED_SAMPLE` to `false` in the Render dashboard.
+
+**Notes**
+- The blueprint uses Render's **Starter** plan ($7/mo) so a 1 GB persistent disk
+  keeps your data across restarts. For a throwaway demo, change `plan` to `free`
+  and remove the `disk:` block in `render.yaml` (data resets on each restart).
+- `render.yaml` deploys the `claude/quirky-mendel-efkvao` branch. Change `branch:`
+  if you merge to `main` later.
+- Turn off the public pilot before entering any real client data.
 
 ## Going to production with real client data (PHI)
 

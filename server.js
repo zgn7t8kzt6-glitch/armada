@@ -150,7 +150,7 @@ function safeArr(s) { try { return JSON.parse(s) || []; } catch (e) { return [];
 function latestAmaRead(clientId) {
   const r = db.prepare(`SELECT * FROM ama_reads WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(clientId);
   if (!r) return null;
-  return { ...r, triggers: safeArr(r.triggers), actions: safeArr(r.actions) };
+  return { ...r, triggers: safeArr(r.triggers), actions: safeArr(r.actions), cared_for: safeArr(r.cared_for) };
 }
 
 // Run Claude's AMA risk read for a client and store it.
@@ -165,10 +165,11 @@ app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
     ).all(client.id);
     const read = await generateAmaRead(client, pulses, handoffs);
     db.prepare(
-      `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(client.id, read.level, read.summary, JSON.stringify(read.triggers),
-      JSON.stringify(read.actions), read.approach, req.user.id);
+      JSON.stringify(read.actions), read.approach, read.underlying || null,
+      JSON.stringify(read.cared_for || []), read.best_play || null, req.user.id);
     audit({ user: req.user, action: 'AMA_READ', entity: 'client', entity_id: client.id, detail: read.level, ip: req.ip });
     res.json({ read });
   } catch (e) {

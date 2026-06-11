@@ -211,22 +211,27 @@ function gotoPlaybook(){ show('report'); }
 /* ---- AMA retention: banner + daily pulse ---- */
 function retentionBanner(c){
   const a = c.ama;
-  if (!a || a.level === 'Low') return '';
-  const cls = a.level === 'High' ? 'ama-high' : 'ama-elev';
+  if (!a) return '';
+  const cls = a.level === 'High' ? 'ama-high' : a.level === 'Elevated' ? 'ama-elev' : 'ama-low';
+  const icon = a.level === 'Low' ? '✦' : '⚠';
   const trig = (a.triggers||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('');
+  const cared = (a.cared_for||[]).map(t=>`<li>${esc(t)}</li>`).join('');
   const acts = (a.actions||[]).map(x=>`<div class="todo"><div class="box" style="cursor:default"></div><div class="txt"><span class="pr ${x.priority==='High'?'high':'normal'}">${esc(x.job_role)} · ${esc(x.shift)}</span> ${esc(x.text)}</div></div>`).join('');
   return `<div class="ama-banner ${cls}">
-    <div class="ama-head">⚠ Retention Focus — AMA risk: ${esc(a.level)} <span class="ama-tag">for clinical review · not a diagnosis</span></div>
+    <div class="ama-head">${icon} Retention Focus — AMA risk: ${esc(a.level)} <span class="ama-tag">for clinical review · not a diagnosis</span></div>
     <div class="ama-sum">${esc(a.summary||'')}</div>
-    ${trig?`<div class="ama-trig">${trig}</div>`:''}
-    ${acts?`<div class="pc-section" style="margin-top:8px"><div class="h">Keep them — this shift</div>${acts}</div>`:''}
+    ${a.underlying?`<div class="pc-section"><div class="h">What's really going on (emotionally)</div><div class="pc-note">${esc(a.underlying)}</div></div>`:''}
+    ${a.best_play?`<div class="ama-play"><div class="h">★ Best play to keep them</div><div>${esc(a.best_play)}</div></div>`:''}
+    ${cared?`<div class="pc-section"><div class="h">Make them feel cared for</div><ul class="ama-list">${cared}</ul></div>`:''}
+    ${trig?`<div class="pc-section"><div class="h">Warning signs</div><div class="ama-trig">${trig}</div></div>`:''}
+    ${acts?`<div class="pc-section"><div class="h">Keep them — this shift</div>${acts}</div>`:''}
     ${a.approach?`<div class="pc-section"><div class="h">How to talk with them</div><div class="pc-note">${esc(a.approach)}</div></div>`:''}
   </div>`;
 }
 
 function pulsePanel(c){
   const trigs = (META.amaTriggers||[]).map((t,i)=>`<label class="trg"><input type="checkbox" value="${esc(t)}"/> ${esc(t)}</label>`).join('');
-  const aiBtn = META.claude ? `<button class="btn btn-gold btn-sm sans" onclick="assessAma(${c.id})">✦ Assess AMA risk</button>` : '';
+  const aiBtn = META.claude ? `<button class="btn btn-gold btn-sm sans" onclick="assessAma(${c.id})">✦ Recap &amp; action plan</button>` : '';
   const done = c.pulsedThisShift ? '<span class="hint" style="margin-left:8px">✓ pulse logged this shift</span>' : '';
   const lvl = c.ama ? `<span class="hint">last read: ${esc(c.ama.level)}</span>` : '';
   return `<details class="pulse-wrap no-print" id="pulse_${c.id}">

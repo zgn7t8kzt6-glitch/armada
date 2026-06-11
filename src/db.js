@@ -117,6 +117,9 @@ CREATE TABLE IF NOT EXISTS ama_reads (
   triggers TEXT,             -- JSON array
   actions TEXT,              -- JSON array of {shift, job_role, text}
   approach TEXT,
+  underlying TEXT,           -- the real emotional reason beneath the complaint
+  cared_for TEXT,            -- JSON array of personalized "feel cared for" gestures
+  best_play TEXT,            -- the single best move to retain this client now
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -134,6 +137,15 @@ CREATE TABLE IF NOT EXISTS audit_log (
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+
+// Lightweight migration: add columns to existing tables (older deployments).
+function addColumn(table, col, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+}
+addColumn('ama_reads', 'underlying', 'TEXT');
+addColumn('ama_reads', 'cared_for', 'TEXT');
+addColumn('ama_reads', 'best_play', 'TEXT');
 
 export function audit({ user, action, entity = null, entity_id = null, detail = null, ip = null }) {
   db.prepare(

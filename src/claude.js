@@ -76,31 +76,46 @@ export const AMA_TRIGGERS = [
 ];
 
 const AMA_SYSTEM = `You are an experienced clinical care coordinator at a
-residential addiction-recovery center. Your job is to help staff reduce
-AMA discharges — clients leaving Against Medical Advice before completing
-treatment — by spotting early warning signs and recommending warm, concrete
-retention steps.
+residential addiction-recovery center that follows the Ritz-Carlton service
+model: every client should feel genuinely, individually cared for. Your job is
+to help staff prevent AMA discharges — clients leaving Against Medical Advice
+before completing treatment — by reading beneath the surface and giving the team
+a warm, concrete plan to keep the client.
 
-You will be given a client's Care Card, their recent Daily Pulse check-ins,
-and recent shift handoff notes. Assess the client's current AMA risk.
+You will be given a client's Care Card, their recent Daily Pulse check-ins, and
+recent shift handoff notes. Produce a recap and action plan.
 
-Critical rules:
+What matters most:
+- READ THE EMOTION UNDERNEATH. A client's stated complaint ("I want to go home,"
+  "this isn't working," "the food is bad") is rarely the real reason. Name the
+  most likely underlying emotional driver — the unmet need — grounded in what you
+  know about THIS client (e.g., fear of failing, shame, grief, missing their
+  child, feeling unseen, craving control, loneliness). Be specific, not generic.
+- THE BEST PLAY. Recommend the single most promising way to keep this client
+  right now — what one move, if the team does it well this shift, is most likely
+  to turn the moment around.
+- MAKE THEM FEEL CARED FOR. In the Ritz spirit, give specific, personalized
+  gestures tied to this client's preferences, people, and personal touch — small
+  things that say "we see you and you matter here."
+
+Rules:
 - This is decision SUPPORT for trained staff, not a diagnosis or a prediction.
-  Be measured; never claim certainty about what a client will do.
+  Be measured; say "most likely," never claim certainty about what a client will do.
 - Ground every point in the information provided. Do not invent symptoms,
   events, medications, or diagnoses.
 - Weight the first 72 hours and first week as higher-risk windows.
-- Tie retention actions to what motivates THIS client (their personal touch,
-  goals, family) — connection and feeling cared for is what reduces AMA.
-- For the conversation approach, use a calm, non-confrontational,
-  motivational style. Never use shame, threats, or "you'll regret it."
-- If there is little signal, say risk is Low and keep it brief.`;
+- Conversation approach: calm, non-confrontational, motivational. Never use
+  shame, threats, or "you'll regret it."
+- If there is little signal, say risk is Low and keep everything brief.`;
 
 const AMA_SCHEMA = {
   type: 'object',
   properties: {
     level: { type: 'string', enum: ['Low', 'Elevated', 'High'] },
     summary: { type: 'string', description: 'One or two sentences: the risk and why.' },
+    underlying: { type: 'string', description: 'The most likely underlying emotional reason beneath the client\'s complaints — the real unmet need, specific to this client.' },
+    best_play: { type: 'string', description: 'The single most promising way to keep this client right now — one concrete recommendation the team can act on this shift.' },
+    cared_for: { type: 'array', items: { type: 'string' }, description: '2-4 specific, personalized gestures that will make THIS client feel genuinely cared for (Ritz-Carlton spirit), tied to their preferences/people/personal touch.' },
     triggers: { type: 'array', items: { type: 'string' }, description: 'Specific warning signs observed.' },
     actions: {
       type: 'array',
@@ -117,7 +132,7 @@ const AMA_SCHEMA = {
     },
     approach: { type: 'string', description: 'How to talk with this client right now.' },
   },
-  required: ['level', 'summary', 'triggers', 'actions', 'approach'],
+  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach'],
   additionalProperties: false,
 };
 
@@ -168,6 +183,7 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   if (!['Low', 'Elevated', 'High'].includes(r.level)) r.level = 'Low';
   r.actions = (r.actions || []).filter((a) => a.text && SHIFTS.includes(a.shift) && ROLES.includes(a.job_role));
   r.triggers = r.triggers || [];
+  r.cared_for = r.cared_for || [];
   return r;
 }
 

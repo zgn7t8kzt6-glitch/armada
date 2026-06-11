@@ -504,6 +504,54 @@ app.get('/api/outcomes', requireAuth, (req, res) => {
     openConcerns, delights30, milestones });
 });
 
+/* ---------------- Surveys (client experience & meals) ---------------- */
+app.get('/api/surveys', requireAuth, (req, res) => {
+  const surveys = db.prepare(`SELECT * FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
+  for (const s of surveys) s.questions = db.prepare(`SELECT id, category, text, type, sort FROM survey_questions WHERE survey_id = ? ORDER BY sort, id`).all(s.id);
+  res.json({ surveys });
+});
+
+app.post('/api/surveys/:id/respond', requireAuth, (req, res) => {
+  const survey = db.prepare(`SELECT id FROM surveys WHERE id = ?`).get(req.params.id);
+  if (!survey) return res.status(404).json({ error: 'Not found' });
+  const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+  if (!answers.length) return res.status(400).json({ error: 'No answers' });
+  const info = db.prepare(`INSERT INTO survey_responses (survey_id, client_id, submitted_by) VALUES (?, ?, ?)`)
+    .run(survey.id, req.body.client_id || null, req.user.id);
+  const rid = info.lastInsertRowid;
+  const ins = db.prepare(`INSERT INTO survey_answers (response_id, question_id, value_num, value_text) VALUES (?, ?, ?, ?)`);
+  for (const a of answers) {
+    if (a.question_id == null) continue;
+    const num = (a.num === 0 || a.num) ? Number(a.num) : null;
+    const text = a.text?.trim() ? a.text.trim() : null;
+    if (num == null && text == null) continue;
+    ins.run(rid, a.question_id, num, text);
+  }
+  audit({ user: req.user, action: 'SURVEY', entity: 'survey', entity_id: survey.id, detail: req.body.client_id ? 'client ' + req.body.client_id : 'anonymous', ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Results (admin): per-question aggregates + recent comments.
+app.get('/api/surveys/:id/results', requireAuth, requireAdmin, (req, res) => {
+  const survey = db.prepare(`SELECT * FROM surveys WHERE id = ?`).get(req.params.id);
+  if (!survey) return res.status(404).json({ error: 'Not found' });
+  const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?`).get(survey.id).n;
+  const questions = db.prepare(`SELECT id, category, text, type, sort FROM survey_questions WHERE survey_id = ? ORDER BY sort, id`).all(survey.id);
+  for (const q of questions) {
+    if (q.type === 'scale' || q.type === 'rating') {
+      const r = db.prepare(`SELECT AVG(value_num) a, COUNT(value_num) n FROM survey_answers WHERE question_id = ?`).get(q.id);
+      q.avg = r.a != null ? Math.round(r.a * 10) / 10 : null; q.count = r.n;
+    } else if (q.type === 'yesno') {
+      const r = db.prepare(`SELECT AVG(value_num) a, COUNT(value_num) n FROM survey_answers WHERE question_id = ?`).get(q.id);
+      q.yesPct = r.a != null ? Math.round(r.a * 100) : null; q.count = r.n;
+    } else {
+      q.comments = db.prepare(`SELECT value_text FROM survey_answers WHERE question_id = ? AND value_text IS NOT NULL ORDER BY id DESC LIMIT 20`).all(q.id).map((x) => x.value_text);
+      q.count = q.comments.length;
+    }
+  }
+  res.json({ survey, responses, questions });
+});
+
 // Weekly leadership report (admin): preview the HTML, or send it now.
 app.get('/api/report/weekly', requireAuth, requireAdmin, (req, res) => {
   res.json({ html: renderReportHtml(buildWeeklyData()), emailConfigured: emailConfigured() });

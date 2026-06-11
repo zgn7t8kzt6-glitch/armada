@@ -51,6 +51,7 @@ function show(v){
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
+  if(v==='surveys') loadSurveys();
   if(v==='report') loadPlaybook();
   if(v==='users') loadUsers();
   if(v==='audit') loadAudit();
@@ -480,6 +481,78 @@ async function addUser(){
       name:$('u_name').value,username:$('u_user').value,password:$('u_pass').value,role:$('u_role').value,job_role:$('u_job').value})});
     $('u_name').value=$('u_user').value=$('u_pass').value=''; loadUsers();
   }catch(e){ alert(e.message); }
+}
+
+/* ---- surveys ---- */
+let SURVEYS = [];
+async function loadSurveys(){
+  const { surveys } = await api('/surveys'); SURVEYS = surveys;
+  $('sv_select').innerHTML = surveys.map(s=>`<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  try { const { clients } = await api('/clients');
+    $('sv_client').innerHTML = '<option value="">Anonymous</option>' + clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}</option>`).join('');
+  } catch(e){}
+  $('surveyArea').innerHTML = '<div class="empty">Pick a survey and press Start.</div>';
+}
+function qInput(q){
+  if(q.type==='text') return `<textarea class="sq-text"></textarea>`;
+  if(q.type==='yesno') return `<div class="sv-opts">
+      <button type="button" class="sv-opt" data-v="1" onclick="pickOpt(this)">Yes</button>
+      <button type="button" class="sv-opt" data-v="0" onclick="pickOpt(this)">No</button></div>`;
+  // scale / rating: 1..5
+  const labels = q.type==='rating' ? ['1','2','3','4','5'] : ['1','2','3','4','5'];
+  return `<div class="sv-opts">${labels.map((l,i)=>`<button type="button" class="sv-opt" data-v="${i+1}" onclick="pickOpt(this)">${l}</button>`).join('')}
+    <span class="hint" style="margin-left:6px">${q.type==='rating'?'1 = poor · 5 = excellent':'1 = strongly disagree · 5 = strongly agree'}</span></div>`;
+}
+function pickOpt(btn){
+  btn.parentNode.querySelectorAll('.sv-opt').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on'); btn.parentNode.dataset.val = btn.dataset.v;
+}
+function startSurvey(){
+  const s = SURVEYS.find(x=>x.id==$('sv_select').value); if(!s) return;
+  let cat='', html='';
+  s.questions.forEach(q=>{
+    if(q.category && q.category!==cat){ cat=q.category; html+=`<div class="sv-cat">${esc(cat)}</div>`; }
+    html+=`<div class="sq" data-qid="${q.id}" data-type="${q.type}">
+      <div class="sq-q">${esc(q.text)}</div>${qInput(q)}</div>`;
+  });
+  $('surveyArea').innerHTML = `<div class="card"><h3>${esc(s.title)}</h3>
+    <p class="sub sans">${esc(s.description||'')}</p>${html}
+    <div class="toolbar" style="margin-top:16px"><button class="btn btn-primary sans" onclick="submitSurvey(${s.id})">Submit survey</button></div>
+    <div id="svMsg" class="hint"></div></div>`;
+}
+async function submitSurvey(id){
+  const answers = [];
+  document.querySelectorAll('#surveyArea .sq').forEach(sq=>{
+    const qid = +sq.dataset.qid, type = sq.dataset.type;
+    if(type==='text'){ const t=sq.querySelector('.sq-text').value.trim(); if(t) answers.push({question_id:qid, text:t}); }
+    else { const opts=sq.querySelector('.sv-opts'); if(opts && opts.dataset.val!=null) answers.push({question_id:qid, num:+opts.dataset.val}); }
+  });
+  if(!answers.length){ $('svMsg').textContent='Please answer at least one question.'; return; }
+  await api('/surveys/'+id+'/respond',{method:'POST',body:JSON.stringify({client_id:$('sv_client').value||null, answers})});
+  $('surveyArea').innerHTML = '<div class="card"><h3>Thank you 💚</h3><p class="sans">Your responses were recorded. They help us care for everyone better.</p><button class="btn btn-ghost sans" onclick="loadSurveys()">Done</button></div>';
+}
+async function showSurveyResults(){
+  const id = $('sv_select').value;
+  let data;
+  try { data = await api('/surveys/'+id+'/results'); } catch(e){ $('surveyArea').innerHTML='<div class="empty">'+e.message+'</div>'; return; }
+  const { survey, responses, questions } = data;
+  let cat='', html='';
+  questions.forEach(q=>{
+    if(q.category && q.category!==cat){ cat=q.category; html+=`<div class="sv-cat">${esc(cat)}</div>`; }
+    if(q.type==='text'){
+      html += `<div class="sq"><div class="sq-q">${esc(q.text)}</div>${q.comments&&q.comments.length?'<ul class="ama-list">'+q.comments.map(c=>`<li>${esc(c)}</li>`).join('')+'</ul>':'<div class="hint">No comments yet.</div>'}</div>`;
+    } else if(q.type==='yesno'){
+      html += `<div class="sq res"><div class="sq-q">${esc(q.text)}</div><div class="res-val">${q.yesPct!=null?q.yesPct+'% yes <span class="hint">('+q.count+')</span>':'<span class="hint">no responses</span>'}</div></div>`;
+    } else {
+      const low = q.avg!=null && q.avg<3.5;
+      const pct = q.avg!=null ? Math.round(q.avg/5*100) : 0;
+      html += `<div class="sq res"><div class="sq-q">${esc(q.text)}</div>
+        <div class="res-bar"><div class="res-track"><div class="res-fill ${low?'low':''}" style="width:${pct}%"></div></div>
+        <div class="res-num ${low?'low':''}">${q.avg!=null?q.avg+'/5':'—'} <span class="hint">(${q.count})</span></div></div></div>`;
+    }
+  });
+  $('surveyArea').innerHTML = `<div class="card"><h3>${esc(survey.title)} — results</h3>
+    <p class="sub sans">${responses} response${responses===1?'':'s'}. Scores under 3.5 are flagged. Low "feel cared for" scores are an early AMA signal.</p>${html}</div>`;
 }
 
 /* ---- weekly report ---- */

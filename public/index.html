@@ -45,6 +45,7 @@
     <button data-view="retention">Retention</button>
     <button data-view="outcomes">Outcomes</button>
     <button data-view="lineup">Lineup</button>
+    <button data-view="surveys">Surveys</button>
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
     <button data-view="assign" data-admin>Assign Staff</button>
@@ -90,6 +91,21 @@
           <div id="retTriggers"></div>
         </div>
       </div>
+    </section>
+
+    <!-- SURVEYS -->
+    <section id="surveys" class="view">
+      <div class="card no-print">
+        <h3>Surveys</h3>
+        <p class="sub sans">Hear directly from clients — the Ritz way. Hand a tablet to the client, or fill it in together.</p>
+        <div class="controls">
+          <div class="field"><label>Survey</label><select id="sv_select"></select></div>
+          <div class="field"><label>Client (optional)</label><select id="sv_client"></select></div>
+          <button class="btn btn-gold sans" onclick="startSurvey()">Start survey</button>
+          <button class="btn btn-ghost sans" data-admin onclick="showSurveyResults()">View results</button>
+        </div>
+      </div>
+      <div id="surveyArea"></div>
     </section>
 
     <!-- CLIENTS -->

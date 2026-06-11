@@ -198,6 +198,38 @@ CREATE TABLE IF NOT EXISTS app_state (
   value TEXT
 );
 
+-- Surveys (client experience & meals) — templates, questions, responses, answers.
+CREATE TABLE IF NOT EXISTS surveys (
+  id INTEGER PRIMARY KEY,
+  key TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS survey_questions (
+  id INTEGER PRIMARY KEY,
+  survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+  category TEXT,
+  text TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'scale',   -- scale | rating | yesno | text
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS survey_responses (
+  id INTEGER PRIMARY KEY,
+  survey_id INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  submitted_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS survey_answers (
+  id INTEGER PRIMARY KEY,
+  response_id INTEGER NOT NULL REFERENCES survey_responses(id) ON DELETE CASCADE,
+  question_id INTEGER NOT NULL REFERENCES survey_questions(id) ON DELETE CASCADE,
+  value_num INTEGER,
+  value_text TEXT
+);
+
 -- Audit log: every access/modification of client data (HIPAA requirement)
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,
@@ -224,6 +256,69 @@ addColumn('clients', 'welcome_plan', 'TEXT');
 addColumn('clients', 'aftercare_plan', 'TEXT');
 addColumn('clients', 'discharge_status', 'TEXT');
 addColumn('clients', 'discharge_date', 'TEXT');
+
+// Seed the default surveys (idempotent — only inserts questions on first creation).
+function ensureSurvey(key, title, description, sort, questions) {
+  let s = db.prepare(`SELECT id FROM surveys WHERE key = ?`).get(key);
+  if (s) return;
+  const info = db.prepare(`INSERT INTO surveys (key, title, description, sort) VALUES (?, ?, ?, ?)`).run(key, title, description, sort);
+  const sid = info.lastInsertRowid;
+  const ins = db.prepare(`INSERT INTO survey_questions (survey_id, category, text, type, sort) VALUES (?, ?, ?, ?, ?)`);
+  questions.forEach((q, i) => ins.run(sid, q[0], q[1], q[2] || 'scale', i));
+}
+
+ensureSurvey('experience', 'Client Experience Survey',
+  'How cared for do you feel? Modeled on the Ritz-Carlton guest experience.', 1, [
+  ['Care & dignity', 'I feel genuinely cared for here.', 'scale'],
+  ['Care & dignity', 'Staff treat me with dignity and respect.', 'scale'],
+  ['Care & dignity', 'Staff know me by name and remember what matters to me.', 'scale'],
+  ['Care & dignity', 'Staff anticipate my needs before I have to ask.', 'scale'],
+  ['Staff & responsiveness', 'When I need help, staff respond quickly.', 'scale'],
+  ['Staff & responsiveness', 'Staff are warm and approachable.', 'scale'],
+  ['Staff & responsiveness', 'I know who to go to if I have a problem.', 'scale'],
+  ['Program & care', 'The groups and therapy are helpful to me.', 'scale'],
+  ['Program & care', 'My treatment goals are understood.', 'scale'],
+  ['Program & care', 'I feel hopeful about my recovery.', 'scale'],
+  ['Program & care', 'I feel safe here.', 'scale'],
+  ['Environment', 'My room is comfortable.', 'scale'],
+  ['Environment', 'The facility is clean and well kept.', 'scale'],
+  ['Environment', 'The environment feels calm and healing.', 'scale'],
+  ['Environment', 'I am able to sleep well.', 'scale'],
+  ['Belonging', 'I feel like I belong here.', 'scale'],
+  ['Belonging', 'Someone here has made me feel truly seen.', 'scale'],
+  ['Problem resolution', 'Have you raised a concern during your stay?', 'yesno'],
+  ['Problem resolution', 'If yes, was it resolved to your satisfaction?', 'yesno'],
+  ['Overall', 'Overall, how would you rate your experience?', 'rating'],
+  ['Overall', 'How likely are you to recommend Armada to someone who needs help?', 'scale'],
+  ['Overall', 'What is one thing we could do to make you feel more cared for?', 'text'],
+  ['Overall', 'Is there a staff member you would like to recognize?', 'text'],
+]);
+
+ensureSurvey('meals', 'Meal & Food Survey',
+  'Tell us about the food and dining experience.', 2, [
+  ['Quality', 'Overall, how satisfied are you with the food?', 'rating'],
+  ['Quality', 'The food tastes good and is well prepared.', 'scale'],
+  ['Quality', 'Meals are served warm/fresh and at good times.', 'scale'],
+  ['Variety', 'There is enough variety in the meals.', 'scale'],
+  ['Variety', 'Portion sizes are right for me.', 'scale'],
+  ['Dietary', 'My dietary needs and restrictions are respected.', 'scale'],
+  ['Dietary', 'Special requests are honored when possible.', 'scale'],
+  ['Environment', 'The dining area is clean and pleasant.', 'scale'],
+  ['Open', 'Is there a food or drink you wish we offered?', 'text'],
+  ['Open', 'Anything about meals we could do better?', 'text'],
+]);
+
+ensureSurvey('discharge', 'Discharge Experience Survey',
+  'A few questions as you complete your stay.', 3, [
+  ['Overall', 'Overall, how would you rate your time with us?', 'rating'],
+  ['Overall', 'I feel more hopeful and prepared than when I arrived.', 'scale'],
+  ['Overall', 'I felt genuinely cared for throughout my stay.', 'scale'],
+  ['Aftercare', 'I understand my aftercare plan and next steps.', 'scale'],
+  ['Aftercare', 'I know how to reach someone if I need support.', 'scale'],
+  ['Loyalty', 'How likely are you to recommend Armada to someone who needs help?', 'scale'],
+  ['Open', 'What moment or person made the biggest difference for you?', 'text'],
+  ['Open', 'What could we have done better?', 'text'],
+]);
 
 export function getState(key) {
   return db.prepare(`SELECT value FROM app_state WHERE key = ?`).get(key)?.value ?? null;

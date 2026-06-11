@@ -116,6 +116,21 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);bo
 .trbar-track{flex:1;background:#eee;border-radius:5px;height:10px;overflow:hidden}
 .trbar-fill{height:100%;background:var(--gold)}
 .trbar-n{flex:0 0 20px;text-align:right;font-size:12px;color:var(--muted)}
+/* surveys */
+.sv-cat{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--gold);font-weight:700;font-family:sans-serif;margin:18px 0 6px;border-bottom:1px solid var(--line);padding-bottom:4px}
+.sq{margin:10px 0}
+.sq-q{font-size:15px;margin-bottom:6px}
+.sq-text{width:100%;min-height:54px}
+.sv-opts{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.sv-opt{font-family:sans-serif;cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:6px;padding:8px 14px;font-size:14px;color:var(--navy);min-width:42px}
+.sv-opt.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.sq.res{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sq.res .sq-q{flex:1;min-width:220px;margin:0;font-size:14px}
+.res-bar{display:flex;align-items:center;gap:8px;min-width:160px}
+.res-track{width:120px;height:10px;background:#eee;border-radius:5px;overflow:hidden}
+.res-fill{height:100%;background:var(--good)}.res-fill.low{background:var(--danger)}
+.res-num{font-weight:700;color:var(--good)}.res-num.low{color:var(--danger)}
+.res-val{font-weight:700;color:var(--navy)}
 /* culture + voice */
 .line-value{font-size:20px;color:var(--navy);font-style:italic;margin-top:6px;line-height:1.45}
 .wow{border-left:3px solid var(--gold);background:#faf6ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:14px;color:#3a3a3a}

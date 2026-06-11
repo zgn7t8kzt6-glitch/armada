@@ -49,6 +49,8 @@ function show(v){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
+  if(v==='outcomes') loadOutcomes();
+  if(v==='lineup') loadLineup();
   if(v==='report') loadPlaybook();
   if(v==='users') loadUsers();
   if(v==='audit') loadAudit();
@@ -71,15 +73,24 @@ async function renderClients(){
   });
 }
 
-function newClient(){ currentId=null; fillForm({}); $('editorTitle').textContent='New Care Card'; $('deleteBtn').style.display='none'; show('editor'); }
+function newClient(){ currentId=null; fillForm({}); $('editorTitle').textContent='New Care Card'; $('deleteBtn').style.display='none'; $('dischargeBox').style.display='none'; show('editor'); }
 async function editClient(id){
   const { client } = await api('/clients/'+id);
   currentId = id; fillForm(client);
   $('editorTitle').textContent = 'Care Card · '+(client.pref||client.name||'');
   $('deleteBtn').style.display = ME.role==='admin' ? 'inline-block':'none';
+  $('dischargeBox').style.display='block'; $('d_date').value = today();
   show('editor');
 }
-const FF = ['name','pref','room','program','admit','sober','touch','prefs','goals','triggers','safety','support'];
+async function dischargeClient(){
+  if(!currentId) return;
+  const status=$('d_status').value;
+  if(!confirm(`Discharge this client as "${status}"? This starts the aftercare calls and removes them from the active playbook.`)) return;
+  await api('/clients/'+currentId+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('d_date').value})});
+  alert('Discharged. Aftercare calls scheduled — see the Outcomes tab.');
+  show('clients');
+}
+const FF = ['name','pref','room','program','admit','sober','touch','prefs','goals','triggers','safety','support','welcome_plan','aftercare_plan'];
 function fillForm(c){
   FF.forEach(f => $('f_'+f).value = c[f]||'');
   const tl = $('taskList'); tl.innerHTML='';
@@ -174,6 +185,7 @@ async function loadPlaybook(){
               <button class="btn btn-ghost btn-sm sans" onclick="addHandoff(${c.id})">Add</button></div>
           </div>
           ${pulsePanel(c)}
+          ${carePanel(c)}
         </div>
       </div>`);
   });
@@ -299,6 +311,34 @@ function pulsePanel(c){
   </details>`;
 }
 
+function carePanel(c){
+  return `<details class="pulse-wrap no-print" id="care_${c.id}">
+    <summary>Moments, concerns &amp; client voice</summary>
+    <div class="pulse-body">
+      <label>How cared for does the client feel? (ask them)</label>
+      <div class="care-scale">${[1,2,3,4,5].map(n=>`<button class="care-btn" onclick="setCare(${c.id},${n})">${n}</button>`).join('')}<span class="hint" style="margin-left:8px">1 = not at all · 5 = deeply</span></div>
+      <label>♥ Log a delight ("whatever it takes")</label>
+      <div class="handoff-add"><input id="dl_${c.id}" placeholder="e.g. arranged a call with her daughter"/><button class="btn btn-ghost btn-sm sans" onclick="logDelight(${c.id})">Add</button></div>
+      <label>⚑ Raise a concern (you own it until it's resolved)</label>
+      <div class="handoff-add"><input id="cn_${c.id}" placeholder="e.g. upset the shower was cold this morning"/><button class="btn btn-ghost btn-sm sans" onclick="raiseConcern(${c.id})">Add</button></div>
+    </div>
+  </details>`;
+}
+async function setCare(clientId, n){
+  await api('/client-experience',{method:'POST',body:JSON.stringify({client_id:clientId,cared:n})});
+  const root=$('care_'+clientId); root.querySelectorAll('.care-btn').forEach((b,i)=>b.classList.toggle('on', i<n));
+}
+async function logDelight(clientId){
+  const inp=$('dl_'+clientId); if(!inp.value.trim())return;
+  await api('/delights',{method:'POST',body:JSON.stringify({client_id:clientId,text:inp.value})});
+  inp.value=''; inp.placeholder='✓ logged — thank you';
+}
+async function raiseConcern(clientId){
+  const inp=$('cn_'+clientId); if(!inp.value.trim())return;
+  await api('/concerns',{method:'POST',body:JSON.stringify({client_id:clientId,text:inp.value})});
+  inp.value=''; inp.placeholder='✓ logged — you own this until resolved';
+}
+
 async function logPulse(clientId){
   const root = $('pulse_'+clientId);
   const triggers = [...root.querySelectorAll('.trg-grid input:checked')].map(i=>i.value);
@@ -341,6 +381,74 @@ async function addHandoff(clientId){
   const inp=$('ho_'+clientId); if(!inp.value.trim())return;
   await api('/handoffs',{method:'POST',body:JSON.stringify({date:$('r_date').value,shift:$('r_shift').value,client_id:clientId,note:inp.value})});
   loadPlaybook();
+}
+
+/* ---- outcomes ---- */
+async function loadOutcomes(){
+  const o = await api('/outcomes');
+  $('outKpis').innerHTML = `
+    <div class="ret-card ${o.ama?'rc-high':''}"><div class="n">${o.amaRate}%</div><div class="l">AMA rate</div></div>
+    <div class="ret-card"><div class="n">${o.completionRate}%</div><div class="l">Completion rate</div></div>
+    <div class="ret-card"><div class="n">${o.feltCare!=null?o.feltCare:'—'}</div><div class="l">Felt-care (avg/5, 30d)</div></div>
+    <div class="ret-card ${o.openConcerns?'rc-warn':''}"><div class="n">${o.openConcerns}</div><div class="l">Open concerns</div></div>
+    <div class="ret-card"><div class="n">${o.delights30}</div><div class="l">Delights (30d)</div></div>
+    <div class="ret-card"><div class="n">${o.active}</div><div class="l">Active clients</div></div>`;
+
+  const { followups } = await api('/followups');
+  $('outFollow').innerHTML = followups.length ? followups.map(f=>`<div class="todo">
+      <div class="txt"><strong>${esc(f.pref||f.name||'')}</strong> — ${esc(f.type)} call · due ${esc(f.due_date)}</div>
+      <button class="btn btn-ghost btn-sm sans" onclick="markFollow(${f.id},'Done')">Done</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="markFollow(${f.id},'Unreachable')">No answer</button>
+    </div>`).join('') : '<div class="hint">No aftercare calls due. They appear here when a client is discharged.</div>';
+
+  $('outMiles').innerHTML = o.milestones.length ? o.milestones.map(m=>`<div class="todo"><div class="txt">🎉 <strong>${esc(m.client)}</strong> — ${esc(m.label)} ${m.inDays===0?'<span class="risk risk-low">today</span>':'in '+m.inDays+'d'}</div></div>`).join('') : '<div class="hint">No milestones in the next 7 days.</div>';
+
+  const { concerns } = await api('/concerns');
+  const open = concerns.filter(c=>c.status==='Open');
+  $('outConcerns').innerHTML = open.length ? open.map(c=>`<div class="todo">
+      <div class="txt"><strong>${esc(c.pref||c.name||'')}</strong> — ${esc(c.text)} <span class="hint">· owned by ${esc(c.owner_name||'?')}</span></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="resolveConcern(${c.id})">Resolve</button>
+    </div>`).join('') : '<div class="hint">No open concerns. 🎉</div>';
+}
+async function markFollow(id, status){
+  let note=''; if(status==='Done') note = prompt('How did the call go? (optional)')||'';
+  await api('/followups/'+id,{method:'POST',body:JSON.stringify({status,note})});
+  loadOutcomes();
+}
+async function resolveConcern(id){
+  const resolution = prompt('How was it resolved? (optional)')||'';
+  await api('/concerns/'+id+'/resolve',{method:'POST',body:JSON.stringify({resolution})});
+  loadOutcomes();
+}
+
+/* ---- lineup / culture ---- */
+let staffLoad = null;
+async function loadLineup(){
+  const { value, wows } = await api('/lineup');
+  $('lineValue').textContent = value;
+  // client dropdown for wow
+  try { const { clients } = await api('/clients');
+    $('w_client').innerHTML = '<option value="">—</option>' + clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}</option>`).join('');
+  } catch(e){}
+  $('wowFeed').innerHTML = wows.length ? wows.map(w=>`<div class="wow">
+      <div>${esc(w.text)}</div>
+      <div class="wow-meta">${w.pref?'about '+esc(w.pref)+' · ':''}${w.recognize?'👏 '+esc(w.recognize)+' · ':''}${esc(w.by_name||'')}</div>
+    </div>`).join('') : '<div class="hint">No stories yet. Be the first to share a moment of care.</div>';
+  // wire load buttons
+  document.querySelectorAll('#staffLoad .load-btn').forEach(b=>b.onclick=()=>{
+    staffLoad=b.dataset.v; document.querySelectorAll('#staffLoad .load-btn').forEach(x=>x.classList.toggle('on',x===b));
+  });
+}
+async function addWow(){
+  const text=$('w_text').value.trim(); if(!text){return;}
+  await api('/wows',{method:'POST',body:JSON.stringify({text,client_id:$('w_client').value||null,recognize:$('w_recognize').value.trim()||null})});
+  $('w_text').value=''; $('w_recognize').value='';
+  loadLineup();
+}
+async function submitStaffPulse(){
+  await api('/staff-pulse',{method:'POST',body:JSON.stringify({load:staffLoad,note:$('staffNote').value.trim()})});
+  $('staffNote').value=''; $('staffPulseMsg').textContent='Thank you — submitted.';
+  document.querySelectorAll('#staffLoad .load-btn').forEach(x=>x.classList.remove('on')); staffLoad=null;
 }
 
 /* ---- assignments ---- */

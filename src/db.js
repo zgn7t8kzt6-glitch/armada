@@ -124,6 +124,74 @@ CREATE TABLE IF NOT EXISTS ama_reads (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Aftercare / continuity-of-care follow-up calls (the "fond farewell").
+CREATE TABLE IF NOT EXISTS followups (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,                     -- 24h | 48h | 30d | custom
+  due_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Pending', -- Pending | Done | Unreachable
+  note TEXT,
+  done_by INTEGER REFERENCES users(id),
+  done_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Concern/defect ownership (lateral service): whoever hears it owns it.
+CREATE TABLE IF NOT EXISTS concerns (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  owner_id INTEGER REFERENCES users(id),
+  owner_name TEXT,
+  status TEXT NOT NULL DEFAULT 'Open',    -- Open | Resolved
+  resolution TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT
+);
+
+-- "Whatever it takes" delight log (the $2,000 rule).
+CREATE TABLE IF NOT EXISTS delights (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Wow Stories / moments-of-care recognition (the Daily Lineup culture).
+CREATE TABLE IF NOT EXISTS wows (
+  id INTEGER PRIMARY KEY,
+  text TEXT NOT NULL,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  recognize TEXT,                          -- staff member being recognized
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
+CREATE TABLE IF NOT EXISTS staff_pulses (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  load TEXT,                               -- Good | Okay | Stretched | Burnt out
+  note TEXT,
+  date TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Client-voiced experience: "how cared for do you feel?"
+CREATE TABLE IF NOT EXISTS client_experience (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  cared INTEGER NOT NULL,                  -- 1..5
+  comment TEXT,
+  by_id INTEGER REFERENCES users(id),
+  date TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Audit log: every access/modification of client data (HIPAA requirement)
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,
@@ -146,6 +214,10 @@ function addColumn(table, col, type) {
 addColumn('ama_reads', 'underlying', 'TEXT');
 addColumn('ama_reads', 'cared_for', 'TEXT');
 addColumn('ama_reads', 'best_play', 'TEXT');
+addColumn('clients', 'welcome_plan', 'TEXT');
+addColumn('clients', 'aftercare_plan', 'TEXT');
+addColumn('clients', 'discharge_status', 'TEXT');
+addColumn('clients', 'discharge_date', 'TEXT');
 
 export function audit({ user, action, entity = null, entity_id = null, detail = null, ip = null }) {
   db.prepare(

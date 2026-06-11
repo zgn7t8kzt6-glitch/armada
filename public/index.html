@@ -43,6 +43,8 @@
   <nav class="sans" id="nav">
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
+    <button data-view="outcomes">Outcomes</button>
+    <button data-view="lineup">Lineup</button>
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
     <button data-view="assign" data-admin>Assign Staff</button>
@@ -122,6 +124,10 @@
           <div><label>⚠ Safety / Medical Watch Items</label><textarea id="f_safety"></textarea></div>
         </div>
         <label>Support System / Family Contacts</label><textarea id="f_support"></textarea>
+        <div class="grid2">
+          <div><label>☀ Welcome / first-72-hours plan (the arrival)</label><textarea id="f_welcome_plan" placeholder="Greet by name. Warm welcome gesture. Pair with a peer buddy. Ease first-night anxiety — the highest-risk window."></textarea></div>
+          <div><label>🤝 Aftercare / continuity plan (the farewell)</label><textarea id="f_aftercare_plan" placeholder="Sober-living / outpatient, sponsor, meeting schedule, who follows up. Used when the client is discharged."></textarea></div>
+        </div>
         <hr/>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <div>
@@ -133,10 +139,82 @@
         <div id="aiStatus" class="hint" style="display:none"></div>
         <div id="taskList" style="margin-top:12px"></div>
         <button class="btn btn-ghost btn-sm sans" onclick="addTaskRow()">+ Add task</button>
+        <div id="dischargeBox" style="display:none;background:#faf8f3;border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:20px">
+          <h3 style="color:var(--navy);margin:0 0 4px">🤝 Discharge — the fond farewell</h3>
+          <p class="sub sans" style="margin:0 0 10px">Completed or AMA automatically schedules 24-hour, 48-hour, and 30-day aftercare check-in calls.</p>
+          <div class="controls">
+            <div class="field"><label>Outcome</label><select id="d_status"><option>Completed</option><option>AMA</option><option>Transferred</option></select></div>
+            <div class="field"><label>Date</label><input id="d_date" type="date"/></div>
+            <button class="btn btn-primary sans" onclick="dischargeClient()">Discharge &amp; start aftercare</button>
+          </div>
+        </div>
         <div class="toolbar" style="margin-top:24px">
           <button class="btn btn-danger btn-sm sans" id="deleteBtn" onclick="deleteCurrent()" style="margin-right:auto;display:none" data-admin>Delete client</button>
           <button class="btn btn-ghost sans" onclick="show('clients')">Cancel</button>
           <button class="btn btn-primary sans" onclick="saveClient()">Save Care Card</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- OUTCOMES -->
+    <section id="outcomes" class="view">
+      <div class="card">
+        <h3>Outcomes</h3>
+        <p class="sub sans">Are we keeping clients and helping them complete? The numbers that prove the care is working.</p>
+        <div id="outKpis" class="ret-cards"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:280px">
+          <h3>Aftercare calls due</h3>
+          <p class="sub sans">The fond farewell — continuity that prevents relapse.</p>
+          <div id="outFollow"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px">
+          <h3>Upcoming milestones</h3>
+          <p class="sub sans">Moments to celebrate — next 7 days.</p>
+          <div id="outMiles"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Open concerns</h3>
+        <p class="sub sans">Whoever heard it owns it until it's resolved.</p>
+        <div id="outConcerns"></div>
+      </div>
+    </section>
+
+    <!-- LINEUP -->
+    <section id="lineup" class="view">
+      <div class="card" style="border-left:4px solid var(--gold)">
+        <h3>Daily Lineup</h3>
+        <p class="sub sans">Take two minutes at the start of the shift. Read today's value aloud. Share one moment of care.</p>
+        <div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Service Value of the day</div>
+        <div id="lineValue" class="line-value"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:2;min-width:320px">
+          <h3>Wow Stories — moments of care</h3>
+          <textarea id="w_text" placeholder="Share a moment where someone made a client feel genuinely cared for…"></textarea>
+          <div class="grid2">
+            <div><label>About which client (optional)</label><select id="w_client"></select></div>
+            <div><label>Recognize a teammate (optional)</label><input id="w_recognize" placeholder="e.g. Maria"/></div>
+          </div>
+          <div class="toolbar"><button class="btn btn-gold sans" onclick="addWow()">Share story</button></div>
+          <div id="wowFeed"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px">
+          <h3>How's the team today?</h3>
+          <p class="sub sans">Ladies and Gentlemen serving Ladies and Gentlemen. Burnout shows up in client care.</p>
+          <label>Your load this shift</label>
+          <div id="staffLoad" class="load-row">
+            <button class="load-btn" data-v="Good">Good</button>
+            <button class="load-btn" data-v="Okay">Okay</button>
+            <button class="load-btn" data-v="Stretched">Stretched</button>
+            <button class="load-btn" data-v="Burnt out">Burnt out</button>
+          </div>
+          <label>Anything leadership should know? (optional)</label>
+          <input id="staffNote" placeholder="Private to admins"/>
+          <div class="toolbar"><button class="btn btn-primary btn-sm sans" onclick="submitStaffPulse()">Submit</button></div>
+          <div id="staffPulseMsg" class="hint"></div>
         </div>
       </div>
     </section>

@@ -116,6 +116,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);bo
 .trbar-track{flex:1;background:#eee;border-radius:5px;height:10px;overflow:hidden}
 .trbar-fill{height:100%;background:var(--gold)}
 .trbar-n{flex:0 0 20px;text-align:right;font-size:12px;color:var(--muted)}
+/* culture + voice */
+.line-value{font-size:20px;color:var(--navy);font-style:italic;margin-top:6px;line-height:1.45}
+.wow{border-left:3px solid var(--gold);background:#faf6ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:14px;color:#3a3a3a}
+.wow-meta{font-size:11px;color:var(--muted);margin-top:5px;font-family:sans-serif}
+.load-row{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 4px}
+.load-btn,.care-btn{font-family:sans-serif;cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:6px;padding:7px 12px;font-size:13px;color:var(--navy)}
+.load-btn.on,.care-btn.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.care-scale{display:flex;align-items:center;gap:6px;margin:4px 0 6px}
+.care-btn{width:38px;text-align:center}
 /* AMA retention banner */
 .ama-banner{border-radius:8px;padding:12px 14px;margin-bottom:14px;border:1px solid}
 .ama-banner.ama-elev{background:#fdf6ec;border-color:#e7c79a}

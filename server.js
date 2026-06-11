@@ -61,7 +61,7 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
   res.json({ client: c });
 });
 
-const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support'];
+const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'welcome_plan', 'aftercare_plan'];
 
 function saveTasks(clientId, tasks = []) {
   db.prepare(`DELETE FROM tasks WHERE client_id = ?`).run(clientId);
@@ -219,7 +219,7 @@ app.post('/api/clients/:id/plan-to-tasks', requireAuth, (req, res) => {
 // warning signs are trending across the center.
 app.get('/api/retention', requireAuth, (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
-  const clients = db.prepare(`SELECT id, name, pref, room, program, admit FROM clients WHERE active = 1`).all();
+  const clients = db.prepare(`SELECT id, name, pref, room, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
   const out = clients.map((c) => {
     const ama = latestAmaRead(c.id);
     const lastPulse = db.prepare(`SELECT date, shift, concern FROM pulses WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(c.id);
@@ -273,7 +273,7 @@ app.get('/api/playbook', requireAuth, (req, res) => {
     `SELECT u.id, u.name, u.job_role FROM assignments a JOIN users u ON u.id = a.user_id WHERE a.shift_id = ?`
   ).all(shift.id);
 
-  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 ORDER BY room, name`).all();
+  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
   const done = new Set(db.prepare(`SELECT task_id FROM completions WHERE shift_id = ?`).all(shift.id).map(r => r.task_id));
   const handoffs = db.prepare(`SELECT * FROM handoffs WHERE shift_id = ? ORDER BY created_at`).all(shift.id);
 
@@ -362,6 +362,146 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
 });
 
 app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS }));
+
+/* ---------------- Ritz modules: farewell, ownership, delight, culture, voice, outcomes ---------------- */
+
+const SERVICE_VALUES = [
+  'I build genuine relationships so every client feels they belong here.',
+  'I am always responsive to the expressed and unexpressed needs of our clients.',
+  'I am empowered to create personal, memorable moments of care.',
+  'I understand my role in our mission: helping clients feel cared for and complete recovery.',
+  'I continuously look for ways to improve our clients’ experience.',
+  'I own and immediately resolve any client problem I hear about.',
+  'I create teamwork and lateral service — I help any client and any teammate.',
+  'I have the opportunity to keep learning and growing.',
+  'I have a voice in the work that affects me.',
+  'I carry myself with warmth, professionalism, and respect.',
+  'I protect the privacy, dignity, and safety of our clients and teammates.',
+  'I keep our environment clean, calm, and safe for healing.',
+];
+
+// Discharge a client; auto-create aftercare follow-up calls (the fond farewell).
+app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
+  const { status, date } = req.body || {};
+  if (!['Completed', 'AMA', 'Transferred'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  const d = date || new Date().toISOString().slice(0, 10);
+  db.prepare(`UPDATE clients SET discharge_status = ?, discharge_date = ? WHERE id = ?`).run(status, d, req.params.id);
+  if (status !== 'Transferred') {
+    const base = new Date(d + 'T00:00').getTime();
+    const ins = db.prepare(`INSERT INTO followups (client_id, type, due_date) VALUES (?, ?, ?)`);
+    [[1, '24h'], [2, '48h'], [30, '30d']].forEach(([days, type]) =>
+      ins.run(req.params.id, type, new Date(base + days * 864e5).toISOString().slice(0, 10)));
+  }
+  audit({ user: req.user, action: 'DISCHARGE', entity: 'client', entity_id: +req.params.id, detail: status, ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/clients/:id/readmit', requireAuth, (req, res) => {
+  db.prepare(`UPDATE clients SET discharge_status = NULL, discharge_date = NULL WHERE id = ?`).run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Aftercare follow-up calls
+app.get('/api/followups', requireAuth, (req, res) => {
+  res.json({ followups: db.prepare(
+    `SELECT f.*, c.pref, c.name FROM followups f JOIN clients c ON c.id = f.client_id
+     WHERE f.status = 'Pending' ORDER BY f.due_date`).all() });
+});
+app.post('/api/followups/:id', requireAuth, (req, res) => {
+  const st = ['Done', 'Unreachable', 'Pending'].includes(req.body?.status) ? req.body.status : 'Done';
+  db.prepare(`UPDATE followups SET status = ?, note = ?, done_by = ?, done_at = datetime('now') WHERE id = ?`)
+    .run(st, req.body?.note || null, req.user.id, req.params.id);
+  res.json({ ok: true });
+});
+
+// Concerns (lateral ownership)
+app.get('/api/concerns', requireAuth, (req, res) => {
+  res.json({ concerns: db.prepare(
+    `SELECT co.*, c.pref, c.name FROM concerns co JOIN clients c ON c.id = co.client_id
+     ORDER BY (co.status = 'Open') DESC, co.id DESC LIMIT 100`).all() });
+});
+app.post('/api/concerns', requireAuth, (req, res) => {
+  const { client_id, text } = req.body || {};
+  if (!client_id || !text?.trim()) return res.status(400).json({ error: 'Missing' });
+  db.prepare(`INSERT INTO concerns (client_id, text, owner_id, owner_name) VALUES (?, ?, ?, ?)`)
+    .run(client_id, text.trim(), req.user.id, req.user.name);
+  audit({ user: req.user, action: 'CONCERN', entity: 'client', entity_id: +client_id, ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/concerns/:id/resolve', requireAuth, (req, res) => {
+  db.prepare(`UPDATE concerns SET status = 'Resolved', resolution = ?, resolved_at = datetime('now') WHERE id = ?`)
+    .run((req.body?.resolution || '').trim() || null, req.params.id);
+  res.json({ ok: true });
+});
+
+// Delights ("whatever it takes")
+app.get('/api/delights', requireAuth, (req, res) => {
+  res.json({ delights: db.prepare(
+    `SELECT d.*, c.pref FROM delights d LEFT JOIN clients c ON c.id = d.client_id ORDER BY d.id DESC LIMIT 50`).all() });
+});
+app.post('/api/delights', requireAuth, (req, res) => {
+  if (!req.body?.text?.trim()) return res.status(400).json({ error: 'Missing' });
+  db.prepare(`INSERT INTO delights (client_id, text, by_id, by_name) VALUES (?, ?, ?, ?)`)
+    .run(req.body.client_id || null, req.body.text.trim(), req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+
+// Lineup + Wow Stories (culture)
+app.get('/api/lineup', requireAuth, (req, res) => {
+  const value = SERVICE_VALUES[Math.floor(Date.now() / 864e5) % SERVICE_VALUES.length];
+  const wows = db.prepare(`SELECT w.*, c.pref FROM wows w LEFT JOIN clients c ON c.id = w.client_id ORDER BY w.id DESC LIMIT 20`).all();
+  res.json({ value, wows });
+});
+app.post('/api/wows', requireAuth, (req, res) => {
+  if (!req.body?.text?.trim()) return res.status(400).json({ error: 'Missing' });
+  db.prepare(`INSERT INTO wows (text, client_id, recognize, by_id, by_name) VALUES (?, ?, ?, ?, ?)`)
+    .run(req.body.text.trim(), req.body.client_id || null, req.body.recognize || null, req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/staff-pulse', requireAuth, (req, res) => {
+  db.prepare(`INSERT INTO staff_pulses (user_id, load, note, date) VALUES (?, ?, ?, ?)`)
+    .run(req.user.id, req.body?.load || null, req.body?.note || null, new Date().toISOString().slice(0, 10));
+  res.json({ ok: true });
+});
+
+// Client voice
+app.post('/api/client-experience', requireAuth, (req, res) => {
+  const { client_id, cared, comment } = req.body || {};
+  if (!client_id || !cared) return res.status(400).json({ error: 'Missing' });
+  db.prepare(`INSERT INTO client_experience (client_id, cared, comment, by_id, date) VALUES (?, ?, ?, ?, ?)`)
+    .run(client_id, +cared, comment || null, req.user.id, new Date().toISOString().slice(0, 10));
+  res.json({ ok: true });
+});
+
+// Outcomes + milestones
+app.get('/api/outcomes', requireAuth, (req, res) => {
+  const disc = db.prepare(`SELECT discharge_status s, COUNT(*) n FROM clients WHERE discharge_status IS NOT NULL GROUP BY discharge_status`).all();
+  const counts = {}; disc.forEach((r) => { counts[r.s] = r.n; });
+  const completed = counts.Completed || 0, ama = counts.AMA || 0, transferred = counts.Transferred || 0;
+  const denom = completed + ama;
+  const amaRate = denom ? Math.round((ama / denom) * 100) : 0;
+  const completionRate = denom ? Math.round((completed / denom) * 100) : 0;
+  const active = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n;
+  const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const ce = db.prepare(`SELECT AVG(cared) a, COUNT(*) n FROM client_experience WHERE date >= ?`).get(since);
+  const openConcerns = db.prepare(`SELECT COUNT(*) n FROM concerns WHERE status = 'Open'`).get().n;
+  const delights30 = db.prepare(`SELECT COUNT(*) n FROM delights WHERE created_at >= datetime('now','-30 day')`).get().n;
+
+  const clients = db.prepare(`SELECT pref, name, sober FROM clients WHERE active = 1 AND discharge_status IS NULL AND sober IS NOT NULL AND sober != ''`).all();
+  const now = Date.now();
+  const milestones = [];
+  clients.forEach((c) => {
+    [7, 30, 60, 90].forEach((d) => {
+      const ms = new Date(c.sober + 'T00:00').getTime() + d * 864e5;
+      const inDays = Math.round((ms - now) / 864e5);
+      if (inDays >= 0 && inDays <= 7) milestones.push({ client: c.pref || c.name, label: `${d} days sober`, date: new Date(ms).toISOString().slice(0, 10), inDays });
+    });
+  });
+  milestones.sort((a, b) => a.inDays - b.inDays);
+
+  res.json({ amaRate, completionRate, completed, ama, transferred, active,
+    feltCare: ce.a ? Math.round(ce.a * 10) / 10 : null, feltCareN: ce.n,
+    openConcerns, delights30, milestones });
+});
 
 /* ---------------- static ---------------- */
 app.use(express.static(path.join(__dirname, 'public')));

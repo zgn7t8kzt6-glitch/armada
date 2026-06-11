@@ -228,6 +228,13 @@
         <div class="toolbar"><button class="btn btn-ghost sans" onclick="testAlert()">Send test alert</button><button class="btn btn-primary sans" onclick="saveOncall()">Save on-call</button></div>
       </div>
       <div class="card">
+        <h3>Kipu EMR integration</h3>
+        <p class="sub sans">Pull the client roster and let every Kipu note flow into the red-flag scanner. Set <code>KIPU_ACCESS_ID</code>, <code>KIPU_SECRET_KEY</code>, <code>KIPU_APP_ID</code> on your host.</p>
+        <div id="kipuStatus" class="hint"></div>
+        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost sans" onclick="kipuTest()">Test connection</button><button class="btn btn-gold sans" onclick="kipuSync()">Sync roster</button></div>
+        <div id="kipuResult" class="hint"></div>
+      </div>
+      <div class="card">
         <h3>Kiosk &amp; display code</h3>
         <p class="sub sans">Code staff enter to open the client kiosk and the break-room display. Share only with staff.</p>
         <div class="controls"><div class="field"><label>Code</label><input id="kc_code"/></div><button class="btn btn-primary sans" onclick="saveKioskCode()">Save</button></div>

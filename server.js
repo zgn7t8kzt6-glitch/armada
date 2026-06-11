@@ -6,6 +6,7 @@ import { db, audit, getState, setState } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster } from './src/kipu.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
@@ -201,7 +202,11 @@ function createAlert(client_id, kind, level, message) {
   const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id = ? AND kind = ? AND status = 'New' AND created_at >= datetime('now','-1 day') LIMIT 1`).get(client_id, kind);
   if (dup) return;
   db.prepare(`INSERT INTO alerts (client_id, kind, level, message) VALUES (?, ?, ?, ?)`).run(client_id || null, kind, level || null, message);
-  if (level === 'High' || level === 'Critical') notifyOnCall(message);
+  if (level === 'High' || level === 'Critical') {
+    // PHI-free by default — the detailed message stays in the app (behind login).
+    const phiFree = process.env.ALERT_INCLUDE_PHI !== 'true';
+    notifyOnCall(phiFree ? `${level} alert — a client needs attention now. Open Armada to view (details kept in-app for privacy).` : message);
+  }
 }
 
 // Gather context, ask Claude, store the read. Reused by the button and by
@@ -515,6 +520,15 @@ app.post('/api/settings/kiosk-code', requireAuth, requireAdmin, (req, res) => {
 app.post('/api/settings/test-alert', requireAuth, requireAdmin, (req, res) => {
   notifyOnCall('TEST — your on-call alerts are working. (No action needed.)');
   res.json({ ok: true, emailReady: emailConfigured(), smsReady: smsConfigured() });
+});
+// Kipu EMR integration (admin)
+app.get('/api/kipu/status', requireAuth, requireAdmin, (req, res) => res.json({ configured: kipuConfigured() }));
+app.post('/api/kipu/test', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await kipuTest()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
+  try { const r = await kipuSyncRoster(); audit({ user: req.user, action: 'KIPU_SYNC', detail: `${r.created} new`, ip: req.ip }); res.json(r); }
+  catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/settings/aftercare-coordinator', requireAuth, requireAdmin, (req, res) => {
   setState('aftercare_coordinator', String(req.body?.user_id || ''));

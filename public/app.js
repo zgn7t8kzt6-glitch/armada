@@ -1,6 +1,7 @@
 /* Armada Care Standards — front-end (talks to the API) */
 let ME = null, META = { shifts: ['Morning','Day','Evening','Night'], jobRoles: ['BHT / Tech','Nurse','Therapist','Kitchen'] };
 let currentId = null;
+let PB = {};   // last playbook clients, keyed by id (for print/share)
 
 const $ = id => document.getElementById(id);
 const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -145,6 +146,7 @@ async function loadPlaybook(){
     <p class="hint">Touch every client. Deliver every ★ personal touch. Confirm every ⚠ safety item at handoff.</p></div>`;
 
   const body=$('reportBody'); body.innerHTML='';
+  PB = {}; data.clients.forEach(c => { PB[c.id] = c; });
   if(!data.clients.length){ body.innerHTML='<div class="empty">No clients with tasks or notes for this shift/role.</div>'; return; }
   data.clients.forEach(c => {
     const todos = c.tasks.length ? c.tasks.map(t=>`<div class="todo ${t.done?'done':''}">
@@ -226,7 +228,47 @@ function retentionBanner(c){
     ${trig?`<div class="pc-section"><div class="h">Warning signs</div><div class="ama-trig">${trig}</div></div>`:''}
     ${acts?`<div class="pc-section"><div class="h">Keep them — this shift</div>${acts}</div>`:''}
     ${a.approach?`<div class="pc-section"><div class="h">How to talk with them</div><div class="pc-note">${esc(a.approach)}</div></div>`:''}
+    <div class="ama-actions no-print">
+      <button class="btn btn-ghost btn-sm sans" onclick="planToTasks(${c.id})">➕ Add to shift tasks</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="printPlan(${c.id})">🖨 Print / share plan</button>
+    </div>
   </div>`;
+}
+
+async function planToTasks(clientId){
+  if (!confirm('Add this plan\'s actions and gestures to the client\'s shift tasks?')) return;
+  try {
+    const { added } = await api('/clients/'+clientId+'/plan-to-tasks', { method:'POST', body: JSON.stringify({ shift: $('r_shift').value }) });
+    alert(added ? `Added ${added} task${added===1?'':'s'} to the Care Card.` : 'Those tasks are already on the Care Card.');
+    loadPlaybook();
+  } catch(e){ alert(e.message); }
+}
+
+function printPlan(clientId){
+  const c = (PB[clientId]||{}); const a = c.ama;
+  if (!a) return;
+  const list = (arr) => (arr||[]).map(x=>`<li>${esc(typeof x==='string'?x:(x.job_role+' · '+x.shift+': '+x.text))}</li>`).join('');
+  const when = new Date(a.created_at ? a.created_at+'Z' : Date.now()).toLocaleString();
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Retention plan — ${esc(c.pref||c.name||'')}</title>
+  <style>body{font-family:Georgia,serif;color:#222;max-width:700px;margin:30px auto;padding:0 20px;line-height:1.5}
+  h1{color:#2a585d;margin:0 0 2px} .meta{color:#666;font-size:13px;margin-bottom:16px}
+  .lvl{display:inline-block;padding:3px 10px;border-radius:20px;font-weight:700;font-size:12px}
+  .h{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:#888;margin:16px 0 4px;font-family:sans-serif}
+  .play{background:#faf6ee;border:1px solid #d9c4a3;border-radius:6px;padding:10px 12px}
+  .tag{font-style:italic;color:#999;font-size:12px} ul{margin:4px 0}</style></head><body>
+  <h1>${esc(c.pref||c.name||'')} ${c.room?'· Room '+esc(c.room):''}</h1>
+  <div class="meta">Retention recap &amp; action plan · ${when} · <span class="tag">for clinical review — not a diagnosis</span></div>
+  <div class="lvl" style="background:${a.level==='High'?'#fbecea':a.level==='Elevated'?'#fdf6ec':'#eef5f0'}">AMA risk: ${esc(a.level)}</div>
+  <div class="h">Summary</div><div>${esc(a.summary||'')}</div>
+  ${a.underlying?`<div class="h">What's really going on (emotionally)</div><div>${esc(a.underlying)}</div>`:''}
+  ${a.best_play?`<div class="h">★ Best play to keep them</div><div class="play">${esc(a.best_play)}</div>`:''}
+  ${(a.cared_for||[]).length?`<div class="h">Make them feel cared for</div><ul>${list(a.cared_for)}</ul>`:''}
+  ${(a.actions||[]).length?`<div class="h">This shift — to do</div><ul>${list(a.actions)}</ul>`:''}
+  ${a.approach?`<div class="h">How to talk with them</div><div>${esc(a.approach)}</div>`:''}
+  </body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(html); w.document.close(); w.focus();
+  setTimeout(()=>w.print(), 300);
 }
 
 function pulsePanel(c){
@@ -260,16 +302,22 @@ function pulsePanel(c){
 async function logPulse(clientId){
   const root = $('pulse_'+clientId);
   const triggers = [...root.querySelectorAll('.trg-grid input:checked')].map(i=>i.value);
+  const concern = root.querySelector('.p-concern').value;
   const body = {
     client_id: clientId, date: $('r_date').value, shift: $('r_shift').value,
-    concern: root.querySelector('.p-concern').value,
+    concern,
     engagement: root.querySelector('.p-eng').value,
     triggers,
     statements: root.querySelector('.p-stmt').value.trim(),
     note: root.querySelector('.p-note').value.trim(),
   };
-  await api('/pulses',{method:'POST',body:JSON.stringify(body)});
-  loadPlaybook();
+  const btn = root.querySelector('.btn-primary');
+  btn.disabled = true; const label = btn.textContent;
+  btn.textContent = (concern === 'High' && META.claude) ? 'Saving + drafting plan…' : 'Saving…';
+  try {
+    await api('/pulses',{method:'POST',body:JSON.stringify(body)});
+    loadPlaybook();
+  } catch(e){ btn.disabled=false; btn.textContent=label; alert(e.message); }
 }
 
 async function assessAma(clientId){

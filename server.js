@@ -125,7 +125,7 @@ app.post('/api/suggest-tasks', requireAuth, async (req, res) => {
 
 /* ---------------- Daily Pulse + AMA risk (retention) ---------------- */
 // Log a quick per-shift check-in for a client.
-app.post('/api/pulses', requireAuth, (req, res) => {
+app.post('/api/pulses', requireAuth, async (req, res) => {
   const b = req.body || {};
   if (!b.client_id) return res.status(400).json({ error: 'Missing client' });
   const date = b.date || new Date().toISOString().slice(0, 10);
@@ -137,7 +137,16 @@ app.post('/api/pulses', requireAuth, (req, res) => {
   ).run(b.client_id, date, shift, b.concern || 'Low', b.engagement || null, triggers,
     b.statements || null, b.note || null, req.user.id);
   audit({ user: req.user, action: 'PULSE', entity: 'client', entity_id: +b.client_id, ip: req.ip });
-  res.json({ ok: true });
+
+  // Auto-generate the recap + action plan when concern is High.
+  let autoPlan = false;
+  if (b.concern === 'High' && claudeConfigured()) {
+    const client = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(b.client_id);
+    if (client) {
+      try { await runAndStoreAmaRead(client, req.user, req.ip); autoPlan = true; } catch (e) { /* don't fail the pulse */ }
+    }
+  }
+  res.json({ ok: true, autoPlan });
 });
 
 function recentPulses(clientId, limit = 8) {
@@ -153,28 +162,57 @@ function latestAmaRead(clientId) {
   return { ...r, triggers: safeArr(r.triggers), actions: safeArr(r.actions), cared_for: safeArr(r.cared_for) };
 }
 
-// Run Claude's AMA risk read for a client and store it.
+// Gather context, ask Claude, store the read. Reused by the button and by
+// auto-generation when a High-concern pulse is logged.
+async function runAndStoreAmaRead(client, user, ip) {
+  const pulses = recentPulses(client.id);
+  const handoffs = db.prepare(`SELECT note FROM handoffs WHERE client_id = ? ORDER BY id DESC LIMIT 6`).all(client.id);
+  const read = await generateAmaRead(client, pulses, handoffs);
+  db.prepare(
+    `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(client.id, read.level, read.summary, JSON.stringify(read.triggers),
+    JSON.stringify(read.actions), read.approach, read.underlying || null,
+    JSON.stringify(read.cared_for || []), read.best_play || null, user.id);
+  audit({ user, action: 'AMA_READ', entity: 'client', entity_id: client.id, detail: read.level, ip });
+  return read;
+}
+
+// Run Claude's AMA recap + action plan for a client and store it.
 app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
   if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured (set ANTHROPIC_API_KEY).' });
   const client = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Not found' });
   try {
-    const pulses = recentPulses(client.id);
-    const handoffs = db.prepare(
-      `SELECT note FROM handoffs WHERE client_id = ? ORDER BY id DESC LIMIT 6`
-    ).all(client.id);
-    const read = await generateAmaRead(client, pulses, handoffs);
-    db.prepare(
-      `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(client.id, read.level, read.summary, JSON.stringify(read.triggers),
-      JSON.stringify(read.actions), read.approach, read.underlying || null,
-      JSON.stringify(read.cared_for || []), read.best_play || null, req.user.id);
-    audit({ user: req.user, action: 'AMA_READ', entity: 'client', entity_id: client.id, detail: read.level, ip: req.ip });
+    const read = await runAndStoreAmaRead(client, req.user, req.ip);
     res.json({ read });
   } catch (e) {
     res.status(502).json({ error: e.message || 'Could not assess.' });
   }
+});
+
+// Apply the latest plan's tasks (and feel-cared-for gestures) to the Care Card.
+app.post('/api/clients/:id/plan-to-tasks', requireAuth, (req, res) => {
+  const client = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Not found' });
+  const read = latestAmaRead(client.id);
+  if (!read) return res.status(400).json({ error: 'No plan to apply yet.' });
+  const defShift = SHIFTS.includes(req.body?.shift) ? req.body.shift : 'Morning';
+  const existing = new Set(db.prepare(`SELECT text FROM tasks WHERE client_id = ?`).all(client.id).map((t) => t.text));
+  const ins = db.prepare(`INSERT INTO tasks (client_id, shift, job_role, text, priority, sort) VALUES (?, ?, ?, ?, ?, ?)`);
+  let n = 0, sort = 1000;
+  for (const a of read.actions || []) {
+    if (!a.text || existing.has(a.text)) continue;
+    ins.run(client.id, SHIFTS.includes(a.shift) ? a.shift : defShift, a.job_role || 'All', a.text, a.priority === 'High' ? 'High' : 'Normal', sort++);
+    existing.add(a.text); n++;
+  }
+  for (const g of read.cared_for || []) {
+    if (!g || existing.has(g)) continue;
+    ins.run(client.id, defShift, 'BHT / Tech', g, 'Normal', sort++);
+    existing.add(g); n++;
+  }
+  audit({ user: req.user, action: 'PLAN_APPLY', entity: 'client', entity_id: client.id, detail: `${n} tasks`, ip: req.ip });
+  res.json({ added: n });
 });
 
 // Retention dashboard: every client's current risk, pulse status, and which

@@ -128,6 +128,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);bo
 .ama-play .h{color:var(--gold)}
 .ama-list{margin:4px 0 0;padding-left:18px;font-size:13px;color:#444}
 .ama-list li{margin-bottom:3px}
+.ama-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 .ama-tag{font-weight:400;font-style:italic;color:var(--muted);font-size:11px;margin-left:6px}
 .ama-sum{font-size:13px;margin:6px 0;color:#444}
 .ama-trig{margin:6px 0;display:flex;flex-wrap:wrap;gap:5px}

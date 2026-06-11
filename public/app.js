@@ -26,6 +26,23 @@ $('loginForm').addEventListener('submit', async e => {
   } catch(err){ $('loginErr').textContent = err.message; }
 });
 async function doLogout(){ await api('/logout',{method:'POST'}); location.reload(); }
+
+/* ---- night mode + PWA + voice ---- */
+function applyTheme(t){ document.documentElement.dataset.theme = t==='dark'?'dark':''; const b=$('themeBtn'); if(b) b.textContent = t==='dark'?'☀️':'🌙'; }
+function toggleTheme(){ const cur=document.documentElement.dataset.theme==='dark'?'dark':'light'; const next=cur==='dark'?'light':'dark'; localStorage.setItem('theme',next); applyTheme(next); }
+(function initTheme(){ const saved=localStorage.getItem('theme'); const hr=new Date().getHours(); applyTheme(saved || ((hr>=19||hr<6)?'dark':'light')); })();
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
+function dictateInto(btn){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ alert('Voice capture needs Chrome or Edge.'); return; }
+  const w=btn.closest('.voicewrap')||btn.parentNode; const inp=w.querySelector('input,textarea'); if(!inp) return;
+  const r=new SR(); r.lang='en-US'; r.interimResults=false; r.maxAlternatives=1;
+  btn.textContent='●'; btn.disabled=true;
+  r.onresult=e=>{ const t=e.results[0][0].transcript; inp.value=(inp.value?inp.value.trim()+' ':'')+t; inp.dispatchEvent(new Event('input')); };
+  r.onend=()=>{ btn.textContent='🎤'; btn.disabled=false; };
+  r.onerror=()=>{ btn.textContent='🎤'; btn.disabled=false; };
+  try{ r.start(); }catch(e){ btn.textContent='🎤'; btn.disabled=false; }
+}
 async function changeMyPassword(){
   const current = prompt('Current password:'); if(current===null) return;
   const next = prompt('New password (at least 6 characters):'); if(!next) return;
@@ -507,7 +524,7 @@ function pulsePanel(c){
       <label>Warning signs seen this shift</label>
       <div class="trg-grid">${trigs}</div>
       <label>Notable statements (their words)</label>
-      <input class="p-stmt" placeholder='e.g. "I don\\'t think this is for me"'/>
+      <span class="voicewrap"><input class="p-stmt" placeholder='e.g. "I don\\'t think this is for me"'/><button type="button" class="mic" onclick="dictateInto(this)" title="Dictate">🎤</button></span>
       <label>Note</label>
       <input class="p-note" placeholder="Anything else worth passing on"/>
       <div class="toolbar" style="margin-top:12px">

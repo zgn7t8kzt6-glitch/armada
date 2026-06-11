@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Armada Care Standards</title>
 <link rel="stylesheet" href="/styles.css" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#2a585d" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Armada" />
+<link rel="apple-touch-icon" href="/logo.svg" />
 </head>
 <body>
 
@@ -36,6 +41,7 @@
     </div>
     <div class="userbox sans">
       <span id="whoami"></span>
+      <button class="btn btn-ghost btn-sm" onclick="toggleTheme()" id="themeBtn" title="Day / night">🌙</button>
       <button class="btn btn-ghost btn-sm" onclick="changeMyPassword()">Change password</button>
       <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign out</button>
     </div>
@@ -97,7 +103,7 @@
         <div class="card" style="flex:1;min-width:240px">
           <h3>Ask Armada</h3>
           <p class="sub sans">Ask anything about the house.</p>
-          <div class="handoff-add"><input id="today_ask" placeholder="e.g. Who needs extra care tonight?"/><button class="btn btn-gold btn-sm sans" onclick="askFromToday()">Ask</button></div>
+          <div class="handoff-add"><input id="today_ask" placeholder="e.g. Who needs extra care tonight?"/><button type="button" class="mic" onclick="dictateInto(this)" title="Dictate">🎤</button><button class="btn btn-gold btn-sm sans" onclick="askFromToday()">Ask</button></div>
           <div id="todayAskOut" class="brief-body"></div>
         </div>
       </div>
@@ -116,7 +122,7 @@
           <div class="field" style="min-width:220px"><label>About (optional)</label><select id="ai_client"><option value="">The whole house</option></select></div>
         </div>
         <label>Your question</label>
-        <textarea id="ai_q" placeholder="e.g. What does Janie need today to feel cared for? · Who is most at risk of leaving? · Draft a warm update to Marc's mother about his progress."></textarea>
+        <span class="voicewrap"><textarea id="ai_q" placeholder="e.g. What does Janie need today to feel cared for? · Who is most at risk of leaving? · Draft a warm update to Marc's mother about his progress."></textarea><button type="button" class="mic" onclick="dictateInto(this)" title="Dictate" style="align-self:flex-start">🎤</button></span>
         <div class="toolbar"><button class="btn btn-gold sans" id="aiAskBtn" onclick="askAI()">Ask Armada</button></div>
         <div id="aiAnswer" class="brief-body"></div>
         <div id="aiHint" class="hint"></div>

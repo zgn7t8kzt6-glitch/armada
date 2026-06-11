@@ -100,9 +100,15 @@
         </div>
         <label>Support System / Family Contacts</label><textarea id="f_support"></textarea>
         <hr/>
-        <h3 style="color:var(--navy)">Shift Tasks</h3>
-        <p class="sub sans">Tag each action with a shift and role. These flow into the Shift Playbook.</p>
-        <div id="taskList"></div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <h3 style="color:var(--navy);margin:0">Shift Tasks</h3>
+            <p class="sub sans" style="margin:4px 0 0">Tag each action with a shift and role. These flow into the Shift Playbook.</p>
+          </div>
+          <button id="aiBtn" class="btn btn-gold btn-sm sans" style="margin-left:auto;display:none" onclick="suggestTasks()">✦ Draft tasks with Claude</button>
+        </div>
+        <div id="aiStatus" class="hint" style="display:none"></div>
+        <div id="taskList" style="margin-top:12px"></div>
         <button class="btn btn-ghost btn-sm sans" onclick="addTaskRow()">+ Add task</button>
         <div class="toolbar" style="margin-top:24px">
           <button class="btn btn-danger btn-sm sans" id="deleteBtn" onclick="deleteCurrent()" style="margin-right:auto;display:none" data-admin>Delete client</button>

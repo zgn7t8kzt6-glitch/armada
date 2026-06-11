@@ -28,6 +28,8 @@ services:
         value: admin
       - key: ADMIN_PASS
         sync: false                  # Render will prompt you to enter this secret
+      - key: ANTHROPIC_API_KEY
+        sync: false                  # optional: enables "Draft tasks with Claude" (key from console.anthropic.com)
     disk:
       name: armada-data
       mountPath: /var/data

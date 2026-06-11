@@ -31,6 +31,7 @@ async function boot(){
   $('whoami').textContent = `${ME.name} · ${ME.job_role}${ME.role==='admin'?' · Admin':''}`;
   document.querySelectorAll('[data-admin]').forEach(el => el.style.display = ME.role==='admin' ? '' : 'none');
   try { META = await api('/meta'); } catch(e){}
+  if (META.claude) $('aiBtn').style.display = 'inline-block';
   // fill shift/role selects
   fillSelect($('r_shift'), META.shifts); fillSelect($('a_shift'), META.shifts);
   fillSelect($('r_role'), ['All', ...META.jobRoles]);
@@ -108,6 +109,23 @@ async function saveClient(){
   else await api('/clients',{method:'POST',body:JSON.stringify(body)});
   show('clients');
 }
+async function suggestTasks(){
+  const body = {}; FF.forEach(f => body[f] = $('f_'+f).value.trim());
+  const btn = $('aiBtn'), status = $('aiStatus');
+  btn.disabled = true; const label = btn.textContent; btn.textContent = '✦ Drafting…';
+  status.style.display = 'block'; status.style.color = ''; status.textContent = 'Claude is reading the Care Card and drafting shift tasks…';
+  try {
+    const { tasks } = await api('/suggest-tasks', { method:'POST', body: JSON.stringify(body) });
+    tasks.forEach(t => addTaskRow(t));
+    status.textContent = `Added ${tasks.length} suggested task${tasks.length===1?'':'s'} below — review and edit each one, then Save.`;
+  } catch(e) {
+    status.style.color = 'var(--danger)';
+    status.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
 async function deleteCurrent(){
   if(!currentId||!confirm('Deactivate this client\'s Care Card?'))return;
   await api('/clients/'+currentId,{method:'DELETE'}); show('clients');

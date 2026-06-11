@@ -36,6 +36,7 @@ real client data.)
 - **Handoff notes.** Per-client notes passed to the next shift.
 - **Assign staff** to specific shifts; assigned names show on the playbook header.
 - **Audit log.** Every view/create/update/delete of client data is recorded (admin-only) — a core HIPAA requirement.
+- **✦ Draft tasks with Claude.** On a Care Card, Claude reads the client's preferences, goals, triggers, and safety items and drafts specific per-shift, per-role tasks for staff to review and edit. Safety items are flagged High priority and routed to nursing; no medical orders are invented. Requires `ANTHROPIC_API_KEY` (get one at console.anthropic.com); the button hides automatically when it isn't set. Staff always review and edit before saving — Claude drafts, humans decide.
 - **Print** a clean playbook for the shift huddle.
 
 ## Run it locally

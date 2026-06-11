@@ -7,6 +7,7 @@ import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
+import { generateShiftTasks, claudeConfigured } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -100,6 +101,26 @@ app.delete('/api/clients/:id', requireAuth, requireAdmin, (req, res) => {
   db.prepare(`UPDATE clients SET active = 0 WHERE id = ?`).run(req.params.id);
   audit({ user: req.user, action: 'DELETE', entity: 'client', entity_id: +req.params.id, ip: req.ip });
   res.json({ ok: true });
+});
+
+/* ---------------- Claude: draft shift tasks from a Care Card ---------------- */
+// Takes the (possibly unsaved) Care Card fields, returns suggested tasks for the
+// user to review/edit before saving. Does not persist anything.
+app.post('/api/suggest-tasks', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) {
+    return res.status(503).json({ error: 'Claude is not configured. Set ANTHROPIC_API_KEY to enable AI suggestions.' });
+  }
+  const b = req.body || {};
+  const hasContent = ['pref', 'name', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'program', 'support']
+    .some((f) => b[f] && b[f].trim());
+  if (!hasContent) return res.status(400).json({ error: 'Add some Care Card details first.' });
+  try {
+    const tasks = await generateShiftTasks(b);
+    audit({ user: req.user, action: 'AI_SUGGEST', entity: 'client', detail: b.name || b.pref, ip: req.ip });
+    res.json({ tasks });
+  } catch (e) {
+    res.status(502).json({ error: e.message || 'Could not generate suggestions.' });
+  }
 });
 
 /* ---------------- shifts / assignments / completions ---------------- */
@@ -206,7 +227,7 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
   res.json({ entries: db.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all() });
 });
 
-app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES }));
+app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured() }));
 
 /* ---------------- static ---------------- */
 app.use(express.static(path.join(__dirname, 'public')));

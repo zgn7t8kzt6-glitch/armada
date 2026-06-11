@@ -8,8 +8,11 @@
     "start": "node server.js",
     "seed": "node src/seed.js"
   },
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
     "bcryptjs": "^2.4.3",
     "express": "^4.19.2"
   }

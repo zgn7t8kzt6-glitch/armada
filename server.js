@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics } from './src/report.js';
+import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
@@ -312,7 +313,8 @@ app.get('/api/playbook', requireAuth, (req, res) => {
       pulsedThisShift: !!pulsedThisShift,
     });
   }
-  res.json({ shift, assignees, clients: out, role });
+  const so = db.prepare(`SELECT crisis_owner_id, crisis_owner_name FROM shifts WHERE id = ?`).get(shift.id);
+  res.json({ shift, assignees, clients: out, role, crisisOwner: so?.crisis_owner_name || null, staff: db.prepare(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`).all() });
 });
 
 app.post('/api/completions', requireAuth, (req, res) => {
@@ -402,7 +404,8 @@ app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
   const { status, date } = req.body || {};
   if (!['Completed', 'AMA', 'Transferred'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const d = date || new Date().toISOString().slice(0, 10);
-  db.prepare(`UPDATE clients SET discharge_status = ?, discharge_date = ? WHERE id = ?`).run(status, d, req.params.id);
+  const steps = req.body?.steps ? JSON.stringify(req.body.steps) : null;
+  db.prepare(`UPDATE clients SET discharge_status = ?, discharge_date = ?, departure_steps = ? WHERE id = ?`).run(status, d, steps, req.params.id);
   if (status !== 'Transferred') {
     const base = new Date(d + 'T00:00').getTime();
     const ins = db.prepare(`INSERT INTO followups (client_id, type, due_date) VALUES (?, ?, ?)`);
@@ -1066,6 +1069,20 @@ app.post('/api/kiosk/survey', (req, res) => {
     if (a.question_id == null) continue;
     ins.run(info.lastInsertRowid, a.question_id, (a.num === 0 || a.num) ? Number(a.num) : null, a.text?.trim() || null);
   }
+  res.json({ ok: true });
+});
+
+/* ---------------- The Armada Standard (knowledge base) ---------------- */
+app.get('/api/standard', requireAuth, (req, res) => {
+  res.json({ northStar: NORTH_STAR, motto: MOTTO, tagline: TAGLINE, sections: STANDARD_SECTIONS });
+});
+
+// Crisis Owner for a shift (named on the lineup board, per the Standard).
+app.post('/api/crisis-owner', requireAuth, (req, res) => {
+  const { date, shift, user_id } = req.body || {};
+  const s = getOrCreateShift(date || new Date().toISOString().slice(0, 10), SHIFTS.includes(shift) ? shift : 'Morning');
+  const u = user_id ? db.prepare(`SELECT name FROM users WHERE id = ?`).get(user_id) : null;
+  db.prepare(`UPDATE shifts SET crisis_owner_id = ?, crisis_owner_name = ? WHERE id = ?`).run(user_id || null, u?.name || null, s.id);
   res.json({ ok: true });
 });
 

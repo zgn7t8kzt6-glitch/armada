@@ -420,6 +420,9 @@ addColumn('clients', 'discharge_status', 'TEXT');
 addColumn('clients', 'discharge_date', 'TEXT');
 addColumn('clients', 'allergies', 'TEXT');
 addColumn('clients', 'medications', 'TEXT');
+addColumn('shifts', 'crisis_owner_id', 'INTEGER');
+addColumn('shifts', 'crisis_owner_name', 'TEXT');
+addColumn('clients', 'departure_steps', 'TEXT');
 
 // Seed the default surveys (idempotent — only inserts questions on first creation).
 function ensureSurvey(key, title, description, sort, questions) {

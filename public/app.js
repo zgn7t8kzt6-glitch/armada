@@ -51,13 +51,14 @@ const GROUPS=[
   {g:'people',label:'People',first:'lineup'},
   {g:'admissions',label:'Admissions',first:'admissions'},
   {g:'insights',label:'Insights',first:'outcomes'},
+  {g:'standard',label:'Standard',first:'standard'},
   {g:'ask',label:'Ask AI',first:'askai'},
 ];
 const GROUP_OF={today:'today',
   report:'care',clients:'care',editor:'care',journey:'care',concierge:'care',program:'care',
   retention:'clinical',surveys:'clinical',incidents:'clinical',
   family:'people',team:'people',lineup:'people',assign:'people',
-  admissions:'admissions',alumni:'people',accountability:'insights',
+  admissions:'admissions',alumni:'people',accountability:'insights',standard:'standard',team:'people',
   outcomes:'insights','report-view':'insights',users:'insights',audit:'insights',
   askai:'ask'};
 function renderGroups(){
@@ -82,6 +83,7 @@ function show(v){
   if(v==='incidents') loadIncidents();
   if(v==='alumni') loadAlumni();
   if(v==='accountability') loadAccountability();
+  if(v==='standard') loadStandard();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -129,7 +131,8 @@ async function dischargeClient(){
   const status=$('d_status').value;
   if(!confirm(`Discharge this client as "${status}"? This starts the aftercare calls and removes them from the active playbook.`)) return;
   const cid = currentId;
-  await api('/clients/'+currentId+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('d_date').value})});
+  const steps = [...document.querySelectorAll('#safeDeparture .sd:checked')].map(c=>c.dataset.s);
+  await api('/clients/'+currentId+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('d_date').value,steps})});
   if(status!=='Transferred' && confirm('Discharged — aftercare calls scheduled.\n\nWould you like to do the Discharge survey with the client now?')){
     gotoSurvey('discharge', cid);
   } else {
@@ -191,12 +194,32 @@ async function deleteCurrent(){
   await api('/clients/'+currentId,{method:'DELETE'}); show('clients');
 }
 
+async function setCrisisOwner(uid){
+  await api('/crisis-owner',{method:'POST',body:JSON.stringify({date:$('r_date').value,shift:$('r_shift').value,user_id:uid||null})});
+  loadPlaybook();
+}
+
+/* ---- the armada standard ---- */
+let STD = null;
+async function loadStandard(){
+  if(!STD){ const d = await api('/standard'); STD = d; $('stdNorth').textContent = '"'+d.motto+'" · '+d.northStar; }
+  renderStandard();
+}
+function renderStandard(){
+  if(!STD) return;
+  const q = ($('stdSearch').value||'').toLowerCase();
+  const secs = STD.sections.filter(s=> !q || s.title.toLowerCase().includes(q) || s.points.some(p=>p.toLowerCase().includes(q)));
+  $('stdSections').innerHTML = secs.length ? secs.map(s=>`<div class="card"><h3>${s.n}. ${esc(s.title)}</h3>
+    <ul class="ama-list">${s.points.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></div>`).join('') : '<div class="empty">Nothing matches "'+esc(q)+'".</div>';
+}
+
 /* ---- playbook ---- */
 async function loadPlaybook(){
   const date=$('r_date').value||today(), shift=$('r_shift').value, role=$('r_role').value;
   const data = await api(`/playbook?date=${date}&shift=${encodeURIComponent(shift)}&role=${encodeURIComponent(role)}`);
   const names = data.assignees.map(a=>`${esc(a.name)} (${esc(a.job_role)})`).join(' · ');
-  $('assignees').innerHTML = names ? `On this shift: ${names}` : 'No staff assigned to this shift yet.';
+  const coOpts = (data.staff||[]).map(s=>`<option value="${s.id}" ${data.crisisOwner===s.name?'selected':''}>${esc(s.name)}</option>`).join('');
+  $('assignees').innerHTML = `${names?`On this shift: ${names}<br>`:''}<span class="no-print">🚨 Crisis Owner: <select class="sans" style="width:auto" onchange="setCrisisOwner(this.value)"><option value="">— name one —</option>${coOpts}</select></span>${data.crisisOwner?`<strong class="only-print">🚨 Crisis Owner: ${esc(data.crisisOwner)}</strong>`:''}`;
   const dstr = new Date(date+'T00:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'});
   $('reportHead').innerHTML = `<div class="card" style="border-left:4px solid var(--gold)">
     <h3 style="margin:0">${esc(shift)} Shift Playbook${role!=='All'?' · '+esc(role):''}</h3>

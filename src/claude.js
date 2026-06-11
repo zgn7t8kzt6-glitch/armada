@@ -2,6 +2,10 @@
 // tasks — the Ritz "daily lineup", drafted automatically. Human-in-the-loop:
 // staff review and edit every suggestion before it's saved.
 import Anthropic from '@anthropic-ai/sdk';
+import { STANDARD_PRIMER } from './standard.js';
+
+// Every Claude feature is grounded in The Armada Standard.
+const G = STANDARD_PRIMER + '\n\n';
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
 const ROLES = ['All', 'BHT / Tech', 'Nurse', 'Therapist', 'Kitchen'];
@@ -169,7 +173,7 @@ export async function askAssistant(question, contextText) {
   const response = await client.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 1500,
-    system: ASSISTANT_SYSTEM,
+    system: G + ASSISTANT_SYSTEM,
     output_config: { effort: 'low' },
     messages: [{ role: 'user', content: `QUESTION:\n${question}\n\n=== DATA ===\n${contextText}` }],
   });
@@ -205,7 +209,7 @@ export async function generateCareBrief(contextText) {
   const response = await client.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 1200,
-    system: BRIEF_SYSTEM,
+    system: G + BRIEF_SYSTEM,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: BRIEF_SCHEMA } },
     messages: [{ role: 'user', content: contextText }],
   });
@@ -235,7 +239,7 @@ export async function generateShiftBriefing(contextText) {
   const response = await client.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 1500,
-    system: SHIFT_BRIEF_SYSTEM,
+    system: G + SHIFT_BRIEF_SYSTEM,
     output_config: { effort: 'low' },
     messages: [{ role: 'user', content: contextText }],
   });
@@ -252,7 +256,7 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   const response = await client.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 1500,
-    system: AMA_SYSTEM,
+    system: G + AMA_SYSTEM,
     output_config: {
       effort: 'low',
       format: { type: 'json_schema', schema: AMA_SCHEMA },
@@ -302,7 +306,7 @@ export async function generateShiftTasks(careCard) {
   const response = await client.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 2000,
-    system: SYSTEM,
+    system: G + SYSTEM,
     output_config: {
       effort: 'low',
       format: { type: 'json_schema', schema: SCHEMA },

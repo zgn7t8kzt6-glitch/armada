@@ -158,6 +158,7 @@ async function loadPlaybook(){
           <h3>${esc(c.pref||c.name)} ${c.pref&&c.name?`<span style="font-weight:400;color:var(--gold-soft);font-size:13px">(${esc(c.name)})</span>`:''}</h3>
           <span class="room">${c.room?'Room '+esc(c.room):''}${c.program?' · '+esc(c.program):''}</span></div>
         <div class="pc-body">
+          ${retentionBanner(c)}
           ${c.touch?`<div class="pc-touch">★ ${esc(c.touch)}</div>`:''}
           ${c.safety?`<div class="pc-section"><div class="alert-line">⚠ Safety watch: ${esc(c.safety)}</div></div>`:''}
           <div class="pc-section"><div class="h">This shift — to do</div>${todos}</div>
@@ -169,10 +170,83 @@ async function loadPlaybook(){
             <div class="handoff-add no-print"><input id="ho_${c.id}" placeholder="Add a handoff note for the next shift…"/>
               <button class="btn btn-ghost btn-sm sans" onclick="addHandoff(${c.id})">Add</button></div>
           </div>
+          ${pulsePanel(c)}
         </div>
       </div>`);
   });
 }
+/* ---- AMA retention: banner + daily pulse ---- */
+function retentionBanner(c){
+  const a = c.ama;
+  if (!a || a.level === 'Low') return '';
+  const cls = a.level === 'High' ? 'ama-high' : 'ama-elev';
+  const trig = (a.triggers||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('');
+  const acts = (a.actions||[]).map(x=>`<div class="todo"><div class="box" style="cursor:default"></div><div class="txt"><span class="pr ${x.priority==='High'?'high':'normal'}">${esc(x.job_role)} · ${esc(x.shift)}</span> ${esc(x.text)}</div></div>`).join('');
+  return `<div class="ama-banner ${cls}">
+    <div class="ama-head">⚠ Retention Focus — AMA risk: ${esc(a.level)} <span class="ama-tag">for clinical review · not a diagnosis</span></div>
+    <div class="ama-sum">${esc(a.summary||'')}</div>
+    ${trig?`<div class="ama-trig">${trig}</div>`:''}
+    ${acts?`<div class="pc-section" style="margin-top:8px"><div class="h">Keep them — this shift</div>${acts}</div>`:''}
+    ${a.approach?`<div class="pc-section"><div class="h">How to talk with them</div><div class="pc-note">${esc(a.approach)}</div></div>`:''}
+  </div>`;
+}
+
+function pulsePanel(c){
+  const trigs = (META.amaTriggers||[]).map((t,i)=>`<label class="trg"><input type="checkbox" value="${esc(t)}"/> ${esc(t)}</label>`).join('');
+  const aiBtn = META.claude ? `<button class="btn btn-gold btn-sm sans" onclick="assessAma(${c.id})">✦ Assess AMA risk</button>` : '';
+  const done = c.pulsedThisShift ? '<span class="hint" style="margin-left:8px">✓ pulse logged this shift</span>' : '';
+  const lvl = c.ama ? `<span class="hint">last read: ${esc(c.ama.level)}</span>` : '';
+  return `<details class="pulse-wrap no-print" id="pulse_${c.id}">
+    <summary>Daily Pulse &amp; retention ${done} ${lvl}</summary>
+    <div class="pulse-body">
+      <div class="grid2">
+        <div><label>Retention concern</label>
+          <select class="p-concern"><option>Low</option><option>Medium</option><option>High</option></select></div>
+        <div><label>Engagement</label>
+          <select class="p-eng"><option value="">—</option><option>Engaged</option><option>Quiet</option><option>Withdrawn</option><option>Missed group</option></select></div>
+      </div>
+      <label>Warning signs seen this shift</label>
+      <div class="trg-grid">${trigs}</div>
+      <label>Notable statements (their words)</label>
+      <input class="p-stmt" placeholder='e.g. "I don\\'t think this is for me"'/>
+      <label>Note</label>
+      <input class="p-note" placeholder="Anything else worth passing on"/>
+      <div class="toolbar" style="margin-top:12px">
+        ${aiBtn}
+        <button class="btn btn-primary btn-sm sans" onclick="logPulse(${c.id})">Save pulse</button>
+      </div>
+    </div>
+  </details>`;
+}
+
+async function logPulse(clientId){
+  const root = $('pulse_'+clientId);
+  const triggers = [...root.querySelectorAll('.trg-grid input:checked')].map(i=>i.value);
+  const body = {
+    client_id: clientId, date: $('r_date').value, shift: $('r_shift').value,
+    concern: root.querySelector('.p-concern').value,
+    engagement: root.querySelector('.p-eng').value,
+    triggers,
+    statements: root.querySelector('.p-stmt').value.trim(),
+    note: root.querySelector('.p-note').value.trim(),
+  };
+  await api('/pulses',{method:'POST',body:JSON.stringify(body)});
+  loadPlaybook();
+}
+
+async function assessAma(clientId){
+  const root = $('pulse_'+clientId);
+  const btn = root.querySelector('.btn-gold');
+  btn.disabled = true; const label = btn.textContent; btn.textContent = '✦ Assessing…';
+  try {
+    await api('/clients/'+clientId+'/ama-read',{method:'POST'});
+    loadPlaybook();
+  } catch(e){
+    btn.disabled = false; btn.textContent = label;
+    alert(e.message);
+  }
+}
+
 async function toggleDone(taskId, done){
   await api('/completions',{method:'POST',body:JSON.stringify({date:$('r_date').value,shift:$('r_shift').value,task_id:taskId,done:!!done})});
   loadPlaybook();

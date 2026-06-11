@@ -92,6 +92,35 @@ CREATE TABLE IF NOT EXISTS handoffs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Daily Pulse: a quick per-shift check-in capturing AMA (against-medical-advice)
+-- warning signs for each client.
+CREATE TABLE IF NOT EXISTS pulses (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  shift TEXT NOT NULL,
+  concern TEXT NOT NULL DEFAULT 'Low',   -- Low | Medium | High (staff gut-check)
+  engagement TEXT,                        -- Engaged | Quiet | Withdrawn | Missed group
+  triggers TEXT,                          -- JSON array of observed warning-sign tags
+  statements TEXT,                        -- notable direct quotes
+  note TEXT,
+  author_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Claude's AMA risk read for a client — clinical decision support, reviewed by staff.
+CREATE TABLE IF NOT EXISTS ama_reads (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  level TEXT NOT NULL,        -- Low | Elevated | High
+  summary TEXT,
+  triggers TEXT,             -- JSON array
+  actions TEXT,              -- JSON array of {shift, job_role, text}
+  approach TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Audit log: every access/modification of client data (HIPAA requirement)
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,

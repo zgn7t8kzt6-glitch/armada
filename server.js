@@ -7,7 +7,7 @@ import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
-import { generateShiftTasks, claudeConfigured } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -123,6 +123,59 @@ app.post('/api/suggest-tasks', requireAuth, async (req, res) => {
   }
 });
 
+/* ---------------- Daily Pulse + AMA risk (retention) ---------------- */
+// Log a quick per-shift check-in for a client.
+app.post('/api/pulses', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.client_id) return res.status(400).json({ error: 'Missing client' });
+  const date = b.date || new Date().toISOString().slice(0, 10);
+  const shift = SHIFTS.includes(b.shift) ? b.shift : 'Morning';
+  const triggers = Array.isArray(b.triggers) ? JSON.stringify(b.triggers) : '[]';
+  db.prepare(
+    `INSERT INTO pulses (client_id, date, shift, concern, engagement, triggers, statements, note, author_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(b.client_id, date, shift, b.concern || 'Low', b.engagement || null, triggers,
+    b.statements || null, b.note || null, req.user.id);
+  audit({ user: req.user, action: 'PULSE', entity: 'client', entity_id: +b.client_id, ip: req.ip });
+  res.json({ ok: true });
+});
+
+function recentPulses(clientId, limit = 8) {
+  return db.prepare(`SELECT * FROM pulses WHERE client_id = ? ORDER BY id DESC LIMIT ?`)
+    .all(clientId, limit)
+    .map((p) => ({ ...p, triggers: safeArr(p.triggers) }));
+}
+function safeArr(s) { try { return JSON.parse(s) || []; } catch (e) { return []; } }
+
+function latestAmaRead(clientId) {
+  const r = db.prepare(`SELECT * FROM ama_reads WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(clientId);
+  if (!r) return null;
+  return { ...r, triggers: safeArr(r.triggers), actions: safeArr(r.actions) };
+}
+
+// Run Claude's AMA risk read for a client and store it.
+app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured (set ANTHROPIC_API_KEY).' });
+  const client = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Not found' });
+  try {
+    const pulses = recentPulses(client.id);
+    const handoffs = db.prepare(
+      `SELECT note FROM handoffs WHERE client_id = ? ORDER BY id DESC LIMIT 6`
+    ).all(client.id);
+    const read = await generateAmaRead(client, pulses, handoffs);
+    db.prepare(
+      `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(client.id, read.level, read.summary, JSON.stringify(read.triggers),
+      JSON.stringify(read.actions), read.approach, req.user.id);
+    audit({ user: req.user, action: 'AMA_READ', entity: 'client', entity_id: client.id, detail: read.level, ip: req.ip });
+    res.json({ read });
+  } catch (e) {
+    res.status(502).json({ error: e.message || 'Could not assess.' });
+  }
+});
+
 /* ---------------- shifts / assignments / completions ---------------- */
 function getOrCreateShift(date, name) {
   let s = db.prepare(`SELECT * FROM shifts WHERE date = ? AND name = ?`).get(date, name);
@@ -155,10 +208,15 @@ app.get('/api/playbook', requireAuth, (req, res) => {
        ORDER BY (priority='High') DESC, sort`
     ).all(c.id, name, role, role);
     if (!tasks.length && !c.safety && !c.touch) continue;
+    const pulsedThisShift = db.prepare(
+      `SELECT 1 FROM pulses WHERE client_id = ? AND date = ? AND shift = ? LIMIT 1`
+    ).get(c.id, date, name);
     out.push({
       ...c,
       tasks: tasks.map(t => ({ ...t, done: done.has(t.id) })),
       handoffs: handoffs.filter(h => h.client_id === c.id),
+      ama: latestAmaRead(c.id),
+      pulsedThisShift: !!pulsedThisShift,
     });
   }
   res.json({ shift, assignees, clients: out, role });
@@ -227,7 +285,7 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
   res.json({ entries: db.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all() });
 });
 
-app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured() }));
+app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS }));
 
 /* ---------------- static ---------------- */
 app.use(express.static(path.join(__dirname, 'public')));

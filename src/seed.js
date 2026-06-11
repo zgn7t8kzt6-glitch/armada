@@ -50,6 +50,11 @@ export function ensureSampleData() {
     ['Evening', 'BHT / Tech', 'Remind + give privacy for sponsor call to Dave', 'Normal'],
     ['Evening', 'Kitchen', 'Vegetarian dinner plate; decaf only', 'Normal'],
   ].forEach((t, i) => ins.run(cid, t[0], t[1], t[2], t[3], i));
+
+  const pins = db.prepare(`INSERT INTO pulses (client_id, date, shift, concern, engagement, triggers, statements, note) VALUES (?,?,?,?,?,?,?,?)`);
+  const today = new Date().toISOString().slice(0, 10);
+  pins.run(cid, today, 'Morning', 'Medium', 'Quiet', JSON.stringify(['Strong cravings', 'Poor sleep']),
+    'Asked how long she has to stay', 'Quiet at breakfast, picked at food.');
 }
 
 // Allow `npm run seed` to set up admin + sample data locally.

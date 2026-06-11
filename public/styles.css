@@ -96,6 +96,22 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);bo
 .pr.high{background:#fbe9e7;color:var(--danger)}.pr.normal{background:#eef2f7;color:var(--navy)}
 .pc-note{font-size:13px;color:#555}
 .alert-line{color:var(--danger);font-weight:600;font-size:13px}
+/* AMA retention banner */
+.ama-banner{border-radius:8px;padding:12px 14px;margin-bottom:14px;border:1px solid}
+.ama-banner.ama-elev{background:#fdf6ec;border-color:#e7c79a}
+.ama-banner.ama-high{background:#fbecea;border-color:#e3b3ac}
+.ama-head{font-weight:700;font-size:13px;color:var(--danger)}
+.ama-elev .ama-head{color:#9a6a1f}
+.ama-tag{font-weight:400;font-style:italic;color:var(--muted);font-size:11px;margin-left:6px}
+.ama-sum{font-size:13px;margin:6px 0;color:#444}
+.ama-trig{margin:6px 0}
+/* daily pulse panel */
+.pulse-wrap{margin-top:12px;border-top:1px dashed var(--line);padding-top:8px}
+.pulse-wrap summary{cursor:pointer;font-family:sans-serif;font-size:13px;color:var(--navy);font-weight:600}
+.pulse-body{padding-top:10px}
+.trg-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;margin:4px 0 6px}
+.trg{display:flex;align-items:center;gap:6px;font-family:sans-serif;font-size:12px;color:#444;text-transform:none;letter-spacing:0;margin:0}
+.trg input{width:auto}
 .handoff{background:#f1f5f2;border-radius:6px;padding:8px 12px;font-size:13px;margin-top:6px}
 .handoff .by{color:var(--muted);font-size:11px}
 .handoff-add{display:flex;gap:8px;margin-top:8px}

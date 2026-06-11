@@ -54,6 +54,123 @@ export function claudeConfigured() {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
+// Evidence-informed AMA (against-medical-advice / early dropout) warning signs.
+// Seed list — the clinical team should review and tune it.
+export const AMA_TRIGGERS = [
+  'First 72 hours / first week',
+  'Severe withdrawal or discomfort',
+  'Strong cravings',
+  'Conflict with a peer',
+  'Conflict with staff',
+  'Upsetting family call or visit',
+  'Talking about leaving / asking about discharge',
+  'Packing or "checked out" behavior',
+  'Missing or refusing groups',
+  'Withdrawn / isolating',
+  'Irritable / agitated',
+  'Hopeless / "this isn\'t working"',
+  'Overconfident / "I\'m fine now"',
+  'Poor sleep',
+  'Money / legal / job worry',
+  'Boredom / restlessness',
+];
+
+const AMA_SYSTEM = `You are an experienced clinical care coordinator at a
+residential addiction-recovery center. Your job is to help staff reduce
+AMA discharges — clients leaving Against Medical Advice before completing
+treatment — by spotting early warning signs and recommending warm, concrete
+retention steps.
+
+You will be given a client's Care Card, their recent Daily Pulse check-ins,
+and recent shift handoff notes. Assess the client's current AMA risk.
+
+Critical rules:
+- This is decision SUPPORT for trained staff, not a diagnosis or a prediction.
+  Be measured; never claim certainty about what a client will do.
+- Ground every point in the information provided. Do not invent symptoms,
+  events, medications, or diagnoses.
+- Weight the first 72 hours and first week as higher-risk windows.
+- Tie retention actions to what motivates THIS client (their personal touch,
+  goals, family) — connection and feeling cared for is what reduces AMA.
+- For the conversation approach, use a calm, non-confrontational,
+  motivational style. Never use shame, threats, or "you'll regret it."
+- If there is little signal, say risk is Low and keep it brief.`;
+
+const AMA_SCHEMA = {
+  type: 'object',
+  properties: {
+    level: { type: 'string', enum: ['Low', 'Elevated', 'High'] },
+    summary: { type: 'string', description: 'One or two sentences: the risk and why.' },
+    triggers: { type: 'array', items: { type: 'string' }, description: 'Specific warning signs observed.' },
+    actions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          shift: { type: 'string', enum: SHIFTS },
+          job_role: { type: 'string', enum: ROLES },
+          text: { type: 'string' },
+        },
+        required: ['shift', 'job_role', 'text'],
+        additionalProperties: false,
+      },
+    },
+    approach: { type: 'string', description: 'How to talk with this client right now.' },
+  },
+  required: ['level', 'summary', 'triggers', 'actions', 'approach'],
+  additionalProperties: false,
+};
+
+function pulsesText(pulses = []) {
+  if (!pulses.length) return 'No Daily Pulse check-ins logged yet.';
+  return pulses
+    .map((p) => {
+      const trig = (p.triggers && p.triggers.length) ? ` | signs: ${p.triggers.join(', ')}` : '';
+      const eng = p.engagement ? ` | engagement: ${p.engagement}` : '';
+      const st = p.statements ? ` | said: "${p.statements}"` : '';
+      const note = p.note ? ` | note: ${p.note}` : '';
+      return `- ${p.date} ${p.shift} | concern: ${p.concern}${eng}${trig}${st}${note}`;
+    })
+    .join('\n');
+}
+
+export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
+  const client = new Anthropic();
+  const handoffText = handoffs.length
+    ? handoffs.map((h) => `- ${h.note}`).join('\n')
+    : 'None.';
+
+  const response = await client.messages.create({
+    model: 'claude-opus-4-8',
+    max_tokens: 1500,
+    system: AMA_SYSTEM,
+    output_config: {
+      effort: 'low',
+      format: { type: 'json_schema', schema: AMA_SCHEMA },
+    },
+    messages: [
+      {
+        role: 'user',
+        content:
+          `Assess this client's AMA risk.\n\n=== CARE CARD ===\n${careCardText(careCard)}\n\n` +
+          `=== RECENT DAILY PULSES (newest first) ===\n${pulsesText(pulses)}\n\n` +
+          `=== RECENT HANDOFF NOTES ===\n${handoffText}`,
+      },
+    ],
+  });
+
+  if (response.stop_reason === 'refusal') {
+    throw new Error('The request was declined. Please review the content.');
+  }
+  const textBlock = response.content.find((b) => b.type === 'text');
+  if (!textBlock) throw new Error('No assessment returned.');
+  const r = JSON.parse(textBlock.text);
+  if (!['Low', 'Elevated', 'High'].includes(r.level)) r.level = 'Low';
+  r.actions = (r.actions || []).filter((a) => a.text && SHIFTS.includes(a.shift) && ROLES.includes(a.job_role));
+  r.triggers = r.triggers || [];
+  return r;
+}
+
 function careCardText(c) {
   const line = (label, val) => (val && val.trim() ? `${label}: ${val.trim()}\n` : '');
   return (

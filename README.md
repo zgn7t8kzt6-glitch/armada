@@ -47,7 +47,13 @@ real client data.)
 - **Client voice.** A "how cared for do you feel?" check-in from the client's side.
 - **Outcomes dashboard.** AMA rate, completion rate, felt-care average, open concerns, delights, and upcoming sobriety milestones.
 - **Weekly leadership report.** A branded summary (outcomes, wow stories, delights, concerns, aftercare) — viewable in-app, printable, and auto-emailed weekly. Requires `RESEND_API_KEY` + `REPORT_TO`.
-- **Print** a clean playbook, plan, or report.
+- **Surveys.** Ritz-grade Client Experience, Meal & Food, and Discharge surveys with a results dashboard; auto-offered (Experience weekly, Discharge on discharge); scores feed Outcomes and the report.
+- **Concierge & Departments.** Every client wish/need logged and routed to the right department (Front Desk, Clinical, Nursing, Kitchen, Housekeeping, Maintenance, Transport, Activities, Family, Spiritual Care), tracked to completion.
+- **Program & Schedule.** The day's groups, activities, meals, outings, and appointments — facility-wide or per client.
+- **Client 360 Journey.** One screen per client pulling together preferences, safety, health, goals, schedule, risk, requests, concerns, delights, pulses, and family — with an AI Care Brief for today.
+- **Treatment goals** with progress, plus **health** (allergies, medications) on the Care Card.
+- **AI Shift Briefing.** Claude reads the whole house and writes the shift huddle: who needs extra care, what to close out, delights to deliver, and a line for the team.
+- **Print** a clean playbook, plan, report, or schedule.
 
 ## Configuration (environment variables)
 

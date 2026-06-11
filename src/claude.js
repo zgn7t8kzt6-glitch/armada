@@ -149,6 +149,72 @@ function pulsesText(pulses = []) {
     .join('\n');
 }
 
+// ---- AI Care Brief: a warm, whole-person summary + today's caring moves ----
+const BRIEF_SYSTEM = `You are a Ritz-Carlton–style care coordinator at a
+residential recovery center. Given everything known about ONE client, write a
+short, warm brief for the staff caring for them today. The goal: help this client
+feel genuinely cared for, important, and seen.
+- summary: 2-4 sentences on who this person is right now and how they're doing.
+- feel_cared_for: 3 specific, personalized things to do TODAY to make them feel
+  cared for, tied to their preferences, people, goals, and current state.
+- watch: one thing to keep an eye on (safety, mood, or retention).
+Ground everything in the information provided. Do not invent facts, diagnoses, or
+medications. This is support for trained staff, not a clinical directive.`;
+
+const BRIEF_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    feel_cared_for: { type: 'array', items: { type: 'string' } },
+    watch: { type: 'string' },
+  },
+  required: ['summary', 'feel_cared_for', 'watch'],
+  additionalProperties: false,
+};
+
+export async function generateCareBrief(contextText) {
+  const client = new Anthropic();
+  const response = await client.messages.create({
+    model: 'claude-opus-4-8',
+    max_tokens: 1200,
+    system: BRIEF_SYSTEM,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: BRIEF_SCHEMA } },
+    messages: [{ role: 'user', content: contextText }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) throw new Error('No brief returned.');
+  const r = JSON.parse(t.text);
+  r.feel_cared_for = r.feel_cared_for || [];
+  return r;
+}
+
+// ---- AI Shift Briefing: the daily lineup for the whole house ----
+const SHIFT_BRIEF_SYSTEM = `You are the care coordinator giving the shift-huddle
+briefing for a residential recovery center, in the Ritz-Carlton spirit. Given the
+status of the whole house, write a concise, warm briefing the charge nurse could
+read aloud in two minutes:
+- Who needs extra care today and why (especially retention/AMA risk).
+- Open requests and concerns to close out this shift.
+- 2-3 specific delights or caring moments to deliver, named to the client.
+- One genuine, uplifting line for the team (Ladies and Gentlemen serving Ladies
+  and Gentlemen).
+Be specific and grounded in the data. Do not invent clinical facts. Use short
+paragraphs or bullets. This is support for staff, not a clinical directive.`;
+
+export async function generateShiftBriefing(contextText) {
+  const client = new Anthropic();
+  const response = await client.messages.create({
+    model: 'claude-opus-4-8',
+    max_tokens: 1500,
+    system: SHIFT_BRIEF_SYSTEM,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: contextText }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+}
+
 export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   const client = new Anthropic();
   const handoffText = handoffs.length

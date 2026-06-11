@@ -46,6 +46,8 @@
     <button data-view="outcomes">Outcomes</button>
     <button data-view="lineup">Lineup</button>
     <button data-view="surveys">Surveys</button>
+    <button data-view="concierge">Concierge</button>
+    <button data-view="program">Program</button>
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
     <button data-view="assign" data-admin>Assign Staff</button>
@@ -66,8 +68,10 @@
           <div class="field"><label>Role filter</label><select id="r_role"><option>All</option></select></div>
           <button class="btn btn-gold sans" onclick="loadPlaybook()">Refresh</button>
           <button class="btn btn-ghost sans" onclick="window.print()">Print</button>
+          <button class="btn btn-gold sans" id="briefBtn" onclick="genShiftBriefing()" style="display:none">✦ AI shift briefing</button>
         </div>
         <div id="assignees" class="hint"></div>
+        <div id="shiftBrief"></div>
       </div>
       <div id="reportHead"></div>
       <div id="reportBody"></div>
@@ -92,6 +96,55 @@
         </div>
       </div>
     </section>
+
+    <!-- CONCIERGE -->
+    <section id="concierge" class="view">
+      <div class="card no-print">
+        <h3>Concierge &amp; Requests</h3>
+        <p class="sub sans">Anticipate and fulfill every wish. Log any client request or need — it routes to the right department and is tracked to completion.</p>
+        <div class="grid3">
+          <div><label>Client (optional)</label><select id="rq_client"></select></div>
+          <div><label>Department</label><select id="rq_dept"></select></div>
+          <div><label>Priority</label><select id="rq_pri"><option>Normal</option><option>High</option></select></div>
+        </div>
+        <label>Request / need</label>
+        <div class="handoff-add"><input id="rq_text" placeholder="e.g. extra blanket for room 204 · ride to court Thursday · vegetarian dinner"/><button class="btn btn-gold sans" onclick="addRequest()">Log request</button></div>
+      </div>
+      <div class="card no-print">
+        <div class="controls">
+          <div class="field"><label>Department</label><select id="rq_filter_dept"><option value="">All departments</option></select></div>
+          <div class="field"><label>Status</label><select id="rq_filter_status"><option value="Open">Open</option><option value="">All</option><option value="Done">Done</option></select></div>
+          <button class="btn btn-ghost sans" onclick="loadConcierge()">Refresh</button>
+        </div>
+      </div>
+      <div id="rqBoard"></div>
+    </section>
+
+    <!-- PROGRAM -->
+    <section id="program" class="view">
+      <div class="card no-print">
+        <h3>Program &amp; Schedule</h3>
+        <p class="sub sans">The day's groups, activities, meals, outings, and appointments.</p>
+        <div class="controls">
+          <div class="field"><label>Date</label><input id="pg_date" type="date"/></div>
+          <button class="btn btn-ghost sans" onclick="loadProgram()">Show</button>
+        </div>
+        <div class="grid3" style="margin-top:8px">
+          <div><label>Time</label><input id="pg_time" type="time"/></div>
+          <div><label>Type</label><select id="pg_type"></select></div>
+          <div><label>Location</label><input id="pg_loc" placeholder="e.g. Group Room A"/></div>
+        </div>
+        <div class="grid2">
+          <div><label>Title</label><input id="pg_title" placeholder="e.g. Morning Process Group"/></div>
+          <div><label>For client (optional — blank = whole house)</label><select id="pg_client"></select></div>
+        </div>
+        <div class="toolbar"><button class="btn btn-gold sans" onclick="addSchedule()">Add to schedule</button></div>
+      </div>
+      <div class="card"><h3 id="pgHeading">Schedule</h3><div id="pgList"></div></div>
+    </section>
+
+    <!-- JOURNEY (client 360) -->
+    <section id="journey" class="view"><div id="journeyBody"></div></section>
 
     <!-- SURVEYS -->
     <section id="surveys" class="view">
@@ -142,6 +195,10 @@
           <div><label>⚠ Safety / Medical Watch Items</label><textarea id="f_safety"></textarea></div>
         </div>
         <label>Support System / Family Contacts</label><textarea id="f_support"></textarea>
+        <div class="grid2">
+          <div><label>⚕ Allergies</label><input id="f_allergies" placeholder="e.g. Penicillin, latex"/></div>
+          <div><label>⚕ Current medications</label><input id="f_medications" placeholder="e.g. Suboxone, Sertraline"/></div>
+        </div>
         <div class="grid2">
           <div><label>☀ Welcome / first-72-hours plan (the arrival)</label><textarea id="f_welcome_plan" placeholder="Greet by name. Warm welcome gesture. Pair with a peer buddy. Ease first-night anxiety — the highest-risk window."></textarea></div>
           <div><label>🤝 Aftercare / continuity plan (the farewell)</label><textarea id="f_aftercare_plan" placeholder="Sober-living / outpatient, sponsor, meeting schedule, who follows up. Used when the client is discharged."></textarea></div>

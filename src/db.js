@@ -230,6 +230,45 @@ CREATE TABLE IF NOT EXISTS survey_answers (
   value_text TEXT
 );
 
+-- Concierge / requests routed to departments (anticipate & fulfill every wish).
+CREATE TABLE IF NOT EXISTS requests (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  department TEXT NOT NULL,
+  text TEXT NOT NULL,
+  priority TEXT NOT NULL DEFAULT 'Normal',  -- Normal | High
+  status TEXT NOT NULL DEFAULT 'Open',       -- Open | In progress | Done
+  created_by INTEGER REFERENCES users(id),
+  created_by_name TEXT,
+  done_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  done_at TEXT
+);
+
+-- Program / schedule: groups, activities, meals, outings, appointments.
+CREATE TABLE IF NOT EXISTS schedule_items (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,
+  time TEXT,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'Group',        -- Group | Activity | Meal | Outing | Appointment | Wellness
+  location TEXT,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,  -- null = facility-wide
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Treatment goals with progress.
+CREATE TABLE IF NOT EXISTS goals (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Active',      -- Active | Met
+  target_date TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  met_at TEXT
+);
+
 -- Audit log: every access/modification of client data (HIPAA requirement)
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,
@@ -256,6 +295,8 @@ addColumn('clients', 'welcome_plan', 'TEXT');
 addColumn('clients', 'aftercare_plan', 'TEXT');
 addColumn('clients', 'discharge_status', 'TEXT');
 addColumn('clients', 'discharge_date', 'TEXT');
+addColumn('clients', 'allergies', 'TEXT');
+addColumn('clients', 'medications', 'TEXT');
 
 // Seed the default surveys (idempotent — only inserts questions on first creation).
 function ensureSurvey(key, title, description, sort, questions) {

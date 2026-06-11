@@ -32,7 +32,7 @@ async function boot(){
   $('whoami').textContent = `${ME.name} · ${ME.job_role}${ME.role==='admin'?' · Admin':''}`;
   document.querySelectorAll('[data-admin]').forEach(el => el.style.display = ME.role==='admin' ? '' : 'none');
   try { META = await api('/meta'); } catch(e){}
-  if (META.claude) $('aiBtn').style.display = 'inline-block';
+  if (META.claude) { $('aiBtn').style.display = 'inline-block'; $('briefBtn').style.display = 'inline-block'; }
   // fill shift/role selects
   fillSelect($('r_shift'), META.shifts); fillSelect($('a_shift'), META.shifts);
   fillSelect($('r_role'), ['All', ...META.jobRoles]);
@@ -52,6 +52,8 @@ function show(v){
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
   if(v==='surveys') loadSurveys();
+  if(v==='concierge') loadConcierge();
+  if(v==='program') loadProgram();
   if(v==='report') loadPlaybook();
   if(v==='users') loadUsers();
   if(v==='audit') loadAudit();
@@ -65,7 +67,7 @@ async function renderClients(){
   const g = $('clientGrid'); g.innerHTML='';
   $('clientEmpty').style.display = clients.length ? 'none':'block';
   clients.forEach(c => {
-    const d = document.createElement('div'); d.className='ctile'; d.onclick=()=>editClient(c.id);
+    const d = document.createElement('div'); d.className='ctile'; d.onclick=()=>openJourney(c.id);
     const touch = c.touch ? `<div class="pref">★ ${esc(c.touch.slice(0,90))}${c.touch.length>90?'…':''}</div>` : '';
     d.innerHTML = `<h4>${esc(c.pref||c.name||'Unnamed')}</h4>
       <div class="meta">${esc(c.name||'')} ${c.room?'· Room '+esc(c.room):''}</div>
@@ -97,7 +99,7 @@ async function dischargeClient(){
     show('clients');
   }
 }
-const FF = ['name','pref','room','program','admit','sober','touch','prefs','goals','triggers','safety','support','welcome_plan','aftercare_plan'];
+const FF = ['name','pref','room','program','admit','sober','touch','prefs','goals','triggers','safety','support','welcome_plan','aftercare_plan','allergies','medications'];
 function fillForm(c){
   FF.forEach(f => $('f_'+f).value = c[f]||'');
   const tl = $('taskList'); tl.innerHTML='';
@@ -488,6 +490,128 @@ async function addUser(){
       name:$('u_name').value,username:$('u_user').value,password:$('u_pass').value,role:$('u_role').value,job_role:$('u_job').value})});
     $('u_name').value=$('u_user').value=$('u_pass').value=''; loadUsers();
   }catch(e){ alert(e.message); }
+}
+
+/* ---- concierge / requests ---- */
+function fillClientSelect(el, withBlank){
+  return api('/clients').then(({clients})=>{
+    el.innerHTML = (withBlank?'<option value="">'+withBlank+'</option>':'') + clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('');
+  }).catch(()=>{});
+}
+async function loadConcierge(){
+  await fillClientSelect($('rq_client'), 'Whole house / no client');
+  if($('rq_dept').options.length===0){ $('rq_dept').innerHTML=(META.departments||[]).map(d=>`<option>${esc(d)}</option>`).join(''); $('rq_filter_dept').innerHTML='<option value="">All departments</option>'+(META.departments||[]).map(d=>`<option>${esc(d)}</option>`).join(''); }
+  const dept=$('rq_filter_dept').value, status=$('rq_filter_status').value;
+  const qs = new URLSearchParams(); if(dept) qs.set('department',dept); if(status) qs.set('status',status);
+  const { requests } = await api('/requests?'+qs.toString());
+  // group by department
+  const byDept = {}; requests.forEach(r=>{ (byDept[r.department]=byDept[r.department]||[]).push(r); });
+  const board = Object.keys(byDept).sort().map(dep=>`<div class="card"><h3>${esc(dep)} <span class="hint">(${byDept[dep].length})</span></h3>
+    ${byDept[dep].map(r=>`<div class="todo ${r.status==='Done'?'done':''}">
+      <div class="txt"><span class="pr ${r.priority==='High'?'high':'normal'}">${r.status==='Done'?'DONE':r.status==='In progress'?'IN PROGRESS':esc(r.priority)}</span>
+        ${r.pref?'<strong>'+esc(r.pref)+'</strong> — ':''}${esc(r.text)} <span class="hint">· ${esc(r.created_by_name||'')}</span></div>
+      ${r.status!=='Done'?`<button class="btn btn-ghost btn-sm sans" onclick="setRequestStatus(${r.id},'In progress')">Start</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="setRequestStatus(${r.id},'Done')">Done</button>`:''}
+    </div>`).join('')}</div>`).join('');
+  $('rqBoard').innerHTML = board || '<div class="empty">No requests. Anticipate a wish and log it.</div>';
+}
+async function addRequest(){
+  const text=$('rq_text').value.trim(); if(!text) return;
+  await api('/requests',{method:'POST',body:JSON.stringify({client_id:$('rq_client').value||null,department:$('rq_dept').value,text,priority:$('rq_pri').value})});
+  $('rq_text').value=''; loadConcierge();
+}
+async function setRequestStatus(id,status){ await api('/requests/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadConcierge(); }
+
+/* ---- program / schedule ---- */
+async function loadProgram(){
+  if(!$('pg_date').value) $('pg_date').value = today();
+  if($('pg_type').options.length===0) $('pg_type').innerHTML=(META.scheduleTypes||[]).map(t=>`<option>${esc(t)}</option>`).join('');
+  await fillClientSelect($('pg_client'), 'Whole house');
+  const date=$('pg_date').value;
+  const { items } = await api('/schedule?date='+date);
+  $('pgHeading').textContent = 'Schedule · '+new Date(date+'T00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'});
+  $('pgList').innerHTML = items.length ? items.map(it=>`<div class="todo">
+      <div class="txt"><strong>${it.time?esc(it.time):'—'}</strong> · <span class="chip">${esc(it.type)}</span> ${esc(it.title)}
+        ${it.location?' <span class="hint">@ '+esc(it.location)+'</span>':''}${it.pref?' <span class="hint">· for '+esc(it.pref)+'</span>':''}</div>
+      <button class="btn btn-ghost btn-sm sans no-print" onclick="delSchedule(${it.id})">✕</button>
+    </div>`).join('') : '<div class="empty">Nothing scheduled. Add the day\'s groups, meals, and activities.</div>';
+}
+async function addSchedule(){
+  const title=$('pg_title').value.trim(); if(!title) return;
+  await api('/schedule',{method:'POST',body:JSON.stringify({date:$('pg_date').value||today(),time:$('pg_time').value||null,title,type:$('pg_type').value,location:$('pg_loc').value.trim()||null,client_id:$('pg_client').value||null})});
+  $('pg_title').value=''; $('pg_loc').value=''; loadProgram();
+}
+async function delSchedule(id){ await api('/schedule/'+id,{method:'DELETE'}); loadProgram(); }
+
+/* ---- client 360 journey ---- */
+let JOURNEY_ID = null;
+function openJourney(id){ JOURNEY_ID=id; show('journey'); loadJourney(); }
+async function loadJourney(){
+  const { journey:j } = await api('/clients/'+JOURNEY_ID+'/journey');
+  const c=j.client;
+  const sec=(t,inner)=>`<div class="jcard"><div class="h">${t}</div>${inner}</div>`;
+  const amaHtml = j.ama ? `<span class="risk ${j.ama.level==='High'?'risk-high':j.ama.level==='Elevated'?'risk-elev':'risk-low'}">AMA risk: ${esc(j.ama.level)}</span>` : '<span class="risk risk-none">No AMA read</span>';
+  const goalsHtml = j.goals.length ? j.goals.map(g=>`<div class="todo"><div class="box" style="cursor:pointer" onclick="toggleGoal(${g.id},'${g.status==='Met'?'Active':'Met'}')">${g.status==='Met'?'✓':''}</div><div class="txt ${g.status==='Met'?'done':''}">${esc(g.text)}${g.target_date?' <span class="hint">· by '+esc(g.target_date)+'</span>':''}</div></div>`).join('') : '<div class="pc-note">No goals yet.</div>';
+  const reqHtml = j.requests.length ? j.requests.map(r=>`<div class="pc-note">• ${esc(r.department)}: ${esc(r.text)} <span class="hint">(${esc(r.status)})</span></div>`).join('') : '<div class="pc-note">None open.</div>';
+  const concernHtml = j.concerns.length ? j.concerns.map(x=>`<div class="pc-note">⚑ ${esc(x.text)}</div>`).join('') : '<div class="pc-note">None open.</div>';
+  const delHtml = j.delights.length ? j.delights.map(x=>`<div class="pc-note">♥ ${esc(x.text)}</div>`).join('') : '<div class="pc-note">None yet.</div>';
+  const pulseHtml = j.pulses.length ? j.pulses.map(p=>`<div class="pc-note">${esc(p.date)} ${esc(p.shift)} — concern ${esc(p.concern)}${(p.triggers||[]).length?' · '+p.triggers.map(esc).join(', '):''}${p.statements?' · "'+esc(p.statements)+'"':''}</div>`).join('') : '<div class="pc-note">No pulses yet.</div>';
+  const schedHtml = j.schedule.length ? j.schedule.map(s=>`<div class="pc-note">${s.time?esc(s.time)+' · ':''}${esc(s.type)}: ${esc(s.title)}</div>`).join('') : '<div class="pc-note">No client-specific items today.</div>';
+  const followHtml = j.followups.length ? j.followups.map(f=>`<div class="pc-note">${esc(f.type)} aftercare call · due ${esc(f.due_date)}</div>`).join('') : '';
+  const health = (c.allergies||c.medications) ? `${c.allergies?'<div class="pc-note"><strong>Allergies:</strong> '+esc(c.allergies)+'</div>':''}${c.medications?'<div class="pc-note"><strong>Medications:</strong> '+esc(c.medications)+'</div>':''}` : '<div class="pc-note">None recorded.</div>';
+  const phase = c.discharge_status ? 'Discharged ('+esc(c.discharge_status)+')' : (c.admit ? 'In treatment' : 'Active');
+
+  $('journeyBody').innerHTML = `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <span class="avatar" style="width:48px;height:48px;font-size:18px">${initials(c.name||c.pref)}</span>
+        <div><h2 style="margin:0;color:var(--navy)">${esc(c.pref||c.name)} ${c.pref&&c.name?'<span class="hint">('+esc(c.name)+')</span>':''}</h2>
+          <div class="hint">${c.room?'Room '+esc(c.room)+' · ':''}${esc(c.program||'')} · ${phase}</div></div>
+        <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${amaHtml}
+          <button class="btn btn-ghost btn-sm sans" onclick="editClient(${c.id})">Edit Care Card</button>
+          <button class="btn btn-gold btn-sm sans" id="cbBtn" onclick="careBrief(${c.id})" style="${META.claude?'':'display:none'}">✦ AI Care Brief</button>
+        </div>
+      </div>
+      ${c.touch?`<div class="pc-touch" style="margin-top:12px">★ ${esc(c.touch)}</div>`:''}
+      <div id="careBriefOut"></div>
+    </div>
+    <div class="jgrid">
+      ${sec('⚠ Safety', c.safety?`<div class="pc-note alert-line">${esc(c.safety)}</div>`:'<div class="pc-note">None noted.</div>')}
+      ${sec('⚕ Health', health)}
+      ${sec('Preferences', c.prefs?`<div class="pc-note">${esc(c.prefs)}</div>`:'<div class="pc-note">—</div>')}
+      ${sec('Triggers / handle with care', c.triggers?`<div class="pc-note">${esc(c.triggers)}</div>`:'<div class="pc-note">—</div>')}
+      ${sec('Treatment goals', goalsHtml + `<div class="handoff-add no-print" style="margin-top:8px"><input id="goalInput" placeholder="Add a goal…"/><button class="btn btn-ghost btn-sm sans" onclick="addGoal(${c.id})">Add</button></div>`)}
+      ${sec("Today's schedule", schedHtml)}
+      ${sec('Open requests', reqHtml)}
+      ${sec('Open concerns', concernHtml)}
+      ${sec('Recent delights', delHtml)}
+      ${sec('Recent pulses', pulseHtml)}
+      ${followHtml?sec('Aftercare', followHtml):''}
+      ${sec('Support / family', c.support?`<div class="pc-note">${esc(c.support)}</div>`:'<div class="pc-note">—</div>')}
+    </div>`;
+}
+async function addGoal(clientId){ const inp=$('goalInput'); if(!inp.value.trim())return; await api('/goals',{method:'POST',body:JSON.stringify({client_id:clientId,text:inp.value})}); loadJourney(); }
+async function toggleGoal(id,status){ await api('/goals/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadJourney(); }
+async function careBrief(clientId){
+  const btn=$('cbBtn'); btn.disabled=true; const l=btn.textContent; btn.textContent='✦ Thinking…';
+  try{ const { brief }=await api('/clients/'+clientId+'/care-brief',{method:'POST'});
+    $('careBriefOut').innerHTML=`<div class="ama-banner ama-low" style="margin-top:12px">
+      <div class="ama-head" style="color:var(--gold)">✦ AI Care Brief — for the team today</div>
+      <div class="ama-sum">${esc(brief.summary||'')}</div>
+      ${(brief.feel_cared_for||[]).length?`<div class="pc-section"><div class="h">Make them feel cared for today</div><ul class="ama-list">${brief.feel_cared_for.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul></div>`:''}
+      ${brief.watch?`<div class="pc-section"><div class="h">Watch</div><div class="pc-note">${esc(brief.watch)}</div></div>`:''}</div>`;
+  }catch(e){ alert(e.message); }
+  finally{ btn.disabled=false; btn.textContent=l; }
+}
+
+/* ---- AI shift briefing ---- */
+async function genShiftBriefing(){
+  const btn=$('briefBtn'); btn.disabled=true; const l=btn.textContent; btn.textContent='✦ Briefing…';
+  $('shiftBrief').innerHTML='<div class="hint">Claude is reading the whole house…</div>';
+  try{ const { brief }=await api('/shift-briefing',{method:'POST',body:JSON.stringify({shift:$('r_shift').value})});
+    $('shiftBrief').innerHTML=`<div class="ama-banner ama-low" style="margin-top:12px"><div class="ama-head" style="color:var(--gold)">✦ Shift Briefing — ${esc($('r_shift').value)}</div><div class="brief-body">${esc(brief).replace(/\n/g,'<br>')}</div></div>`;
+  }catch(e){ $('shiftBrief').innerHTML='<div class="hint" style="color:var(--danger)">'+e.message+'</div>'; }
+  finally{ btn.disabled=false; btn.textContent=l; }
 }
 
 /* ---- surveys ---- */

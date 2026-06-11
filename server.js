@@ -8,7 +8,7 @@ import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -31,6 +31,8 @@ app.use((req, res, next) => {
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
 const JOB_ROLES = ['BHT / Tech', 'Nurse', 'Therapist', 'Kitchen'];
+const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nursing / Medical', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
+const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
 /* ---------------- auth ---------------- */
 app.post('/api/login', (req, res) => {
@@ -62,7 +64,7 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
   res.json({ client: c });
 });
 
-const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'welcome_plan', 'aftercare_plan'];
+const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'welcome_plan', 'aftercare_plan', 'allergies', 'medications'];
 
 function saveTasks(clientId, tasks = []) {
   db.prepare(`DELETE FROM tasks WHERE client_id = ?`).run(clientId);
@@ -362,7 +364,7 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
   res.json({ entries: db.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all() });
 });
 
-app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS }));
+app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES }));
 
 /* ---------------- Ritz modules: farewell, ownership, delight, culture, voice, outcomes ---------------- */
 
@@ -502,6 +504,140 @@ app.get('/api/outcomes', requireAuth, (req, res) => {
   res.json({ amaRate, completionRate, completed, ama, transferred, active,
     feltCare: ce.a ? Math.round(ce.a * 10) / 10 : null, feltCareN: ce.n,
     openConcerns, delights30, milestones, surveys: surveyMetrics(30) });
+});
+
+/* ---------------- Departments, Concierge, Program, Goals, Journey, AI briefs ---------------- */
+
+// Concierge requests
+app.get('/api/requests', requireAuth, (req, res) => {
+  let sql = `SELECT r.*, c.pref, c.name FROM requests r LEFT JOIN clients c ON c.id = r.client_id WHERE 1=1`;
+  const args = [];
+  if (req.query.status) { sql += ` AND r.status = ?`; args.push(req.query.status); }
+  if (req.query.department) { sql += ` AND r.department = ?`; args.push(req.query.department); }
+  sql += ` ORDER BY (r.status = 'Done'), (r.priority = 'High') DESC, r.id DESC LIMIT 200`;
+  res.json({ requests: db.prepare(sql).all(...args) });
+});
+app.post('/api/requests', requireAuth, (req, res) => {
+  const { client_id, department, text, priority } = req.body || {};
+  if (!department || !text?.trim()) return res.status(400).json({ error: 'Missing department or text' });
+  db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(client_id || null, department, text.trim(), priority === 'High' ? 'High' : 'Normal', req.user.id, req.user.name);
+  audit({ user: req.user, action: 'REQUEST', entity: 'client', entity_id: client_id ? +client_id : null, detail: department, ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/requests/:id/status', requireAuth, (req, res) => {
+  const st = ['Open', 'In progress', 'Done'].includes(req.body?.status) ? req.body.status : 'Done';
+  db.prepare(`UPDATE requests SET status = ?, done_by = CASE WHEN ? = 'Done' THEN ? ELSE done_by END, done_at = CASE WHEN ? = 'Done' THEN datetime('now') ELSE done_at END WHERE id = ?`)
+    .run(st, st, req.user.id, st, req.params.id);
+  res.json({ ok: true });
+});
+
+// Program / schedule
+app.get('/api/schedule', requireAuth, (req, res) => {
+  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  res.json({ date, items: db.prepare(`SELECT s.*, c.pref FROM schedule_items s LEFT JOIN clients c ON c.id = s.client_id WHERE s.date = ? ORDER BY (s.time IS NULL), s.time, s.id`).all(date) });
+});
+app.post('/api/schedule', requireAuth, (req, res) => {
+  const { date, time, title, type, location, client_id } = req.body || {};
+  if (!date || !title?.trim()) return res.status(400).json({ error: 'Missing date or title' });
+  db.prepare(`INSERT INTO schedule_items (date, time, title, type, location, client_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(date, time || null, title.trim(), SCHEDULE_TYPES.includes(type) ? type : 'Group', location || null, client_id || null, req.user.id);
+  res.json({ ok: true });
+});
+app.delete('/api/schedule/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM schedule_items WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+
+// Treatment goals
+app.get('/api/goals', requireAuth, (req, res) => {
+  res.json({ goals: db.prepare(`SELECT * FROM goals WHERE client_id = ? ORDER BY (status = 'Met'), id DESC`).all(req.query.client_id) });
+});
+app.post('/api/goals', requireAuth, (req, res) => {
+  const { client_id, text, target_date } = req.body || {};
+  if (!client_id || !text?.trim()) return res.status(400).json({ error: 'Missing' });
+  db.prepare(`INSERT INTO goals (client_id, text, target_date) VALUES (?, ?, ?)`).run(client_id, text.trim(), target_date || null);
+  res.json({ ok: true });
+});
+app.post('/api/goals/:id/status', requireAuth, (req, res) => {
+  const met = req.body?.status === 'Met';
+  db.prepare(`UPDATE goals SET status = ?, met_at = ? WHERE id = ?`).run(met ? 'Met' : 'Active', met ? new Date().toISOString().slice(0, 10) : null, req.params.id);
+  res.json({ ok: true });
+});
+
+// Client 360 journey — everything about one client, in one place
+app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
+  const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const today = new Date().toISOString().slice(0, 10);
+  c.tasks = db.prepare(`SELECT * FROM tasks WHERE client_id = ? ORDER BY sort, id`).all(c.id);
+  audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: c.id, detail: 'journey', ip: req.ip });
+  res.json({ journey: {
+    client: c,
+    ama: latestAmaRead(c.id),
+    pulses: recentPulses(c.id, 5),
+    requests: db.prepare(`SELECT * FROM requests WHERE client_id = ? AND status != 'Done' ORDER BY id DESC`).all(c.id),
+    concerns: db.prepare(`SELECT * FROM concerns WHERE client_id = ? AND status = 'Open' ORDER BY id DESC`).all(c.id),
+    delights: db.prepare(`SELECT d.*, u.name by_name2 FROM delights d LEFT JOIN users u ON u.id = d.by_id WHERE d.client_id = ? ORDER BY d.id DESC LIMIT 5`).all(c.id),
+    goals: db.prepare(`SELECT * FROM goals WHERE client_id = ? ORDER BY (status = 'Met'), id DESC`).all(c.id),
+    schedule: db.prepare(`SELECT * FROM schedule_items WHERE client_id = ? AND date = ? ORDER BY time`).all(c.id, today),
+    followups: db.prepare(`SELECT * FROM followups WHERE client_id = ? AND status = 'Pending' ORDER BY due_date`).all(c.id),
+  } });
+});
+
+function buildClientContext(c) {
+  const line = (l, v) => (v && String(v).trim() ? `${l}: ${v}\n` : '');
+  const ama = latestAmaRead(c.id);
+  const pulses = recentPulses(c.id, 5);
+  const goals = db.prepare(`SELECT text, status FROM goals WHERE client_id = ?`).all(c.id);
+  const reqs = db.prepare(`SELECT department, text FROM requests WHERE client_id = ? AND status != 'Done'`).all(c.id);
+  const concerns = db.prepare(`SELECT text FROM concerns WHERE client_id = ? AND status = 'Open'`).all(c.id);
+  return `Brief this client for the team today.\n\n` +
+    line('Preferred name', c.pref) + line('Name', c.name) + line('Program', c.program) +
+    line('Admitted', c.admit) + line('Sobriety date', c.sober) + line('Personal touch', c.touch) +
+    line('Preferences', c.prefs) + line('Goals (free text)', c.goals) + line('Triggers', c.triggers) +
+    line('Safety', c.safety) + line('Allergies', c.allergies) + line('Medications', c.medications) +
+    line('Support', c.support) + line('Welcome plan', c.welcome_plan) +
+    (ama ? `\nAMA risk: ${ama.level}. ${ama.summary || ''} Underlying: ${ama.underlying || ''}\n` : '') +
+    (goals.length ? `\nTreatment goals:\n` + goals.map((g) => `- ${g.text} [${g.status}]`).join('\n') + '\n' : '') +
+    (pulses.length ? `\nRecent pulses:\n` + pulses.map((p) => `- ${p.date} ${p.shift} concern:${p.concern} ${(p.triggers || []).join(', ')} ${p.statements || ''}`).join('\n') + '\n' : '') +
+    (reqs.length ? `\nOpen requests: ` + reqs.map((r) => `${r.department}: ${r.text}`).join('; ') + '\n' : '') +
+    (concerns.length ? `\nOpen concerns: ` + concerns.map((r) => r.text).join('; ') + '\n' : '');
+}
+
+function buildHouseContext(shift) {
+  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room`).all();
+  let ctx = `Shift briefing for ${shift || 'this'} shift. ${clients.length} active clients.\n\n`;
+  clients.forEach((c) => {
+    const ama = latestAmaRead(c.id);
+    const reqs = db.prepare(`SELECT text FROM requests WHERE client_id = ? AND status != 'Done'`).all(c.id);
+    const parts = [];
+    if (ama && ama.level !== 'Low') parts.push(`AMA risk ${ama.level}: ${ama.summary || ''}`);
+    if (c.safety) parts.push(`safety: ${c.safety}`);
+    if (reqs.length) parts.push(`open requests: ${reqs.map((r) => r.text).join('; ')}`);
+    if (c.touch) parts.push(`personal touch: ${c.touch}`);
+    ctx += `• ${c.pref || c.name}${c.room ? ' (Room ' + c.room + ')' : ''}: ${parts.join(' | ') || 'stable'}\n`;
+  });
+  const oc = db.prepare(`SELECT co.text, c.pref FROM concerns co JOIN clients c ON c.id = co.client_id WHERE co.status = 'Open'`).all();
+  if (oc.length) ctx += `\nOpen concerns: ` + oc.map((o) => `${o.pref}: ${o.text}`).join('; ') + '\n';
+  return ctx;
+}
+
+app.post('/api/clients/:id/care-brief', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured (set ANTHROPIC_API_KEY).' });
+  const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  try {
+    const brief = await generateCareBrief(buildClientContext(c));
+    audit({ user: req.user, action: 'CARE_BRIEF', entity: 'client', entity_id: c.id, ip: req.ip });
+    res.json({ brief });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+app.post('/api/shift-briefing', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured (set ANTHROPIC_API_KEY).' });
+  try {
+    const brief = await generateShiftBriefing(buildHouseContext(req.body?.shift));
+    audit({ user: req.user, action: 'SHIFT_BRIEF', ip: req.ip });
+    res.json({ brief });
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 /* ---------------- Surveys (client experience & meals) ---------------- */

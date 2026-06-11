@@ -699,13 +699,18 @@ app.get('/api/today', requireAuth, (req, res) => {
     openConcerns: db.prepare(`SELECT COUNT(*) n FROM concerns WHERE status='Open'`).get().n,
     openIncidents: db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status='Open'`).get().n,
     visitsToday: db.prepare(`SELECT COUNT(*) n FROM visits WHERE date = ? AND status='Scheduled'`).get(today).n,
+    refreshersDue: (() => {
+      const cs = db.prepare(`SELECT id, recert_days FROM courses WHERE active = 1`).all();
+      const us = db.prepare(`SELECT id FROM users WHERE active = 1`).all();
+      let n = 0; us.forEach((u) => cs.forEach((c) => { if (courseStatus(c, u.id).due) n++; })); return n;
+    })(),
   };
   const schedule = db.prepare(`SELECT s.*, c.pref FROM schedule_items s LEFT JOIN clients c ON c.id=s.client_id WHERE s.date = ? ORDER BY (s.time IS NULL), s.time LIMIT 12`).all(today);
   const wins = {
     wows: db.prepare(`SELECT w.text, w.by_name, c.pref FROM wows w LEFT JOIN clients c ON c.id=w.client_id ORDER BY w.id DESC LIMIT 3`).all(),
     delights: db.prepare(`SELECT d.text, c.pref FROM delights d LEFT JOIN clients c ON c.id=d.client_id ORDER BY d.id DESC LIMIT 3`).all(),
   };
-  res.json({ metrics, attention: attention.slice(0, 25), schedule, wins, claude: claudeConfigured(), focus: todaysFocus() });
+  res.json({ metrics, attention: attention.slice(0, 25), schedule, wins, claude: claudeConfigured(), focus: focusForDate(today) });
 });
 
 // Ask Armada (AI concierge)
@@ -1002,6 +1007,13 @@ app.get('/api/accountability', requireAuth, requireAdmin, (req, res) => {
     stat[a.uid].assigned++;
     if (activeSet.has(a.uid + '|' + a.d)) stat[a.uid].covered++; else stat[a.uid].missed++;
   }
+  // Training currency per teammate
+  const tcourses = db.prepare(`SELECT id, recert_days FROM courses WHERE active = 1`).all();
+  Object.values(stat).forEach((s) => {
+    let cur = 0, due = 0;
+    tcourses.forEach((c) => { (courseStatus(c, s.id).due ? due++ : cur++); });
+    s.trainingCurrent = cur; s.trainingDue = due; s.trainingTotal = tcourses.length;
+  });
   const staff = Object.values(stat).sort((x, y) => (x.missed - y.missed) || (y.actions - x.actions));
   const eligible = staff.filter((s) => s.assigned > 0);
   const champion = (eligible.length ? eligible : staff.filter((s) => s.actions > 0)).sort((x, y) => (x.missed - y.missed) || (y.actions - x.actions))[0] || null;
@@ -1147,16 +1159,32 @@ app.get('/api/training-status', requireAuth, requireAdmin, (req, res) => {
 });
 
 /* ---------------- Daily focus / refresher ---------------- */
+function focusForDate(dateStr) {
+  const o = getState('focus:' + dateStr);
+  if (o) { try { return JSON.parse(o); } catch (e) { /* fall through */ } }
+  const idx = Math.floor(new Date(dateStr + 'T00:00').getTime() / 864e5) % FOCUS_TOPICS.length;
+  return FOCUS_TOPICS[idx];
+}
 app.get('/api/focus', requireAuth, (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
-  const f = todaysFocus();
+  const f = focusForDate(today);
   const logs = db.prepare(`SELECT user_name, note FROM focus_logs WHERE date = ? ORDER BY id DESC`).all(today);
-  res.json({ topic: f.t, goal: f.g, participants: logs.length, logs, joined: !!db.prepare(`SELECT 1 FROM focus_logs WHERE date = ? AND user_id = ?`).get(today, req.user.id) });
+  res.json({ topic: f.t, goal: f.g, participants: logs.length, logs, joined: !!db.prepare(`SELECT 1 FROM focus_logs WHERE date = ? AND user_id = ?`).get(today, req.user.id), options: FOCUS_TOPICS });
 });
 app.post('/api/focus', requireAuth, (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
-  db.prepare(`INSERT INTO focus_logs (date, topic, user_id, user_name, note) VALUES (?, ?, ?, ?, ?)`).run(today, todaysFocus().t, req.user.id, req.user.name, req.body?.note || null);
+  db.prepare(`INSERT INTO focus_logs (date, topic, user_id, user_name, note) VALUES (?, ?, ?, ?, ?)`).run(today, focusForDate(today).t, req.user.id, req.user.name, req.body?.note || null);
   res.json({ ok: true });
+});
+app.post('/api/focus/set', requireAuth, requireAdmin, (req, res) => {
+  const { t, g } = req.body || {}; if (!t?.trim()) return res.status(400).json({ error: 'Missing topic' });
+  setState('focus:' + new Date().toISOString().slice(0, 10), JSON.stringify({ t: t.trim(), g: (g || '').trim() }));
+  res.json({ ok: true });
+});
+app.get('/api/focus/history', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT date, COUNT(DISTINCT user_id) n FROM focus_logs WHERE date >= date('now','-21 day') GROUP BY date ORDER BY date DESC`).all();
+  rows.forEach((r) => { r.topic = focusForDate(r.date).t; });
+  res.json({ history: rows });
 });
 
 /* ---------------- The Armada Standard (knowledge base) ---------------- */

@@ -58,7 +58,24 @@ export function buildWeeklyData() {
     concernsOpened, concernsResolved, openConcerns,
     feltCare: ce.a ? Math.round(ce.a * 10) / 10 : null, feltCareN: ce.n, callsDue,
     surveys: surveyMetrics(30),
+    trainingPct: trainingCompliance(),
   };
+}
+
+// % of (active staff × active courses) that are currently certified (not due).
+export function trainingCompliance() {
+  const courses = db.prepare(`SELECT id, recert_days FROM courses WHERE active = 1`).all();
+  const users = db.prepare(`SELECT id FROM users WHERE active = 1`).all();
+  if (!courses.length || !users.length) return null;
+  let req = 0, cur = 0;
+  for (const c of courses) for (const u of users) {
+    req++;
+    const last = db.prepare(`SELECT completed_at FROM course_completions WHERE course_id = ? AND user_id = ? AND passed = 1 ORDER BY id DESC LIMIT 1`).get(c.id, u.id);
+    let ok = !!last;
+    if (last && c.recert_days > 0) ok = (Date.now() - new Date(last.completed_at + 'Z').getTime()) <= c.recert_days * 864e5;
+    if (ok) cur++;
+  }
+  return Math.round((cur / req) * 100);
 }
 
 export function renderReportHtml(d) {
@@ -86,6 +103,7 @@ export function renderReportHtml(d) {
         ${kpi(d.surveys.feltCared.avg != null ? d.surveys.feltCared.avg + '/5' : '—', 'Feel cared for')}
         ${kpi(d.surveys.recommend.avg != null ? d.surveys.recommend.avg + '/5' : '—', 'Would recommend')}
         ${kpi(d.surveys.food.avg != null ? d.surveys.food.avg + '/5' : '—', 'Food rating')}
+        ${kpi(d.trainingPct != null ? d.trainingPct + '%' : '—', 'Training current')}
       </tr></table>
 
       ${h('★ Wow Stories — moments of care')}

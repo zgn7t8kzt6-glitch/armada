@@ -244,7 +244,8 @@ async function loadTraining(){
       <h3 style="margin:0">${esc(c.title)}</h3>
       ${c.due?'<span class="risk risk-high">Due</span>':'<span class="risk risk-low">Current</span>'}
       ${c.lastPassed?`<span class="hint">last passed ${esc((c.lastPassed.at||'').slice(0,10))} · ${c.lastPassed.score}%</span>`:'<span class="hint">not yet completed</span>'}
-      <button class="btn btn-gold btn-sm sans" style="margin-left:auto" onclick="openCourse(${c.id})">${c.lastPassed?'Refresh':'Start'} (${c.questionCount} q)</button>
+      ${c.lastPassed?`<button class="btn btn-ghost btn-sm sans" style="margin-left:auto" onclick="certificate(${JSON.stringify(c.title).replace(/"/g,'&quot;')},${c.lastPassed.score},'${esc((c.lastPassed.at||'').slice(0,10))}')">🏅 Certificate</button>`:''}
+      <button class="btn btn-gold btn-sm sans" ${c.lastPassed?'':'style="margin-left:auto"'} onclick="openCourse(${c.id})">${c.lastPassed?'Refresh':'Start'} (${c.questionCount} q)</button>
     </div>
     <p class="sub sans" style="margin:6px 0 0">${esc(c.description||'')}${c.recert_days?' · refresher every '+c.recert_days+' days':''}</p>
   </div>`).join('') || '<div class="empty">No courses yet.</div>';
@@ -284,6 +285,22 @@ async function saveCourse(){
   if(!$('nc_title').value.trim()||!questions.length){alert('Need a title and at least one question (use the format shown).');return;}
   await api('/courses',{method:'POST',body:JSON.stringify({title:$('nc_title').value,description:$('nc_desc').value,body:$('nc_body').value,recert_days:$('nc_recert').value,questions})});
   loadTraining();
+}
+function certificate(title, score, at){
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Certificate — ${esc(title)}</title>
+  <style>body{font-family:Georgia,serif;color:#2a585d;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f6f3ec}
+  .cert{background:#fff;border:3px solid #c89461;border-radius:14px;max-width:720px;padding:48px 56px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.12)}
+  .k{color:#c89461;letter-spacing:3px;text-transform:uppercase;font-size:12px;font-family:sans-serif}
+  h1{font-size:34px;margin:8px 0}.nm{font-size:30px;margin:18px 0 6px;border-bottom:1px solid #e5e0d6;display:inline-block;padding:0 30px 8px}
+  .c{font-size:20px;margin:14px 0}.meta{color:#888;font-size:13px;margin-top:18px;font-family:sans-serif}.mark{width:60px;margin-bottom:6px}</style></head>
+  <body><div class="cert">
+    <img class="mark" src="/logo.svg"/><div class="k">Armada Recovery · Certificate of Training</div>
+    <h1>Certificate of Completion</h1>
+    <div class="k">This certifies that</div><div class="nm">${esc(ME.name)}</div>
+    <div class="c">has successfully completed<br><strong>${esc(title)}</strong></div>
+    <div class="meta">Score ${score}% · Completed ${esc(at)} · The Gold Standard of Client Care</div>
+  </div></body></html>`;
+  const w=window.open('','_blank'); w.document.write(html); w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
 }
 async function trainingStatus(){
   const { courses, rows } = await api('/training-status');
@@ -775,6 +792,7 @@ async function loadToday(){
     <div class="ret-card ${m.openConcerns?'rc-warn':''}"><div class="n">${m.openConcerns}</div><div class="l">Open concerns</div></div>
     <div class="ret-card ${m.openIncidents?'rc-high':''}"><div class="n">${m.openIncidents}</div><div class="l">Open incidents</div></div>
     <div class="ret-card"><div class="n">${m.surveysDue}</div><div class="l">Surveys due</div></div>
+    <div class="ret-card ${m.refreshersDue?'rc-warn':''}"><div class="n">${m.refreshersDue}</div><div class="l">Refreshers due</div></div>
     <div class="ret-card"><div class="n">${m.visitsToday}</div><div class="l">Visits today</div></div>
     <div class="ret-card"><div class="n">${m.bedsOpen}</div><div class="l">Open beds</div></div>
     <div class="ret-card"><div class="n">${m.pipeline}</div><div class="l">In pipeline</div></div>`;
@@ -789,7 +807,8 @@ async function loadToday(){
     $('focusCard').innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <div><div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Today's Focus — the team stresses this</div>
           <h3 style="margin:2px 0 0">${esc(t.focus.t)}</h3><p class="sub sans" style="margin:4px 0 0">${esc(t.focus.g)}</p></div>
-        <button class="btn btn-gold btn-sm sans" style="margin-left:auto" onclick="joinFocus()">I'm on it ✋</button></div>
+        <button class="btn btn-gold btn-sm sans" style="margin-left:auto" onclick="joinFocus()">I'm on it ✋</button>
+        ${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="setFocus()">Set focus</button>`:''}</div>
       <div id="focusMsg" class="hint"></div>`;
   }
   loadAlerts();
@@ -799,6 +818,17 @@ async function joinFocus(){
   await api('/focus',{method:'POST',body:JSON.stringify({note})});
   const f = await api('/focus');
   $('focusMsg').textContent = `✓ ${f.participants} teammate${f.participants===1?'':'s'} focused on this today.`;
+}
+async function setFocus(){
+  const f = await api('/focus');
+  const list = f.options.map((o,i)=>`${i+1}. ${o.t}`).join('\n');
+  const pick = prompt(`Set today's focus — enter a number, or type your own topic:\n\n${list}`); if(pick===null) return;
+  let t=pick.trim(), g='';
+  const idx=parseInt(pick,10);
+  if(!isNaN(idx) && f.options[idx-1]){ t=f.options[idx-1].t; g=f.options[idx-1].g; }
+  else { g = prompt("Goal / what to try (optional):")||''; }
+  await api('/focus/set',{method:'POST',body:JSON.stringify({t,g})});
+  loadToday();
 }
 async function loadAlerts(){
   const { alerts, newCount } = await api('/alerts');
@@ -831,8 +861,8 @@ async function loadAccountability(){
     <h3 style="margin:0">🏅 Care Champion — ${esc(d.month)}</h3>
     <p class="sans" style="margin:6px 0 0"><strong>${esc(d.champion.name)}</strong> (${esc(d.champion.job_role)}) — ${d.champion.missed} missed · ${d.champion.actions} care actions logged.</p>
     <button class="btn btn-gold btn-sm sans" style="margin-top:8px" onclick="recognizeChampion('${esc(d.champion.name)}')">Recognize publicly</button></div>` : '';
-  $('acTable').innerHTML = `<table class="tbl"><tr><th>Teammate</th><th>Role</th><th>Used (care actions)</th><th>Assigned</th><th>Covered</th><th>Missed</th></tr>${
-    d.staff.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.job_role)}</td><td><strong>${s.actions}</strong> <span class="hint">${Object.entries(s.breakdown).map(([k,v])=>k+':'+v).join(' · ')}</span></td><td>${s.assigned}</td><td>${s.covered}</td><td>${s.missed?'<span class="risk risk-high">'+s.missed+'</span>':'0'}</td></tr>`).join('')}</table>`;
+  $('acTable').innerHTML = `<table class="tbl"><tr><th>Teammate</th><th>Role</th><th>Used (care actions)</th><th>Assigned</th><th>Covered</th><th>Missed</th><th>Training</th></tr>${
+    d.staff.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.job_role)}</td><td><strong>${s.actions}</strong> <span class="hint">${Object.entries(s.breakdown).map(([k,v])=>k+':'+v).join(' · ')}</span></td><td>${s.assigned}</td><td>${s.covered}</td><td>${s.missed?'<span class="risk risk-high">'+s.missed+'</span>':'0'}</td><td>${s.trainingDue?'<span class="risk risk-high">'+s.trainingCurrent+'/'+s.trainingTotal+'</span>':'<span class="risk risk-low">'+s.trainingCurrent+'/'+s.trainingTotal+'</span>'}</td></tr>`).join('')}</table>`;
   $('acGaps').innerHTML = `<p class="sub sans">${d.gaps.count} client-day check-in${d.gaps.count===1?'':'s'} missed this month.</p>` +
     (d.gaps.recent.length ? d.gaps.recent.map(g=>`<div class="pc-note">• ${esc(g.client)} — no check-in on ${esc(g.date)}</div>`).join('') : '<div class="pc-note">No gaps. Every client checked in, every day. 🎉</div>');
 }
@@ -948,6 +978,9 @@ async function loadTeam(){
   $('kudosFeed').innerHTML = t.kudos.length ? t.kudos.map(k=>`<div class="wow"><div>👏 ${esc(k.text)}</div><div class="wow-meta">${k.from_name?'from '+esc(k.from_name):''}${k.to_name?' → '+esc(k.to_name):''}</div></div>`).join('') : '<div class="hint">No kudos yet. Catch someone doing something great.</div>';
   if(t.pulseTrend){ const total=t.pulseTrend.reduce((a,b)=>a+b.n,0)||1;
     $('pulseTrend').innerHTML = t.pulseTrend.length ? t.pulseTrend.map(p=>`<div class="trbar"><div class="trbar-l">${esc(p.load||'—')}</div><div class="trbar-track"><div class="trbar-fill" style="width:${Math.round(p.n/total*100)}%"></div></div><div class="trbar-n">${p.n}</div></div>`).join('') : '<div class="hint">No staff pulses this week.</div>'; }
+  try { const { history } = await api('/focus/history');
+    if($('focusHistory')) $('focusHistory').innerHTML = history.length ? history.map(h=>`<div class="pc-note"><strong>${esc(h.date)}</strong> — ${esc(h.topic)} <span class="hint">· ${h.n} joined</span></div>`).join('') : '<div class="hint">No focus participation logged yet.</div>';
+  } catch(e){}
 }
 async function ackTraining(){ await api('/training-ack',{method:'POST',body:JSON.stringify({value_text:$('teamValue').textContent})}); loadTeam(); }
 async function giveKudos(){ if(!$('ku_text').value.trim())return; await api('/kudos',{method:'POST',body:JSON.stringify({to_user_id:$('ku_to').value||null,text:$('ku_text').value})}); $('ku_text').value=''; loadTeam(); }

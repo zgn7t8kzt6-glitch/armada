@@ -8,6 +8,24 @@ export function emailConfigured() {
   return Boolean(process.env.RESEND_API_KEY && process.env.REPORT_TO);
 }
 
+// Headline survey scores (averages) over the last `days` days.
+export function surveyMetrics(days = 30) {
+  const q = (like) => {
+    const r = db.prepare(
+      `SELECT AVG(a.value_num) avg, COUNT(a.value_num) n
+       FROM survey_answers a
+       JOIN survey_questions q ON q.id = a.question_id
+       JOIN survey_responses r ON r.id = a.response_id
+       WHERE q.text LIKE ? AND r.created_at >= datetime('now', ?)`).get(like, `-${days} day`);
+    return { avg: r.avg != null ? Math.round(r.avg * 10) / 10 : null, n: r.n };
+  };
+  return {
+    feltCared: q('I feel genuinely cared for%'),
+    recommend: q('How likely are you to recommend%'),
+    food: q('Overall, how satisfied are you with the food%'),
+  };
+}
+
 export function buildWeeklyData() {
   const weekAgo = `datetime('now','-7 day')`;
   const since = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
@@ -39,6 +57,7 @@ export function buildWeeklyData() {
     dischargesWeek, pulsesWeek, highReads, delights, wows,
     concernsOpened, concernsResolved, openConcerns,
     feltCare: ce.a ? Math.round(ce.a * 10) / 10 : null, feltCareN: ce.n, callsDue,
+    surveys: surveyMetrics(30),
   };
 }
 
@@ -60,6 +79,13 @@ export function renderReportHtml(d) {
         ${kpi(d.completionRate + '%', 'Completion')}
         ${kpi(d.feltCare != null ? d.feltCare : '—', 'Felt-care /5')}
         ${kpi(d.active, 'Active clients')}
+      </tr></table>
+
+      ${h('Voice of the client — survey scores (30 days)')}
+      <table style="width:100%;border-collapse:separate;border-spacing:8px"><tr>
+        ${kpi(d.surveys.feltCared.avg != null ? d.surveys.feltCared.avg + '/5' : '—', 'Feel cared for')}
+        ${kpi(d.surveys.recommend.avg != null ? d.surveys.recommend.avg + '/5' : '—', 'Would recommend')}
+        ${kpi(d.surveys.food.avg != null ? d.surveys.food.avg + '/5' : '—', 'Food rating')}
       </tr></table>
 
       ${h('★ Wow Stories — moments of care')}

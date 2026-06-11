@@ -88,9 +88,14 @@ async function dischargeClient(){
   if(!currentId) return;
   const status=$('d_status').value;
   if(!confirm(`Discharge this client as "${status}"? This starts the aftercare calls and removes them from the active playbook.`)) return;
+  const cid = currentId;
   await api('/clients/'+currentId+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('d_date').value})});
-  alert('Discharged. Aftercare calls scheduled — see the Outcomes tab.');
-  show('clients');
+  if(status!=='Transferred' && confirm('Discharged — aftercare calls scheduled.\n\nWould you like to do the Discharge survey with the client now?')){
+    gotoSurvey('discharge', cid);
+  } else {
+    alert('Discharged. Aftercare calls scheduled — see the Outcomes tab.');
+    show('clients');
+  }
 }
 const FF = ['name','pref','room','program','admit','sober','touch','prefs','goals','triggers','safety','support','welcome_plan','aftercare_plan'];
 function fillForm(c){
@@ -394,6 +399,8 @@ async function loadOutcomes(){
     <div class="ret-card"><div class="n">${o.feltCare!=null?o.feltCare:'—'}</div><div class="l">Felt-care (avg/5, 30d)</div></div>
     <div class="ret-card ${o.openConcerns?'rc-warn':''}"><div class="n">${o.openConcerns}</div><div class="l">Open concerns</div></div>
     <div class="ret-card"><div class="n">${o.delights30}</div><div class="l">Delights (30d)</div></div>
+    <div class="ret-card"><div class="n">${o.surveys?.recommend.avg!=null?o.surveys.recommend.avg:'—'}</div><div class="l">Recommend /5 (survey)</div></div>
+    <div class="ret-card"><div class="n">${o.surveys?.food.avg!=null?o.surveys.food.avg:'—'}</div><div class="l">Food /5 (survey)</div></div>
     <div class="ret-card"><div class="n">${o.active}</div><div class="l">Active clients</div></div>`;
 
   const { followups } = await api('/followups');
@@ -492,6 +499,27 @@ async function loadSurveys(){
     $('sv_client').innerHTML = '<option value="">Anonymous</option>' + clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}</option>`).join('');
   } catch(e){}
   $('surveyArea').innerHTML = '<div class="empty">Pick a survey and press Start.</div>';
+  try {
+    const { due } = await api('/surveys/due');
+    $('surveyDue').innerHTML = due.length ? `<div class="card"><h3>Surveys to offer</h3>
+      <p class="sub sans">The app auto-offers the Experience survey weekly and the Discharge survey after discharge.</p>
+      ${due.map(d=>`<div class="todo"><div class="txt"><strong>${esc(d.client)}</strong> — ${esc(d.title)} <span class="hint">· ${esc(d.reason)}</span></div>
+        <button class="btn btn-gold btn-sm sans" onclick="startDue(${d.survey_id},${d.client_id})">Offer now</button></div>`).join('')}</div>` : '';
+  } catch(e){ $('surveyDue').innerHTML=''; }
+}
+function startDue(surveyId, clientId){
+  $('sv_select').value = surveyId;
+  $('sv_client').value = clientId || '';
+  startSurvey();
+  $('surveyArea').scrollIntoView({behavior:'smooth'});
+}
+async function gotoSurvey(key, clientId){
+  document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id==='surveys'));
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view==='surveys'));
+  await loadSurveys();
+  const sv = SURVEYS.find(s=>s.key===key); if(!sv) return;
+  $('sv_select').value = sv.id; if(clientId) $('sv_client').value = clientId;
+  startSurvey();
 }
 function qInput(q){
   if(q.type==='text') return `<textarea class="sq-text"></textarea>`;

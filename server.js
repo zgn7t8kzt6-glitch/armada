@@ -3,7 +3,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState } from './src/db.js';
-import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured } from './src/report.js';
+import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics } from './src/report.js';
 import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
@@ -501,7 +501,7 @@ app.get('/api/outcomes', requireAuth, (req, res) => {
 
   res.json({ amaRate, completionRate, completed, ama, transferred, active,
     feltCare: ce.a ? Math.round(ce.a * 10) / 10 : null, feltCareN: ce.n,
-    openConcerns, delights30, milestones });
+    openConcerns, delights30, milestones, surveys: surveyMetrics(30) });
 });
 
 /* ---------------- Surveys (client experience & meals) ---------------- */
@@ -529,6 +529,30 @@ app.post('/api/surveys/:id/respond', requireAuth, (req, res) => {
   }
   audit({ user: req.user, action: 'SURVEY', entity: 'survey', entity_id: survey.id, detail: req.body.client_id ? 'client ' + req.body.client_id : 'anonymous', ip: req.ip });
   res.json({ ok: true });
+});
+
+// Surveys that are due: discharge survey after discharge, experience survey weekly.
+app.get('/api/surveys/due', requireAuth, (req, res) => {
+  const exp = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get();
+  const dis = db.prepare(`SELECT id FROM surveys WHERE key = 'discharge'`).get();
+  const due = [];
+  if (exp) {
+    db.prepare(
+      `SELECT c.id, c.pref, c.name FROM clients c
+       WHERE c.active = 1 AND c.discharge_status IS NULL
+       AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id = ? AND r.client_id = c.id AND r.created_at >= datetime('now','-7 day'))
+       ORDER BY c.room, c.name`).all(exp.id)
+      .forEach((c) => due.push({ survey_id: exp.id, title: 'Client Experience Survey', client_id: c.id, client: c.pref || c.name, reason: 'No experience survey in the last 7 days' }));
+  }
+  if (dis) {
+    db.prepare(
+      `SELECT c.id, c.pref, c.name, c.discharge_date FROM clients c
+       WHERE c.discharge_status IS NOT NULL AND c.discharge_status != 'Transferred' AND c.discharge_date >= date('now','-30 day')
+       AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id = ? AND r.client_id = c.id)
+       ORDER BY c.discharge_date DESC`).all(dis.id)
+      .forEach((c) => due.push({ survey_id: dis.id, title: 'Discharge Experience Survey', client_id: c.id, client: c.pref || c.name, reason: `Discharged ${c.discharge_date} — survey not done` }));
+  }
+  res.json({ due });
 });
 
 // Results (admin): per-question aggregates + recent comments.

@@ -28,8 +28,27 @@ services:
         value: admin
       - key: ADMIN_PASS
         sync: false                  # Render will prompt you to enter this secret
+      # ── AI provider ──────────────────────────────────────────────────────
+      # Default is the Anthropic API (needs an Anthropic BAA before real PHI).
+      # To run Claude through AWS Bedrock instead — so the free AWS BAA covers
+      # the model and no separate Anthropic BAA is needed — set:
+      #   AI_PROVIDER=bedrock, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+      #   BEDROCK_MODEL_ID (the exact id available in your region's Bedrock console).
+      # Then set AI_DEIDENTIFY=false to let real client info reach Claude legally.
+      - key: AI_PROVIDER
+        sync: false                  # "anthropic" (default) or "bedrock"
       - key: ANTHROPIC_API_KEY
-        sync: false                  # optional: enables "Draft tasks with Claude" (key from console.anthropic.com)
+        sync: false                  # Anthropic path: key from console.anthropic.com
+      - key: AWS_REGION
+        sync: false                  # Bedrock path, e.g. us-east-1
+      - key: AWS_ACCESS_KEY_ID
+        sync: false                  # Bedrock path
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false                  # Bedrock path
+      - key: BEDROCK_MODEL_ID
+        sync: false                  # Bedrock path, e.g. us.anthropic.claude-...-v1:0
+      - key: AI_DEIDENTIFY
+        sync: false                  # "false" only with a signed BAA (Bedrock=AWS, or Anthropic)
       - key: RESEND_API_KEY
         sync: false                  # optional: enables the weekly leadership email (key from resend.com)
       - key: REPORT_TO

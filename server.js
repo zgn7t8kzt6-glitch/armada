@@ -12,7 +12,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -412,6 +412,13 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
   res.json({ entries: db.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all() });
 });
 
+// Admin pre-flight: which AI provider/model is active and whether the
+// structured-output params work (the key thing to verify after switching to Bedrock).
+app.get('/api/ai/health', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await aiHealth()); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message, provider: aiProvider() }); }
+});
+
 app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined, deidentify: DEID }));
 
 // Change my own password.
@@ -510,6 +517,7 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     oncallEmail: getState('oncall_email') || process.env.ONCALL_EMAIL || '',
     oncallPhone: getState('oncall_phone') || process.env.ONCALL_PHONE || '',
     emailReady: emailConfigured(), smsReady: smsConfigured(), claudeReady: claudeConfigured(),
+    aiProvider: aiProvider(), deidentify: DEID,
     kioskCode: kioskCode(),
   });
 });

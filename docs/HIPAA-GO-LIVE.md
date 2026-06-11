@@ -42,7 +42,10 @@ you manage the box). **Aptible** is excellent for HIPAA but expects a managed Po
 (ephemeral app disk) — it would require migrating this app off SQLite first.
 
 ### 2. Sign BAAs with every vendor that touches PHI
-- **Anthropic (Claude)** — required, because notes/Care Cards are sent to Claude. Request a BAA via Anthropic sales / the Trust Center. **Until signed, keep AI features on fake data only.**
+- **Claude (AI)** — required, because notes/Care Cards are sent to Claude. **Two ways:**
+  - **RECOMMENDED — AWS Bedrock.** Run Claude through Bedrock (a HIPAA-eligible AWS service). The standard **AWS BAA** (free, self-serve in AWS Artifact) then covers the model — **no separate Anthropic BAA, no Anthropic sales call.** In the app: set `AI_PROVIDER=bedrock`, `AWS_REGION`, AWS credentials, and `BEDROCK_MODEL_ID` (confirm the exact Claude model id available in your region in the Bedrock console). Then run the **AI health check** in Settings to confirm structured outputs work on Bedrock before going live.
+  - **Or — Anthropic direct.** Request a BAA via Anthropic sales / the Trust Center (paid). Keep `AI_PROVIDER=anthropic` and set `ANTHROPIC_API_KEY`.
+  - With either BAA signed, set `AI_DEIDENTIFY=false` so Claude sees the real picture. **Until a BAA is signed, leave de-identification on (default) and keep AI on fake data only.**
 - **Kipu** — a data-use agreement / BAA to pull records via their API.
 - **Twilio / Resend** (if you use SMS/email alerts) — they will sign BAAs. **OR** keep alert messages PHI-free (see §5).
 

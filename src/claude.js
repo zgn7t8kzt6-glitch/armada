@@ -7,8 +7,42 @@ import { STANDARD_PRIMER } from './standard.js';
 // Every Claude feature is grounded in The Armada Standard.
 const G = STANDARD_PRIMER + '\n\n';
 
+// ── AI provider ──────────────────────────────────────────────────────────────
+// AI_PROVIDER=anthropic (default) calls the Anthropic API directly (needs an
+// Anthropic BAA before real PHI). AI_PROVIDER=bedrock calls Claude through AWS
+// Bedrock, so the AWS BAA covers the model — no separate Anthropic BAA. Flip the
+// env var once your AWS BAA is signed; nothing else changes.
+const PROVIDER = (process.env.AI_PROVIDER || 'anthropic').toLowerCase();
+// Model id. On Bedrock the id is namespaced and usually needs a region inference
+// profile (e.g. us.anthropic.claude-...-v1:0) — CONFIRM the exact id available in
+// your account/region in the Bedrock console and set BEDROCK_MODEL_ID.
+export const MODEL = process.env.AI_MODEL || (PROVIDER === 'bedrock'
+  ? (process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-opus-4-5-20251101-v1:0')
+  : 'claude-opus-4-8');
+
+// Lazily build a client for the active provider (Bedrock SDK is only imported
+// when actually used, so the dependency is optional on the Anthropic path).
+let _client = null;
+async function getClient() {
+  if (_client) return _client;
+  if (PROVIDER === 'bedrock') {
+    const { AnthropicBedrock } = await import('@anthropic-ai/bedrock-sdk');
+    // Credentials & region resolve from the standard AWS chain (env vars,
+    // shared profile, or an EC2/ECS instance role).
+    _client = new AnthropicBedrock(
+      process.env.AWS_REGION ? { awsRegion: process.env.AWS_REGION } : {}
+    );
+  } else {
+    _client = new Anthropic(); // reads ANTHROPIC_API_KEY
+  }
+  return _client;
+}
+
+export function aiProvider() { return PROVIDER; }
+
 // De-identification: on by default. No client names/identifiers are sent to
-// Claude. Set AI_DEIDENTIFY=false only if you hold a signed Anthropic BAA.
+// Claude. Set AI_DEIDENTIFY=false only with a signed BAA covering the AI
+// (the AWS BAA when AI_PROVIDER=bedrock, or an Anthropic BAA on the direct path).
 export const DEID = process.env.AI_DEIDENTIFY !== 'false';
 // Remove a person's name(s) from free text, replacing with a neutral token.
 export function scrub(text, names = []) {
@@ -69,6 +103,14 @@ const SCHEMA = {
 };
 
 export function claudeConfigured() {
+  if (PROVIDER === 'bedrock') {
+    // Configured if any AWS credential source is present; on an instance role
+    // only AWS_REGION may be set, so accept that too.
+    return Boolean(
+      process.env.AWS_REGION || process.env.AWS_ACCESS_KEY_ID ||
+      process.env.AWS_PROFILE || process.env.AWS_DEFAULT_REGION
+    );
+  }
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
@@ -183,9 +225,9 @@ provided below the question — about the house or a specific client.
   medical or clinical directive.`;
 
 export async function askAssistant(question, contextText) {
-  const client = new Anthropic();
+  const client = await getClient();
   const response = await client.messages.create({
-    model: 'claude-opus-4-8',
+    model: MODEL,
     max_tokens: 1500,
     system: G + ASSISTANT_SYSTEM,
     output_config: { effort: 'low' },
@@ -219,9 +261,9 @@ const BRIEF_SCHEMA = {
 };
 
 export async function generateCareBrief(contextText) {
-  const client = new Anthropic();
+  const client = await getClient();
   const response = await client.messages.create({
-    model: 'claude-opus-4-8',
+    model: MODEL,
     max_tokens: 1200,
     system: G + BRIEF_SYSTEM,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: BRIEF_SCHEMA } },
@@ -249,9 +291,9 @@ Be specific and grounded in the data. Do not invent clinical facts. Use short
 paragraphs or bullets. This is support for staff, not a clinical directive.`;
 
 export async function generateShiftBriefing(contextText) {
-  const client = new Anthropic();
+  const client = await getClient();
   const response = await client.messages.create({
-    model: 'claude-opus-4-8',
+    model: MODEL,
     max_tokens: 1500,
     system: G + SHIFT_BRIEF_SYSTEM,
     output_config: { effort: 'low' },
@@ -289,9 +331,9 @@ const NOTE_SCHEMA = {
   additionalProperties: false,
 };
 export async function scanNote(text, clientName) {
-  const client = new Anthropic();
+  const client = await getClient();
   const response = await client.messages.create({
-    model: 'claude-opus-4-8',
+    model: MODEL,
     max_tokens: 700,
     system: G + NOTE_SYSTEM,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: NOTE_SCHEMA } },
@@ -305,14 +347,14 @@ export async function scanNote(text, clientName) {
 }
 
 export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
-  const client = new Anthropic();
+  const client = await getClient();
   const names = [careCard.name, careCard.pref];
   const handoffText = handoffs.length
     ? handoffs.map((h) => `- ${scrub(h.note, names)}`).join('\n')
     : 'None.';
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-8',
+    model: MODEL,
     max_tokens: 1500,
     system: G + AMA_SYSTEM,
     output_config: {
@@ -361,10 +403,10 @@ function careCardText(c) {
 }
 
 export async function generateShiftTasks(careCard) {
-  const client = new Anthropic(); // reads ANTHROPIC_API_KEY
+  const client = await getClient();
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-8',
+    model: MODEL,
     max_tokens: 2000,
     system: G + SYSTEM,
     output_config: {
@@ -392,4 +434,52 @@ export async function generateShiftTasks(careCard) {
   return (parsed.tasks || []).filter(
     (t) => t.text && SHIFTS.includes(t.shift) && ROLES.includes(t.job_role)
   );
+}
+
+// Pre-flight check: confirms the active provider/model works AND that the
+// structured-output params (output_config + json_schema) the app relies on are
+// supported on this provider (the main thing to verify on Bedrock). Returns a
+// plain object — never throws — so an admin can read the result.
+export async function aiHealth() {
+  const base = { provider: PROVIDER, model: MODEL, deidentify: DEID, configured: claudeConfigured() };
+  if (!base.configured) {
+    return { ...base, ok: false, structuredOutput: false, error: PROVIDER === 'bedrock'
+      ? 'No AWS credentials/region found (set AWS_REGION + credentials or use an instance role).'
+      : 'ANTHROPIC_API_KEY is not set.' };
+  }
+  const schema = {
+    type: 'object',
+    properties: { ok: { type: 'boolean' }, word: { type: 'string' } },
+    required: ['ok', 'word'], additionalProperties: false,
+  };
+  try {
+    const client = await getClient();
+    const r = await client.messages.create({
+      model: MODEL,
+      max_tokens: 64,
+      output_config: { effort: 'low', format: { type: 'json_schema', schema } },
+      messages: [{ role: 'user', content: 'Reply with ok=true and word="ready".' }],
+    });
+    const text = (r.content.find((b) => b.type === 'text') || {}).text || '';
+    JSON.parse(text); // throws if not valid structured JSON
+    return { ...base, ok: true, structuredOutput: true };
+  } catch (e) {
+    // Retry once WITHOUT output_config to tell apart "provider down" from
+    // "structured outputs unsupported here" (the Bedrock risk we flagged).
+    let plainOk = false, plainErr = null;
+    try {
+      const client = await getClient();
+      const r2 = await client.messages.create({
+        model: MODEL, max_tokens: 16,
+        messages: [{ role: 'user', content: 'Say ready.' }],
+      });
+      plainOk = Boolean(r2.content.find((b) => b.type === 'text'));
+    } catch (e2) { plainErr = e2.message; }
+    return {
+      ...base, ok: plainOk, structuredOutput: false,
+      error: plainOk
+        ? `Connected, but structured outputs (output_config/json_schema) failed on this provider: ${e.message}. The app can fall back to tool-use JSON mode here.`
+        : `AI call failed: ${plainErr || e.message}`,
+    };
+  }
 }

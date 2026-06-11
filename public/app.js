@@ -385,16 +385,27 @@ async function saveOncall(){ await api('/settings/oncall',{method:'POST',body:JS
 async function loadSettings(){
   const st = await api('/settings');
   const dot=(ok)=>ok?'<span class="risk risk-low">ready</span>':'<span class="risk risk-warn">not set</span>';
+  const prov = st.aiProvider==='bedrock'?'AWS Bedrock':'Anthropic API';
   $('intStatus').innerHTML = `
-    <div class="ret-card"><div class="n" style="font-size:18px">${st.claudeReady?'✓':'—'}</div><div class="l">Claude AI ${st.claudeReady?'':'(ANTHROPIC_API_KEY)'}</div></div>
+    <div class="ret-card"><div class="n" style="font-size:18px">${st.claudeReady?'✓':'—'}</div><div class="l">Claude AI · ${prov}${st.claudeReady?'':(st.aiProvider==='bedrock'?' (AWS creds)':' (ANTHROPIC_API_KEY)')}</div></div>
+    <div class="ret-card"><div class="n" style="font-size:18px">${st.deidentify?'🔒':'⚠'}</div><div class="l">PHI to AI: ${st.deidentify?'de-identified':'real (BAA required)'}</div></div>
     <div class="ret-card"><div class="n" style="font-size:18px">${st.emailReady?'✓':'—'}</div><div class="l">Email ${st.emailReady?'':'(RESEND_API_KEY)'}</div></div>
     <div class="ret-card"><div class="n" style="font-size:18px">${st.smsReady?'✓':'—'}</div><div class="l">SMS ${st.smsReady?'':'(Twilio)'}</div></div>`;
+  $('aiHealthWrap').innerHTML = `<button class="btn btn-ghost btn-sm sans" onclick="runAiHealth()">Run AI health check</button> <span id="aiHealthResult" class="hint"></span>`;
   const ac=st.aftercareCoordinator;
   $('acc_user').innerHTML='<option value="">— none —</option>'+st.staff.map(s=>`<option value="${s.id}" ${ac&&ac.id===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
   $('oc_email').value=st.oncallEmail||''; $('oc_phone').value=st.oncallPhone||'';
   $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
   $('kc_code').value = st.kioskCode||'';
   try { const k = await api('/kipu/status'); $('kipuStatus').innerHTML = k.configured ? '<span class="risk risk-low">credentials set</span>' : '<span class="risk risk-warn">not configured — set Kipu env vars on your host</span>'; } catch(e){}
+}
+async function runAiHealth(){
+  const el=$('aiHealthResult'); el.innerHTML='Checking…';
+  try{ const r=await api('/ai/health');
+    const tag=(ok)=>ok?'<span style="color:var(--good)">✓</span>':'<span style="color:var(--danger)">✗</span>';
+    el.innerHTML = `${tag(r.ok)} ${esc(r.provider)} · model ${esc(r.model||'?')} · structured output ${tag(r.structuredOutput)}`
+      + (r.error?`<div class="hint" style="color:var(--danger)">${esc(r.error)}</div>`:'');
+  }catch(e){ el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function kipuTest(){ $('kipuResult').textContent='Testing…'; try{ const r=await api('/kipu/test',{method:'POST'}); $('kipuResult').innerHTML='<span style="color:var(--good)">✓ Connected'+(r.sampleCount!=null?' · '+r.sampleCount+' patients visible':'')+'</span>'; }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuSync(){ $('kipuResult').textContent='Syncing…'; try{ const r=await api('/kipu/sync',{method:'POST'}); $('kipuResult').textContent=`Synced: ${r.created} new clients, ${r.matched} already here (of ${r.total}).`; }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }

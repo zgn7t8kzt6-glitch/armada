@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Armada Care Standards</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen" class="login-wrap">
+  <form id="loginForm" class="login-card">
+    <div class="crest big">✦</div>
+    <h1>Armada Care Standards</h1>
+    <div class="tag">The Gold Standard of Client Care</div>
+    <label>Username</label>
+    <input id="l_user" autocomplete="username" />
+    <label>Password</label>
+    <input id="l_pass" type="password" autocomplete="current-password" />
+    <div id="loginErr" class="err"></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:14px">Sign in</button>
+  </form>
+</div>
+
+<!-- APP -->
+<div id="app" style="display:none">
+  <header>
+    <div class="crest">✦</div>
+    <div>
+      <h1>Armada Care Standards</h1>
+      <div class="tag">The Gold Standard of Client Care</div>
+    </div>
+    <div class="userbox sans">
+      <span id="whoami"></span>
+      <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign out</button>
+    </div>
+  </header>
+
+  <nav class="sans" id="nav">
+    <button data-view="report" class="active">Shift Playbook</button>
+    <button data-view="clients">Clients</button>
+    <button data-view="editor">Care Card</button>
+    <button data-view="assign" data-admin>Assign Staff</button>
+    <button data-view="users" data-admin>Staff</button>
+    <button data-view="audit" data-admin>Audit Log</button>
+  </nav>
+
+  <main>
+    <!-- SHIFT REPORT -->
+    <section id="report" class="view active">
+      <div class="card no-print">
+        <h3>Shift Playbook</h3>
+        <p class="sub sans">The daily lineup. Each client, what to do this shift, checked off live as the team works.</p>
+        <div class="controls">
+          <div class="field"><label>Date</label><input id="r_date" type="date"/></div>
+          <div class="field"><label>Shift</label><select id="r_shift"></select></div>
+          <div class="field"><label>Role filter</label><select id="r_role"><option>All</option></select></div>
+          <button class="btn btn-gold sans" onclick="loadPlaybook()">Refresh</button>
+          <button class="btn btn-ghost sans" onclick="window.print()">Print</button>
+        </div>
+        <div id="assignees" class="hint"></div>
+      </div>
+      <div id="reportHead"></div>
+      <div id="reportBody"></div>
+    </section>
+
+    <!-- CLIENTS -->
+    <section id="clients" class="view">
+      <div class="toolbar"><button class="btn btn-gold sans" onclick="newClient()">+ New Client Care Card</button></div>
+      <div id="clientGrid" class="clientlist"></div>
+      <div id="clientEmpty" class="empty" style="display:none">No clients yet. Create your first Care Card.</div>
+    </section>
+
+    <!-- EDITOR -->
+    <section id="editor" class="view">
+      <div class="card">
+        <h3 id="editorTitle">New Care Card</h3>
+        <p class="sub sans">Fill this out once per client. It becomes the source of every staff member's shift instructions.</p>
+        <div class="grid3">
+          <div><label>Full Name</label><input id="f_name"/></div>
+          <div><label>Preferred Name</label><input id="f_pref"/></div>
+          <div><label>Room / Unit</label><input id="f_room"/></div>
+        </div>
+        <div class="grid3">
+          <div><label>Program / Level of Care</label><input id="f_program"/></div>
+          <div><label>Admission Date</label><input id="f_admit" type="date"/></div>
+          <div><label>Sobriety / Milestone Date</label><input id="f_sober" type="date"/></div>
+        </div>
+        <label>★ Personal Touch — what makes this client feel genuinely cared for</label>
+        <textarea id="f_touch"></textarea>
+        <div class="grid2">
+          <div><label>Preferences (food, drink, comfort, faith, hobbies)</label><textarea id="f_prefs"></textarea></div>
+          <div><label>Goals This Week</label><textarea id="f_goals"></textarea></div>
+        </div>
+        <div class="grid2">
+          <div><label>Triggers / Sensitivities</label><textarea id="f_triggers"></textarea></div>
+          <div><label>⚠ Safety / Medical Watch Items</label><textarea id="f_safety"></textarea></div>
+        </div>
+        <label>Support System / Family Contacts</label><textarea id="f_support"></textarea>
+        <hr/>
+        <h3 style="color:var(--navy)">Shift Tasks</h3>
+        <p class="sub sans">Tag each action with a shift and role. These flow into the Shift Playbook.</p>
+        <div id="taskList"></div>
+        <button class="btn btn-ghost btn-sm sans" onclick="addTaskRow()">+ Add task</button>
+        <div class="toolbar" style="margin-top:24px">
+          <button class="btn btn-danger btn-sm sans" id="deleteBtn" onclick="deleteCurrent()" style="margin-right:auto;display:none" data-admin>Delete client</button>
+          <button class="btn btn-ghost sans" onclick="show('clients')">Cancel</button>
+          <button class="btn btn-primary sans" onclick="saveClient()">Save Care Card</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ASSIGN -->
+    <section id="assign" class="view">
+      <div class="card">
+        <h3>Assign Staff to a Shift</h3>
+        <p class="sub sans">Choose who is working. Assigned staff show on the playbook header.</p>
+        <div class="controls">
+          <div class="field"><label>Date</label><input id="a_date" type="date"/></div>
+          <div class="field"><label>Shift</label><select id="a_shift"></select></div>
+          <button class="btn btn-gold sans" onclick="loadAssign()">Load</button>
+        </div>
+        <div id="assignList"></div>
+        <button class="btn btn-primary sans" style="margin-top:14px" onclick="saveAssign()">Save assignments</button>
+      </div>
+    </section>
+
+    <!-- USERS -->
+    <section id="users" class="view">
+      <div class="card">
+        <h3>Add Staff Member</h3>
+        <div class="grid3">
+          <div><label>Name</label><input id="u_name"/></div>
+          <div><label>Username</label><input id="u_user"/></div>
+          <div><label>Temp Password</label><input id="u_pass"/></div>
+        </div>
+        <div class="grid2">
+          <div><label>Job Role</label><select id="u_job"></select></div>
+          <div><label>Access</label><select id="u_role"><option value="staff">Staff</option><option value="admin">Admin</option></select></div>
+        </div>
+        <button class="btn btn-primary sans" style="margin-top:14px" onclick="addUser()">Add staff</button>
+      </div>
+      <div class="card"><h3>Staff</h3><div id="userList"></div></div>
+    </section>
+
+    <!-- AUDIT -->
+    <section id="audit" class="view">
+      <div class="card">
+        <h3>Audit Log</h3>
+        <p class="sub sans">Every access and change to client data — for accountability and HIPAA.</p>
+        <div id="auditList"></div>
+      </div>
+    </section>
+  </main>
+  <footer class="sans">Armada Care Standards · shared workspace</footer>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

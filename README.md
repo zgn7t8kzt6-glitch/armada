@@ -1,38 +1,75 @@
 # Armada Care Standards
 
-A Ritz-Carlton–style client care tool for Armada Recovery. Fill out a **Care Card**
-once per client, and the app generates a **Shift Playbook** that tells each staff
-member exactly what to do for each client on their shift — so every client feels
-genuinely, individually cared for.
+A Ritz-Carlton–style client care system for Armada Recovery. Fill out a **Care
+Card** once per client, and the app produces a live **Shift Playbook** telling
+each staff member exactly what to do for each client on their shift — so every
+client feels genuinely, individually cared for.
+
+This is now a **multi-user web app** with logins, roles, shift assignment, task
+check-off, handoff notes, and an audit log.
 
 ## The model
 
 | Ritz-Carlton | Armada |
 |---|---|
 | Guest Preference Pad | **Client Care Card** — preferences, goals, triggers, personal touches |
-| Daily Lineup | **Shift Playbook** — per-shift, per-role checklist generated automatically |
-| Anticipatory service | Safety watch-items and ★ personal touches surface on every shift |
+| Daily Lineup | **Shift Playbook** — per-shift, per-role checklist, generated automatically |
+| Anticipatory service | Safety watch-items + ★ personal touches surface on every shift |
+| Service recovery / accountability | Live check-off, handoff notes, full audit log |
 
-## How to use it (today)
+## Features
 
-1. Open `index.html` in any browser (double-click the file).
-2. **Clients → New Client Care Card** — fill it out, add shift tasks (each tagged
-   with a shift + role).
-3. **Shift Playbook** — pick the shift and role, click *Build Playbook*, then
-   *Print* for the shift handoff. Try **About → Load sample client** to see it.
+- **Logins & roles.** Admins manage clients, staff, and assignments; staff run the playbook.
+- **Care Cards.** One rich profile per client (preferences, goals, triggers, ⚠ safety, support, personal touch).
+- **Shift Playbook.** Pick date + shift + role → every client with the tasks for that shift, sorted with priorities first.
+- **Live check-off.** Tap a task done; state is shared across all staff in real time (on refresh).
+- **Handoff notes.** Per-client notes passed to the next shift.
+- **Assign staff** to specific shifts; assigned names show on the playbook header.
+- **Audit log.** Every view/create/update/delete of client data is recorded (admin-only) — a core HIPAA requirement.
+- **Print** a clean playbook for the shift huddle.
 
-Data is stored locally in the browser. Use **About → Export** to back up or move
-data between devices.
+## Run it locally
 
-## Status & next steps
+```bash
+npm install
+ADMIN_PASS=changeme123 npm run seed   # creates admin + sample staff/client (first run only)
+npm start                             # http://localhost:3000
+```
 
-This is a working **prototype** for one device/browser. Before real client (PHI)
-use, the likely next steps are:
+Log in as `admin` / `changeme123` (change it after first login). Sample staff:
+`maria` / `staff123`, `david` / `staff123`.
 
-- **Hosted, multi-user version** with logins so staff share one live source of data.
-- **HIPAA-aware hosting** (BAA, encryption, audit log) — client data shouldn't live
-  only in a browser long-term.
-- Shift assignment by staff member, completion check-off, and end-of-shift handoff notes.
-- Optional integration with the existing EHR/EMR so Care Cards aren't double-entered.
+Tech: Node 22 (built-in `node:sqlite`), Express, bcrypt password hashing,
+HttpOnly cookie sessions. No build step.
 
-Tell us which direction matters most and we'll build it next.
+## Architecture
+
+```
+server.js        Express API (auth, clients, playbook, completions, handoffs, assignments, users, audit)
+src/db.js        node:sqlite schema + audit() helper
+src/auth.js      bcrypt + DB-backed session cookies, requireAuth / requireAdmin
+src/seed.js      first admin + sample data
+public/          index.html · styles.css · app.js  (front-end)
+data/armada.db   SQLite database (gitignored)
+```
+
+## Going to production with real client data (PHI)
+
+The code is **HIPAA-aware**, but compliance is organizational. Before using real
+client data:
+
+1. **Host with a signed BAA.** Use AWS / GCP / Azure (with a BAA) or a HIPAA PaaS
+   like Aptible or Healthie-style infra. The host must sign a Business Associate
+   Agreement.
+2. **Encryption.** Serve only over HTTPS/TLS (set `NODE_ENV=production` so the
+   session cookie is `Secure`). Enable encryption at rest on the database/volume.
+3. **Managed Postgres.** Swap the SQLite file for managed Postgres (encrypted,
+   backed up, access-controlled). The route layer is written to make this a small change.
+4. **Strong auth.** Enforce strong passwords + add MFA; rotate the seed admin
+   credentials immediately.
+5. **Audit retention & monitoring.** The audit log is in place; ship it to durable,
+   tamper-resistant storage and review access.
+6. **Least privilege & training.** Keep admin accounts few; train staff on PHI handling.
+
+Tell us which hosting path you want (AWS vs. a HIPAA PaaS) and we'll wire up the
+deploy + Postgres migration next.

@@ -221,5 +221,17 @@ async function loadAudit(){
       <td>${esc(e.entity||'')} ${e.entity_id||''}</td><td>${esc(e.detail||'')}</td></tr>`).join('')}</table>`;
 }
 
+/* ---- brand logo: if an official /logo.png is added to the repo, use it ---- */
+// Drop a file at public/logo.png (the horizontal Armada lockup) and it replaces
+// the SVG fallback automatically — no code change needed.
+(function applyBrandLogo(){
+  const probe = new Image();
+  probe.onload = () => {            // only fires for a real image, not the SPA's index.html fallback
+    const el = document.getElementById('loginBrand');
+    if (el) el.innerHTML = '<img src="/logo.png" alt="Armada Recovery" class="login-lockup"/>';
+  };
+  probe.src = '/logo.png?v=' + Date.now();
+})();
+
 /* ---- start ---- */
 (async()=>{ try{ const { user } = await api('/me'); if(user){ ME=user; boot(); } else showLogin(); }catch(e){ showLogin(); } })();

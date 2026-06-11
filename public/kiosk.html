@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Armada — How can we care for you?</title>
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  body{background:linear-gradient(135deg,var(--navy),var(--navy-2));min-height:100vh}
+  .kiosk{max-width:680px;margin:0 auto;padding:28px 18px}
+  .kcard{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);padding:26px;border-top:4px solid var(--gold)}
+  .kiosk h1{color:var(--navy);margin:6px 0}
+  .kbtn{display:block;width:100%;text-align:left;font-family:inherit;font-size:18px;padding:18px 20px;margin:10px 0;border:1px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;color:var(--navy)}
+  .kbtn:hover{border-color:var(--gold);background:#faf6ee}
+  .kmark{width:64px;display:block;margin:0 auto 6px}
+  .ksub{color:var(--muted);font-family:sans-serif;font-size:15px}
+  textarea,select,input{font-size:17px;padding:12px}
+  .big{font-size:18px;padding:16px 22px}
+</style>
+</head>
+<body>
+<div class="kiosk">
+  <div class="kcard">
+    <img src="/logo.svg" class="kmark" alt="Armada"/>
+    <div id="kview"></div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let CODE=localStorage.getItem('kioskCode')||'', DATA=null, CLIENT='';
+
+async function kapi(path, opts){ const r=await fetch('/api/kiosk/'+path,opts); if(!r.ok){throw new Error((await r.json().catch(()=>({}))).error||'Error');} return r.json(); }
+
+function gate(){
+  $('kview').innerHTML=`<h1>Welcome</h1><p class="ksub">A staff member will enter the kiosk code to begin.</p>
+    <label>Kiosk code</label><input id="kcode" type="password"/><div id="kerr" class="err"></div>
+    <button class="btn btn-gold big" style="margin-top:12px;width:100%" onclick="enter()">Start</button>`;
+}
+async function enter(){
+  CODE=$('kcode')?$('kcode').value:CODE;
+  try{ DATA=await kapi('data?code='+encodeURIComponent(CODE)); localStorage.setItem('kioskCode',CODE); home(); }
+  catch(e){ if($('kerr'))$('kerr').textContent='That code didn\'t work.'; else gate(); }
+}
+function home(){
+  $('kview').innerHTML=`<h1>How can we care for you?</h1>
+    <p class="ksub">You can ask for something or tell us how you're doing. It's anonymous unless you choose your name.</p>
+    <label>I am (optional)</label>
+    <select id="kclient"><option value="">Prefer not to say</option>${DATA.clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
+    <button class="kbtn" onclick="reqView()">🛎  Request something</button>
+    ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}`;
+}
+function client(){ const s=$('kclient'); return s?s.value:''; }
+function reqView(){
+  CLIENT=client();
+  $('kview').innerHTML=`<h1>What do you need?</h1>
+    <label>Type (optional)</label><select id="kdept"><option value="">Anything</option>${DATA.departments.map(d=>`<option>${esc(d)}</option>`).join('')}</select>
+    <label>Your request</label><textarea id="krtext" placeholder="e.g. an extra blanket, to call my family, a snack…"></textarea>
+    <button class="btn btn-gold big" style="width:100%;margin-top:10px" onclick="sendReq()">Send</button>
+    <button class="kbtn" onclick="home()">← Back</button>`;
+}
+async function sendReq(){
+  if(!$('krtext').value.trim())return;
+  await kapi('request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,client_id:CLIENT||null,department:$('kdept').value||null,text:$('krtext').value})});
+  thanks('We\'re on it. Someone will take care of this for you.');
+}
+function surveyView(id){
+  CLIENT=client();
+  const s=DATA.surveys.find(x=>x.id===id);
+  let cat='',html='';
+  s.questions.forEach(q=>{
+    if(q.category&&q.category!==cat){cat=q.category;html+=`<div class="sv-cat">${esc(cat)}</div>`;}
+    let inp;
+    if(q.type==='text') inp=`<textarea class="sq-text"></textarea>`;
+    else if(q.type==='yesno') inp=`<div class="sv-opts"><button type="button" class="sv-opt" data-v="1" onclick="kpick(this)">Yes</button><button type="button" class="sv-opt" data-v="0" onclick="kpick(this)">No</button></div>`;
+    else inp=`<div class="sv-opts">${[1,2,3,4,5].map(i=>`<button type="button" class="sv-opt" data-v="${i}" onclick="kpick(this)">${i}</button>`).join('')}</div>`;
+    html+=`<div class="sq" data-qid="${q.id}" data-type="${q.type}"><div class="sq-q">${esc(q.text)}</div>${inp}</div>`;
+  });
+  $('kview').innerHTML=`<h1>${esc(s.title)}</h1><p class="ksub">${esc(s.description||'')}</p>${html}
+    <button class="btn btn-gold big" style="width:100%;margin-top:12px" onclick="sendSurvey(${id})">Submit</button>
+    <button class="kbtn" onclick="home()">← Back</button>`;
+}
+function kpick(b){ b.parentNode.querySelectorAll('.sv-opt').forEach(x=>x.classList.remove('on')); b.classList.add('on'); b.parentNode.dataset.val=b.dataset.v; }
+async function sendSurvey(id){
+  const answers=[];
+  document.querySelectorAll('.sq').forEach(sq=>{ const qid=+sq.dataset.qid;
+    if(sq.dataset.type==='text'){const t=sq.querySelector('.sq-text').value.trim(); if(t)answers.push({question_id:qid,text:t});}
+    else{const o=sq.querySelector('.sv-opts'); if(o&&o.dataset.val!=null)answers.push({question_id:qid,num:+o.dataset.val});}
+  });
+  if(!answers.length){home();return;}
+  await kapi('survey',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,survey_id:id,client_id:CLIENT||null,answers})});
+  thanks('Thank you for sharing. It helps us care for you better.');
+}
+function thanks(msg){
+  $('kview').innerHTML=`<h1>Thank you 💚</h1><p class="ksub" style="font-size:17px">${esc(msg)}</p>
+    <button class="btn btn-gold big" style="width:100%;margin-top:16px" onclick="home()">Done</button>`;
+  setTimeout(()=>{ if($('kview')) home(); }, 6000);
+}
+if(CODE) enter(); else gate();
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "armada-care-standards",
+  "version": "0.2.0",
+  "description": "Ritz-model client care app for Armada Recovery: Care Cards + Shift Playbook, multi-user with audit logging.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node src/seed.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2"
+  }
+}

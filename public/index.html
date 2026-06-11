@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Armada Care Standards</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen" class="login-wrap">
+  <form id="loginForm" class="login-card">
+    <div id="loginBrand" class="login-brand">
+      <img src="/logo.svg" alt="Armada Recovery" class="brand-mark"/>
+      <h1 class="brand-word">Armada</h1>
+      <div class="brand-rec">Recovery</div>
+    </div>
+    <div class="tag">The Gold Standard of Client Care</div>
+    <label>Username</label>
+    <input id="l_user" autocomplete="username" />
+    <label>Password</label>
+    <input id="l_pass" type="password" autocomplete="current-password" />
+    <div id="loginErr" class="err"></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:14px">Sign in</button>
+  </form>
+</div>
+
+<!-- APP -->
+<div id="app" style="display:none">
+  <header>
+    <img src="/logo.svg" alt="Armada Recovery" class="header-mark"/>
+    <div>
+      <h1>Armada Recovery</h1>
+      <div class="tag">Care Standards · The Gold Standard of Client Care</div>
+    </div>
+    <div class="userbox sans">
+      <span id="whoami"></span>
+      <button class="btn btn-ghost btn-sm" onclick="changeMyPassword()">Change password</button>
+      <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="sans" id="groupbar"></div>
+  <nav class="sans" id="nav">
+    <button data-view="today">Today</button>
+    <button data-view="report" class="active">Shift Playbook</button>
+    <button data-view="retention">Retention</button>
+    <button data-view="outcomes">Outcomes</button>
+    <button data-view="lineup">Lineup</button>
+    <button data-view="surveys">Surveys</button>
+    <button data-view="concierge">Concierge</button>
+    <button data-view="program">Program</button>
+    <button data-view="incidents">Incidents</button>
+    <button data-view="askai">Ask AI</button>
+    <button data-view="family">Family</button>
+    <button data-view="admissions">Admissions</button>
+    <button data-view="alumni">Alumni</button>
+    <button data-view="accountability" data-admin>Accountability</button>
+    <button data-view="team">Team</button>
+    <button data-view="training">Training</button>
+    <button data-view="library">Library / SOPs</button>
+    <button data-view="standard">Standard</button>
+    <button data-view="clients">Clients</button>
+    <button data-view="editor">Care Card</button>
+    <button data-view="assign" data-admin>Assign Staff</button>
+    <button data-view="report-view" data-admin>Report</button>
+    <button data-view="users" data-admin>Staff</button>
+    <button data-view="audit" data-admin>Audit Log</button>
+  </nav>
+
+  <main>
+    <!-- TODAY (command center) -->
+    <section id="today" class="view">
+      <div class="card" style="border-left:4px solid var(--gold)">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div><h3 style="margin:0">Today at Armada</h3><p class="sub sans" id="todayDate" style="margin:2px 0 0"></p></div>
+          <button class="btn btn-gold sans" id="todayBriefBtn" onclick="todayBriefing()" style="margin-left:auto;display:none">✦ AI house briefing</button>
+        </div>
+        <div id="todayBrief"></div>
+      </div>
+      <div class="card" id="focusCard" style="border-left:4px solid var(--gold);background:#faf6ee"></div>
+      <div class="card" id="alertsCard" style="display:none;border-left:4px solid var(--danger)">
+        <h3>⚡ Proactive alerts <span id="alertCount" class="badge"></span></h3>
+        <p class="sub sans">The moment a client's signals turn — surfaced here without anyone having to look.</p>
+        <div id="alertsList"></div>
+      </div>
+      <div class="card"><div id="todayKpis" class="ret-cards"></div>
+        <div class="toolbar" style="margin-top:10px"><a class="btn btn-ghost btn-sm sans" href="/kiosk.html" target="_blank">Open client kiosk ↗</a><span id="kioskCodeHint" class="hint" style="align-self:center"></span></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:2;min-width:320px">
+          <h3>Needs attention today</h3>
+          <div id="todayAttention"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px">
+          <h3>Ask Armada</h3>
+          <p class="sub sans">Ask anything about the house.</p>
+          <div class="handoff-add"><input id="today_ask" placeholder="e.g. Who needs extra care tonight?"/><button class="btn btn-gold btn-sm sans" onclick="askFromToday()">Ask</button></div>
+          <div id="todayAskOut" class="brief-body"></div>
+        </div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:280px"><h3>Today's program</h3><div id="todaySchedule"></div></div>
+        <div class="card" style="flex:1;min-width:280px"><h3>Recent wins</h3><div id="todayWins"></div></div>
+      </div>
+    </section>
+
+    <!-- ASK AI -->
+    <section id="askai" class="view">
+      <div class="card">
+        <h3>Ask Armada — AI care concierge</h3>
+        <p class="sub sans">Ask anything about the house or a client, or have it draft a note, plan, or family update. Grounded in your data; decision support, not a clinical directive.</p>
+        <div class="controls">
+          <div class="field" style="min-width:220px"><label>About (optional)</label><select id="ai_client"><option value="">The whole house</option></select></div>
+        </div>
+        <label>Your question</label>
+        <textarea id="ai_q" placeholder="e.g. What does Janie need today to feel cared for? · Who is most at risk of leaving? · Draft a warm update to Marc's mother about his progress."></textarea>
+        <div class="toolbar"><button class="btn btn-gold sans" id="aiAskBtn" onclick="askAI()">Ask Armada</button></div>
+        <div id="aiAnswer" class="brief-body"></div>
+        <div id="aiHint" class="hint"></div>
+      </div>
+    </section>
+
+    <!-- INCIDENTS -->
+    <section id="incidents" class="view">
+      <div class="card no-print">
+        <h3>Incident &amp; Safety Reports</h3>
+        <p class="sub sans">Document safety events for review and follow-up — behavioral, property, elopement/AMA, and other.</p>
+        <div class="grid3">
+          <div><label>Client (optional)</label><select id="in_client"></select></div>
+          <div><label>Type</label><select id="in_type"><option>Behavioral</option><option>Property</option><option>Elopement/AMA</option><option>Conflict</option><option>Other</option></select></div>
+          <div><label>Severity</label><select id="in_sev"><option>Low</option><option>Moderate</option><option>High</option><option>Critical</option></select></div>
+        </div>
+        <label>What happened</label><textarea id="in_desc"></textarea>
+        <label>Action taken</label><input id="in_action"/>
+        <div class="toolbar"><button class="btn btn-gold sans" onclick="addIncident()">File report</button></div>
+      </div>
+      <div class="card"><h3>Reports</h3><div id="inList"></div></div>
+    </section>
+
+    <!-- ALUMNI -->
+    <section id="alumni" class="view">
+      <div class="card">
+        <h3>Alumni &amp; Continuing Care</h3>
+        <p class="sub sans">The relationship doesn't end at discharge. Stay connected, celebrate milestones, keep them in the family.</p>
+        <div id="alumniList"></div>
+      </div>
+    </section>
+
+    <!-- ACCOUNTABILITY -->
+    <section id="accountability" class="view">
+      <div class="card no-print">
+        <h3>Employee Accountability</h3>
+        <p class="sub sans">How often each teammate showed up in the care system — and where check-ins were missed. The teammate who missed the least each month earns recognition.</p>
+        <div class="controls"><div class="field"><label>Month</label><input id="ac_month" type="month"/></div><button class="btn btn-ghost sans" onclick="loadAccountability()">Show</button></div>
+      </div>
+      <div id="championCard"></div>
+      <div class="card"><h3>Leaderboard</h3><div id="acTable"></div></div>
+      <div class="card"><h3>Care gaps — client check-ins missed</h3><div id="acGaps"></div></div>
+    </section>
+
+    <!-- TRAINING -->
+    <section id="training" class="view">
+      <div class="card no-print">
+        <h3>Training</h3>
+        <p class="sub sans">Courses, quizzes, and proof of completion — with refreshers when certifications expire.</p>
+        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost sans" data-admin onclick="trainingStatus()">Team status</button><button class="btn btn-ghost sans" data-admin onclick="newCourse()">+ New course</button></div>
+      </div>
+      <div id="trainingArea"></div>
+    </section>
+
+    <!-- LIBRARY / SOPs -->
+    <section id="library" class="view">
+      <div class="card no-print">
+        <h3>Library — SOPs &amp; Policies</h3>
+        <p class="sub sans">Search any policy or procedure: "what's the policy on…" / "how do I…". Everything we do, written down.</p>
+        <div class="controls">
+          <input id="libSearch" placeholder="Search policies & procedures…" oninput="renderDocs()" style="flex:1;min-width:240px"/>
+          <button class="btn btn-gold sans" data-admin onclick="newDoc()">+ New document</button>
+        </div>
+      </div>
+      <div id="docEditor"></div>
+      <div id="libList"></div>
+    </section>
+
+    <!-- STANDARD (knowledge base) -->
+    <section id="standard" class="view">
+      <div class="card" style="border-left:4px solid var(--gold)">
+        <h3>The Armada Standard</h3>
+        <p id="stdNorth" class="sub sans" style="font-style:italic"></p>
+        <input id="stdSearch" placeholder="Search the standard… (e.g. AMA, the Save, food, departure)" oninput="renderStandard()"/>
+      </div>
+      <div id="stdSections"></div>
+    </section>
+
+    <!-- SHIFT REPORT -->
+    <section id="report" class="view active">
+      <div class="card no-print">
+        <h3>Shift Playbook</h3>
+        <p class="sub sans">The daily lineup. Each client, what to do this shift, checked off live as the team works.</p>
+        <div class="controls">
+          <div class="field"><label>Date</label><input id="r_date" type="date"/></div>
+          <div class="field"><label>Shift</label><select id="r_shift"></select></div>
+          <div class="field"><label>Role filter</label><select id="r_role"><option>All</option></select></div>
+          <button class="btn btn-gold sans" onclick="loadPlaybook()">Refresh</button>
+          <button class="btn btn-ghost sans" onclick="window.print()">Print</button>
+          <button class="btn btn-gold sans" id="briefBtn" onclick="genShiftBriefing()" style="display:none">✦ AI shift briefing</button>
+        </div>
+        <div id="assignees" class="hint"></div>
+        <div id="shiftBrief"></div>
+      </div>
+      <div id="reportHead"></div>
+      <div id="reportBody"></div>
+    </section>
+
+    <!-- RETENTION -->
+    <section id="retention" class="view">
+      <div class="card">
+        <h3>Retention Dashboard</h3>
+        <p class="sub sans">Who is at risk of leaving against medical advice, who still needs a check-in today, and which warning signs are trending. For clinical review — not a diagnosis.</p>
+        <div id="retSummary" class="ret-cards"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:2;min-width:320px">
+          <h3>Clients by risk</h3>
+          <div id="retClients"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px">
+          <h3>Trending warning signs</h3>
+          <p class="sub sans">Across all pulses, last 14 days.</p>
+          <div id="retTriggers"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONCIERGE -->
+    <section id="concierge" class="view">
+      <div class="card no-print">
+        <h3>Concierge &amp; Requests</h3>
+        <p class="sub sans">Anticipate and fulfill every wish. Log any client request or need — it routes to the right department and is tracked to completion.</p>
+        <div class="grid3">
+          <div><label>Client (optional)</label><select id="rq_client"></select></div>
+          <div><label>Department</label><select id="rq_dept"></select></div>
+          <div><label>Priority</label><select id="rq_pri"><option>Normal</option><option>High</option></select></div>
+        </div>
+        <label>Request / need</label>
+        <div class="handoff-add"><input id="rq_text" placeholder="e.g. extra blanket for room 204 · ride to court Thursday · vegetarian dinner"/><button class="btn btn-gold sans" onclick="addRequest()">Log request</button></div>
+      </div>
+      <div class="card no-print">
+        <div class="controls">
+          <div class="field"><label>Department</label><select id="rq_filter_dept"><option value="">All departments</option></select></div>
+          <div class="field"><label>Status</label><select id="rq_filter_status"><option value="Open">Open</option><option value="">All</option><option value="Done">Done</option></select></div>
+          <button class="btn btn-ghost sans" onclick="loadConcierge()">Refresh</button>
+        </div>
+      </div>
+      <div id="rqBoard"></div>
+    </section>
+
+    <!-- PROGRAM -->
+    <section id="program" class="view">
+      <div class="card no-print">
+        <h3>Program &amp; Schedule</h3>
+        <p class="sub sans">The day's groups, activities, meals, outings, and appointments.</p>
+        <div class="controls">
+          <div class="field"><label>Date</label><input id="pg_date" type="date"/></div>
+          <button class="btn btn-ghost sans" onclick="loadProgram()">Show</button>
+        </div>
+        <div class="grid3" style="margin-top:8px">
+          <div><label>Time</label><input id="pg_time" type="time"/></div>
+          <div><label>Type</label><select id="pg_type"></select></div>
+          <div><label>Location</label><input id="pg_loc" placeholder="e.g. Group Room A"/></div>
+        </div>
+        <div class="grid2">
+          <div><label>Title</label><input id="pg_title" placeholder="e.g. Morning Process Group"/></div>
+          <div><label>For client (optional — blank = whole house)</label><select id="pg_client"></select></div>
+        </div>
+        <div class="toolbar"><button class="btn btn-gold sans" onclick="addSchedule()">Add to schedule</button></div>
+      </div>
+      <div class="card"><h3 id="pgHeading">Schedule</h3><div id="pgList"></div></div>
+    </section>
+
+    <!-- JOURNEY (client 360) -->
+    <section id="journey" class="view"><div id="journeyBody"></div></section>
+
+    <!-- FAMILY -->
+    <section id="family" class="view">
+      <div class="card no-print">
+        <h3>Family Engagement</h3>
+        <p class="sub sans">Family are part of the experience. Keep them informed and cared for — easing outside pressure is a top way to keep clients.</p>
+        <div class="controls"><div class="field"><label>Client</label><select id="fm_client"></select></div><button class="btn btn-ghost sans" onclick="loadFamily()">Open</button></div>
+      </div>
+      <div id="familyArea"></div>
+    </section>
+
+    <!-- ADMISSIONS -->
+    <section id="admissions" class="view">
+      <div class="card no-print">
+        <h3>Admissions &amp; Bed Board</h3>
+        <p class="sub sans">Every journey begins with a warm welcome — from the first phone call.</p>
+        <div class="grid3">
+          <div><label>Name</label><input id="ad_name"/></div>
+          <div><label>Referral source</label><input id="ad_ref" placeholder="e.g. Hospital, family"/></div>
+          <div><label>Phone</label><input id="ad_phone"/></div>
+        </div>
+        <div class="grid2"><div><label>Insurance</label><input id="ad_ins"/></div><div><label>Scheduled date</label><input id="ad_date" type="date"/></div></div>
+        <div class="toolbar"><button class="btn btn-gold sans" onclick="addAdmission()">Add to pipeline</button></div>
+      </div>
+      <div class="card"><h3>Pipeline</h3><div id="admBoard"></div></div>
+      <div class="card">
+        <h3>Bed Board</h3>
+        <div class="handoff-add no-print"><input id="bed_room" placeholder="Room"/><input id="bed_label" placeholder="Bed"/><input id="bed_unit" placeholder="Unit"/><button class="btn btn-ghost btn-sm sans" onclick="addBed()">Add bed</button></div>
+        <div id="bedBoard" class="bed-grid"></div>
+      </div>
+    </section>
+
+    <!-- TEAM -->
+    <section id="team" class="view">
+      <div class="card">
+        <h3>Team</h3>
+        <p class="sub sans">Ladies and Gentlemen serving Ladies and Gentlemen. Cared-for staff give cared-for care.</p>
+        <div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Today's Service Value</div>
+        <div id="teamValue" class="line-value"></div>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-primary btn-sm sans" id="trainBtn" onclick="ackTraining()">✓ I reviewed today's value</button><span id="trainMsg" class="hint" style="align-self:center"></span></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:2;min-width:300px">
+          <h3>Kudos — recognize a teammate</h3>
+          <div class="grid2"><div><label>To</label><select id="ku_to"></select></div><div></div></div>
+          <div class="handoff-add"><input id="ku_text" placeholder="What did they do that made someone feel cared for?"/><button class="btn btn-gold sans" onclick="giveKudos()">Give kudos</button></div>
+          <div id="kudosFeed"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px" data-admin>
+          <h3>Team wellbeing (7 days)</h3>
+          <div id="pulseTrend"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Daily Focus participation</h3>
+        <p class="sub sans">Engagement with the day's focus over time.</p>
+        <div id="focusHistory"></div>
+      </div>
+    </section>
+
+    <!-- SURVEYS -->
+    <section id="surveys" class="view">
+      <div class="card no-print">
+        <h3>Surveys</h3>
+        <p class="sub sans">Hear directly from clients — the Ritz way. Hand a tablet to the client, or fill it in together.</p>
+        <div class="controls">
+          <div class="field"><label>Survey</label><select id="sv_select"></select></div>
+          <div class="field"><label>Client (optional)</label><select id="sv_client"></select></div>
+          <button class="btn btn-gold sans" onclick="startSurvey()">Start survey</button>
+          <button class="btn btn-ghost sans" data-admin onclick="showSurveyResults()">View results</button>
+        </div>
+      </div>
+      <div id="surveyDue"></div>
+      <div id="surveyArea"></div>
+    </section>
+
+    <!-- CLIENTS -->
+    <section id="clients" class="view">
+      <div class="toolbar"><button class="btn btn-gold sans" onclick="newClient()">+ New Client Care Card</button></div>
+      <div id="clientGrid" class="clientlist"></div>
+      <div id="clientEmpty" class="empty" style="display:none">No clients yet. Create your first Care Card.</div>
+    </section>
+
+    <!-- EDITOR -->
+    <section id="editor" class="view">
+      <div class="card">
+        <h3 id="editorTitle">New Care Card</h3>
+        <p class="sub sans">Fill this out once per client. It becomes the source of every staff member's shift instructions.</p>
+        <div class="grid3">
+          <div><label>Full Name</label><input id="f_name"/></div>
+          <div><label>Preferred Name</label><input id="f_pref"/></div>
+          <div><label>Room / Unit</label><input id="f_room"/></div>
+        </div>
+        <div class="grid3">
+          <div><label>Program / Level of Care</label><input id="f_program"/></div>
+          <div><label>Admission Date</label><input id="f_admit" type="date"/></div>
+          <div><label>Sobriety / Milestone Date</label><input id="f_sober" type="date"/></div>
+        </div>
+        <label>★ Personal Touch — what makes this client feel genuinely cared for</label>
+        <textarea id="f_touch"></textarea>
+        <div class="grid2">
+          <div><label>Preferences (food, drink, comfort, faith, hobbies)</label><textarea id="f_prefs"></textarea></div>
+          <div><label>Goals This Week</label><textarea id="f_goals"></textarea></div>
+        </div>
+        <div class="grid2">
+          <div><label>Triggers / Sensitivities</label><textarea id="f_triggers"></textarea></div>
+          <div><label>⚠ Safety / Medical Watch Items</label><textarea id="f_safety"></textarea></div>
+        </div>
+        <label>Support System / Family Contacts</label><textarea id="f_support"></textarea>
+        <div class="grid2">
+          <div><label>☀ Welcome / first-72-hours plan (the arrival)</label><textarea id="f_welcome_plan" placeholder="Greet by name. Warm welcome gesture. Pair with a peer buddy. Ease first-night anxiety — the highest-risk window."></textarea></div>
+          <div><label>🤝 Aftercare / continuity plan (the farewell)</label><textarea id="f_aftercare_plan" placeholder="Sober-living / outpatient, sponsor, meeting schedule, who follows up. Used when the client is discharged."></textarea></div>
+        </div>
+        <hr/>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <h3 style="color:var(--navy);margin:0">Shift Tasks</h3>
+            <p class="sub sans" style="margin:4px 0 0">Tag each action with a shift and role. These flow into the Shift Playbook.</p>
+          </div>
+          <button id="aiBtn" class="btn btn-gold btn-sm sans" style="margin-left:auto;display:none" onclick="suggestTasks()">✦ Draft tasks with Claude</button>
+        </div>
+        <div id="aiStatus" class="hint" style="display:none"></div>
+        <div id="taskList" style="margin-top:12px"></div>
+        <button class="btn btn-ghost btn-sm sans" onclick="addTaskRow()">+ Add task</button>
+        <div id="dischargeBox" style="display:none;background:#faf8f3;border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:20px">
+          <h3 style="color:var(--navy);margin:0 0 4px">🤝 Discharge — the fond farewell</h3>
+          <p class="sub sans" style="margin:0 0 10px">Completed or AMA automatically schedules 24-hour, 48-hour, and 30-day aftercare check-in calls.</p>
+          <div class="controls">
+            <div class="field"><label>Outcome</label><select id="d_status"><option>Completed</option><option>AMA</option><option>Transferred</option></select></div>
+            <div class="field"><label>Date</label><input id="d_date" type="date"/></div>
+          </div>
+          <div id="safeDeparture" style="margin-top:6px">
+            <div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Safe Departure checklist — every departure, dignity intact</div>
+            <label class="trg"><input type="checkbox" class="sd" data-s="In-person, calm conversation; AMA explained in plain language with risks and the open door"/> In-person, calm conversation — risks + open door explained</label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Refusal to sign witnessed by two staff and documented (still an AMA)"/> Refusal to sign witnessed by two staff (if applicable)</label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Naloxone in hand + 60-sec overdose education (per clinical protocol — Medical Director owns)"/> Naloxone in hand + overdose education <span class="hint">(per clinical protocol)</span></label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Belongings returned with dignity; destination/transport asked; food for the road offered"/> Belongings returned; transport asked; food for the road</label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Last words an invitation: you are welcome back any time"/> "You are welcome back — any time"</label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Follow-up call scheduled within 24–72 hours"/> Follow-up within 24–72h (auto-scheduled)</label>
+          </div>
+          <div class="toolbar"><button class="btn btn-primary sans" onclick="dischargeClient()">Discharge &amp; start aftercare</button></div>
+        </div>
+        <div class="toolbar" style="margin-top:24px">
+          <button class="btn btn-danger btn-sm sans" id="deleteBtn" onclick="deleteCurrent()" style="margin-right:auto;display:none" data-admin>Delete client</button>
+          <button class="btn btn-ghost sans" onclick="show('clients')">Cancel</button>
+          <button class="btn btn-primary sans" onclick="saveClient()">Save Care Card</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- OUTCOMES -->
+    <section id="outcomes" class="view">
+      <div class="card">
+        <h3>Outcomes</h3>
+        <p class="sub sans">Are we keeping clients and helping them complete? The numbers that prove the care is working.</p>
+        <div id="outKpis" class="ret-cards"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:280px">
+          <h3>Aftercare calls due</h3>
+          <p class="sub sans">The fond farewell — continuity that prevents relapse.</p>
+          <div id="outFollow"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px">
+          <h3>Upcoming milestones</h3>
+          <p class="sub sans">Moments to celebrate — next 7 days.</p>
+          <div id="outMiles"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Open concerns</h3>
+        <p class="sub sans">Whoever heard it owns it until it's resolved.</p>
+        <div id="outConcerns"></div>
+      </div>
+    </section>
+
+    <!-- LINEUP -->
+    <section id="lineup" class="view">
+      <div class="card" style="border-left:4px solid var(--gold)">
+        <h3>Daily Lineup</h3>
+        <p class="sub sans">Take two minutes at the start of the shift. Read today's value aloud. Share one moment of care.</p>
+        <div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Service Value of the day</div>
+        <div id="lineValue" class="line-value"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:2;min-width:320px">
+          <h3>Wow Stories — moments of care</h3>
+          <textarea id="w_text" placeholder="Share a moment where someone made a client feel genuinely cared for…"></textarea>
+          <div class="grid2">
+            <div><label>About which client (optional)</label><select id="w_client"></select></div>
+            <div><label>Recognize a teammate (optional)</label><input id="w_recognize" placeholder="e.g. Maria"/></div>
+          </div>
+          <div class="toolbar"><button class="btn btn-gold sans" onclick="addWow()">Share story</button></div>
+          <div id="wowFeed"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px">
+          <h3>How's the team today?</h3>
+          <p class="sub sans">Ladies and Gentlemen serving Ladies and Gentlemen. Burnout shows up in client care.</p>
+          <label>Your load this shift</label>
+          <div id="staffLoad" class="load-row">
+            <button class="load-btn" data-v="Good">Good</button>
+            <button class="load-btn" data-v="Okay">Okay</button>
+            <button class="load-btn" data-v="Stretched">Stretched</button>
+            <button class="load-btn" data-v="Burnt out">Burnt out</button>
+          </div>
+          <label>Anything leadership should know? (optional)</label>
+          <input id="staffNote" placeholder="Private to admins"/>
+          <div class="toolbar"><button class="btn btn-primary btn-sm sans" onclick="submitStaffPulse()">Submit</button></div>
+          <div id="staffPulseMsg" class="hint"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ASSIGN -->
+    <section id="assign" class="view">
+      <div class="card">
+        <h3>Assign Staff to a Shift</h3>
+        <p class="sub sans">Choose who is working. Assigned staff show on the playbook header.</p>
+        <div class="controls">
+          <div class="field"><label>Date</label><input id="a_date" type="date"/></div>
+          <div class="field"><label>Shift</label><select id="a_shift"></select></div>
+          <button class="btn btn-gold sans" onclick="loadAssign()">Load</button>
+        </div>
+        <div id="assignList"></div>
+        <button class="btn btn-primary sans" style="margin-top:14px" onclick="saveAssign()">Save assignments</button>
+      </div>
+    </section>
+
+    <!-- USERS -->
+    <section id="users" class="view">
+      <div class="card">
+        <h3>Add Staff Member</h3>
+        <div class="grid3">
+          <div><label>Name</label><input id="u_name"/></div>
+          <div><label>Username</label><input id="u_user"/></div>
+          <div><label>Temp Password</label><input id="u_pass"/></div>
+        </div>
+        <div class="grid2">
+          <div><label>Job Role</label><select id="u_job"></select></div>
+          <div><label>Access</label><select id="u_role"><option value="staff">Staff</option><option value="admin">Admin</option></select></div>
+        </div>
+        <button class="btn btn-primary sans" style="margin-top:14px" onclick="addUser()">Add staff</button>
+      </div>
+      <div class="card"><h3>Staff</h3><div id="userList"></div></div>
+    </section>
+
+    <!-- REPORT -->
+    <section id="report-view" class="view">
+      <div class="card no-print">
+        <h3>Weekly Leadership Report</h3>
+        <p class="sub sans">Outcomes, wow stories, delights, and open concerns for the past 7 days.</p>
+        <div class="toolbar" style="justify-content:flex-start">
+          <button class="btn btn-ghost sans" onclick="window.print()">Print / Save PDF</button>
+          <button class="btn btn-gold sans" id="sendReportBtn" onclick="sendReport()">Email to leadership now</button>
+        </div>
+        <div id="reportEmailHint" class="hint"></div>
+      </div>
+      <div class="card"><div id="reportPreview"></div></div>
+    </section>
+
+    <!-- AUDIT -->
+    <section id="audit" class="view">
+      <div class="card">
+        <h3>Audit Log</h3>
+        <p class="sub sans">Every access and change to client data — for accountability and HIPAA.</p>
+        <div id="auditList"></div>
+      </div>
+    </section>
+  </main>
+  <footer class="sans">Armada Care Standards · shared workspace</footer>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

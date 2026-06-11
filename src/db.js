@@ -400,6 +400,17 @@ CREATE TABLE IF NOT EXISTS focus_logs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Assigned tasks — required, owned by a named teammate (incl. @mentions).
+CREATE TABLE IF NOT EXISTS assigned_tasks (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL, detail TEXT,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  assignee_id INTEGER REFERENCES users(id), assignee_name TEXT,
+  assigned_by TEXT, source TEXT DEFAULT 'manual',
+  due_date TEXT, status TEXT NOT NULL DEFAULT 'Open',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), done_at TEXT
+);
+
 -- The Save (PAUSE) tracker — de-escalation attempts and whether they stayed.
 CREATE TABLE IF NOT EXISTS saves (
   id INTEGER PRIMARY KEY,
@@ -553,6 +564,11 @@ addColumn('clients', 'medications', 'TEXT');
 addColumn('shifts', 'crisis_owner_id', 'INTEGER');
 addColumn('shifts', 'crisis_owner_name', 'TEXT');
 addColumn('clients', 'departure_steps', 'TEXT');
+addColumn('clients', 'discharge_reason', 'TEXT');
+addColumn('clients', 'discharge_followthrough', 'TEXT');
+addColumn('clients', 'discharge_improve', 'TEXT');
+addColumn('followups', 'assignee_id', 'INTEGER');
+addColumn('followups', 'assignee_name', 'TEXT');
 
 // Seed the default surveys (idempotent — only inserts questions on first creation).
 function ensureSurvey(key, title, description, sort, questions) {

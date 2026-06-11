@@ -80,7 +80,7 @@ const GROUPS=[
 const GROUP_OF={today:'today',
   report:'care',clients:'care',editor:'care',journey:'care',concierge:'care',program:'care',
   retention:'clinical',surveys:'clinical',incidents:'clinical',
-  family:'people',team:'people',lineup:'people',assign:'people',
+  family:'people',team:'people',lineup:'people',assign:'people',mytasks:'people',
   admissions:'admissions',alumni:'people',accountability:'insights',
   standard:'learn',library:'learn',training:'learn',
   outcomes:'insights',scorecard:'insights','report-view':'insights',users:'insights',audit:'insights',
@@ -111,6 +111,7 @@ function show(v){
   if(v==='library') loadLibrary();
   if(v==='training') loadTraining();
   if(v==='scorecard') loadScorecard();
+  if(v==='mytasks') loadMyTasks();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -159,7 +160,7 @@ async function dischargeClient(){
   if(!confirm(`Discharge this client as "${status}"? This starts the aftercare calls and removes them from the active playbook.`)) return;
   const cid = currentId;
   const steps = [...document.querySelectorAll('#safeDeparture .sd:checked')].map(c=>c.dataset.s);
-  await api('/clients/'+currentId+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('d_date').value,steps})});
+  await api('/clients/'+currentId+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('d_date').value,steps,reason:$('d_reason').value,followthrough:$('d_follow').value,improve:$('d_improve').value})});
   if(status!=='Transferred' && confirm('Discharged — aftercare calls scheduled.\n\nWould you like to do the Discharge survey with the client now?')){
     gotoSurvey('discharge', cid);
   } else {
@@ -333,6 +334,32 @@ async function trainingStatus(){
     ${rows.map(r=>`<tr><td>${esc(r.name)}</td>${r.courses.map(c=>`<td>${c.due?'<span class="risk risk-high">due</span>':'<span class="risk risk-low">'+(c.lastPassed?c.lastPassed.score+'%':'✓')+'</span>'}</td>`).join('')}</tr>`).join('')}</table>
     <div class="toolbar"><button class="btn btn-ghost sans" onclick="loadTraining()">Back</button></div></div>`;
 }
+
+/* ---- my tasks / assigned tasks ---- */
+async function loadMyTasks(){
+  const { calls, tasks, today } = await api('/my-tasks');
+  const callRows = calls.map(c=>`<div class="todo"><div class="txt">🤝 <strong>${esc(c.pref||c.name)}</strong> — ${esc(c.type)} aftercare call · due ${esc(c.due_date)} ${c.due_date<=today?'<span class="risk risk-high">due</span>':''}</div>
+    <button class="btn btn-ghost btn-sm sans" onclick="doneCall(${c.id},'Done')">Done</button><button class="btn btn-ghost btn-sm sans" onclick="doneCall(${c.id},'Unreachable')">No answer</button></div>`).join('');
+  const taskRows = tasks.map(t=>`<div class="todo"><div class="txt">✅ ${esc(t.title)}${t.pref?' · '+esc(t.pref):''}${t.due_date?' · due '+esc(t.due_date):''} <span class="hint">from ${esc(t.assigned_by||'')}</span>${t.detail?'<div class="hint">'+esc(t.detail)+'</div>':''}</div>
+    <button class="btn btn-ghost btn-sm sans" onclick="doneTask(${t.id})">Done</button></div>`).join('');
+  $('myTasksList').innerHTML = (callRows+taskRows) || '<div class="pc-note">Nothing assigned to you. 🎉</div>';
+  await fillClientSelect($('at_client'),'No client');
+  try { const { staff } = await api('/staff'); const opts = staff.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    $('at_to').innerHTML = '<option value="">Pick teammate…</option>'+opts;
+    if($('acc_user')){ const { aftercareCoordinator } = await api('/settings').catch(()=>({})); $('acc_user').innerHTML='<option value="">— none —</option>'+staff.map(s=>`<option value="${s.id}" ${aftercareCoordinator&&aftercareCoordinator.id===s.id?'selected':''}>${esc(s.name)}</option>`).join(''); }
+  } catch(e){}
+  if(ME.role==='admin'){ try { const { calls:ac, tasks:at } = await api('/all-tasks');
+    $('allTasksList').innerHTML = (ac.map(c=>`<div class="pc-note">🤝 ${esc(c.pref)} — ${esc(c.type)} call due ${esc(c.due_date)} · <strong>${esc(c.assignee_name||'unassigned')}</strong></div>`).join('')+
+      at.map(t=>`<div class="pc-note">✅ ${esc(t.title)} · <strong>${esc(t.assignee_name||'')}</strong>${t.due_date?' · due '+esc(t.due_date):''}</div>`).join('')) || '<div class="hint">No open team tasks.</div>'; }catch(e){} }
+}
+async function doneCall(id,status){ await api('/followups/'+id,{method:'POST',body:JSON.stringify({status})}); loadMyTasks(); }
+async function doneTask(id){ await api('/assigned-tasks/'+id+'/done',{method:'POST'}); loadMyTasks(); }
+async function assignTask(){
+  if(!$('at_to').value||!$('at_title').value.trim()){ alert('Pick a teammate and enter a task.'); return; }
+  await api('/assigned-tasks',{method:'POST',body:JSON.stringify({assignee_id:$('at_to').value,title:$('at_title').value,client_id:$('at_client').value||null,due_date:$('at_due').value||null})});
+  $('at_title').value=''; $('at_due').value=''; alert('Assigned.'); loadMyTasks();
+}
+async function saveCoordinator(){ await api('/settings/aftercare-coordinator',{method:'POST',body:JSON.stringify({user_id:$('acc_user').value||null})}); alert('Aftercare Coordinator saved. New discharges will auto-assign their calls.'); }
 
 /* ---- scorecard + saves ---- */
 async function loadScorecard(){
@@ -855,6 +882,11 @@ async function loadToday(){
         ${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="setFocus()">Set focus</button>`:''}</div>
       <div id="focusMsg" class="hint"></div>`;
   }
+  const ad = [];
+  (t.admitsToday||[]).forEach(c=>ad.push(`<div class="pc-note">☀ <strong>Admit:</strong> ${esc(c.pref||c.name)}${c.room?' · Room '+esc(c.room):''}${c.program?' · '+esc(c.program):''} <button class="btn btn-ghost btn-sm sans no-print" onclick="openJourney(${c.id})">Open</button></div>`));
+  (t.dischargesToday||[]).forEach(c=>ad.push(`<div class="pc-note">🤝 <strong>Discharge (${esc(c.discharge_status)}):</strong> ${esc(c.pref||c.name)}${c.discharge_reason?' — '+esc(c.discharge_reason):''}</div>`));
+  if($('todayAdmitsDischarges')) $('todayAdmitsDischarges').innerHTML = ad.length ? ad.join('') : '<div class="pc-note">No admits or discharges logged today.</div>';
+  $('todayDate').innerHTML = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'}) + (t.myTaskCount?` · <a href="#" onclick="show('mytasks');return false" style="color:var(--gold)">You have ${t.myTaskCount} task${t.myTaskCount===1?'':'s'} →</a>`:'');
   loadAlerts();
 }
 async function joinFocus(){

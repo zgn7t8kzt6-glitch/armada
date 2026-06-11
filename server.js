@@ -414,13 +414,18 @@ app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
   const { status, date } = req.body || {};
   if (!['Completed', 'AMA', 'Transferred'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const d = date || new Date().toISOString().slice(0, 10);
-  const steps = req.body?.steps ? JSON.stringify(req.body.steps) : null;
-  db.prepare(`UPDATE clients SET discharge_status = ?, discharge_date = ?, departure_steps = ? WHERE id = ?`).run(status, d, steps, req.params.id);
+  const b = req.body || {};
+  const steps = b.steps ? JSON.stringify(b.steps) : null;
+  db.prepare(`UPDATE clients SET discharge_status = ?, discharge_date = ?, departure_steps = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
+    .run(status, d, steps, b.reason || null, b.followthrough || null, b.improve || null, req.params.id);
   if (status !== 'Transferred') {
+    // Aftercare calls are REQUIRED tasks, auto-assigned to the Aftercare Coordinator.
+    const coordId = getState('aftercare_coordinator');
+    const coord = coordId ? db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(coordId) : null;
     const base = new Date(d + 'T00:00').getTime();
-    const ins = db.prepare(`INSERT INTO followups (client_id, type, due_date) VALUES (?, ?, ?)`);
+    const ins = db.prepare(`INSERT INTO followups (client_id, type, due_date, assignee_id, assignee_name) VALUES (?, ?, ?, ?, ?)`);
     [[1, '24h'], [2, '48h'], [30, '30d']].forEach(([days, type]) =>
-      ins.run(req.params.id, type, new Date(base + days * 864e5).toISOString().slice(0, 10)));
+      ins.run(req.params.id, type, new Date(base + days * 864e5).toISOString().slice(0, 10), coord?.id || null, coord?.name || null));
   }
   audit({ user: req.user, action: 'DISCHARGE', entity: 'client', entity_id: +req.params.id, detail: status, ip: req.ip });
   res.json({ ok: true });
@@ -440,6 +445,39 @@ app.post('/api/followups/:id', requireAuth, (req, res) => {
   const st = ['Done', 'Unreachable', 'Pending'].includes(req.body?.status) ? req.body.status : 'Done';
   db.prepare(`UPDATE followups SET status = ?, note = ?, done_by = ?, done_at = datetime('now') WHERE id = ?`)
     .run(st, req.body?.note || null, req.user.id, req.params.id);
+  res.json({ ok: true });
+});
+
+/* ---------------- Assigned tasks ("tasks per employee") + My Tasks ---------------- */
+app.get('/api/my-tasks', requireAuth, (req, res) => {
+  const calls = db.prepare(`SELECT f.id, f.type, f.due_date, c.pref, c.name, c.id cid FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' AND f.assignee_id = ? ORDER BY f.due_date`).all(req.user.id);
+  const tasks = db.prepare(`SELECT t.*, c.pref FROM assigned_tasks t LEFT JOIN clients c ON c.id = t.client_id WHERE t.status = 'Open' AND t.assignee_id = ? ORDER BY (t.due_date IS NULL), t.due_date, t.id`).all(req.user.id);
+  res.json({ calls, tasks, today: new Date().toISOString().slice(0, 10) });
+});
+app.get('/api/all-tasks', requireAuth, requireAdmin, (req, res) => {
+  res.json({
+    calls: db.prepare(`SELECT f.id, f.type, f.due_date, f.assignee_name, c.pref FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' ORDER BY f.due_date`).all(),
+    tasks: db.prepare(`SELECT t.*, c.pref FROM assigned_tasks t LEFT JOIN clients c ON c.id = t.client_id WHERE t.status = 'Open' ORDER BY (t.due_date IS NULL), t.due_date`).all(),
+  });
+});
+app.post('/api/assigned-tasks', requireAuth, (req, res) => {
+  const b = req.body || {}; if (!b.assignee_id || !b.title?.trim()) return res.status(400).json({ error: 'Pick a teammate and a task' });
+  const u = db.prepare(`SELECT name FROM users WHERE id = ?`).get(b.assignee_id);
+  db.prepare(`INSERT INTO assigned_tasks (title, detail, client_id, assignee_id, assignee_name, assigned_by, source, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(b.title.trim(), b.detail || null, b.client_id || null, b.assignee_id, u?.name || null, req.user.name, b.source || 'manual', b.due_date || null);
+  res.json({ ok: true });
+});
+app.post('/api/assigned-tasks/:id/done', requireAuth, (req, res) => {
+  db.prepare(`UPDATE assigned_tasks SET status = 'Done', done_at = datetime('now') WHERE id = ?`).run(req.params.id);
+  res.json({ ok: true });
+});
+app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
+  const id = getState('aftercare_coordinator');
+  res.json({ aftercareCoordinator: id ? db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(id) : null,
+    staff: db.prepare(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`).all() });
+});
+app.post('/api/settings/aftercare-coordinator', requireAuth, requireAdmin, (req, res) => {
+  setState('aftercare_coordinator', String(req.body?.user_id || ''));
   res.json({ ok: true });
 });
 
@@ -719,7 +757,11 @@ app.get('/api/today', requireAuth, (req, res) => {
     wows: db.prepare(`SELECT w.text, w.by_name, c.pref FROM wows w LEFT JOIN clients c ON c.id=w.client_id ORDER BY w.id DESC LIMIT 3`).all(),
     delights: db.prepare(`SELECT d.text, c.pref FROM delights d LEFT JOIN clients c ON c.id=d.client_id ORDER BY d.id DESC LIMIT 3`).all(),
   };
-  res.json({ metrics, attention: attention.slice(0, 25), schedule, wins, claude: claudeConfigured(), focus: focusForDate(today) });
+  const admitsToday = db.prepare(`SELECT id, pref, name, room, program FROM clients WHERE admit = ? AND active = 1`).all(today);
+  const dischargesToday = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason FROM clients WHERE discharge_date = ?`).all(today);
+  const myCalls = db.prepare(`SELECT COUNT(*) n FROM followups WHERE status = 'Pending' AND assignee_id = ? AND due_date <= ?`).get(req.user.id, today).n;
+  const myTasks = db.prepare(`SELECT COUNT(*) n FROM assigned_tasks WHERE status = 'Open' AND assignee_id = ?`).get(req.user.id).n;
+  res.json({ metrics, attention: attention.slice(0, 25), schedule, wins, claude: claudeConfigured(), focus: focusForDate(today), admitsToday, dischargesToday, myTaskCount: myCalls + myTasks });
 });
 
 // Ask Armada (AI concierge)

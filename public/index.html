@@ -60,6 +60,7 @@
     <button data-view="program">Program</button>
     <button data-view="incidents">Incidents</button>
     <button data-view="askai">Ask AI</button>
+    <button data-view="mytasks">My Tasks</button>
     <button data-view="family">Family</button>
     <button data-view="admissions">Admissions</button>
     <button data-view="alumni">Alumni</button>
@@ -111,6 +112,7 @@
         <div class="card" style="flex:1;min-width:280px"><h3>Today's program</h3><div id="todaySchedule"></div></div>
         <div class="card" style="flex:1;min-width:280px"><h3>Recent wins</h3><div id="todayWins"></div></div>
       </div>
+      <div class="card"><h3>Today's admits &amp; discharges</h3><div id="todayAdmitsDischarges"></div></div>
     </section>
 
     <!-- ASK AI -->
@@ -189,6 +191,23 @@
       </div>
       <div id="docEditor"></div>
       <div id="libList"></div>
+    </section>
+
+    <!-- MY TASKS -->
+    <section id="mytasks" class="view">
+      <div class="card"><h3>My Tasks</h3><p class="sub sans">Your required to-dos — aftercare calls you own and anything a teammate assigned you. Not optional.</p><div id="myTasksList"></div></div>
+      <div class="card">
+        <h3>Assign a task / tag a teammate</h3>
+        <p class="sub sans">Hand a task to someone with accountability — it lands in their My Tasks. (Keep client details out of free text; this is for follow-through, not chat.)</p>
+        <div class="grid3"><div><label>To</label><select id="at_to"></select></div><div><label>About client (optional)</label><select id="at_client"></select></div><div><label>Due (optional)</label><input id="at_due" type="date"/></div></div>
+        <div class="handoff-add"><input id="at_title" placeholder="e.g. Call Marc's mother with an update / restock snack station"/><button class="btn btn-gold sans" onclick="assignTask()">Assign</button></div>
+      </div>
+      <div class="card" data-admin>
+        <h3>Aftercare Coordinator</h3>
+        <p class="sub sans">All discharge aftercare calls (24h / 48h / 30-day) are auto-assigned to this person as required tasks.</p>
+        <div class="controls"><div class="field"><label>Coordinator</label><select id="acc_user"></select></div><button class="btn btn-primary sans" onclick="saveCoordinator()">Save</button></div>
+        <h3 style="margin-top:14px">All open team tasks</h3><div id="allTasksList"></div>
+      </div>
     </section>
 
     <!-- SCORECARD -->
@@ -431,6 +450,11 @@
           <div class="controls">
             <div class="field"><label>Outcome</label><select id="d_status"><option>Completed</option><option>AMA</option><option>Transferred</option></select></div>
             <div class="field"><label>Date</label><input id="d_date" type="date"/></div>
+          </div>
+          <div class="grid3" style="margin-top:4px">
+            <div><label>Why are they leaving? (debrief)</label><textarea id="d_reason"></textarea></div>
+            <div><label>What did we follow through on?</label><textarea id="d_follow"></textarea></div>
+            <div><label>What could we have done better?</label><textarea id="d_improve"></textarea></div>
           </div>
           <div id="safeDeparture" style="margin-top:6px">
             <div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Safe Departure checklist — every departure, dignity intact</div>

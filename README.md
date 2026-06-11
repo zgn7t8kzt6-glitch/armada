@@ -8,6 +8,16 @@ client feels genuinely, individually cared for.
 This is now a **multi-user web app** with logins, roles, shift assignment, task
 check-off, handoff notes, and an audit log.
 
+## ► Deploy it live (one click)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/zgn7t8kzt6-glitch/armada)
+
+Click the button → sign in to Render → authorize the repo → enter an
+**`ADMIN_PASS`** when prompted → **Apply**. In ~3 minutes you'll have a live
+`https://…onrender.com` URL. Log in as **`admin`** with that password.
+(Pilot only — use fake/de-identified clients. See the HIPAA notes below before
+real client data.)
+
 ## The model
 
 | Ritz-Carlton | Armada |

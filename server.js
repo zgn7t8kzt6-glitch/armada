@@ -82,7 +82,7 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
   res.json({ client: c });
 });
 
-const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'welcome_plan', 'aftercare_plan'];
+const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'anchor_why', 'welcome_plan', 'aftercare_plan'];
 
 function saveTasks(clientId, tasks = []) {
   db.prepare(`DELETE FROM tasks WHERE client_id = ?`).run(clientId);
@@ -723,6 +723,7 @@ function buildClientContext(c) {
   return `Brief this client for the team today.\n\n` +
     (DEID ? 'Client: the client (name & dates withheld for privacy)\n' : (line('Preferred name', c.pref) + line('Name', c.name) + line('Admitted', c.admit) + line('Sobriety date', c.sober) + line('Support', c.support))) +
     line('Program', c.program) + line('Personal touch', c.touch) +
+    line('⚓ Intake Anchor — why they came (their own words)', c.anchor_why) +
     line('Preferences', c.prefs) + line('Goals (free text)', c.goals) + line('Triggers', c.triggers) +
     line('Safety', c.safety) + line('Welcome plan', c.welcome_plan) +
     (ama ? `\nAMA risk: ${ama.level}. ${s(ama.summary)} Underlying: ${s(ama.underlying)}\n` : '') +
@@ -799,7 +800,10 @@ app.get('/api/today', requireAuth, (req, res) => {
   for (const c of clients) {
     const ama = latestAmaRead(c.id);
     if (ama && ama.level !== 'Low') attention.push({ kind: 'risk', level: ama.level, client_id: c.id, text: `${c.pref || c.name} — AMA risk ${ama.level}${ama.summary ? ': ' + ama.summary : ''}` });
-    if (c.admit && (Date.now() - new Date(c.admit + 'T00:00').getTime()) <= 3 * 864e5) attention.push({ kind: 'welcome', client_id: c.id, text: `${c.pref || c.name} — in the first 72 hours. Deliver the welcome.` });
+    if (c.admit && (Date.now() - new Date(c.admit + 'T00:00').getTime()) <= 3 * 864e5) {
+      if (c.anchor_why && c.anchor_why.trim()) attention.push({ kind: 'welcome', client_id: c.id, text: `${c.pref || c.name} — in the first 72 hours (the wave). ⚓ Anchor: “${c.anchor_why.trim()}”` });
+      else attention.push({ kind: 'welcome', client_id: c.id, text: `${c.pref || c.name} — in the first 72 hours. Deliver the welcome — and capture their ⚓ Intake Anchor (why they came, in their words).` });
+    }
   }
   const callsDue = db.prepare(`SELECT f.type, f.due_date, c.pref, c.name, c.id cid FROM followups f JOIN clients c ON c.id=f.client_id WHERE f.status='Pending' AND f.due_date <= ? ORDER BY f.due_date`).all(today);
   callsDue.forEach((f) => attention.push({ kind: 'call', client_id: f.cid, text: `${f.pref || f.name} — ${f.type} aftercare call due ${f.due_date}` }));

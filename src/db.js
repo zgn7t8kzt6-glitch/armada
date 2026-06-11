@@ -529,6 +529,8 @@ function seedLearning() {
     'Food is comfort, dignity, and medicine. Seconds are the default — the answer is yes (only "no" is a documented clinical restriction). 24/7 snack access — nobody hungry at 2 a.m. Meal rhythm posted and reliable; special diets honored. Dining room calm during service.', 'food, meals, kitchen');
   ensureDoc('Policy', 'Empowerment — solve it on the spot',
     'Every staff member may spend up to the set limit ($50–100) to solve a patient problem on the spot — no permission needed, logged afterward (use the Concierge/Delight log). Fix the fixable: food, nicotine, comfort, fear, dignity.', 'empowerment, delight, $2000 rule');
+  ensureDoc('SOP', 'The Intake Anchor & The Quiet AMA',
+    'The polite "I\'m good, I\'ll do it on my own" departure is won or lost at admission — long before the client ever says they want to leave.\n\nTHE INTAKE ANCHOR (set it at admission, capture it on the Care Card):\n• Ask "What brought you here tonight?" and write down the WHY in the client\'s OWN words — verbatim. This becomes their ⚓ Intake Anchor on the Care Card and Journey.\n• Pre-brief THE WAVE: tell them plainly that motivation is highest at intake and often dips by morning — that the urge to leave is part of the process, not a sign they made the wrong choice. Naming it now defuses it later.\n• The clinician sets the timeline: "Give it 24–72 hours before you make any decision about leaving."\n\nTHE QUIET AMA (the calm, polite "I feel fine, I\'ll finish at home"):\n• This is the dangerous one — no crisis, no shouting, easy to wave through. Treat "I feel fine" as the cue to engage, not to process paperwork.\n• READ THEIR OWN WORDS BACK to them — the Anchor: "When you got here you told me ___. Has that changed?" Their own why is the strongest argument.\n• Make the 48-HOUR ASK — time-boxed, concrete: "Give me 48 more hours. If you still want to go then, I\'ll help you leave safely." A small, finite ask beats arguing about treatment.\n• If they still leave, Safe Departure (Warm AMA) every step.\n\nTHE SECOND SAVE: the 24–48 hour follow-up call after a Quiet AMA is a real Save attempt, not a courtesy. Many will come back if the door is warm. Make the call, document it, and offer the bed back.', 'intake, anchor, ama, quiet ama, wave, retention');
 
   ensureCourse('save', 'The Save (PAUSE) — de-escalation & AMA prevention',
     'The core skill for keeping clients. Certify before solo floor work.',
@@ -545,6 +547,15 @@ function seedLearning() {
       { q: 'A client refuses to sign the AMA form. The departure is:', o: ['Not an AMA', 'Still an AMA — document witnessed refusal', 'An administrative discharge'], a: 1 },
       { q: 'What goes with the client at every departure?', o: ['Nothing', 'Naloxone + overdose education (per protocol)', 'A bill'], a: 1 },
       { q: 'The last words to a departing client should be:', o: ['"Don\'t come back"', '"You are welcome back any time"', 'Nothing'], a: 1 },
+    ]);
+  ensureCourse('intake-anchor', 'The Intake Anchor & The Quiet AMA',
+    'How to win the polite AMA at admission — and what to do when "I feel fine, I\'ll finish at home" arrives.',
+    'The quiet, polite departure is won at admission.\n\nSET THE ANCHOR AT INTAKE:\n• Ask "What brought you here tonight?" — capture the WHY in their own words on the Care Card (their ⚓ Intake Anchor).\n• Pre-brief THE WAVE: motivation is highest now and usually dips by morning; the urge to leave is part of detox, not proof they chose wrong.\n• Clinician sets the timeline: "Give it 24–72 hours before deciding anything."\n\nWHEN THE QUIET AMA COMES:\n• "I feel fine, I\'ll do the rest at home" is the cue to ENGAGE — not to hand over paperwork.\n• Read their own Anchor words back: "When you got here you told me ___ — has that changed?"\n• Make the 48-HOUR ASK: a small, time-boxed, concrete request beats arguing.\n• Still leaving? Safe Departure every step, then a follow-up call in 24–48h — the second Save.', 180,
+    [
+      { q: 'The Intake Anchor is:', o: ['The client\'s diagnosis', 'Why they came, in their own words, captured at admission', 'Their discharge date'], a: 1 },
+      { q: '"The wave" you pre-brief at intake is:', o: ['A visiting-hours policy', 'That motivation dips by morning and the urge to leave is part of the process', 'A type of group therapy'], a: 1 },
+      { q: 'A client calmly says "I feel fine, I\'ll finish at home." The best first move is:', o: ['Hand them the AMA form', 'Read their own Anchor words back and make the 48-hour ask', 'Tell them they\'ll relapse'], a: 1 },
+      { q: 'After a quiet AMA, the 24–48 hour follow-up call is:', o: ['A courtesy with no real purpose', 'A real second Save attempt — make it, document it, offer the bed back', 'Optional and usually skipped'], a: 1 },
     ]);
   ensureCourse('person-first', 'Person-First Language',
     'How we speak about the people we serve — always.',
@@ -582,6 +593,7 @@ addColumn('followups', 'assignee_name', 'TEXT');
 addColumn('users', 'mfa_secret', 'TEXT');
 addColumn('users', 'mfa_enabled', 'INTEGER');
 addColumn('clients', 'consent_on_file', 'INTEGER');
+addColumn('clients', 'anchor_why', 'TEXT');
 
 // Seed the default surveys (idempotent — only inserts questions on first creation).
 function ensureSurvey(key, title, description, sort, questions) {

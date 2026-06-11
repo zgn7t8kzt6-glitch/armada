@@ -152,6 +152,15 @@ export const STANDARD_SECTIONS = [
     'Targets: time-to-comfort at intake ≤ 15 min; staff response to request ≤ 5 min; top-box "I felt cared for" ≥ 90%; empowerment $50–100; AMA-rate target from baseline.',
     'Corrective measures: AMA rate; discharge-classification accuracy; naloxone-at-departure 100%; PHI spot-audit zero findings; lineup compliance 100%; nicotine incidents trending down.',
   ]},
+  { n: 24, title: 'The Intake Anchor & The Quiet AMA', points: [
+    'The polite "I\'ll do it on my own" departure is won at admission — or not at all.',
+    'The Wave: motivation peaks the night they arrive and dips by morning. They admit at the crest; they wake at the trough.',
+    '"I feel fine": withdrawal (esp. alcohol) peaks at 24–72h. Feeling good at hour 12 is pre-withdrawal, not recovery.',
+    'ANCHOR at admission: capture their WHY in their own words ("What brought you here tonight?") — verbatim, on a card they keep. Pre-brief the morning wave out loud. A clinician sets the 24–72h timeline.',
+    'When the quiet AMA comes (calm, no grievance): sit at eye level, READ THEIR OWN WORDS BACK, ask "what\'s different about that scene this morning?" — never argue.',
+    'Make the 48-hour ask: "Give me 48 hours through the medical window; after that I\'ll walk you out myself, no hard feelings." It gets a yes far more often than "stay for treatment."',
+    'An invitation, never pressure — the Save can fail with dignity. The 24–48h follow-up call lands inside their danger window: it is the second Save attempt. Make it without fail.',
+  ]},
   { n: 23, title: 'The One-Paragraph Version', points: [
     'We are building the Ritz-Carlton of recovery: a place where people at their lowest are known by name, fed generously, kept safe by one accountable owner on every shift, met in person within five minutes when they struggle, never managed through a chat, never sent into the night without naloxone and an open door — by staff who were selected for caring, trained before they were trusted, recognized daily, and led from the floor. Cared for and pushed. No one leaves here uncared for — not even the ones who leave.',
   ]},
@@ -167,4 +176,6 @@ Every departure (especially AMA) follows Safe Departure: in person and calm, dig
 Language is person-first ALWAYS: "person with a substance use disorder," "returned to use," "chose to leave against medical advice." Describe behavior, never label character ("difficult," "manipulative," "drug-seeking"). No lay diagnosis — only clinicians name conditions.
 Recognition is specific, same-day, public. Root cause, never blame. Leaders are present on the floor, including nights.
 Hard rules: never put patient information in chats/texts; comfort generously but the clinical line holds (no promises a clinician hasn't made); a human always goes to the patient in person — never a chat.
+THE INTAKE ANCHOR & THE QUIET AMA: the polite "I'm good, I'll do it on my own" departure is won at admission. Two facts: (1) The Wave — motivation peaks the night they arrive and dips by morning; (2) "I feel fine" — withdrawal (esp. alcohol) peaks at 24–72h, so feeling good at hour 12 is pre-withdrawal, not recovery. At admission, capture their WHY in their own words ("What brought you here tonight?"), pre-brief the morning wave, and have a clinician set the 24–72h timeline. When the quiet AMA comes there's no defect to fix — it runs on motivation: sit at eye level, READ THEIR OWN WORDS BACK, and make the time-boxed 48-hour ask ("give me 48 hours through the medical window; after that I'll walk you out myself, no hard feelings"). Never pressure — the Save can fail with dignity. The 24–48h follow-up call lands inside their danger window and is the second Save attempt — make it without fail. When you build a retention plan for a client in their first 72 hours, anchor it to their own stated reason for coming and the 48-hour ask.
+
 Write warmly, specifically, and in the Armada voice: cared for and pushed.`;

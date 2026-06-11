@@ -188,7 +188,7 @@ async function dischargeClient(){
     show('clients');
   }
 }
-const FF = ['name','pref','room','program','admit','sober','touch','prefs','goals','triggers','safety','support','welcome_plan','aftercare_plan'];
+const FF = ['name','pref','room','program','admit','sober','touch','prefs','goals','triggers','safety','support','anchor_why','welcome_plan','aftercare_plan'];
 function fillForm(c){
   FF.forEach(f => $('f_'+f).value = c[f]||'');
   const tl = $('taskList'); tl.innerHTML='';
@@ -895,6 +895,12 @@ async function loadJourney(){
         </div>
       </div>
       ${c.touch?`<div class="pc-touch" style="margin-top:12px">★ ${esc(c.touch)}</div>`:''}
+      ${c.anchor_why?`<div class="anchor-card" style="margin-top:12px">
+        <div class="anchor-head">⚓ Intake Anchor — why they came (their own words)</div>
+        <div class="anchor-words">“${esc(c.anchor_why)}”</div>
+        <div class="anchor-foot sans no-print">If a quiet "I feel fine, I'll finish at home" ever comes — read these words back, then make the 48-hour ask.
+          <button class="btn btn-ghost btn-sm sans" style="margin-left:8px" onclick="printAnchor(${c.id})">🖨 Print anchor card</button></div>
+      </div>`:''}
       <div id="careBriefOut"></div>
     </div>
     <div class="jgrid">
@@ -936,6 +942,25 @@ async function addNote(clientId){
     $('noteResult').innerHTML = r.flagged ? `<div class="ama-banner ${r.level==='High'?'ama-high':'ama-elev'}" style="margin:8px 0"><div class="ama-head">⚑ Red flag (${esc(r.level)})</div><div class="ama-sum">${esc(r.summary||'')}</div><div class="pc-note">→ ${esc(r.suggested_action||'')}</div></div>` : '<div class="hint" style="margin:6px 0">✓ Saved — no red flags found.</div>';
     $('noteText').value=''; loadClientNotes(clientId);
   }catch(e){ $('noteResult').innerHTML='<span class="hint" style="color:var(--danger)">'+e.message+'</span>'; }
+}
+async function printAnchor(id){
+  const { journey:j } = await api('/clients/'+id+'/journey'); const c=j.client;
+  const w=window.open('','_blank','width=600,height=700'); if(!w) return;
+  w.document.write(`<html><head><title>Intake Anchor</title><style>
+    body{font-family:Georgia,serif;margin:0;padding:48px;color:#0b1f3a;text-align:center}
+    .mark{font-size:54px;margin-bottom:8px}
+    .label{font-family:Arial,sans-serif;letter-spacing:2px;text-transform:uppercase;font-size:12px;color:#9a7b4f;margin-bottom:24px}
+    .words{font-size:26px;line-height:1.5;font-style:italic;margin:0 auto;max-width:440px}
+    .name{margin-top:28px;font-size:15px;color:#555}
+    .foot{margin-top:40px;font-family:Arial,sans-serif;font-size:12px;color:#888}
+  </style></head><body>
+    <div class="mark">⚓</div>
+    <div class="label">My reason for being here</div>
+    <div class="words">“${esc(c.anchor_why||'')}”</div>
+    <div class="name">${esc(c.pref||c.name||'')}</div>
+    <div class="foot">Armada Recovery — keep this where you'll see it on the hard mornings.</div>
+  </body></html>`);
+  w.document.close(); setTimeout(()=>w.print(),250);
 }
 async function addGoal(clientId){ const inp=$('goalInput'); if(!inp.value.trim())return; await api('/goals',{method:'POST',body:JSON.stringify({client_id:clientId,text:inp.value})}); loadJourney(); }
 async function toggleGoal(id,status){ await api('/goals/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadJourney(); }

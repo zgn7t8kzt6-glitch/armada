@@ -351,6 +351,7 @@ function careCardText(c) {
     (DEID ? 'Client: the client (name withheld for privacy)\n' : (line('Preferred name', c.pref) + line('Full name', c.name))) +
     line('Program / level of care', c.program) +
     line('Personal touch (what makes them feel cared for)', c.touch) +
+    line('⚓ Intake Anchor — why they came (their own words)', c.anchor_why) +
     line('Preferences', c.prefs) +
     line('Goals this week', c.goals) +
     line('Triggers / handle with care', c.triggers) +

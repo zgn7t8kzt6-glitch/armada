@@ -47,6 +47,7 @@ function show(v){
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   if(v==='clients') renderClients();
+  if(v==='retention') loadRetention();
   if(v==='report') loadPlaybook();
   if(v==='users') loadUsers();
   if(v==='audit') loadAudit();
@@ -175,6 +176,38 @@ async function loadPlaybook(){
       </div>`);
   });
 }
+/* ---- retention dashboard ---- */
+function riskBadge(level){
+  const m = { High:'risk-high', Elevated:'risk-elev', Low:'risk-low' };
+  return `<span class="risk ${m[level]||'risk-none'}">${esc(level||'No read')}</span>`;
+}
+async function loadRetention(){
+  const { clients, triggerCounts, summary } = await api('/retention');
+  $('retSummary').innerHTML = `
+    <div class="ret-card ${summary.high?'rc-high':''}"><div class="n">${summary.high}</div><div class="l">High risk</div></div>
+    <div class="ret-card ${summary.elevated?'rc-elev':''}"><div class="n">${summary.elevated}</div><div class="l">Elevated</div></div>
+    <div class="ret-card ${summary.notPulsedToday?'rc-warn':''}"><div class="n">${summary.notPulsedToday}</div><div class="l">No pulse today</div></div>
+    <div class="ret-card"><div class="n">${summary.pulsesToday}</div><div class="l">Pulses today</div></div>
+    <div class="ret-card"><div class="n">${summary.total}</div><div class="l">Active clients</div></div>`;
+
+  $('retClients').innerHTML = clients.length ? `<table class="tbl">
+    <tr><th>Client</th><th>Room</th><th>AMA risk</th><th>Last pulse</th><th>Today</th></tr>
+    ${clients.map(c=>`<tr class="ret-row" onclick="gotoPlaybook()">
+      <td><strong>${esc(c.pref||c.name||'')}</strong>${c.summary?`<div class="hint" style="margin-top:2px">${esc(c.summary.slice(0,80))}${c.summary.length>80?'…':''}</div>`:''}</td>
+      <td>${esc(c.room||'')}</td>
+      <td>${riskBadge(c.level)}</td>
+      <td>${c.lastPulse?esc(c.lastPulse.date)+' '+esc(c.lastPulse.shift)+' · '+esc(c.lastPulse.concern):'<span class="hint">none</span>'}</td>
+      <td>${c.pulsedToday?'<span class="risk risk-low">✓</span>':'<span class="risk risk-warn">—</span>'}</td>
+    </tr>`).join('')}</table>` : '<div class="empty">No clients yet.</div>';
+
+  const max = Math.max(1, ...triggerCounts.map(t=>t.count));
+  $('retTriggers').innerHTML = triggerCounts.length ? triggerCounts.map(t=>`
+    <div class="trbar"><div class="trbar-l">${esc(t.trigger)}</div>
+      <div class="trbar-track"><div class="trbar-fill" style="width:${Math.round(t.count/max*100)}%"></div></div>
+      <div class="trbar-n">${t.count}</div></div>`).join('') : '<div class="hint">No pulses logged in the last 14 days.</div>';
+}
+function gotoPlaybook(){ show('report'); }
+
 /* ---- AMA retention: banner + daily pulse ---- */
 function retentionBanner(c){
   const a = c.ama;

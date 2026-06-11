@@ -176,6 +176,43 @@ app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
   }
 });
 
+// Retention dashboard: every client's current risk, pulse status, and which
+// warning signs are trending across the center.
+app.get('/api/retention', requireAuth, (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const clients = db.prepare(`SELECT id, name, pref, room, program, admit FROM clients WHERE active = 1`).all();
+  const out = clients.map((c) => {
+    const ama = latestAmaRead(c.id);
+    const lastPulse = db.prepare(`SELECT date, shift, concern FROM pulses WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(c.id);
+    const pulsedToday = !!db.prepare(`SELECT 1 FROM pulses WHERE client_id = ? AND date = ? LIMIT 1`).get(c.id, today);
+    return {
+      id: c.id, name: c.name, pref: c.pref, room: c.room, program: c.program, admit: c.admit,
+      level: ama ? ama.level : null,
+      summary: ama ? ama.summary : null,
+      lastReadAt: ama ? ama.created_at : null,
+      lastPulse: lastPulse || null,
+      pulsedToday,
+    };
+  });
+  const rank = { High: 3, Elevated: 2, Low: 1 };
+  out.sort((a, b) => (rank[b.level] || 0) - (rank[a.level] || 0) || (a.room || '').localeCompare(b.room || ''));
+
+  const since = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
+  const recent = db.prepare(`SELECT triggers FROM pulses WHERE date >= ?`).all(since);
+  const counts = {};
+  recent.forEach((r) => safeArr(r.triggers).forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
+  const triggerCounts = Object.entries(counts).map(([trigger, count]) => ({ trigger, count })).sort((a, b) => b.count - a.count);
+
+  const summary = {
+    high: out.filter((c) => c.level === 'High').length,
+    elevated: out.filter((c) => c.level === 'Elevated').length,
+    notPulsedToday: out.filter((c) => !c.pulsedToday).length,
+    total: out.length,
+    pulsesToday: db.prepare(`SELECT COUNT(*) n FROM pulses WHERE date = ?`).get(today).n,
+  };
+  res.json({ clients: out, triggerCounts, summary, windowDays: 14 });
+});
+
 /* ---------------- shifts / assignments / completions ---------------- */
 function getOrCreateShift(date, name) {
   let s = db.prepare(`SELECT * FROM shifts WHERE date = ? AND name = ?`).get(date, name);

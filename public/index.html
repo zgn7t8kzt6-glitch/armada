@@ -42,6 +42,7 @@
 
   <nav class="sans" id="nav">
     <button data-view="report" class="active">Shift Playbook</button>
+    <button data-view="retention">Retention</button>
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
     <button data-view="assign" data-admin>Assign Staff</button>
@@ -66,6 +67,26 @@
       </div>
       <div id="reportHead"></div>
       <div id="reportBody"></div>
+    </section>
+
+    <!-- RETENTION -->
+    <section id="retention" class="view">
+      <div class="card">
+        <h3>Retention Dashboard</h3>
+        <p class="sub sans">Who is at risk of leaving against medical advice, who still needs a check-in today, and which warning signs are trending. For clinical review — not a diagnosis.</p>
+        <div id="retSummary" class="ret-cards"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:2;min-width:320px">
+          <h3>Clients by risk</h3>
+          <div id="retClients"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px">
+          <h3>Trending warning signs</h3>
+          <p class="sub sans">Across all pulses, last 14 days.</p>
+          <div id="retTriggers"></div>
+        </div>
+      </div>
     </section>
 
     <!-- CLIENTS -->

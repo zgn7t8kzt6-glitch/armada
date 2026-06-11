@@ -26,8 +26,9 @@
     <input id="l_user" autocomplete="username" />
     <label>Password</label>
     <input id="l_pass" type="password" autocomplete="current-password" />
+    <div id="mfaRow" style="display:none"><label>Authenticator code</label><input id="l_code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code"/></div>
     <div id="loginErr" class="err"></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:14px">Sign in</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:14px" id="loginBtn">Sign in</button>
   </form>
 </div>
 
@@ -42,6 +43,7 @@
     <div class="userbox sans">
       <span id="whoami"></span>
       <button class="btn btn-ghost btn-sm" onclick="toggleTheme()" id="themeBtn" title="Day / night">🌙</button>
+      <button class="btn btn-ghost btn-sm" onclick="manageMfa()" title="Two-factor">🔐 2FA</button>
       <button class="btn btn-ghost btn-sm" onclick="changeMyPassword()">Change password</button>
       <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign out</button>
     </div>

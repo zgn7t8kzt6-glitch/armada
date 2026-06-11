@@ -7,7 +7,8 @@ import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, s
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import {
-  cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser, changePassword,
+  cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
+  mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
@@ -28,6 +29,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
+  if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
 
@@ -39,10 +41,23 @@ const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'W
 /* ---------------- auth ---------------- */
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
-  const user = login(req, res, username || '', password || '');
-  if (!user) return res.status(401).json({ error: 'Invalid username or password' });
+  const result = login(req, res, username || '', password || '');
+  if (!result) return res.status(401).json({ error: 'Invalid username or password' });
+  if (result.mfaRequired) return res.json({ mfaRequired: true, ticket: result.ticket });
+  res.json({ user: result });
+});
+app.post('/api/login/mfa', (req, res) => {
+  const user = completeMfa(req, res, req.body?.ticket || '', req.body?.code || '');
+  if (!user) return res.status(401).json({ error: 'Invalid or expired code' });
   res.json({ user });
 });
+app.get('/api/mfa/setup', requireAuth, (req, res) => res.json(mfaSetup(req.user.id, req.user.username)));
+app.post('/api/mfa/enable', requireAuth, (req, res) => {
+  if (!mfaEnable(req.user.id, req.body?.code)) return res.status(400).json({ error: 'Code did not match — try again.' });
+  audit({ user: req.user, action: 'MFA_ENABLE', ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/mfa/disable', requireAuth, (req, res) => { mfaDisable(req.user.id); audit({ user: req.user, action: 'MFA_DISABLE', ip: req.ip }); res.json({ ok: true }); });
 
 app.post('/api/logout', (req, res) => { logout(req, res); res.json({ ok: true }); });
 

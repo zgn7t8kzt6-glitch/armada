@@ -18,13 +18,32 @@ async function api(path, opts={}) {
 
 /* ---- auth ---- */
 function showLogin(){ $('app').style.display='none'; $('loginScreen').style.display='flex'; }
+let mfaTicket = null;
 $('loginForm').addEventListener('submit', async e => {
   e.preventDefault(); $('loginErr').textContent='';
   try {
-    const { user } = await api('/login', { method:'POST', body: JSON.stringify({ username:$('l_user').value, password:$('l_pass').value }) });
-    ME = user; boot();
+    if (mfaTicket) {
+      const { user } = await api('/login/mfa', { method:'POST', body: JSON.stringify({ ticket: mfaTicket, code: $('l_code').value }) });
+      mfaTicket = null; ME = user; boot(); return;
+    }
+    const r = await api('/login', { method:'POST', body: JSON.stringify({ username:$('l_user').value, password:$('l_pass').value }) });
+    if (r.mfaRequired) { mfaTicket = r.ticket; $('mfaRow').style.display='block'; $('l_code').focus(); $('loginBtn').textContent='Verify code'; return; }
+    ME = r.user; boot();
   } catch(err){ $('loginErr').textContent = err.message; }
 });
+async function manageMfa(){
+  if(!ME){ alert('Sign in first.'); return; }
+  if(ME.mfaEnabled){ if(confirm('Two-factor is ON for your account. Turn it off?')){ await api('/mfa/disable',{method:'POST'}); ME.mfaEnabled=false; alert('Two-factor disabled.'); } return; }
+  const { secret } = await api('/mfa/setup');
+  const code = prompt('Set up two-factor:\n\n1) Open Google Authenticator / Authy → add account → "Enter a setup key".\n2) Account: Armada Care · Key:\n\n'+secret+'\n\n3) Type the 6-digit code it shows:');
+  if(!code) return;
+  try{ await api('/mfa/enable',{method:'POST',body:JSON.stringify({code})}); ME.mfaEnabled=true; alert('✓ Two-factor enabled. You\'ll enter a code each time you sign in.'); }
+  catch(e){ alert(e.message); }
+}
+/* auto-logoff after inactivity (HIPAA) */
+let idleTimer=null;
+function resetIdle(){ clearTimeout(idleTimer); idleTimer=setTimeout(()=>{ if(ME){ alert('Signed out after 15 minutes of inactivity.'); doLogout(); } }, 15*60000); }
+['click','keydown','mousemove','touchstart'].forEach(ev=>document.addEventListener(ev, resetIdle, {passive:true}));
 async function doLogout(){ await api('/logout',{method:'POST'}); location.reload(); }
 
 /* ---- night mode + PWA + voice ---- */

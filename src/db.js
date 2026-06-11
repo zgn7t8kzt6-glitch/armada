@@ -579,6 +579,9 @@ addColumn('clients', 'discharge_followthrough', 'TEXT');
 addColumn('clients', 'discharge_improve', 'TEXT');
 addColumn('followups', 'assignee_id', 'INTEGER');
 addColumn('followups', 'assignee_name', 'TEXT');
+addColumn('users', 'mfa_secret', 'TEXT');
+addColumn('users', 'mfa_enabled', 'INTEGER');
+addColumn('clients', 'consent_on_file', 'INTEGER');
 
 // Seed the default surveys (idempotent — only inserts questions on first creation).
 function ensureSurvey(key, title, description, sort, questions) {

@@ -132,17 +132,31 @@ export function renderReportHtml(d) {
   </div>`;
 }
 
-export async function sendEmail({ subject, html }) {
+export async function sendEmail({ subject, html, to }) {
   const key = process.env.RESEND_API_KEY;
-  const to = process.env.REPORT_TO;
-  if (!key || !to) throw new Error('Email not configured. Set RESEND_API_KEY and REPORT_TO.');
+  const dest = to || process.env.REPORT_TO;
+  if (!key || !dest) throw new Error('Email not configured. Set RESEND_API_KEY and REPORT_TO.');
   const from = process.env.REPORT_FROM || 'Armada Care <onboarding@resend.dev>';
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: to.split(',').map((s) => s.trim()), subject, html }),
+    body: JSON.stringify({ from, to: dest.split(',').map((s) => s.trim()), subject, html }),
   });
   if (!r.ok) throw new Error('Email send failed: ' + (await r.text()).slice(0, 200));
+}
+
+export function smsConfigured() {
+  return Boolean(process.env.TWILIO_SID && process.env.TWILIO_TOKEN && process.env.TWILIO_FROM);
+}
+export async function sendSms({ to, body }) {
+  const sid = process.env.TWILIO_SID, token = process.env.TWILIO_TOKEN, from = process.env.TWILIO_FROM;
+  if (!sid || !token || !from || !to) throw new Error('SMS not configured (TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM).');
+  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: { Authorization: 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ From: from, To: to, Body: body }),
+  });
+  if (!r.ok) throw new Error('SMS send failed: ' + (await r.text()).slice(0, 200));
 }
 
 export async function sendWeeklyReport() {

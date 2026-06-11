@@ -346,7 +346,12 @@ async function loadMyTasks(){
   await fillClientSelect($('at_client'),'No client');
   try { const { staff } = await api('/staff'); const opts = staff.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
     $('at_to').innerHTML = '<option value="">Pick teammate…</option>'+opts;
-    if($('acc_user')){ const { aftercareCoordinator } = await api('/settings').catch(()=>({})); $('acc_user').innerHTML='<option value="">— none —</option>'+staff.map(s=>`<option value="${s.id}" ${aftercareCoordinator&&aftercareCoordinator.id===s.id?'selected':''}>${esc(s.name)}</option>`).join(''); }
+    if($('acc_user')){ const st = await api('/settings').catch(()=>({})); const ac=st.aftercareCoordinator;
+      $('acc_user').innerHTML='<option value="">— none —</option>'+staff.map(s=>`<option value="${s.id}" ${ac&&ac.id===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
+      if($('oc_email')) $('oc_email').value = st.oncallEmail||'';
+      if($('oc_phone')) $('oc_phone').value = st.oncallPhone||'';
+      if($('ocStatus')) $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
+    }
   } catch(e){}
   if(ME.role==='admin'){ try { const { calls:ac, tasks:at } = await api('/all-tasks');
     $('allTasksList').innerHTML = (ac.map(c=>`<div class="pc-note">🤝 ${esc(c.pref)} — ${esc(c.type)} call due ${esc(c.due_date)} · <strong>${esc(c.assignee_name||'unassigned')}</strong></div>`).join('')+
@@ -360,6 +365,30 @@ async function assignTask(){
   $('at_title').value=''; $('at_due').value=''; alert('Assigned.'); loadMyTasks();
 }
 async function saveCoordinator(){ await api('/settings/aftercare-coordinator',{method:'POST',body:JSON.stringify({user_id:$('acc_user').value||null})}); alert('Aftercare Coordinator saved. New discharges will auto-assign their calls.'); }
+async function saveOncall(){ await api('/settings/oncall',{method:'POST',body:JSON.stringify({email:$('oc_email').value,phone:$('oc_phone').value})}); alert('On-call leader saved. High alerts will reach them in real time.'); }
+
+/* ---- huddle mode (full-screen daily lineup) ---- */
+async function startHuddle(){
+  const [t, line, conc] = await Promise.all([api('/today'), api('/lineup'), api('/concerns').catch(()=>({concerns:[]}))]);
+  const atRisk = (t.attention||[]).filter(a=>a.kind==='risk');
+  const welcome = (t.attention||[]).filter(a=>a.kind==='welcome');
+  const wow = (line.wows||[])[0];
+  const openConcern = (conc.concerns||[]).find(c=>c.status==='Open');
+  const dt = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+  $('huddleBody').innerHTML = `
+    <h1>Daily Lineup</h1><div class="hint" style="color:#cfe">${dt} · ${esc($('r_shift')?.value||'')} shift</div>
+    <h2>Today's value</h2><div class="hv">${esc(line.value||'')}</div>
+    <h2>The house</h2>
+    <div class="hitem">${t.metrics.active} active clients · ${t.metrics.highRisk} at risk · ${t.metrics.openConcerns} open concerns · ${t.metrics.callsDue} aftercare calls due</div>
+    ${welcome.length?`<h2>New arrivals — deliver the welcome</h2>${welcome.map(w=>`<div class="hitem">☀ ${esc(w.text)}</div>`).join('')}`:''}
+    <h2>Needs extra care today</h2>${atRisk.length?atRisk.map(a=>`<div class="hitem">⚠ ${esc(a.text)}</div>`).join(''):'<div class="hitem">All steady — touch every client, deliver every personal touch.</div>'}
+    <h2>Recognition</h2><div class="hitem">${wow?'👏 '+esc(wow.text)+(wow.by_name?' — '+esc(wow.by_name):''):'Catch someone doing something great today and name it.'}</div>
+    <h2>One defect to own</h2><div class="hitem">${openConcern?'⚑ '+esc(openConcern.pref||'')+': '+esc(openConcern.text)+' — who owns the fix?':'No open concerns. 🎉'}</div>
+    <h2>Today's focus</h2><div class="hitem">${esc(t.focus?.t||'')} — ${esc(t.focus?.g||'')}</div>`;
+  $('huddle').style.display='block'; window.scrollTo(0,0);
+}
+function closeHuddle(){ $('huddle').style.display='none'; }
+async function lineupDone(){ await api('/lineup-log',{method:'POST',body:JSON.stringify({shift:$('r_shift')?.value||'Day'})}); closeHuddle(); alert('Lineup logged ✓ (counts toward Scorecard compliance).'); }
 
 /* ---- scorecard + saves ---- */
 async function loadScorecard(){

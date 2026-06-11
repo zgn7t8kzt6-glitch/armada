@@ -49,6 +49,12 @@ header .tag{margin:2px 0 0;font-size:11px;color:var(--gold-soft);letter-spacing:
 .mic{font-family:inherit;cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:7px;padding:8px 10px;font-size:14px}
 .voicewrap{display:flex;gap:6px;align-items:center}.voicewrap input,.voicewrap textarea{flex:1}
 [data-theme="dark"] .mic{background:#16202a}
+.huddle{position:fixed;inset:0;z-index:50;background:linear-gradient(135deg,#1d2a44,#2a585d);color:#fff;overflow:auto;padding:40px 6vw}
+.huddle h1{font-size:34px;margin:0 0 4px}
+.huddle .hv{font-size:26px;font-style:italic;color:#e6cfa9;margin:10px 0 24px;line-height:1.4}
+.huddle h2{font-size:15px;letter-spacing:2px;text-transform:uppercase;color:#9fc6c2;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:6px;margin:22px 0 8px}
+.huddle .hitem{font-size:19px;margin:8px 0;line-height:1.4}
+.huddle-actions{position:fixed;bottom:24px;right:6vw;display:flex;gap:10px}
 .only-print{display:none}
 @media print{.only-print{display:inline}}
 #groupbar{background:var(--navy-2);padding:0 28px;display:flex;gap:2px;flex-wrap:wrap}

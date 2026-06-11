@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Armada — Break Room</title>
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  body{margin:0;background:linear-gradient(135deg,#1d2a44,#2a585d);color:#fff;height:100vh;overflow:hidden;font-family:Georgia,serif}
+  .wrap{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:5vh 8vw}
+  .mark{width:80px;margin-bottom:10px}
+  .motto{font-size:18px;color:#e6cfa9;letter-spacing:1px;margin-bottom:30px}
+  .panel{display:none}.panel.on{display:block;animation:fade .8s}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .k{font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#9fc6c2}
+  .big{font-size:46px;line-height:1.25;margin:14px 0}
+  .sub{font-size:22px;color:#dfe7e6;line-height:1.4}
+  ul{list-style:none;padding:0;font-size:26px;line-height:1.6}
+  .counts{position:fixed;bottom:24px;left:0;right:0;display:flex;justify-content:center;gap:40px;font-family:sans-serif;font-size:16px;color:#cfe}
+  .gate{max-width:320px;margin:18vh auto;background:#fff;color:#222;border-radius:12px;padding:26px;border-top:4px solid #c89461}
+  .gate input{width:100%}
+</style>
+</head>
+<body>
+<div id="root"><div class="gate"><h3 style="color:#2a585d">Break-room display</h3><p class="ksub" style="font-family:sans-serif;color:#777">Enter the code to start the display.</p><input id="code" type="password"/><button class="btn btn-gold" style="width:100%;margin-top:10px" onclick="start()">Start</button><div id="err" class="err"></div></div></div>
+<script>
+const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let CODE=localStorage.getItem('kioskCode')||'', DATA=null, panels=[], idx=0;
+async function start(){
+  CODE=document.getElementById('code')?document.getElementById('code').value:CODE;
+  try{ DATA=await (await fetch('/api/display/data?code='+encodeURIComponent(CODE))).json(); if(DATA.error) throw 0; localStorage.setItem('kioskCode',CODE); render(); setInterval(refresh,60000); }
+  catch(e){ const el=document.getElementById('err'); if(el) el.textContent='That code didn\'t work.'; }
+}
+async function refresh(){ try{ DATA=await (await fetch('/api/display/data?code='+encodeURIComponent(CODE))).json(); render(); }catch(e){} }
+function render(){
+  const d=DATA; const wows=(d.wows||[]).map(w=>`<li>👏 ${esc(w.text)}${w.by_name?' <span style="color:#9fc6c2">— '+esc(w.by_name)+'</span>':''}</li>`).join('');
+  const dels=(d.delights||[]).map(x=>`<li>♥ ${esc(x.text)}</li>`).join('');
+  panels=[
+    `<div class="k">Today's focus</div><div class="big">${esc(d.focus.t)}</div><div class="sub">${esc(d.focus.g)}</div>`,
+    wows?`<div class="k">Moments of care</div><ul style="margin-top:20px">${wows}</ul>`:'',
+    dels?`<div class="k">Delights delivered</div><ul style="margin-top:20px">${dels}</ul>`:'',
+    d.champion?`<div class="k">Care Champion</div><div class="big">🏅 ${esc(d.champion)}</div><div class="sub">Thank you for showing up for every client.</div>`:'',
+    `<div class="k">${esc(d.tagline||'')}</div><div class="big" style="font-style:italic">${esc(d.motto)}</div>`,
+  ].filter(Boolean);
+  document.getElementById('root').innerHTML = `<div class="wrap"><img class="mark" src="/logo.svg"/><div class="motto">${esc(d.tagline||'')}</div>
+    <div id="stage"></div>
+    <div class="counts"><span>♥ ${d.counts.delightsWeek} delights this week</span><span>👏 ${d.counts.kudosWeek} kudos</span><span>✋ ${d.counts.focusJoined} on today's focus</span></div></div>`;
+  idx=0; show(); if(window._t) clearInterval(window._t); window._t=setInterval(()=>{ idx=(idx+1)%panels.length; show(); }, 9000);
+}
+function show(){ const st=document.getElementById('stage'); if(st) st.innerHTML=`<div class="panel on">${panels[idx]}</div>`; }
+if(CODE) start();
+</script>
+</body>
+</html>

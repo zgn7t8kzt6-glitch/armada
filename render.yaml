@@ -34,6 +34,12 @@ services:
         sync: false                  # optional: enables the weekly leadership email (key from resend.com)
       - key: REPORT_TO
         sync: false                  # optional: who gets the weekly report (comma-separated emails)
+      - key: TWILIO_SID
+        sync: false                  # optional: SMS alerts to the on-call leader
+      - key: TWILIO_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false                  # your Twilio phone number, e.g. +1...
     disk:
       name: armada-data
       mountPath: /var/data

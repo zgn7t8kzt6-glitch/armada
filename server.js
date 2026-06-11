@@ -3,7 +3,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState } from './src/db.js';
-import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics } from './src/report.js';
+import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import {
@@ -171,12 +171,22 @@ function latestAmaRead(clientId) {
   return { ...r, triggers: safeArr(r.triggers), actions: safeArr(r.actions), cared_for: safeArr(r.cared_for) };
 }
 
+// Notify the posted on-call leader by text/email (voice-first principle: the
+// alert reaches a human, it doesn't sit unread). Best-effort, non-blocking.
+function notifyOnCall(message) {
+  const email = getState('oncall_email') || process.env.ONCALL_EMAIL;
+  const phone = getState('oncall_phone') || process.env.ONCALL_PHONE;
+  if (email && emailConfigured()) sendEmail({ to: email, subject: 'Armada — on-call alert', html: `<p style="font-family:Georgia,serif">${message}</p><p style="color:#888">Go to the client in person. A human goes to the patient — never a chat.</p>` }).catch((e) => console.error('on-call email:', e.message));
+  if (phone && smsConfigured()) sendSms({ to: phone, body: `Armada alert: ${message}`.slice(0, 300) }).catch((e) => console.error('on-call sms:', e.message));
+}
+
 // Proactive alert: surfaced the moment a client's signals turn. De-duped so we
 // don't repeat the same open alert for the same client+kind.
 function createAlert(client_id, kind, level, message) {
   const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id = ? AND kind = ? AND status = 'New' AND created_at >= datetime('now','-1 day') LIMIT 1`).get(client_id, kind);
   if (dup) return;
   db.prepare(`INSERT INTO alerts (client_id, kind, level, message) VALUES (?, ?, ?, ?)`).run(client_id || null, kind, level || null, message);
+  if (level === 'High' || level === 'Critical') notifyOnCall(message);
 }
 
 // Gather context, ask Claude, store the read. Reused by the button and by
@@ -473,11 +483,21 @@ app.post('/api/assigned-tasks/:id/done', requireAuth, (req, res) => {
 });
 app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
   const id = getState('aftercare_coordinator');
-  res.json({ aftercareCoordinator: id ? db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(id) : null,
-    staff: db.prepare(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`).all() });
+  res.json({
+    aftercareCoordinator: id ? db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(id) : null,
+    staff: db.prepare(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`).all(),
+    oncallEmail: getState('oncall_email') || process.env.ONCALL_EMAIL || '',
+    oncallPhone: getState('oncall_phone') || process.env.ONCALL_PHONE || '',
+    emailReady: emailConfigured(), smsReady: smsConfigured(),
+  });
 });
 app.post('/api/settings/aftercare-coordinator', requireAuth, requireAdmin, (req, res) => {
   setState('aftercare_coordinator', String(req.body?.user_id || ''));
+  res.json({ ok: true });
+});
+app.post('/api/settings/oncall', requireAuth, requireAdmin, (req, res) => {
+  setState('oncall_email', (req.body?.email || '').trim());
+  setState('oncall_phone', (req.body?.phone || '').trim());
   res.json({ ok: true });
 });
 
@@ -1236,6 +1256,31 @@ app.get('/api/focus/history', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT date, COUNT(DISTINCT user_id) n FROM focus_logs WHERE date >= date('now','-21 day') GROUP BY date ORDER BY date DESC`).all();
   rows.forEach((r) => { r.topic = focusForDate(r.date).t; });
   res.json({ history: rows });
+});
+
+/* ---------------- Break-room display (code-gated, no PHI) ---------------- */
+app.get('/api/display/data', (req, res) => {
+  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid code' });
+  const f = focusForDate(new Date().toISOString().slice(0, 10));
+  const month = new Date().toISOString().slice(0, 7);
+  // Care Champion (most care actions this month) — name only, no client data
+  const champ = db.prepare(`SELECT user_name, COUNT(*) n FROM (
+      SELECT user_name FROM (SELECT u.name user_name, p.id FROM pulses p JOIN users u ON u.id=p.author_id WHERE p.date >= ?)
+      UNION ALL SELECT by_name FROM delights WHERE created_at >= ? AND by_name IS NOT NULL
+      UNION ALL SELECT by_name FROM wows WHERE created_at >= ? AND by_name IS NOT NULL
+    ) GROUP BY user_name ORDER BY n DESC LIMIT 1`).get(month + '-01', month + '-01', month + '-01');
+  res.json({
+    motto: MOTTO, tagline: TAGLINE,
+    focus: f,
+    wows: db.prepare(`SELECT text, by_name FROM wows ORDER BY id DESC LIMIT 8`).all(),     // staff recognition; no client names shown
+    delights: db.prepare(`SELECT text FROM delights ORDER BY id DESC LIMIT 8`).all(),
+    champion: champ ? champ.user_name : null,
+    counts: {
+      delightsWeek: db.prepare(`SELECT COUNT(*) n FROM delights WHERE created_at >= datetime('now','-7 day')`).get().n,
+      kudosWeek: db.prepare(`SELECT COUNT(*) n FROM kudos WHERE created_at >= datetime('now','-7 day')`).get().n,
+      focusJoined: db.prepare(`SELECT COUNT(DISTINCT user_id) n FROM focus_logs WHERE date = ?`).get(new Date().toISOString().slice(0, 10)).n,
+    },
+  });
 });
 
 /* ---------------- The Save tracker ---------------- */

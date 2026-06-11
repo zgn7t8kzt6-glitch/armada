@@ -88,6 +88,9 @@ All are optional except `ADMIN_PASS` in production.
 | `REPORT_TO` | Comma-separated recipient emails for the weekly report. |
 | `REPORT_FROM` | Optional sender (default `onboarding@resend.dev`; use a verified domain in production). |
 | `REPORT_DAY` / `REPORT_HOUR` | When the weekly auto-send fires (UTC; default Monday 13:00). |
+| `TWILIO_SID` / `TWILIO_TOKEN` / `TWILIO_FROM` | Optional: SMS alerts to the on-call leader (Twilio). |
+| `ONCALL_EMAIL` / `ONCALL_PHONE` | Optional default on-call contact (also settable in-app under My Tasks). |
+| `KIOSK_CODE` | Code for the client kiosk and break-room display (default `armada`). |
 | `SEED_SAMPLE` | `true` loads a demo client/staff on first boot. |
 | `ARMADA_DB` | Path to the SQLite file (default `./data/armada.db`). |
 

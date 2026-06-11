@@ -400,6 +400,16 @@ CREATE TABLE IF NOT EXISTS focus_logs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Documentation notes (from staff or ingested from the EMR/Kipu) — AI-scanned
+-- for red flags (unhappy, bothered, AMA risk) that need follow-up.
+CREATE TABLE IF NOT EXISTS notes (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  text TEXT NOT NULL, author TEXT, source TEXT DEFAULT 'manual',
+  flagged INTEGER NOT NULL DEFAULT 0, flag_level TEXT, flag_summary TEXT, categories TEXT, suggested_action TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Assigned tasks — required, owned by a named teammate (incl. @mentions).
 CREATE TABLE IF NOT EXISTS assigned_tasks (
   id INTEGER PRIMARY KEY,

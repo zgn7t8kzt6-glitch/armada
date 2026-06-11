@@ -10,7 +10,7 @@ import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser, changePassword,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -1268,6 +1268,44 @@ app.get('/api/focus/history', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT date, COUNT(DISTINCT user_id) n FROM focus_logs WHERE date >= date('now','-21 day') GROUP BY date ORDER BY date DESC`).all();
   rows.forEach((r) => { r.topic = focusForDate(r.date).t; });
   res.json({ history: rows });
+});
+
+/* ---------------- Documentation notes + red-flag scanner ---------------- */
+// Store a note, scan it for red flags, and raise an alert if follow-up is needed.
+async function ingestNote({ client_id, text, author, source }, user, ip) {
+  const c = client_id ? db.prepare(`SELECT id, pref, name FROM clients WHERE id = ?`).get(client_id) : null;
+  let scan = { flagged: 0, level: 'None', categories: [], summary: null, suggested_action: null };
+  if (claudeConfigured()) {
+    try { const r = await scanNote(text, c ? (c.pref || c.name) : ''); scan = { flagged: r.flagged ? 1 : 0, level: r.level, categories: r.categories, summary: r.summary, suggested_action: r.suggested_action }; }
+    catch (e) { /* store unscanned */ }
+  }
+  const info = db.prepare(`INSERT INTO notes (client_id, text, author, source, flagged, flag_level, flag_summary, categories, suggested_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(client_id || null, text, author || null, source || 'manual', scan.flagged, scan.level, scan.summary, JSON.stringify(scan.categories), scan.suggested_action);
+  if (scan.flagged && (scan.level === 'High' || scan.level === 'Elevated')) {
+    createAlert(client_id || null, 'note', scan.level, `${c ? (c.pref || c.name) + ' — ' : ''}note red flag: ${scan.summary || ''}${scan.suggested_action ? ' → ' + scan.suggested_action : ''}`);
+  }
+  if (user) audit({ user, action: 'NOTE', entity: 'client', entity_id: client_id ? +client_id : null, detail: scan.level, ip });
+  return { id: info.lastInsertRowid, ...scan };
+}
+app.post('/api/notes', requireAuth, async (req, res) => {
+  const b = req.body || {}; if (!b.text?.trim()) return res.status(400).json({ error: 'Empty note' });
+  try { res.json(await ingestNote({ client_id: b.client_id, text: b.text.trim(), author: req.user.name, source: 'manual' }, req.user, req.ip)); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/clients/:id/notes', requireAuth, (req, res) => {
+  res.json({ notes: db.prepare(`SELECT * FROM notes WHERE client_id = ? ORDER BY id DESC LIMIT 30`).all(req.params.id).map((n) => ({ ...n, categories: safeArr(n.categories) })) });
+});
+app.get('/api/notes/flagged', requireAuth, (req, res) => {
+  res.json({ notes: db.prepare(`SELECT n.*, c.pref FROM notes n LEFT JOIN clients c ON c.id = n.client_id WHERE n.flagged = 1 ORDER BY n.id DESC LIMIT 50`).all().map((n) => ({ ...n, categories: safeArr(n.categories) })) });
+});
+// Ingest hook for the EMR/Kipu (no session; guarded by INGEST_KEY). Maps by client_id or name.
+app.post('/api/ingest/note', async (req, res) => {
+  if (!process.env.INGEST_KEY || (req.headers['x-ingest-key'] !== process.env.INGEST_KEY)) return res.status(401).json({ error: 'Invalid ingest key' });
+  const b = req.body || {}; if (!b.text?.trim()) return res.status(400).json({ error: 'Empty note' });
+  let cid = b.client_id || null;
+  if (!cid && b.client_name) cid = db.prepare(`SELECT id FROM clients WHERE active = 1 AND (pref = ? OR name = ?) ORDER BY id DESC LIMIT 1`).get(b.client_name, b.client_name)?.id || null;
+  try { res.json(await ingestNote({ client_id: cid, text: b.text.trim(), author: b.author || 'EMR', source: b.source || 'kipu' }, null, req.ip)); }
+  catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 /* ---------------- Break-room display (code-gated, no PHI) ---------------- */

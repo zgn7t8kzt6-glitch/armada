@@ -347,12 +347,6 @@ async function loadMyTasks(){
   await fillClientSelect($('at_client'),'No client');
   try { const { staff } = await api('/staff'); const opts = staff.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
     $('at_to').innerHTML = '<option value="">Pick teammate…</option>'+opts;
-    if($('acc_user')){ const st = await api('/settings').catch(()=>({})); const ac=st.aftercareCoordinator;
-      $('acc_user').innerHTML='<option value="">— none —</option>'+staff.map(s=>`<option value="${s.id}" ${ac&&ac.id===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
-      if($('oc_email')) $('oc_email').value = st.oncallEmail||'';
-      if($('oc_phone')) $('oc_phone').value = st.oncallPhone||'';
-      if($('ocStatus')) $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
-    }
   } catch(e){}
   if(ME.role==='admin'){ try { const { calls:ac, tasks:at } = await api('/all-tasks');
     $('allTasksList').innerHTML = (ac.map(c=>`<div class="pc-note">🤝 ${esc(c.pref)} — ${esc(c.type)} call due ${esc(c.due_date)} · <strong>${esc(c.assignee_name||'unassigned')}</strong></div>`).join('')+
@@ -894,7 +888,32 @@ async function loadJourney(){
       ${sec('Recent pulses', pulseHtml)}
       ${followHtml?sec('Aftercare', followHtml):''}
       ${sec('Support / family', c.support?`<div class="pc-note">${esc(c.support)}</div>`:'<div class="pc-note">—</div>')}
+    </div>
+    <div class="card no-print">
+      <h3>Documentation notes — red-flag scan</h3>
+      <p class="sub sans">Drop in a note (or it arrives from the EMR). Claude flags anything that means they're unhappy or at risk, and raises it on Today.</p>
+      <div class="voicewrap"><textarea id="noteText" placeholder="e.g. Client was withdrawn at group and said the food is terrible and nobody listens…"></textarea><button type="button" class="mic" onclick="dictateInto(this)" title="Dictate">🎤</button></div>
+      <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="addNote(${c.id})">Scan &amp; save</button></div>
+      <div id="noteResult"></div>
+      <div id="notesList"></div>
     </div>`;
+  loadClientNotes(c.id);
+}
+async function loadClientNotes(id){
+  try { const { notes } = await api('/clients/'+id+'/notes');
+    $('notesList').innerHTML = notes.length ? notes.map(n=>`<div class="todo">
+      <div class="txt">${n.flagged?'<span class="risk '+(n.flag_level==='High'?'risk-high':'risk-elev')+'">⚑ '+esc(n.flag_level)+'</span> ':''}${esc(n.text.slice(0,180))}${n.text.length>180?'…':''}
+        ${n.flag_summary?'<div class="hint">'+esc(n.flag_summary)+(n.suggested_action?' → '+esc(n.suggested_action):'')+'</div>':''}
+        <div class="hint">${esc(n.source||'')} · ${esc(n.author||'')} · ${esc((n.created_at||'').slice(0,16))}</div></div></div>`).join('') : '<div class="pc-note" style="margin-top:8px">No notes yet.</div>';
+  } catch(e){}
+}
+async function addNote(clientId){
+  const t=$('noteText').value.trim(); if(!t) return;
+  $('noteResult').innerHTML='<span class="hint">Scanning…</span>';
+  try{ const r=await api('/notes',{method:'POST',body:JSON.stringify({client_id:clientId,text:t})});
+    $('noteResult').innerHTML = r.flagged ? `<div class="ama-banner ${r.level==='High'?'ama-high':'ama-elev'}" style="margin:8px 0"><div class="ama-head">⚑ Red flag (${esc(r.level)})</div><div class="ama-sum">${esc(r.summary||'')}</div><div class="pc-note">→ ${esc(r.suggested_action||'')}</div></div>` : '<div class="hint" style="margin:6px 0">✓ Saved — no red flags found.</div>';
+    $('noteText').value=''; loadClientNotes(clientId);
+  }catch(e){ $('noteResult').innerHTML='<span class="hint" style="color:var(--danger)">'+e.message+'</span>'; }
 }
 async function addGoal(clientId){ const inp=$('goalInput'); if(!inp.value.trim())return; await api('/goals',{method:'POST',body:JSON.stringify({client_id:clientId,text:inp.value})}); loadJourney(); }
 async function toggleGoal(id,status){ await api('/goals/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadJourney(); }

@@ -247,6 +247,49 @@ export async function generateShiftBriefing(contextText) {
   return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
 }
 
+// ---- Scan a documentation note for red flags that need follow-up ----
+const NOTE_SYSTEM = `You scan a documentation note about a client at a recovery
+center for RED FLAGS that need staff follow-up — anything signaling the client
+is unhappy, uncomfortable, bothered, mistreated, or at risk of leaving (AMA), or
+any safety concern or unresolved complaint. This is NOT clinical charting — it
+feeds a care/retention dashboard.
+- flagged = true only if there's something a human should follow up on.
+- level: None | Low | Elevated | High (High = imminent AMA talk, safety, or a
+  serious unaddressed complaint).
+- categories: short tags (e.g., "dissatisfaction", "wants to leave", "conflict",
+  "unmet request", "withdrawal discomfort", "family stress").
+- summary: one plain sentence a charge nurse can act on.
+- suggested_action: one concrete, warm next step in the Armada way (fix the
+  fixable, run the Save, a human goes to the client).
+Ground everything in the note. Do not invent. Person-first language.`;
+const NOTE_SCHEMA = {
+  type: 'object',
+  properties: {
+    flagged: { type: 'boolean' },
+    level: { type: 'string', enum: ['None', 'Low', 'Elevated', 'High'] },
+    categories: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+    suggested_action: { type: 'string' },
+  },
+  required: ['flagged', 'level', 'categories', 'summary', 'suggested_action'],
+  additionalProperties: false,
+};
+export async function scanNote(text, clientName) {
+  const client = new Anthropic();
+  const response = await client.messages.create({
+    model: 'claude-opus-4-8',
+    max_tokens: 700,
+    system: G + NOTE_SYSTEM,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: NOTE_SCHEMA } },
+    messages: [{ role: 'user', content: `Client: ${clientName || 'unknown'}\n\nNOTE:\n${text}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('Declined.');
+  const t = response.content.find((b) => b.type === 'text');
+  const r = JSON.parse(t.text);
+  r.categories = r.categories || [];
+  return r;
+}
+
 export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   const client = new Anthropic();
   const handoffText = handoffs.length

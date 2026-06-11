@@ -31,7 +31,7 @@ app.use((req, res, next) => {
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
 const JOB_ROLES = ['BHT / Tech', 'Nurse', 'Therapist', 'Kitchen'];
-const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nursing / Medical', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
+const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
 /* ---------------- auth ---------------- */

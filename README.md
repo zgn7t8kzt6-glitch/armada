@@ -15,10 +15,11 @@ spans every department and weaves Claude through all of it.
 - **Ask Armada — AI concierge.** Ask anything in plain English about the house or
   a client ("Who's at risk tonight?", "Draft a warm update to Marc's mom") and
   Claude answers from the app's data.
-- Plus: AMA early-warning + recap/action plans, retention dashboard, surveys,
-  concierge/requests, program/schedule, nursing (MAR/vitals/withdrawal), family
-  engagement, admissions & bed board, team (kudos/training/wellbeing), incident
-  & safety reports, the full Ritz service model, outcomes, and a weekly report.
+- Plus: AMA early-warning + recap/action plans, retention dashboard, proactive
+  alerts, employee accountability (Care Champion), surveys, concierge/requests,
+  program/schedule, family engagement, admissions & bed board, alumni, a
+  client-facing kiosk, team (kudos/training/wellbeing), incident reports, the full
+  Ritz service model, outcomes, and a weekly report.
 
 ## ► Deploy it live (one click)
 
@@ -48,7 +49,7 @@ real client data.)
 - **Handoff notes.** Per-client notes passed to the next shift.
 - **Assign staff** to specific shifts; assigned names show on the playbook header.
 - **Audit log.** Every view/create/update/delete of client data is recorded (admin-only) — a core HIPAA requirement.
-- **✦ Draft tasks with Claude.** Claude reads a Care Card and drafts per-shift, per-role tasks for staff to review/edit. Safety items are flagged High and routed to nursing; no medical orders are invented. Requires `ANTHROPIC_API_KEY`.
+- **✦ Draft tasks with Claude.** Claude reads a Care Card and drafts per-shift, per-role tasks for staff to review/edit. Safety/sensitivity items are flagged High priority; no medical orders are invented. Requires `ANTHROPIC_API_KEY`.
 - **AMA early-warning system.** A 30-second **Daily Pulse** per client (warning signs, engagement, statements). Claude turns the Care Card + pulses + handoffs into a **Ritz recap & action plan**: the underlying emotional reason, the best play to keep them, personalized "feel cared for" gestures, per-shift tasks, and how to talk with them. Auto-generates on a High-concern pulse; one click applies it to the Care Card or prints it.
 - **Retention dashboard.** Every client by risk, who still needs a pulse today, and trending warning signs.
 - **The Ritz bookends.** Care Cards carry a **Welcome / first-72-hours plan** (arrival) and an **Aftercare plan** (farewell); discharging a client auto-schedules **24h / 48h / 30-day aftercare calls**.
@@ -58,10 +59,10 @@ real client data.)
 - **Outcomes dashboard.** AMA rate, completion rate, felt-care average, open concerns, delights, and upcoming sobriety milestones.
 - **Weekly leadership report.** A branded summary (outcomes, wow stories, delights, concerns, aftercare) — viewable in-app, printable, and auto-emailed weekly. Requires `RESEND_API_KEY` + `REPORT_TO`.
 - **Surveys.** Ritz-grade Client Experience, Meal & Food, and Discharge surveys with a results dashboard; auto-offered (Experience weekly, Discharge on discharge); scores feed Outcomes and the report.
-- **Concierge & Departments.** Every client wish/need logged and routed to the right department (Front Desk, Clinical, Nursing, Kitchen, Housekeeping, Maintenance, Transport, Activities, Family, Spiritual Care), tracked to completion.
+- **Concierge & Departments.** Every client wish/need logged and routed to the right department (Front Desk, Clinical/Therapy, Kitchen, Housekeeping, Maintenance, Transport, Activities, Family, Spiritual Care), tracked to completion.
 - **Program & Schedule.** The day's groups, activities, meals, outings, and appointments — facility-wide or per client.
-- **Client 360 Journey.** One screen per client pulling together preferences, safety, health, goals, schedule, risk, requests, concerns, delights, pulses, and family — with an AI Care Brief for today.
-- **Treatment goals** with progress, plus **health** (allergies, medications) on the Care Card.
+- **Client 360 Journey.** One screen per client pulling together preferences, safety, goals, schedule, risk, requests, concerns, delights, pulses, and family — with an AI Care Brief for today.
+- **Treatment goals** with progress on the Care Card / Journey.
 - **AI Shift Briefing.** Claude reads the whole house and writes the shift huddle: who needs extra care, what to close out, delights to deliver, and a line for the team.
 - **Employee accountability.** Tracks how often each teammate engaged in the care system (pulses, delights, requests, surveys, handoffs) and how many assigned shifts had no logged care action — with a monthly **Care Champion** (fewest misses) for recognition, and a house care-gap list of missed client check-ins.
 - **Proactive alerts.** The moment a client's signals turn (High-concern pulse, High/Elevated AMA read, high-priority request, serious incident) an alert surfaces on Today — no one has to go looking.

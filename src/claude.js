@@ -149,6 +149,34 @@ function pulsesText(pulses = []) {
     .join('\n');
 }
 
+// ---- Ask Armada: an AI concierge that answers staff questions from the data ----
+const ASSISTANT_SYSTEM = `You are "Armada", the AI care concierge for a
+residential addiction-recovery center built on the Ritz-Carlton philosophy:
+every client should feel genuinely cared for and important, and so should the
+staff. A staff member is asking you a question. Answer using ONLY the data
+provided below the question — about the house or a specific client.
+
+- Be warm, specific, and immediately useful. Lead with the answer.
+- If asked to draft something (a family update, a note, a plan), write it ready
+  to use.
+- If the data doesn't contain the answer, say so plainly rather than guessing.
+- Ground every claim in the provided data. Do not invent clinical facts,
+  diagnoses, medications, or events. This is support for trained staff, not a
+  medical or clinical directive.`;
+
+export async function askAssistant(question, contextText) {
+  const client = new Anthropic();
+  const response = await client.messages.create({
+    model: 'claude-opus-4-8',
+    max_tokens: 1500,
+    system: ASSISTANT_SYSTEM,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: `QUESTION:\n${question}\n\n=== DATA ===\n${contextText}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+}
+
 // ---- AI Care Brief: a warm, whole-person summary + today's caring moves ----
 const BRIEF_SYSTEM = `You are a Ritz-Carlton–style care coordinator at a
 residential recovery center. Given everything known about ONE client, write a

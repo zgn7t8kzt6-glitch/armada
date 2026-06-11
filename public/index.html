@@ -40,7 +40,9 @@
     </div>
   </header>
 
+  <div class="sans" id="groupbar"></div>
   <nav class="sans" id="nav">
+    <button data-view="today">Today</button>
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
     <button data-view="outcomes">Outcomes</button>
@@ -49,6 +51,8 @@
     <button data-view="concierge">Concierge</button>
     <button data-view="program">Program</button>
     <button data-view="nursing">Nursing</button>
+    <button data-view="incidents">Incidents</button>
+    <button data-view="askai">Ask AI</button>
     <button data-view="family">Family</button>
     <button data-view="admissions">Admissions</button>
     <button data-view="team">Team</button>
@@ -61,6 +65,67 @@
   </nav>
 
   <main>
+    <!-- TODAY (command center) -->
+    <section id="today" class="view">
+      <div class="card" style="border-left:4px solid var(--gold)">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div><h3 style="margin:0">Today at Armada</h3><p class="sub sans" id="todayDate" style="margin:2px 0 0"></p></div>
+          <button class="btn btn-gold sans" id="todayBriefBtn" onclick="todayBriefing()" style="margin-left:auto;display:none">✦ AI house briefing</button>
+        </div>
+        <div id="todayBrief"></div>
+      </div>
+      <div class="card"><div id="todayKpis" class="ret-cards"></div></div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:2;min-width:320px">
+          <h3>Needs attention today</h3>
+          <div id="todayAttention"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px">
+          <h3>Ask Armada</h3>
+          <p class="sub sans">Ask anything about the house.</p>
+          <div class="handoff-add"><input id="today_ask" placeholder="e.g. Who needs extra care tonight?"/><button class="btn btn-gold btn-sm sans" onclick="askFromToday()">Ask</button></div>
+          <div id="todayAskOut" class="brief-body"></div>
+        </div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:280px"><h3>Today's program</h3><div id="todaySchedule"></div></div>
+        <div class="card" style="flex:1;min-width:280px"><h3>Recent wins</h3><div id="todayWins"></div></div>
+      </div>
+    </section>
+
+    <!-- ASK AI -->
+    <section id="askai" class="view">
+      <div class="card">
+        <h3>Ask Armada — AI care concierge</h3>
+        <p class="sub sans">Ask anything about the house or a client, or have it draft a note, plan, or family update. Grounded in your data; decision support, not a clinical directive.</p>
+        <div class="controls">
+          <div class="field" style="min-width:220px"><label>About (optional)</label><select id="ai_client"><option value="">The whole house</option></select></div>
+        </div>
+        <label>Your question</label>
+        <textarea id="ai_q" placeholder="e.g. What does Janie need today to feel cared for? · Who is most at risk of leaving? · Draft a warm update to Marc's mother about his progress."></textarea>
+        <div class="toolbar"><button class="btn btn-gold sans" id="aiAskBtn" onclick="askAI()">Ask Armada</button></div>
+        <div id="aiAnswer" class="brief-body"></div>
+        <div id="aiHint" class="hint"></div>
+      </div>
+    </section>
+
+    <!-- INCIDENTS -->
+    <section id="incidents" class="view">
+      <div class="card no-print">
+        <h3>Incident &amp; Safety Reports</h3>
+        <p class="sub sans">Document safety events for review and follow-up — falls, medical, behavioral, medication errors, elopement.</p>
+        <div class="grid3">
+          <div><label>Client (optional)</label><select id="in_client"></select></div>
+          <div><label>Type</label><select id="in_type"><option>Behavioral</option><option>Medical</option><option>Fall</option><option>Medication error</option><option>Property</option><option>Elopement/AMA</option><option>Other</option></select></div>
+          <div><label>Severity</label><select id="in_sev"><option>Low</option><option>Moderate</option><option>High</option><option>Critical</option></select></div>
+        </div>
+        <label>What happened</label><textarea id="in_desc"></textarea>
+        <label>Action taken</label><input id="in_action"/>
+        <div class="toolbar"><button class="btn btn-gold sans" onclick="addIncident()">File report</button></div>
+      </div>
+      <div class="card"><h3>Reports</h3><div id="inList"></div></div>
+    </section>
+
     <!-- SHIFT REPORT -->
     <section id="report" class="view active">
       <div class="card no-print">

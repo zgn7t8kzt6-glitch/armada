@@ -32,6 +32,10 @@ header h1{margin:0;font-size:19px}
 header .tag{margin:2px 0 0;font-size:11px;color:var(--gold-soft);letter-spacing:1.5px;text-transform:uppercase}
 .userbox{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13px;color:var(--gold-soft)}
 
+#groupbar{background:var(--navy-2);padding:0 28px;display:flex;gap:2px;flex-wrap:wrap}
+#groupbar button{font-family:inherit;background:none;border:none;padding:11px 16px;cursor:pointer;
+  font-size:14px;color:var(--gold-soft);border-bottom:3px solid transparent;font-weight:600}
+#groupbar button.active{color:#fff;border-bottom-color:var(--gold)}
 nav{background:#fff;border-bottom:1px solid var(--line);padding:0 28px;display:flex;gap:2px;
   position:sticky;top:0;z-index:5;flex-wrap:wrap}
 nav button{font-family:inherit;background:none;border:none;padding:14px 16px;cursor:pointer;

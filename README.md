@@ -5,10 +5,20 @@ Card** once per client, and the app produces a live **Shift Playbook** telling
 each staff member exactly what to do for each client on their shift — so every
 client feels genuinely, individually cared for.
 
-It is a **multi-user web app** with logins and roles, a Claude-powered AMA
-(against-medical-advice) early-warning system, a retention dashboard, the full
-Ritz service model (arrival, daily lineup, wow stories, fond farewell), and a
-weekly leadership report.
+It is a **multi-user web app** with logins and roles, organized into grouped
+sections (Today · Care · Clinical · People · Admissions · Insights · Ask AI). It
+spans every department and weaves Claude through all of it.
+
+- **Today — command center.** One home screen tying the whole house together:
+  live numbers, "needs attention today" across every department, an AI house
+  briefing, today's program, and recent wins.
+- **Ask Armada — AI concierge.** Ask anything in plain English about the house or
+  a client ("Who's at risk tonight?", "Draft a warm update to Marc's mom") and
+  Claude answers from the app's data.
+- Plus: AMA early-warning + recap/action plans, retention dashboard, surveys,
+  concierge/requests, program/schedule, nursing (MAR/vitals/withdrawal), family
+  engagement, admissions & bed board, team (kudos/training/wellbeing), incident
+  & safety reports, the full Ritz service model, outcomes, and a weekly report.
 
 ## ► Deploy it live (one click)
 

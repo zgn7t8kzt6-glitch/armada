@@ -8,7 +8,7 @@ import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, claudeConfigured, AMA_TRIGGERS } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -651,6 +651,87 @@ app.post('/api/shift-briefing', requireAuth, async (req, res) => {
     audit({ user: req.user, action: 'SHIFT_BRIEF', ip: req.ip });
     res.json({ brief });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* ---------------- Today: command center ---------------- */
+function surveysDueCount() {
+  const exp = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get();
+  const dis = db.prepare(`SELECT id FROM surveys WHERE key = 'discharge'`).get();
+  let n = 0;
+  if (exp) n += db.prepare(`SELECT COUNT(*) n FROM clients c WHERE c.active=1 AND c.discharge_status IS NULL AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id=? AND r.client_id=c.id AND r.created_at >= datetime('now','-7 day'))`).get(exp.id).n;
+  if (dis) n += db.prepare(`SELECT COUNT(*) n FROM clients c WHERE c.discharge_status IS NOT NULL AND c.discharge_status!='Transferred' AND c.discharge_date >= date('now','-30 day') AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id=? AND r.client_id=c.id)`).get(dis.id).n;
+  return n;
+}
+app.get('/api/today', requireAuth, (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const attention = [];
+  for (const c of clients) {
+    const ama = latestAmaRead(c.id);
+    if (ama && ama.level !== 'Low') attention.push({ kind: 'risk', level: ama.level, client_id: c.id, text: `${c.pref || c.name} — AMA risk ${ama.level}${ama.summary ? ': ' + ama.summary : ''}` });
+    if (c.admit && (Date.now() - new Date(c.admit + 'T00:00').getTime()) <= 3 * 864e5) attention.push({ kind: 'welcome', client_id: c.id, text: `${c.pref || c.name} — in the first 72 hours. Deliver the welcome.` });
+  }
+  const callsDue = db.prepare(`SELECT f.type, f.due_date, c.pref, c.name, c.id cid FROM followups f JOIN clients c ON c.id=f.client_id WHERE f.status='Pending' AND f.due_date <= ? ORDER BY f.due_date`).all(today);
+  callsDue.forEach((f) => attention.push({ kind: 'call', client_id: f.cid, text: `${f.pref || f.name} — ${f.type} aftercare call due ${f.due_date}` }));
+  const hiReq = db.prepare(`SELECT r.text, r.department, c.pref FROM requests r LEFT JOIN clients c ON c.id=r.client_id WHERE r.status!='Done' AND r.priority='High' ORDER BY r.id DESC`).all();
+  hiReq.forEach((r) => attention.push({ kind: 'request', text: `${r.department}: ${r.text}${r.pref ? ' (' + r.pref + ')' : ''}` }));
+  const order = { risk: 0, welcome: 1, call: 2, request: 3 };
+  attention.sort((a, b) => (order[a.kind] - order[b.kind]) || ((b.level === 'High') - (a.level === 'High')));
+
+  const metrics = {
+    active: clients.length,
+    highRisk: attention.filter((a) => a.kind === 'risk').length,
+    openRequests: db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`).get().n,
+    surveysDue: surveysDueCount(),
+    bedsOpen: db.prepare(`SELECT COUNT(*) n FROM beds WHERE status = 'Open'`).get().n,
+    pipeline: db.prepare(`SELECT COUNT(*) n FROM admissions WHERE status NOT IN ('Admitted','Declined')`).get().n,
+    callsDue: callsDue.length,
+    openConcerns: db.prepare(`SELECT COUNT(*) n FROM concerns WHERE status='Open'`).get().n,
+    openIncidents: db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status='Open'`).get().n,
+    visitsToday: db.prepare(`SELECT COUNT(*) n FROM visits WHERE date = ? AND status='Scheduled'`).get(today).n,
+  };
+  const schedule = db.prepare(`SELECT s.*, c.pref FROM schedule_items s LEFT JOIN clients c ON c.id=s.client_id WHERE s.date = ? ORDER BY (s.time IS NULL), s.time LIMIT 12`).all(today);
+  const wins = {
+    wows: db.prepare(`SELECT w.text, w.by_name, c.pref FROM wows w LEFT JOIN clients c ON c.id=w.client_id ORDER BY w.id DESC LIMIT 3`).all(),
+    delights: db.prepare(`SELECT d.text, c.pref FROM delights d LEFT JOIN clients c ON c.id=d.client_id ORDER BY d.id DESC LIMIT 3`).all(),
+  };
+  res.json({ metrics, attention: attention.slice(0, 25), schedule, wins, claude: claudeConfigured() });
+});
+
+// Ask Armada (AI concierge)
+app.post('/api/assistant', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured (set ANTHROPIC_API_KEY).' });
+  const q = (req.body?.question || '').trim();
+  if (!q) return res.status(400).json({ error: 'Ask a question.' });
+  try {
+    let ctx;
+    if (req.body?.client_id) {
+      const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.body.client_id);
+      ctx = c ? buildClientContext(c) : 'No such client.';
+    } else {
+      ctx = buildHouseContext('current');
+    }
+    const answer = await askAssistant(q, ctx);
+    audit({ user: req.user, action: 'ASSISTANT', detail: q.slice(0, 80), ip: req.ip });
+    res.json({ answer });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* ---------------- Incidents (quality & safety) ---------------- */
+app.get('/api/incidents', requireAuth, (req, res) => {
+  res.json({ incidents: db.prepare(`SELECT i.*, c.pref FROM incidents i LEFT JOIN clients c ON c.id = i.client_id ORDER BY (i.status='Closed'), i.id DESC LIMIT 100`).all() });
+});
+app.post('/api/incidents', requireAuth, (req, res) => {
+  const b = req.body || {}; if (!b.type || !b.description?.trim()) return res.status(400).json({ error: 'Missing' });
+  db.prepare(`INSERT INTO incidents (client_id, type, severity, description, action_taken, reported_by, reported_by_name) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, req.user.id, req.user.name);
+  audit({ user: req.user, action: 'INCIDENT', entity: 'client', entity_id: b.client_id ? +b.client_id : null, detail: `${b.type}/${b.severity}`, ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/incidents/:id/status', requireAuth, (req, res) => {
+  const st = ['Open', 'Reviewed', 'Closed'].includes(req.body?.status) ? req.body.status : 'Reviewed';
+  db.prepare(`UPDATE incidents SET status = ? WHERE id = ?`).run(st, req.params.id);
+  res.json({ ok: true });
 });
 
 /* ---------------- Nursing: meds (MAR), vitals, withdrawal ---------------- */

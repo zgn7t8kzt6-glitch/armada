@@ -38,15 +38,48 @@ async function boot(){
   fillSelect($('r_role'), ['All', ...META.jobRoles]);
   fillSelect($('u_job'), META.jobRoles);
   $('r_date').value = today(); $('a_date').value = today();
-  loadPlaybook();
+  renderGroups();
+  show('today');
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
 
-/* ---- nav ---- */
+/* ---- grouped nav ---- */
+const GROUPS=[
+  {g:'today',label:'Today',first:'today'},
+  {g:'care',label:'Care',first:'report'},
+  {g:'clinical',label:'Clinical',first:'retention'},
+  {g:'people',label:'People',first:'lineup'},
+  {g:'admissions',label:'Admissions',first:'admissions'},
+  {g:'insights',label:'Insights',first:'outcomes'},
+  {g:'ask',label:'Ask AI',first:'askai'},
+];
+const GROUP_OF={today:'today',
+  report:'care',clients:'care',editor:'care',journey:'care',concierge:'care',program:'care',
+  retention:'clinical',nursing:'clinical',surveys:'clinical',incidents:'clinical',
+  family:'people',team:'people',lineup:'people',assign:'people',
+  admissions:'admissions',
+  outcomes:'insights','report-view':'insights',users:'insights',audit:'insights',
+  askai:'ask'};
+function renderGroups(){
+  $('groupbar').innerHTML = GROUPS.map(x=>`<button data-g="${x.g}">${x.label}</button>`).join('');
+  document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'care'; });
+  document.querySelectorAll('#groupbar button').forEach(b=>b.onclick=()=>{ const grp=GROUPS.find(x=>x.g===b.dataset.g); show(grp.first); });
+}
+function selectGroup(g){
+  document.querySelectorAll('#groupbar button').forEach(b=>b.classList.toggle('active', b.dataset.g===g));
+  document.querySelectorAll('#nav button').forEach(b=>{
+    const adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
+    b.style.display = (b.dataset.group===g && !adminHidden) ? '' : 'none';
+  });
+}
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.view));
 function show(v){
+  selectGroup(GROUP_OF[v]||'care');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
+  if(v==='today') loadToday();
+  if(v==='askai') loadAskAI();
+  if(v==='incidents') loadIncidents();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -617,6 +650,79 @@ async function careBrief(clientId){
   }catch(e){ alert(e.message); }
   finally{ btn.disabled=false; btn.textContent=l; }
 }
+
+/* ---- today command center ---- */
+async function loadToday(){
+  const t = await api('/today');
+  $('todayDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  if(t.claude) $('todayBriefBtn').style.display='inline-block';
+  const m=t.metrics;
+  $('todayKpis').innerHTML = `
+    <div class="ret-card ${m.highRisk?'rc-high':''}"><div class="n">${m.highRisk}</div><div class="l">At risk</div></div>
+    <div class="ret-card"><div class="n">${m.active}</div><div class="l">Active clients</div></div>
+    <div class="ret-card ${m.callsDue?'rc-warn':''}"><div class="n">${m.callsDue}</div><div class="l">Aftercare calls due</div></div>
+    <div class="ret-card ${m.openRequests?'rc-warn':''}"><div class="n">${m.openRequests}</div><div class="l">Open requests</div></div>
+    <div class="ret-card ${m.openConcerns?'rc-warn':''}"><div class="n">${m.openConcerns}</div><div class="l">Open concerns</div></div>
+    <div class="ret-card ${m.openIncidents?'rc-high':''}"><div class="n">${m.openIncidents}</div><div class="l">Open incidents</div></div>
+    <div class="ret-card"><div class="n">${m.surveysDue}</div><div class="l">Surveys due</div></div>
+    <div class="ret-card"><div class="n">${m.visitsToday}</div><div class="l">Visits today</div></div>
+    <div class="ret-card"><div class="n">${m.bedsOpen}</div><div class="l">Open beds</div></div>
+    <div class="ret-card"><div class="n">${m.pipeline}</div><div class="l">In pipeline</div></div>`;
+  const icon={risk:'⚠',welcome:'☀',call:'🤝',request:'🛎'};
+  $('todayAttention').innerHTML = t.attention.length ? t.attention.map(a=>`<div class="todo">
+      <div class="txt">${icon[a.kind]||'•'} ${esc(a.text)}</div>
+      ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}</div>`).join('') : '<div class="pc-note">All clear. Touch every client, deliver every personal touch.</div>';
+  $('todaySchedule').innerHTML = t.schedule.length ? t.schedule.map(s=>`<div class="pc-note">${s.time?'<strong>'+esc(s.time)+'</strong> · ':''}<span class="chip">${esc(s.type)}</span> ${esc(s.title)}${s.pref?' · '+esc(s.pref):''}</div>`).join('') : '<div class="pc-note">Nothing scheduled. Build the day in Program.</div>';
+  const wins=[...t.wins.wows.map(w=>'👏 '+w.text+(w.pref?' ('+w.pref+')':'')),...t.wins.delights.map(d=>'♥ '+d.text+(d.pref?' ('+d.pref+')':''))];
+  $('todayWins').innerHTML = wins.length ? wins.map(w=>`<div class="pc-note">${esc(w)}</div>`).join('') : '<div class="pc-note">Log a Wow Story or a delight to celebrate the team.</div>';
+}
+async function askFromToday(){
+  const q=$('today_ask').value.trim(); if(!q) return;
+  $('todayAskOut').innerHTML='<span class="hint">Thinking…</span>';
+  try{ const { answer }=await api('/assistant',{method:'POST',body:JSON.stringify({question:q})}); $('todayAskOut').innerHTML=esc(answer).replace(/\n/g,'<br>'); }
+  catch(e){ $('todayAskOut').innerHTML='<span class="hint" style="color:var(--danger)">'+e.message+'</span>'; }
+}
+async function todayBriefing(){
+  const btn=$('todayBriefBtn'); btn.disabled=true; const l=btn.textContent; btn.textContent='✦ Briefing…';
+  $('todayBrief').innerHTML='<div class="hint">Claude is reading the whole house…</div>';
+  try{ const { brief }=await api('/shift-briefing',{method:'POST',body:JSON.stringify({shift:'today'})});
+    $('todayBrief').innerHTML=`<div class="ama-banner ama-low" style="margin-top:12px"><div class="ama-head" style="color:var(--gold)">✦ AI House Briefing</div><div class="brief-body">${esc(brief).replace(/\n/g,'<br>')}</div></div>`;
+  }catch(e){ $('todayBrief').innerHTML='<div class="hint" style="color:var(--danger)">'+e.message+'</div>'; }
+  finally{ btn.disabled=false; btn.textContent=l; }
+}
+
+/* ---- ask AI ---- */
+async function loadAskAI(){
+  await fillClientSelect($('ai_client'), 'The whole house');
+  $('aiHint').textContent = META.claude ? '' : 'Claude is not configured — set ANTHROPIC_API_KEY to enable.';
+  $('aiAskBtn').disabled = !META.claude;
+}
+async function askAI(){
+  const q=$('ai_q').value.trim(); if(!q) return;
+  const btn=$('aiAskBtn'); btn.disabled=true; const l=btn.textContent; btn.textContent='Thinking…';
+  $('aiAnswer').innerHTML='';
+  try{ const { answer }=await api('/assistant',{method:'POST',body:JSON.stringify({question:q,client_id:$('ai_client').value||null})});
+    $('aiAnswer').innerHTML=`<div class="ama-banner ama-low" style="margin-top:12px"><div class="brief-body">${esc(answer).replace(/\n/g,'<br>')}</div></div>`;
+  }catch(e){ $('aiHint').textContent=e.message; }
+  finally{ btn.disabled=false; btn.textContent=l; }
+}
+
+/* ---- incidents ---- */
+async function loadIncidents(){
+  await fillClientSelect($('in_client'), 'No client / facility');
+  const { incidents } = await api('/incidents');
+  const sev={Low:'risk-low',Moderate:'risk-elev',High:'risk-high',Critical:'risk-high'};
+  $('inList').innerHTML = incidents.length ? incidents.map(i=>`<div class="todo ${i.status==='Closed'?'done':''}">
+      <div class="txt"><span class="risk ${sev[i.severity]||''}">${esc(i.severity)}</span> <strong>${esc(i.type)}</strong>${i.pref?' · '+esc(i.pref):''} — ${esc(i.description)}
+        ${i.action_taken?'<div class="hint">Action: '+esc(i.action_taken)+'</div>':''}<div class="hint">${esc(i.created_at)} · ${esc(i.reported_by_name||'')} · ${esc(i.status)}</div></div>
+      ${i.status!=='Closed'?`<button class="btn btn-ghost btn-sm sans" onclick="setIncident(${i.id},'Reviewed')">Reviewed</button><button class="btn btn-ghost btn-sm sans" onclick="setIncident(${i.id},'Closed')">Close</button>`:''}</div>`).join('') : '<div class="empty">No incidents reported.</div>';
+}
+async function addIncident(){
+  if(!$('in_desc').value.trim()) return;
+  await api('/incidents',{method:'POST',body:JSON.stringify({client_id:$('in_client').value||null,type:$('in_type').value,severity:$('in_sev').value,description:$('in_desc').value,action_taken:$('in_action').value})});
+  $('in_desc').value=''; $('in_action').value=''; loadIncidents();
+}
+async function setIncident(id,status){ await api('/incidents/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadIncidents(); }
 
 /* ---- nursing ---- */
 async function loadNursing(){

@@ -358,6 +358,19 @@ CREATE TABLE IF NOT EXISTS training_ack (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Incident / safety reports (quality & compliance).
+CREATE TABLE IF NOT EXISTS incidents (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  type TEXT NOT NULL,                       -- Behavioral | Medical | Fall | Medication error | Property | Elopement/AMA | Other
+  severity TEXT NOT NULL DEFAULT 'Low',     -- Low | Moderate | High | Critical
+  description TEXT NOT NULL,
+  action_taken TEXT,
+  status TEXT NOT NULL DEFAULT 'Open',       -- Open | Reviewed | Closed
+  reported_by INTEGER REFERENCES users(id), reported_by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Audit log: every access/modification of client data (HIPAA requirement)
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,

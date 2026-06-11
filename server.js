@@ -1196,6 +1196,56 @@ app.get('/api/focus/history', requireAuth, (req, res) => {
   res.json({ history: rows });
 });
 
+/* ---------------- The Save tracker ---------------- */
+app.get('/api/saves', requireAuth, (req, res) => {
+  res.json({ saves: db.prepare(`SELECT s.*, c.pref FROM saves s LEFT JOIN clients c ON c.id = s.client_id ORDER BY s.id DESC LIMIT 50`).all() });
+});
+app.post('/api/saves', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const info = db.prepare(`INSERT INTO saves (client_id, trigger, note, outcome, by_id, by_name) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(b.client_id || null, b.trigger || null, b.note || null, ['Stayed', 'Left'].includes(b.outcome) ? b.outcome : 'Pending', req.user.id, req.user.name);
+  audit({ user: req.user, action: 'SAVE', entity: 'client', entity_id: b.client_id ? +b.client_id : null, ip: req.ip });
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.post('/api/saves/:id/outcome', requireAuth, (req, res) => {
+  const o = ['Stayed', 'Left', 'Pending'].includes(req.body?.outcome) ? req.body.outcome : 'Pending';
+  db.prepare(`UPDATE saves SET outcome = ? WHERE id = ?`).run(o, req.params.id);
+  res.json({ ok: true });
+});
+app.post('/api/lineup-log', requireAuth, (req, res) => {
+  db.prepare(`INSERT OR IGNORE INTO lineup_log (date, shift, by_id) VALUES (?, ?, ?)`).run(new Date().toISOString().slice(0, 10), req.body?.shift || 'Day', req.user.id);
+  res.json({ ok: true });
+});
+
+/* ---------------- Excellence Scorecard (Standard §22) ---------------- */
+app.get('/api/scorecard', requireAuth, (req, res) => {
+  const m = [];
+  const push = (label, value, unit, target, met, note) => m.push({ label, value, unit, target, met, note });
+  const disc = db.prepare(`SELECT discharge_status s, COUNT(*) n FROM clients WHERE discharge_date >= date('now','-90 day') GROUP BY discharge_status`).all();
+  const dc = {}; disc.forEach((r) => { dc[r.s] = r.n; });
+  const completed = dc.Completed || 0, ama = dc.AMA || 0; const denom = completed + ama;
+  push('AMA rate (90d)', denom ? Math.round(ama / denom * 100) : 0, '%', '↓ lower', denom ? (ama / denom) <= 0.2 : true, `${ama} of ${denom} discharges`);
+  push('Completion rate (90d)', denom ? Math.round(completed / denom * 100) : 0, '%', '≥ 70%', denom ? (completed / denom) >= 0.7 : true, '');
+  const ce = db.prepare(`SELECT cared FROM client_experience WHERE created_at >= datetime('now','-30 day')`).all();
+  const sv = db.prepare(`SELECT a.value_num v FROM survey_answers a JOIN survey_questions q ON q.id=a.question_id JOIN survey_responses r ON r.id=a.response_id WHERE q.text LIKE 'I feel genuinely cared for%' AND r.created_at >= datetime('now','-30 day')`).all();
+  const all = [...ce.map((x) => x.cared), ...sv.map((x) => x.v)].filter((x) => x != null);
+  const topbox = all.length ? Math.round(all.filter((x) => x >= 4).length / all.length * 100) : null;
+  push('"I felt cared for" top-box (30d)', topbox == null ? '—' : topbox, '%', '≥ 90%', topbox == null ? null : topbox >= 90, `${all.length} responses`);
+  const sret = db.prepare(`SELECT outcome, COUNT(*) n FROM saves WHERE outcome != 'Pending' GROUP BY outcome`).all();
+  const sgc = {}; sret.forEach((r) => { sgc[r.outcome] = r.n; }); const sden = (sgc.Stayed || 0) + (sgc.Left || 0);
+  push('Save success rate', sden ? Math.round((sgc.Stayed || 0) / sden * 100) : '—', '%', '↑ higher', sden ? (sgc.Stayed / sden) >= 0.5 : null, `${sgc.Stayed || 0} stayed of ${sden}`);
+  const deps = db.prepare(`SELECT departure_steps FROM clients WHERE discharge_status IN ('Completed','AMA') AND discharge_date >= date('now','-90 day')`).all();
+  const nal = deps.filter((d) => (d.departure_steps || '').toLowerCase().includes('naloxone')).length;
+  push('Naloxone-at-departure (90d)', deps.length ? Math.round(nal / deps.length * 100) : '—', '%', '100%', deps.length ? nal === deps.length : null, `${nal} of ${deps.length}`);
+  const lc = db.prepare(`SELECT COUNT(*) n FROM lineup_log WHERE date >= date('now','-7 day')`).get().n;
+  push('Lineup compliance (7d)', Math.round(lc / 28 * 100), '%', '100%', lc >= 28, `${lc} of 28 logged`);
+  const cl = db.prepare(`SELECT (julianday(resolved_at)-julianday(created_at))*24 h FROM concerns WHERE resolved_at >= datetime('now','-30 day')`).all();
+  const avgH = cl.length ? Math.round(cl.reduce((a, b) => a + b.h, 0) / cl.length * 10) / 10 : null;
+  push('Avg defect closure (30d)', avgH == null ? '—' : avgH, 'hrs', '≤ 24', avgH == null ? null : avgH <= 24, `${cl.length} resolved`);
+  push('Delights delivered (30d)', db.prepare(`SELECT COUNT(*) n FROM delights WHERE created_at >= datetime('now','-30 day')`).get().n, '', '↑ more', true, '');
+  res.json({ metrics: m });
+});
+
 /* ---------------- The Armada Standard (knowledge base) ---------------- */
 app.get('/api/standard', requireAuth, (req, res) => {
   res.json({ northStar: NORTH_STAR, motto: MOTTO, tagline: TAGLINE, sections: STANDARD_SECTIONS });

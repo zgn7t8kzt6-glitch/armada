@@ -47,6 +47,7 @@
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
     <button data-view="outcomes">Outcomes</button>
+    <button data-view="scorecard">Scorecard</button>
     <button data-view="lineup">Lineup</button>
     <button data-view="surveys">Surveys</button>
     <button data-view="concierge">Concierge</button>
@@ -182,6 +183,18 @@
       </div>
       <div id="docEditor"></div>
       <div id="libList"></div>
+    </section>
+
+    <!-- SCORECARD -->
+    <section id="scorecard" class="view">
+      <div class="card"><h3>Excellence Scorecard</h3><p class="sub sans">The numbers the Standard says to review monthly. Green = on target.</p><div id="scoreGrid" class="ret-cards"></div></div>
+      <div class="card">
+        <h3>The Save (PAUSE) tracker</h3>
+        <p class="sub sans">Log every de-escalation. Did they stay? This is the counter-skill to AMA.</p>
+        <div class="grid3"><div><label>Client (optional)</label><select id="sv_save_client"></select></div><div><label>What triggered it</label><input id="sv_trigger" placeholder="e.g. day-4 cravings, family call"/></div><div><label>Note</label><input id="sv_note" placeholder="What you did"/></div></div>
+        <div class="toolbar"><button class="btn btn-gold sans" onclick="logSave()">Log a Save</button></div>
+        <div id="savesList"></div>
+      </div>
     </section>
 
     <!-- STANDARD (knowledge base) -->

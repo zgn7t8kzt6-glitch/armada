@@ -66,7 +66,7 @@ const GROUP_OF={today:'today',
   family:'people',team:'people',lineup:'people',assign:'people',
   admissions:'admissions',alumni:'people',accountability:'insights',
   standard:'learn',library:'learn',training:'learn',
-  outcomes:'insights','report-view':'insights',users:'insights',audit:'insights',
+  outcomes:'insights',scorecard:'insights','report-view':'insights',users:'insights',audit:'insights',
   askai:'ask'};
 function renderGroups(){
   $('groupbar').innerHTML = GROUPS.map(x=>`<button data-g="${x.g}">${x.label}</button>`).join('');
@@ -93,6 +93,7 @@ function show(v){
   if(v==='standard') loadStandard();
   if(v==='library') loadLibrary();
   if(v==='training') loadTraining();
+  if(v==='scorecard') loadScorecard();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -315,6 +316,25 @@ async function trainingStatus(){
     ${rows.map(r=>`<tr><td>${esc(r.name)}</td>${r.courses.map(c=>`<td>${c.due?'<span class="risk risk-high">due</span>':'<span class="risk risk-low">'+(c.lastPassed?c.lastPassed.score+'%':'✓')+'</span>'}</td>`).join('')}</tr>`).join('')}</table>
     <div class="toolbar"><button class="btn btn-ghost sans" onclick="loadTraining()">Back</button></div></div>`;
 }
+
+/* ---- scorecard + saves ---- */
+async function loadScorecard(){
+  const { metrics } = await api('/scorecard');
+  $('scoreGrid').innerHTML = metrics.map(x=>`<div class="ret-card ${x.met===false?'rc-high':x.met===true?'':''}" style="${x.met===true?'border-color:#bcd8c6;background:#eef5f0':x.met===false?'':''}">
+    <div class="n" style="${x.met===false?'color:var(--danger)':x.met===true?'color:var(--good)':''}">${x.value}${x.unit||''}</div>
+    <div class="l">${esc(x.label)}</div><div class="hint" style="margin-top:3px">${esc(x.target)}${x.note?' · '+esc(x.note):''}</div></div>`).join('');
+  await fillClientSelect($('sv_save_client'),'No client');
+  const { saves } = await api('/saves');
+  $('savesList').innerHTML = saves.length ? saves.map(s=>`<div class="todo">
+    <div class="txt"><strong>${esc(s.pref||'—')}</strong> ${s.trigger?'· '+esc(s.trigger):''} ${s.note?'· '+esc(s.note):''} <span class="hint">${esc(s.by_name||'')} ${esc((s.created_at||'').slice(0,10))}</span></div>
+    ${s.outcome==='Pending'?`<button class="btn btn-ghost btn-sm sans" onclick="saveOutcome(${s.id},'Stayed')">Stayed ✓</button><button class="btn btn-ghost btn-sm sans" onclick="saveOutcome(${s.id},'Left')">Left</button>`:`<span class="risk ${s.outcome==='Stayed'?'risk-low':'risk-high'}">${esc(s.outcome)}</span>`}
+  </div>`).join('') : '<div class="pc-note">No saves logged yet.</div>';
+}
+async function logSave(){
+  await api('/saves',{method:'POST',body:JSON.stringify({client_id:$('sv_save_client').value||null,trigger:$('sv_trigger').value,note:$('sv_note').value})});
+  $('sv_trigger').value=''; $('sv_note').value=''; loadScorecard();
+}
+async function saveOutcome(id,outcome){ await api('/saves/'+id+'/outcome',{method:'POST',body:JSON.stringify({outcome})}); loadScorecard(); }
 
 /* ---- the armada standard ---- */
 let STD = null;

@@ -400,6 +400,23 @@ CREATE TABLE IF NOT EXISTS focus_logs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- The Save (PAUSE) tracker — de-escalation attempts and whether they stayed.
+CREATE TABLE IF NOT EXISTS saves (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  trigger TEXT, note TEXT,
+  outcome TEXT NOT NULL DEFAULT 'Pending',  -- Pending | Stayed | Left
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Lineup / huddle compliance log (the daily lineup happened this shift).
+CREATE TABLE IF NOT EXISTS lineup_log (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL, shift TEXT, by_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(date, shift)
+);
+
 -- Proactive alerts: surfaced the moment a client's signals turn.
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY,

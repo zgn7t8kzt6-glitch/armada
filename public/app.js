@@ -51,14 +51,15 @@ const GROUPS=[
   {g:'people',label:'People',first:'lineup'},
   {g:'admissions',label:'Admissions',first:'admissions'},
   {g:'insights',label:'Insights',first:'outcomes'},
-  {g:'standard',label:'Standard',first:'standard'},
+  {g:'learn',label:'Learn',first:'training'},
   {g:'ask',label:'Ask AI',first:'askai'},
 ];
 const GROUP_OF={today:'today',
   report:'care',clients:'care',editor:'care',journey:'care',concierge:'care',program:'care',
   retention:'clinical',surveys:'clinical',incidents:'clinical',
   family:'people',team:'people',lineup:'people',assign:'people',
-  admissions:'admissions',alumni:'people',accountability:'insights',standard:'standard',team:'people',
+  admissions:'admissions',alumni:'people',accountability:'insights',team:'people',
+  standard:'learn',library:'learn',training:'learn',
   outcomes:'insights','report-view':'insights',users:'insights',audit:'insights',
   askai:'ask'};
 function renderGroups(){
@@ -84,6 +85,8 @@ function show(v){
   if(v==='alumni') loadAlumni();
   if(v==='accountability') loadAccountability();
   if(v==='standard') loadStandard();
+  if(v==='library') loadLibrary();
+  if(v==='training') loadTraining();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -197,6 +200,97 @@ async function deleteCurrent(){
 async function setCrisisOwner(uid){
   await api('/crisis-owner',{method:'POST',body:JSON.stringify({date:$('r_date').value,shift:$('r_shift').value,user_id:uid||null})});
   loadPlaybook();
+}
+
+/* ---- library (SOPs & policies) ---- */
+let DOCS = [];
+async function loadLibrary(){ const { docs } = await api('/docs'); DOCS = docs; renderDocs(); }
+function renderDocs(){
+  const q=($('libSearch').value||'').toLowerCase();
+  const list = DOCS.filter(d=> !q || (d.title+d.body+d.category+(d.tags||'')).toLowerCase().includes(q));
+  $('libList').innerHTML = list.length ? list.map(d=>`<div class="card">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="chip">${esc(d.category)}</span><h3 style="margin:0">${esc(d.title)}</h3>
+      <span style="margin-left:auto" class="hint">${d.read?'✓ reviewed':''}</span></div>
+    <div class="brief-body" style="margin-top:8px;white-space:pre-wrap">${esc(d.body)}</div>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:8px">
+      ${d.read?'':`<button class="btn btn-ghost btn-sm sans" onclick="readDoc(${d.id})">Mark reviewed</button>`}
+      ${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="editDoc(${d.id})">Edit</button><button class="btn btn-danger btn-sm sans" onclick="delDoc(${d.id})">Delete</button>`:''}
+    </div></div>`).join('') : '<div class="empty">Nothing found.</div>';
+}
+async function readDoc(id){ await api('/docs/'+id+'/read',{method:'POST'}); loadLibrary(); }
+async function delDoc(id){ if(confirm('Delete this document?')){ await api('/docs/'+id,{method:'DELETE'}); loadLibrary(); } }
+function newDoc(){ docForm({}); }
+function editDoc(id){ docForm(DOCS.find(d=>d.id===id)||{}); }
+function docForm(d){
+  $('docEditor').innerHTML = `<div class="card"><h3>${d.id?'Edit':'New'} document</h3>
+    <div class="grid2"><div><label>Title</label><input id="dc_title" value="${esc(d.title||'')}"/></div>
+      <div><label>Category</label><select id="dc_cat">${['SOP','Policy','Training guideline','Safety','HR'].map(c=>`<option ${d.category===c?'selected':''}>${c}</option>`).join('')}</select></div></div>
+    <label>Tags (comma-separated)</label><input id="dc_tags" value="${esc(d.tags||'')}"/>
+    <label>Body</label><textarea id="dc_body" style="min-height:160px">${esc(d.body||'')}</textarea>
+    <div class="toolbar"><button class="btn btn-ghost sans" onclick="$('docEditor').innerHTML=''">Cancel</button><button class="btn btn-primary sans" onclick="saveDoc(${d.id||0})">Save</button></div></div>`;
+  $('docEditor').scrollIntoView({behavior:'smooth'});
+}
+async function saveDoc(id){
+  const body={id:id||undefined,title:$('dc_title').value,category:$('dc_cat').value,tags:$('dc_tags').value,body:$('dc_body').value};
+  if(!body.title.trim()||!body.body.trim()){alert('Title and body required');return;}
+  await api('/docs',{method:'POST',body:JSON.stringify(body)}); $('docEditor').innerHTML=''; loadLibrary();
+}
+
+/* ---- training ---- */
+async function loadTraining(){
+  const { courses } = await api('/courses');
+  $('trainingArea').innerHTML = courses.map(c=>`<div class="card">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <h3 style="margin:0">${esc(c.title)}</h3>
+      ${c.due?'<span class="risk risk-high">Due</span>':'<span class="risk risk-low">Current</span>'}
+      ${c.lastPassed?`<span class="hint">last passed ${esc((c.lastPassed.at||'').slice(0,10))} · ${c.lastPassed.score}%</span>`:'<span class="hint">not yet completed</span>'}
+      <button class="btn btn-gold btn-sm sans" style="margin-left:auto" onclick="openCourse(${c.id})">${c.lastPassed?'Refresh':'Start'} (${c.questionCount} q)</button>
+    </div>
+    <p class="sub sans" style="margin:6px 0 0">${esc(c.description||'')}${c.recert_days?' · refresher every '+c.recert_days+' days':''}</p>
+  </div>`).join('') || '<div class="empty">No courses yet.</div>';
+}
+async function openCourse(id){
+  const { course } = await api('/courses/'+id);
+  const qs = course.questions.map((q,qi)=>`<div class="sq" data-qid="${q.id}"><div class="sq-q">${qi+1}. ${esc(q.text)}</div>
+    ${q.options.map((o,oi)=>`<label class="trg"><input type="radio" name="q${q.id}" value="${oi}"/> ${esc(o)}</label>`).join('')}</div>`).join('');
+  $('trainingArea').innerHTML = `<div class="card"><h3>${esc(course.title)}</h3>
+    ${course.body?`<div class="brief-body" style="white-space:pre-wrap;margin-bottom:12px">${esc(course.body)}</div>`:''}
+    <div class="sv-cat">Quiz — 80% to pass</div>${qs}
+    <div id="quizMsg" class="hint"></div>
+    <div class="toolbar"><button class="btn btn-ghost sans" onclick="loadTraining()">Back</button><button class="btn btn-primary sans" onclick="submitCourse(${course.id})">Submit</button></div></div>`;
+  window.scrollTo(0,0);
+}
+async function submitCourse(id){
+  const answers={};
+  document.querySelectorAll('#trainingArea .sq').forEach(sq=>{ const qid=sq.dataset.qid; const sel=sq.querySelector('input:checked'); if(sel) answers[qid]=sel.value; });
+  const { score, passed } = await api('/courses/'+id+'/complete',{method:'POST',body:JSON.stringify({answers})});
+  $('quizMsg').innerHTML = passed ? `<span style="color:var(--good)">✓ Passed — ${score}%. Recorded as proof of training.</span>` : `<span style="color:var(--danger)">Scored ${score}% — 80% needed. Review the lesson and try again.</span>`;
+  if(passed) setTimeout(loadTraining, 1800);
+}
+function newCourse(){
+  $('trainingArea').innerHTML = `<div class="card"><h3>New course</h3>
+    <label>Title</label><input id="nc_title"/>
+    <label>Description</label><input id="nc_desc"/>
+    <label>Lesson</label><textarea id="nc_body" style="min-height:120px"></textarea>
+    <label>Refresher interval (days, 0 = none)</label><input id="nc_recert" type="number" value="180"/>
+    <div class="sv-cat">Questions — one per line as: Question | option A | option B | option C ‖ correctIndex(0-based)</div>
+    <textarea id="nc_qs" style="min-height:120px" placeholder="What does P in PAUSE mean? | Pause your reaction | Page the leader | Print the form ‖ 0"></textarea>
+    <div class="toolbar"><button class="btn btn-ghost sans" onclick="loadTraining()">Cancel</button><button class="btn btn-primary sans" onclick="saveCourse()">Create</button></div></div>`;
+}
+async function saveCourse(){
+  const questions=$('nc_qs').value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
+    const [main,ans]=l.split('‖'); const parts=main.split('|').map(x=>x.trim()); return { q:parts[0], o:parts.slice(1), a:Number((ans||'0').trim()) };
+  }).filter(x=>x.q&&x.o.length>=2);
+  if(!$('nc_title').value.trim()||!questions.length){alert('Need a title and at least one question (use the format shown).');return;}
+  await api('/courses',{method:'POST',body:JSON.stringify({title:$('nc_title').value,description:$('nc_desc').value,body:$('nc_body').value,recert_days:$('nc_recert').value,questions})});
+  loadTraining();
+}
+async function trainingStatus(){
+  const { courses, rows } = await api('/training-status');
+  $('trainingArea').innerHTML = `<div class="card"><h3>Team training status</h3>
+    <table class="tbl"><tr><th>Teammate</th>${courses.map(c=>`<th>${esc(c)}</th>`).join('')}</tr>
+    ${rows.map(r=>`<tr><td>${esc(r.name)}</td>${r.courses.map(c=>`<td>${c.due?'<span class="risk risk-high">due</span>':'<span class="risk risk-low">'+(c.lastPassed?c.lastPassed.score+'%':'✓')+'</span>'}</td>`).join('')}</tr>`).join('')}</table>
+    <div class="toolbar"><button class="btn btn-ghost sans" onclick="loadTraining()">Back</button></div></div>`;
 }
 
 /* ---- the armada standard ---- */
@@ -691,7 +785,20 @@ async function loadToday(){
   $('todaySchedule').innerHTML = t.schedule.length ? t.schedule.map(s=>`<div class="pc-note">${s.time?'<strong>'+esc(s.time)+'</strong> · ':''}<span class="chip">${esc(s.type)}</span> ${esc(s.title)}${s.pref?' · '+esc(s.pref):''}</div>`).join('') : '<div class="pc-note">Nothing scheduled. Build the day in Program.</div>';
   const wins=[...t.wins.wows.map(w=>'👏 '+w.text+(w.pref?' ('+w.pref+')':'')),...t.wins.delights.map(d=>'♥ '+d.text+(d.pref?' ('+d.pref+')':''))];
   $('todayWins').innerHTML = wins.length ? wins.map(w=>`<div class="pc-note">${esc(w)}</div>`).join('') : '<div class="pc-note">Log a Wow Story or a delight to celebrate the team.</div>';
+  if(t.focus){
+    $('focusCard').innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div><div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Today's Focus — the team stresses this</div>
+          <h3 style="margin:2px 0 0">${esc(t.focus.t)}</h3><p class="sub sans" style="margin:4px 0 0">${esc(t.focus.g)}</p></div>
+        <button class="btn btn-gold btn-sm sans" style="margin-left:auto" onclick="joinFocus()">I'm on it ✋</button></div>
+      <div id="focusMsg" class="hint"></div>`;
+  }
   loadAlerts();
+}
+async function joinFocus(){
+  const note = prompt("Optional: a quick win or result you'll aim for today:")||'';
+  await api('/focus',{method:'POST',body:JSON.stringify({note})});
+  const f = await api('/focus');
+  $('focusMsg').textContent = `✓ ${f.participants} teammate${f.participants===1?'':'s'} focused on this today.`;
 }
 async function loadAlerts(){
   const { alerts, newCount } = await api('/alerts');

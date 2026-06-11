@@ -57,6 +57,8 @@
     <button data-view="alumni">Alumni</button>
     <button data-view="accountability" data-admin>Accountability</button>
     <button data-view="team">Team</button>
+    <button data-view="training">Training</button>
+    <button data-view="library">Library / SOPs</button>
     <button data-view="standard">Standard</button>
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
@@ -76,6 +78,7 @@
         </div>
         <div id="todayBrief"></div>
       </div>
+      <div class="card" id="focusCard" style="border-left:4px solid var(--gold);background:#faf6ee"></div>
       <div class="card" id="alertsCard" style="display:none;border-left:4px solid var(--danger)">
         <h3>⚡ Proactive alerts <span id="alertCount" class="badge"></span></h3>
         <p class="sub sans">The moment a client's signals turn — surfaced here without anyone having to look.</p>
@@ -154,6 +157,30 @@
       <div id="championCard"></div>
       <div class="card"><h3>Leaderboard</h3><div id="acTable"></div></div>
       <div class="card"><h3>Care gaps — client check-ins missed</h3><div id="acGaps"></div></div>
+    </section>
+
+    <!-- TRAINING -->
+    <section id="training" class="view">
+      <div class="card no-print">
+        <h3>Training</h3>
+        <p class="sub sans">Courses, quizzes, and proof of completion — with refreshers when certifications expire.</p>
+        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost sans" data-admin onclick="trainingStatus()">Team status</button><button class="btn btn-ghost sans" data-admin onclick="newCourse()">+ New course</button></div>
+      </div>
+      <div id="trainingArea"></div>
+    </section>
+
+    <!-- LIBRARY / SOPs -->
+    <section id="library" class="view">
+      <div class="card no-print">
+        <h3>Library — SOPs &amp; Policies</h3>
+        <p class="sub sans">Search any policy or procedure: "what's the policy on…" / "how do I…". Everything we do, written down.</p>
+        <div class="controls">
+          <input id="libSearch" placeholder="Search policies & procedures…" oninput="renderDocs()" style="flex:1;min-width:240px"/>
+          <button class="btn btn-gold sans" data-admin onclick="newDoc()">+ New document</button>
+        </div>
+      </div>
+      <div id="docEditor"></div>
+      <div id="libList"></div>
     </section>
 
     <!-- STANDARD (knowledge base) -->

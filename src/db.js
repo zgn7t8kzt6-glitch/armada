@@ -358,6 +358,48 @@ CREATE TABLE IF NOT EXISTS training_ack (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- SOP / Policy library — the "how do we do this / what's the policy" station.
+CREATE TABLE IF NOT EXISTS docs (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'SOP', body TEXT NOT NULL,
+  tags TEXT, pinned INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS doc_reads (
+  id INTEGER PRIMARY KEY,
+  doc_id INTEGER NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id),
+  read_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(doc_id, user_id)
+);
+
+-- Training: courses, quiz questions, completions (proof of training).
+CREATE TABLE IF NOT EXISTS courses (
+  id INTEGER PRIMARY KEY,
+  key TEXT UNIQUE, title TEXT NOT NULL, description TEXT, body TEXT,
+  recert_days INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS course_questions (
+  id INTEGER PRIMARY KEY,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  text TEXT NOT NULL, options TEXT NOT NULL, answer INTEGER NOT NULL, sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS course_completions (
+  id INTEGER PRIMARY KEY,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id), user_name TEXT,
+  score INTEGER, passed INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Daily focus / refresher log (each day the team stresses one subject).
+CREATE TABLE IF NOT EXISTS focus_logs (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL, topic TEXT,
+  user_id INTEGER REFERENCES users(id), user_name TEXT, note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Proactive alerts: surfaced the moment a client's signals turn.
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY,
@@ -405,6 +447,77 @@ CREATE TABLE IF NOT EXISTS audit_log (
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+
+// ---- Seed SOP library + training courses + daily focus (idempotent) ----
+export const FOCUS_TOPICS = [
+  { t: 'Greet every client by their preferred name', g: 'Use each client\'s preferred name in your first sentence to them today.' },
+  { t: 'Fix the fixable in under 5 minutes', g: 'When a client is frustrated, go to them within 5 minutes and solve the small thing (food, smoke break, comfort).' },
+  { t: 'Deliver one unprompted delight', g: 'Do one small, personal thing for a client before they ask. Log it.' },
+  { t: 'Run the Save — Pause before you react', g: 'In every hard moment, pause your own reaction first. Acknowledge before you solve.' },
+  { t: 'Person-first language all shift', g: 'Describe behavior, never label character. "Returned to use," never "relapsed."' },
+  { t: 'Close the loop out loud', g: 'Tell a client: "You said X — we did Y." Make being heard visible.' },
+  { t: 'No one hungry', g: 'Offer seconds, check the snack station, ask about the food.' },
+  { t: 'Recognize a teammate by name', g: 'Catch someone doing something great and say it specifically, today.' },
+  { t: 'Ask the Listening question', g: 'Ask each client: "What\'s one thing that would make today better?" and write it down.' },
+  { t: 'Sit at eye level', g: 'For every hard conversation, sit down and meet them at eye level.' },
+  { t: 'A human goes to the patient', g: 'Never manage distress through a message — go in person, every time.' },
+  { t: 'Hold the open door', g: 'Remind at least one client, warmly, that they\'re welcome here and welcome back.' },
+];
+export function todaysFocus() { return FOCUS_TOPICS[Math.floor(Date.now() / 864e5) % FOCUS_TOPICS.length]; }
+
+function ensureDoc(category, title, body, tags) {
+  if (db.prepare(`SELECT id FROM docs WHERE title = ?`).get(title)) return;
+  db.prepare(`INSERT INTO docs (title, category, body, tags, updated_by) VALUES (?, ?, ?, ?, 'Armada Standard')`).run(title, category, body, tags || null);
+}
+function ensureCourse(key, title, description, body, recert, questions) {
+  if (db.prepare(`SELECT id FROM courses WHERE key = ?`).get(key)) return;
+  const info = db.prepare(`INSERT INTO courses (key, title, description, body, recert_days, sort) VALUES (?, ?, ?, ?, ?, ?)`).run(key, title, description, body, recert, 0);
+  const ins = db.prepare(`INSERT INTO course_questions (course_id, text, options, answer, sort) VALUES (?, ?, ?, ?, ?)`);
+  questions.forEach((q, i) => ins.run(info.lastInsertRowid, q.q, JSON.stringify(q.o), q.a, i));
+}
+
+function seedLearning() {
+  ensureDoc('Policy', 'Crisis Escalation Ladder (L1–L4)',
+    'The One Rule: a human goes to the patient, always — never a chat.\n\nL1 First signs (pacing, agitation): Crisis Owner goes within 5 minutes; sit, listen, fix the fixable. Most crises end here.\nL2 Escalating (shouting, demands): Crisis Owner + clinical staff respond together in person; on-call leader called; comfort per protocol; no ultimatums, no "calm down," no audience.\nL3 "I\'m leaving": leader + clinician engaged; run the Save; if staying, re-stabilize and follow up within an hour; if leaving, Safe Departure every step.\nL4 Safety event: 911/medical per clinical judgment; never block an exit, never restrain to retain; debrief within 24 hours.', 'crisis, escalation, owner');
+  ensureDoc('SOP', 'Running the Daily Lineup',
+    'Every shift, every day, including nights — led, 10–15 minutes:\n1. One principle of the Standard (rotating).\n2. Today\'s info: census, acuity, arrivals/departures, Crisis Owner named, on-call leader posted.\n3. Preference Board highlights — who needs what today.\n4. Recognition by name — specific, same-day.\n5. One defect from the Listening System and who owns the fix.', 'lineup, huddle');
+  ensureDoc('SOP', 'Handoff Standard',
+    'No shift hands the next a mess. Before change of shift: beds made, kitchen reset, smoke supplies prepped, snack station stocked, Preference Board updated, open issues briefed person-to-person. The handoff is a face-to-face ritual, not a note.', 'handoff, shift change');
+  ensureDoc('SOP', 'Preference Board — how to use',
+    'Every staff member is an antenna: notice a preference, write it down (initial + date), act on it. Capture preferred name & pronunciation, drinks, food loves/dislikes, comfort, sleep rhythm, what calms them, approach-with-care notes (written as if the client will read them), interests, important people, wins. Preferences only — no diagnoses, meds, or behavior reports. Update every shift. "Being known without having to ask is the product."', 'preferences, care card');
+  ensureDoc('Policy', 'Smoking & Nicotine Schedule',
+    'Smoking permitted in the designated area on a fixed published schedule (5–6 breaks at posted times). NRT offered to every smoker at intake per medical protocol. Smoke breaks are never a behavioral lever — never reward, never punishment, never canceled for the unit. Lighters staff-held. No personal vapes on the unit.', 'smoking, nicotine, nrt');
+  ensureDoc('Policy', 'The Table — food service standard',
+    'Food is comfort, dignity, and medicine. Seconds are the default — the answer is yes (only "no" is a documented clinical restriction). 24/7 snack access — nobody hungry at 2 a.m. Meal rhythm posted and reliable; special diets honored. Dining room calm during service.', 'food, meals, kitchen');
+  ensureDoc('Policy', 'Empowerment — solve it on the spot',
+    'Every staff member may spend up to the set limit ($50–100) to solve a patient problem on the spot — no permission needed, logged afterward (use the Concierge/Delight log). Fix the fixable: food, nicotine, comfort, fear, dignity.', 'empowerment, delight, $2000 rule');
+
+  ensureCourse('save', 'The Save (PAUSE) — de-escalation & AMA prevention',
+    'The core skill for keeping clients. Certify before solo floor work.',
+    'More than half of opioid-detox patients can leave AMA without intervention. The Save is the counter-skill.\n\nP — Pause your own reaction.\nA — Acknowledge the feeling ("This is miserable, and you\'re not wrong to be frustrated").\nU — Understand what\'s underneath (fear, withdrawal, nicotine, family, court, shame).\nS — Solve the fixable (food, smoke-break clarity, comfort per protocol, a phone call, a blanket).\nE — Extend the door to stay — always an invitation, never an ultimatum.\n\nConfrontation backfires; motivational-interviewing style works. Document a successful save and thank the team at lineup.', 180,
+    [
+      { q: 'What does the P in PAUSE stand for?', o: ['Pause your own reaction', 'Page the on-call leader', 'Print the discharge form'], a: 0 },
+      { q: 'When you Extend the door to stay, it should be:', o: ['An ultimatum', 'An invitation, never an ultimatum', 'A warning about consequences'], a: 1 },
+      { q: 'Which is the right move when a client is escalating?', o: ['Tell them to calm down in front of others', 'Acknowledge the feeling and solve the fixable', 'Threaten loss of privileges'], a: 1 },
+    ]);
+  ensureCourse('safe-departure', 'Safe Departure (Warm AMA)',
+    'Every departure, including AMA, follows these steps.',
+    'Applies to every departure, especially AMA:\n1. In-person, calm conversation; AMA explained in plain language with risks and the open door.\n2. Refusal to sign is witnessed by two staff and documented — refusal to sign is still an AMA.\n3. Naloxone goes with them, every time, plus 60-second overdose education (per clinical protocol — Medical Director owns).\n4. Belongings returned with dignity; destination/transport asked; food for the road offered.\n5. Last words are an invitation: "You are welcome back — any time."\n6. Follow-up call within 24–72 hours, documented; charted same shift, classified correctly.', 180,
+    [
+      { q: 'A client refuses to sign the AMA form. The departure is:', o: ['Not an AMA', 'Still an AMA — document witnessed refusal', 'An administrative discharge'], a: 1 },
+      { q: 'What goes with the client at every departure?', o: ['Nothing', 'Naloxone + overdose education (per protocol)', 'A bill'], a: 1 },
+      { q: 'The last words to a departing client should be:', o: ['"Don\'t come back"', '"You are welcome back any time"', 'Nothing'], a: 1 },
+    ]);
+  ensureCourse('person-first', 'Person-First Language',
+    'How we speak about the people we serve — always.',
+    'Person-first, always:\n• "Person with a substance use disorder" — never "addict/junkie/user."\n• "Returned to use" — never "dirty/relapsed."\n• "Negative/positive result" — never "clean/dirty."\n• "Chose to leave against medical advice" — never "eloped/bolted/absconded."\n• Describe behavior ("pacing, raised voice") — never label character ("difficult," "manipulative," "drug-seeking").\n• No lay diagnosis — only clinicians name conditions.', 365,
+    [
+      { q: 'Which phrase is person-first?', o: ['"The addict in room 6"', '"Person with a substance use disorder"', '"Junkie"'], a: 1 },
+      { q: 'Instead of "he relapsed," say:', o: ['"He returned to use"', '"He went back to his old ways"', '"He got dirty"'], a: 0 },
+      { q: 'A non-clinician should:', o: ['Diagnose "he\'s manic"', 'Describe behavior, not label character', 'Call the client "manipulative" in the chart'], a: 1 },
+    ]);
+}
+seedLearning();
 
 // Lightweight migration: add columns to existing tables (older deployments).
 function addColumn(table, col, type) {

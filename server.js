@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
+import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import {
   cookies, login, logout, currentUser, requireAuth, requireAdmin, createUser,
 } from './src/auth.js';
@@ -704,7 +705,7 @@ app.get('/api/today', requireAuth, (req, res) => {
     wows: db.prepare(`SELECT w.text, w.by_name, c.pref FROM wows w LEFT JOIN clients c ON c.id=w.client_id ORDER BY w.id DESC LIMIT 3`).all(),
     delights: db.prepare(`SELECT d.text, c.pref FROM delights d LEFT JOIN clients c ON c.id=d.client_id ORDER BY d.id DESC LIMIT 3`).all(),
   };
-  res.json({ metrics, attention: attention.slice(0, 25), schedule, wins, claude: claudeConfigured() });
+  res.json({ metrics, attention: attention.slice(0, 25), schedule, wins, claude: claudeConfigured(), focus: todaysFocus() });
 });
 
 // Ask Armada (AI concierge)
@@ -1069,6 +1070,92 @@ app.post('/api/kiosk/survey', (req, res) => {
     if (a.question_id == null) continue;
     ins.run(info.lastInsertRowid, a.question_id, (a.num === 0 || a.num) ? Number(a.num) : null, a.text?.trim() || null);
   }
+  res.json({ ok: true });
+});
+
+/* ---------------- SOP / Policy library ---------------- */
+app.get('/api/docs', requireAuth, (req, res) => {
+  const q = (req.query.q || '').trim();
+  let sql = `SELECT id, title, category, tags, body, updated_at FROM docs`;
+  const args = [];
+  if (q) { sql += ` WHERE title LIKE ? OR body LIKE ? OR category LIKE ? OR IFNULL(tags,'') LIKE ?`; const like = '%' + q + '%'; args.push(like, like, like, like); }
+  sql += ` ORDER BY pinned DESC, category, title`;
+  const docs = db.prepare(sql).all(...args);
+  const reads = new Set(db.prepare(`SELECT doc_id FROM doc_reads WHERE user_id = ?`).all(req.user.id).map((r) => r.doc_id));
+  docs.forEach((d) => { d.read = reads.has(d.id); d.excerpt = (d.body || '').slice(0, 160); });
+  res.json({ docs });
+});
+app.post('/api/docs', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {}; if (!b.title?.trim() || !b.body?.trim()) return res.status(400).json({ error: 'Title and body required' });
+  if (b.id) db.prepare(`UPDATE docs SET title=?, category=?, body=?, tags=?, updated_by=?, updated_at=datetime('now') WHERE id=?`)
+    .run(b.title.trim(), b.category || 'SOP', b.body.trim(), b.tags || null, req.user.name, b.id);
+  else db.prepare(`INSERT INTO docs (title, category, body, tags, updated_by) VALUES (?, ?, ?, ?, ?)`)
+    .run(b.title.trim(), b.category || 'SOP', b.body.trim(), b.tags || null, req.user.name);
+  res.json({ ok: true });
+});
+app.delete('/api/docs/:id', requireAuth, requireAdmin, (req, res) => { db.prepare(`DELETE FROM docs WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+app.post('/api/docs/:id/read', requireAuth, (req, res) => {
+  db.prepare(`INSERT OR IGNORE INTO doc_reads (doc_id, user_id) VALUES (?, ?)`).run(req.params.id, req.user.id);
+  res.json({ ok: true });
+});
+
+/* ---------------- Training ---------------- */
+function courseStatus(course, userId) {
+  const last = db.prepare(`SELECT * FROM course_completions WHERE course_id = ? AND user_id = ? AND passed = 1 ORDER BY id DESC LIMIT 1`).get(course.id, userId);
+  let due = !last;
+  if (last && course.recert_days > 0) due = (Date.now() - new Date(last.completed_at + 'Z').getTime()) > course.recert_days * 864e5;
+  return { lastPassed: last ? { score: last.score, at: last.completed_at } : null, due };
+}
+app.get('/api/courses', requireAuth, (req, res) => {
+  const courses = db.prepare(`SELECT id, title, description, recert_days FROM courses WHERE active = 1 ORDER BY sort, id`).all();
+  courses.forEach((c) => { c.questionCount = db.prepare(`SELECT COUNT(*) n FROM course_questions WHERE course_id = ?`).get(c.id).n; Object.assign(c, courseStatus(c, req.user.id)); });
+  res.json({ courses });
+});
+app.get('/api/courses/:id', requireAuth, (req, res) => {
+  const c = db.prepare(`SELECT id, title, description, body, recert_days FROM courses WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  c.questions = db.prepare(`SELECT id, text, options FROM course_questions WHERE course_id = ? ORDER BY sort, id`).all(c.id)
+    .map((q) => ({ id: q.id, text: q.text, options: JSON.parse(q.options) }));  // answers withheld
+  res.json({ course: c });
+});
+app.post('/api/courses/:id/complete', requireAuth, (req, res) => {
+  const c = db.prepare(`SELECT * FROM courses WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const qs = db.prepare(`SELECT id, answer FROM course_questions WHERE course_id = ? ORDER BY sort, id`).all(c.id);
+  const ans = req.body?.answers || {};
+  let correct = 0;
+  const review = qs.map((q) => { const ok = Number(ans[q.id]) === q.answer; if (ok) correct++; return { id: q.id, correct: ok, answer: q.answer }; });
+  const score = qs.length ? Math.round((correct / qs.length) * 100) : 100;
+  const passed = score >= 80 ? 1 : 0;
+  db.prepare(`INSERT INTO course_completions (course_id, user_id, user_name, score, passed) VALUES (?, ?, ?, ?, ?)`).run(c.id, req.user.id, req.user.name, score, passed);
+  audit({ user: req.user, action: 'TRAINING', entity: 'course', entity_id: c.id, detail: `${c.title}: ${score}%`, ip: req.ip });
+  res.json({ score, passed: !!passed, review });
+});
+app.post('/api/courses', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {}; if (!b.title?.trim() || !Array.isArray(b.questions)) return res.status(400).json({ error: 'Missing' });
+  const info = db.prepare(`INSERT INTO courses (title, description, body, recert_days) VALUES (?, ?, ?, ?)`).run(b.title.trim(), b.description || null, b.body || null, Number(b.recert_days) || 0);
+  const ins = db.prepare(`INSERT INTO course_questions (course_id, text, options, answer, sort) VALUES (?, ?, ?, ?, ?)`);
+  b.questions.forEach((q, i) => { if (q.q && Array.isArray(q.o)) ins.run(info.lastInsertRowid, q.q, JSON.stringify(q.o), Number(q.a) || 0, i); });
+  res.json({ ok: true });
+});
+// Admin: team training status
+app.get('/api/training-status', requireAuth, requireAdmin, (req, res) => {
+  const users = db.prepare(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`).all();
+  const courses = db.prepare(`SELECT id, title, recert_days FROM courses WHERE active = 1 ORDER BY sort, id`).all();
+  const rows = users.map((u) => ({ name: u.name, courses: courses.map((c) => ({ title: c.title, ...courseStatus(c, u.id) })) }));
+  res.json({ courses: courses.map((c) => c.title), rows });
+});
+
+/* ---------------- Daily focus / refresher ---------------- */
+app.get('/api/focus', requireAuth, (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const f = todaysFocus();
+  const logs = db.prepare(`SELECT user_name, note FROM focus_logs WHERE date = ? ORDER BY id DESC`).all(today);
+  res.json({ topic: f.t, goal: f.g, participants: logs.length, logs, joined: !!db.prepare(`SELECT 1 FROM focus_logs WHERE date = ? AND user_id = ?`).get(today, req.user.id) });
+});
+app.post('/api/focus', requireAuth, (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  db.prepare(`INSERT INTO focus_logs (date, topic, user_id, user_name, note) VALUES (?, ?, ?, ?, ?)`).run(today, todaysFocus().t, req.user.id, req.user.name, req.body?.note || null);
   res.json({ ok: true });
 });
 

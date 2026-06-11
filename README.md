@@ -12,6 +12,8 @@ spans every department and weaves Claude through all of it.
 - **Today — command center.** One home screen tying the whole house together:
   live numbers, "needs attention today" across every department, an AI house
   briefing, today's program, and recent wins.
+- **Training.** Courses with lessons, quizzes, **proof-of-completion**, and **refreshers** when certifications expire; admins build courses and see team status. Plus a **Daily Focus** — each day the team stresses one subject, with a one-tap "I'm on it."
+- **Library — SOPs & Policies.** A searchable station for every policy and procedure ("what's the policy on… / how do I…"), with read-acknowledgement; admins author and edit documents.
 - **The Armada Standard.** The canonical knowledge base (identity, the Save/PAUSE, Safe Departure, the non-negotiables, person-first language, the numbers) is encoded in-app, searchable — and **every AI feature is grounded in it**, so Claude coaches and answers in the Armada voice: cared for and pushed.
 - **Ask Armada — AI concierge.** Ask anything in plain English about the house or
   a client ("Who's at risk tonight?", "Draft a warm update to Marc's mom") and

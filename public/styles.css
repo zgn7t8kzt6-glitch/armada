@@ -116,6 +116,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);bo
 .trbar-track{flex:1;background:#eee;border-radius:5px;height:10px;overflow:hidden}
 .trbar-fill{height:100%;background:var(--gold)}
 .trbar-n{flex:0 0 20px;text-align:right;font-size:12px;color:var(--muted)}
+/* bed board */
+.bed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:10px}
+.bed{border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center;cursor:pointer;font-family:sans-serif}
+.bed-room{font-weight:700;color:var(--navy)}
+.bed-status{font-size:11px;text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+.bed-client{font-size:12px;color:var(--muted);margin-top:3px}
+.bed-open{background:#eef5f0;border-color:#bcd8c6}
+.bed-occ{background:#eef2f7}
+.bed-hold{background:#fdf6ec;border-color:#e7c79a}
+.bed-clean{background:#f3f6fb;border-color:#cdd9ea}
 /* client journey (360) */
 .jgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
 .jcard{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:14px}

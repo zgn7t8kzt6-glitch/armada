@@ -54,6 +54,10 @@ function show(v){
   if(v==='surveys') loadSurveys();
   if(v==='concierge') loadConcierge();
   if(v==='program') loadProgram();
+  if(v==='nursing') loadNursing();
+  if(v==='family') loadFamily();
+  if(v==='admissions') loadAdmissions();
+  if(v==='team') loadTeam();
   if(v==='report') loadPlaybook();
   if(v==='users') loadUsers();
   if(v==='audit') loadAudit();
@@ -559,6 +563,14 @@ async function loadJourney(){
   const schedHtml = j.schedule.length ? j.schedule.map(s=>`<div class="pc-note">${s.time?esc(s.time)+' · ':''}${esc(s.type)}: ${esc(s.title)}</div>`).join('') : '<div class="pc-note">No client-specific items today.</div>';
   const followHtml = j.followups.length ? j.followups.map(f=>`<div class="pc-note">${esc(f.type)} aftercare call · due ${esc(f.due_date)}</div>`).join('') : '';
   const health = (c.allergies||c.medications) ? `${c.allergies?'<div class="pc-note"><strong>Allergies:</strong> '+esc(c.allergies)+'</div>':''}${c.medications?'<div class="pc-note"><strong>Medications:</strong> '+esc(c.medications)+'</div>':''}` : '<div class="pc-note">None recorded.</div>';
+  const v=j.vitals, w=j.withdrawal;
+  const nursingSummary = `${(j.meds||[]).length?'<div class="pc-note"><strong>Meds:</strong> '+j.meds.map(m=>esc(m.name)).join(', ')+'</div>':'<div class="pc-note">No active meds.</div>'}`+
+    `${v?'<div class="pc-note">Vitals: BP '+esc(v.bp||'-')+' · HR '+esc(v.hr||'-')+' · T '+esc(v.temp||'-')+'</div>':''}`+
+    `${w?'<div class="pc-note">'+esc(w.scale)+': <strong>'+w.score+'</strong></div>':''}`+
+    `<button class="btn btn-ghost btn-sm sans no-print" style="margin-top:6px" onclick="openNursing(${c.id})">Open nursing</button>`;
+  const familySummary = `${(j.family||[]).length?j.family.map(f=>'<div class="pc-note">'+esc(f.name)+(f.relationship?' ('+esc(f.relationship)+')':'')+(f.phone?' · '+esc(f.phone):'')+'</div>').join(''):'<div class="pc-note">No contacts.</div>'}`+
+    `${(j.visits||[]).length?'<div class="pc-note">Next visit: '+esc(j.visits[0].date)+(j.visits[0].contact_name?' · '+esc(j.visits[0].contact_name):'')+'</div>':''}`+
+    `<button class="btn btn-ghost btn-sm sans no-print" style="margin-top:6px" onclick="openFamily(${c.id})">Open family</button>`;
   const phase = c.discharge_status ? 'Discharged ('+esc(c.discharge_status)+')' : (c.admit ? 'In treatment' : 'Active');
 
   $('journeyBody').innerHTML = `
@@ -578,6 +590,8 @@ async function loadJourney(){
     <div class="jgrid">
       ${sec('⚠ Safety', c.safety?`<div class="pc-note alert-line">${esc(c.safety)}</div>`:'<div class="pc-note">None noted.</div>')}
       ${sec('⚕ Health', health)}
+      ${sec('⚕ Nursing', nursingSummary)}
+      ${sec('👪 Family', familySummary)}
       ${sec('Preferences', c.prefs?`<div class="pc-note">${esc(c.prefs)}</div>`:'<div class="pc-note">—</div>')}
       ${sec('Triggers / handle with care', c.triggers?`<div class="pc-note">${esc(c.triggers)}</div>`:'<div class="pc-note">—</div>')}
       ${sec('Treatment goals', goalsHtml + `<div class="handoff-add no-print" style="margin-top:8px"><input id="goalInput" placeholder="Add a goal…"/><button class="btn btn-ghost btn-sm sans" onclick="addGoal(${c.id})">Add</button></div>`)}
@@ -603,6 +617,118 @@ async function careBrief(clientId){
   }catch(e){ alert(e.message); }
   finally{ btn.disabled=false; btn.textContent=l; }
 }
+
+/* ---- nursing ---- */
+async function loadNursing(){
+  if(!$('nu_client').value) await fillClientSelect($('nu_client'), null);
+  const cid=$('nu_client').value; if(!cid){ $('nursingArea').innerHTML='<div class="empty">Pick a client.</div>'; return; }
+  const n = await api('/clients/'+cid+'/nursing');
+  const meds = n.meds.length ? n.meds.map(m=>`<div class="todo">
+      <div class="txt"><strong>${esc(m.name)}</strong> ${esc(m.dose||'')} ${esc(m.route||'')} ${m.schedule?'· '+esc(m.schedule):''} ${m.prn?'<span class="chip">PRN</span>':''}</div>
+      <button class="btn btn-ghost btn-sm sans" onclick="giveMed(${m.id},'Given')">Given</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="giveMed(${m.id},'Refused')">Refused</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="giveMed(${m.id},'Held')">Held</button>
+      <button class="btn btn-danger btn-sm sans" onclick="stopMed(${m.id})">Stop</button>
+    </div>`).join('') : '<div class="pc-note">No active meds.</div>';
+  const mar = n.recentAdmin.length ? n.recentAdmin.map(a=>`<div class="pc-note">${esc(a.given_at)} — ${esc(a.name)}: <strong>${esc(a.status)}</strong></div>`).join('') : '<div class="pc-note">No administrations logged.</div>';
+  const vit = n.vitals.length ? n.vitals.map(v=>`<div class="pc-note">${esc(v.taken_at)} — BP ${esc(v.bp||'-')} · HR ${esc(v.hr||'-')} · T ${esc(v.temp||'-')} · RR ${esc(v.resp||'-')} · O₂ ${esc(v.o2||'-')}${v.note?' · '+esc(v.note):''}</div>`).join('') : '<div class="pc-note">No vitals.</div>';
+  const wd = n.withdrawal.length ? n.withdrawal.map(w=>`<div class="pc-note">${esc(w.taken_at)} — ${esc(w.scale)}: <strong>${w.score}</strong>${w.note?' · '+esc(w.note):''}</div>`).join('') : '<div class="pc-note">No scores.</div>';
+  $('nursingArea').innerHTML = `
+    <div class="card"><h3>Medications</h3>${meds}
+      <div class="sv-cat">Add medication</div>
+      <div class="grid3"><div><input id="md_name" placeholder="Name"/></div><div><input id="md_dose" placeholder="Dose"/></div><div><input id="md_route" placeholder="Route"/></div></div>
+      <div class="grid2"><div><input id="md_sched" placeholder="Schedule (e.g. BID)"/></div><div><label class="sans" style="text-transform:none;letter-spacing:0"><input type="checkbox" id="md_prn" style="width:auto"/> PRN</label></div></div>
+      <div class="toolbar"><button class="btn btn-gold btn-sm sans" onclick="addMed()">Add med</button></div>
+    </div>
+    <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+      <div class="card" style="flex:1;min-width:260px"><h3>Vitals</h3>${vit}
+        <div class="grid3" style="margin-top:8px"><div><input id="v_bp" placeholder="BP"/></div><div><input id="v_hr" placeholder="HR"/></div><div><input id="v_temp" placeholder="Temp"/></div></div>
+        <div class="grid3"><div><input id="v_resp" placeholder="RR"/></div><div><input id="v_o2" placeholder="O₂%"/></div><div><input id="v_wt" placeholder="Weight"/></div></div>
+        <div class="toolbar"><button class="btn btn-ghost btn-sm sans" onclick="addVitals()">Record vitals</button></div>
+      </div>
+      <div class="card" style="flex:1;min-width:260px"><h3>Withdrawal scale</h3>${wd}
+        <div class="grid2" style="margin-top:8px"><div><select id="w_scale"><option>CIWA-Ar</option><option>COWS</option></select></div><div><input id="w_score" type="number" placeholder="Score"/></div></div>
+        <input id="w_note" placeholder="Note (optional)"/>
+        <div class="toolbar"><button class="btn btn-ghost btn-sm sans" onclick="addWithdrawal()">Record score</button></div>
+      </div>
+    </div>
+    <div class="card"><h3>Recent MAR</h3>${mar}</div>`;
+}
+async function addMed(){ const cid=$('nu_client').value; if(!$('md_name').value.trim())return;
+  await api('/meds',{method:'POST',body:JSON.stringify({client_id:cid,name:$('md_name').value,dose:$('md_dose').value,route:$('md_route').value,schedule:$('md_sched').value,prn:$('md_prn').checked})}); loadNursing(); }
+async function giveMed(id,status){ await api('/meds/'+id+'/admin',{method:'POST',body:JSON.stringify({status})}); loadNursing(); }
+async function stopMed(id){ if(confirm('Stop this medication?')){ await api('/meds/'+id+'/stop',{method:'POST'}); loadNursing(); } }
+async function addVitals(){ const cid=$('nu_client').value;
+  await api('/vitals',{method:'POST',body:JSON.stringify({client_id:cid,bp:$('v_bp').value,hr:$('v_hr').value,temp:$('v_temp').value,resp:$('v_resp').value,o2:$('v_o2').value,weight:$('v_wt').value})}); loadNursing(); }
+async function addWithdrawal(){ const cid=$('nu_client').value; if($('w_score').value==='')return;
+  await api('/withdrawal',{method:'POST',body:JSON.stringify({client_id:cid,scale:$('w_scale').value,score:$('w_score').value,note:$('w_note').value})}); loadNursing(); }
+function openNursing(id){ show('nursing'); setTimeout(async()=>{ await fillClientSelect($('nu_client'),null); $('nu_client').value=id; loadNursing(); },50); }
+
+/* ---- family ---- */
+async function loadFamily(){
+  if(!$('fm_client').value) await fillClientSelect($('fm_client'), null);
+  const cid=$('fm_client').value; if(!cid){ $('familyArea').innerHTML='<div class="empty">Pick a client.</div>'; return; }
+  const f = await api('/clients/'+cid+'/family');
+  const contacts = f.contacts.length ? f.contacts.map(c=>`<div class="pc-note"><strong>${esc(c.name)}</strong>${c.relationship?' ('+esc(c.relationship)+')':''}${c.phone?' · '+esc(c.phone):''}${c.email?' · '+esc(c.email):''}</div>`).join('') : '<div class="pc-note">No contacts yet.</div>';
+  const updates = f.updates.length ? f.updates.map(u=>`<div class="pc-note">${esc(u.created_at)} — ${u.contact_name?'to '+esc(u.contact_name)+': ':''}${esc(u.text)} <span class="hint">(${esc(u.by_name||'')})</span></div>`).join('') : '<div class="pc-note">No updates shared.</div>';
+  const visits = f.visits.length ? f.visits.map(v=>`<div class="todo"><div class="txt"><strong>${esc(v.date)}</strong>${v.time?' '+esc(v.time):''} · <span class="chip">${esc(v.type)}</span> ${v.contact_name?esc(v.contact_name):''} <span class="hint">${esc(v.status)}</span></div>${v.status==='Scheduled'?`<button class="btn btn-ghost btn-sm sans" onclick="setVisit(${v.id},'Completed')">Done</button><button class="btn btn-ghost btn-sm sans" onclick="setVisit(${v.id},'Cancelled')">Cancel</button>`:''}</div>`).join('') : '<div class="pc-note">No visits.</div>';
+  $('familyArea').innerHTML = `
+    <div class="card"><h3>Contacts</h3>${contacts}
+      <div class="grid3" style="margin-top:8px"><div><input id="fc_name" placeholder="Name"/></div><div><input id="fc_rel" placeholder="Relationship"/></div><div><input id="fc_phone" placeholder="Phone"/></div></div>
+      <div class="toolbar"><button class="btn btn-gold btn-sm sans" onclick="addContact()">Add contact</button></div>
+    </div>
+    <div class="card"><h3>Family updates</h3>${updates}
+      <div class="handoff-add"><input id="fu_text" placeholder="Share an update with family…"/><button class="btn btn-ghost btn-sm sans" onclick="addFamilyUpdate()">Share</button></div>
+    </div>
+    <div class="card"><h3>Visits</h3>${visits}
+      <div class="grid3" style="margin-top:8px"><div><input id="fv_date" type="date"/></div><div><input id="fv_time" type="time"/></div><div><select id="fv_type"><option>In-person</option><option>Virtual</option><option>Family therapy</option></select></div></div>
+      <div class="handoff-add"><input id="fv_name" placeholder="Who's visiting (optional)"/><button class="btn btn-gold btn-sm sans" onclick="addVisit()">Schedule visit</button></div>
+    </div>`;
+}
+async function addContact(){ const cid=$('fm_client').value; if(!$('fc_name').value.trim())return; await api('/family/contacts',{method:'POST',body:JSON.stringify({client_id:cid,name:$('fc_name').value,relationship:$('fc_rel').value,phone:$('fc_phone').value})}); loadFamily(); }
+async function addFamilyUpdate(){ const cid=$('fm_client').value; if(!$('fu_text').value.trim())return; await api('/family/updates',{method:'POST',body:JSON.stringify({client_id:cid,text:$('fu_text').value})}); loadFamily(); }
+async function addVisit(){ const cid=$('fm_client').value; if(!$('fv_date').value)return; await api('/visits',{method:'POST',body:JSON.stringify({client_id:cid,date:$('fv_date').value,time:$('fv_time').value,type:$('fv_type').value,contact_name:$('fv_name').value})}); loadFamily(); }
+async function setVisit(id,status){ await api('/visits/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadFamily(); }
+function openFamily(id){ show('family'); setTimeout(async()=>{ await fillClientSelect($('fm_client'),null); $('fm_client').value=id; loadFamily(); },50); }
+
+/* ---- admissions + bed board ---- */
+async function loadAdmissions(){
+  const { admissions } = await api('/admissions');
+  const stages=['Inquiry','Screening','Scheduled','Admitted','Declined'];
+  $('admBoard').innerHTML = admissions.length ? admissions.map(a=>`<div class="todo">
+      <div class="txt"><strong>${esc(a.name)}</strong> <span class="chip">${esc(a.status)}</span>${a.referral_source?' · '+esc(a.referral_source):''}${a.phone?' · '+esc(a.phone):''}${a.scheduled_date?' · '+esc(a.scheduled_date):''}</div>
+      ${a.status!=='Admitted'&&a.status!=='Declined'?`<select onchange="setAdmStatus(${a.id},this.value)" class="sans" style="width:auto">${stages.filter(s=>s!=='Admitted').map(s=>`<option ${s===a.status?'selected':''}>${s}</option>`).join('')}</select>
+        <button class="btn btn-primary btn-sm sans" onclick="admitClient(${a.id})">Admit</button>`:''}
+    </div>`).join('') : '<div class="empty">No one in the pipeline yet.</div>';
+  loadBeds();
+}
+async function addAdmission(){ if(!$('ad_name').value.trim())return;
+  await api('/admissions',{method:'POST',body:JSON.stringify({name:$('ad_name').value,referral_source:$('ad_ref').value,phone:$('ad_phone').value,insurance:$('ad_ins').value,scheduled_date:$('ad_date').value||null})});
+  $('ad_name').value=$('ad_ref').value=$('ad_phone').value=$('ad_ins').value=''; loadAdmissions(); }
+async function setAdmStatus(id,status){ await api('/admissions/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadAdmissions(); }
+async function admitClient(id){ const room=prompt('Room/bed for the new client? (optional)')||''; await api('/admissions/'+id+'/admit',{method:'POST',body:JSON.stringify({room})}); alert('Admitted — a Care Card was created. Fill in their Welcome plan to start the arrival right.'); loadAdmissions(); }
+async function loadBeds(){
+  const { beds } = await api('/beds');
+  const cls={Open:'bed-open',Occupied:'bed-occ',Hold:'bed-hold',Cleaning:'bed-clean'};
+  $('bedBoard').innerHTML = beds.length ? beds.map(b=>`<div class="bed ${cls[b.status]||''}" onclick="cycleBed(${b.id},'${b.status}')" title="click to change">
+      <div class="bed-room">${esc(b.room)}${b.label?'-'+esc(b.label):''}</div>
+      <div class="bed-status">${esc(b.status)}</div>${b.pref?`<div class="bed-client">${esc(b.pref)}</div>`:''}</div>`).join('') : '<div class="hint">No beds added yet.</div>';
+}
+async function addBed(){ if(!$('bed_room').value.trim())return; await api('/beds',{method:'POST',body:JSON.stringify({room:$('bed_room').value,label:$('bed_label').value,unit:$('bed_unit').value})}); $('bed_room').value=$('bed_label').value=''; loadBeds(); }
+async function cycleBed(id,cur){ const order=['Open','Hold','Cleaning','Occupied']; const next=order[(order.indexOf(cur)+1)%order.length]; await api('/beds/'+id,{method:'POST',body:JSON.stringify({status:next})}); loadBeds(); }
+
+/* ---- team ---- */
+async function loadTeam(){
+  const [{value}, t, {staff}] = await Promise.all([api('/lineup'), api('/team'), api('/staff')]);
+  $('teamValue').textContent = value;
+  $('trainBtn').disabled = t.trainedToday; $('trainMsg').textContent = t.trainedToday ? `✓ reviewed · ${t.trainingCount} on the team today` : `${t.trainingCount} teammates reviewed today`;
+  $('ku_to').innerHTML = '<option value="">Whole team</option>'+staff.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  $('kudosFeed').innerHTML = t.kudos.length ? t.kudos.map(k=>`<div class="wow"><div>👏 ${esc(k.text)}</div><div class="wow-meta">${k.from_name?'from '+esc(k.from_name):''}${k.to_name?' → '+esc(k.to_name):''}</div></div>`).join('') : '<div class="hint">No kudos yet. Catch someone doing something great.</div>';
+  if(t.pulseTrend){ const total=t.pulseTrend.reduce((a,b)=>a+b.n,0)||1;
+    $('pulseTrend').innerHTML = t.pulseTrend.length ? t.pulseTrend.map(p=>`<div class="trbar"><div class="trbar-l">${esc(p.load||'—')}</div><div class="trbar-track"><div class="trbar-fill" style="width:${Math.round(p.n/total*100)}%"></div></div><div class="trbar-n">${p.n}</div></div>`).join('') : '<div class="hint">No staff pulses this week.</div>'; }
+}
+async function ackTraining(){ await api('/training-ack',{method:'POST',body:JSON.stringify({value_text:$('teamValue').textContent})}); loadTeam(); }
+async function giveKudos(){ if(!$('ku_text').value.trim())return; await api('/kudos',{method:'POST',body:JSON.stringify({to_user_id:$('ku_to').value||null,text:$('ku_text').value})}); $('ku_text').value=''; loadTeam(); }
 
 /* ---- AI shift briefing ---- */
 async function genShiftBriefing(){

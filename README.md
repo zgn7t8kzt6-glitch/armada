@@ -53,6 +53,10 @@ real client data.)
 - **Client 360 Journey.** One screen per client pulling together preferences, safety, health, goals, schedule, risk, requests, concerns, delights, pulses, and family — with an AI Care Brief for today.
 - **Treatment goals** with progress, plus **health** (allergies, medications) on the Care Card.
 - **AI Shift Briefing.** Claude reads the whole house and writes the shift huddle: who needs extra care, what to close out, delights to deliver, and a line for the team.
+- **Nursing station.** Structured medications with a MAR (Given/Refused/Held), vitals, and withdrawal scales (CIWA-Ar / COWS) — surfaced on the Journey and fed to the AI briefs. Decision support, verified per clinical protocol.
+- **Family engagement.** Family contacts, shared updates, and visit scheduling — easing the outside pressure that drives AMA.
+- **Admissions & bed board.** An intake pipeline (Inquiry → Screening → Scheduled → Admitted) that creates a Care Card on admit, plus a live bed board.
+- **Team.** Daily Service-Value training acknowledgement, peer kudos, and (for admins) a 7-day staff-wellbeing trend.
 - **Print** a clean playbook, plan, report, or schedule.
 
 ## Configuration (environment variables)

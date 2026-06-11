@@ -48,6 +48,10 @@
     <button data-view="surveys">Surveys</button>
     <button data-view="concierge">Concierge</button>
     <button data-view="program">Program</button>
+    <button data-view="nursing">Nursing</button>
+    <button data-view="family">Family</button>
+    <button data-view="admissions">Admissions</button>
+    <button data-view="team">Team</button>
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
     <button data-view="assign" data-admin>Assign Staff</button>
@@ -145,6 +149,70 @@
 
     <!-- JOURNEY (client 360) -->
     <section id="journey" class="view"><div id="journeyBody"></div></section>
+
+    <!-- NURSING -->
+    <section id="nursing" class="view">
+      <div class="card no-print">
+        <h3>Nursing Station</h3>
+        <p class="sub sans">Medications (MAR), vitals, and withdrawal scales (CIWA-Ar / COWS). Decision support — verify per your clinical protocol.</p>
+        <div class="controls"><div class="field"><label>Client</label><select id="nu_client"></select></div><button class="btn btn-ghost sans" onclick="loadNursing()">Open chart</button></div>
+      </div>
+      <div id="nursingArea"></div>
+    </section>
+
+    <!-- FAMILY -->
+    <section id="family" class="view">
+      <div class="card no-print">
+        <h3>Family Engagement</h3>
+        <p class="sub sans">Family are part of the experience. Keep them informed and cared for — easing outside pressure is a top way to keep clients.</p>
+        <div class="controls"><div class="field"><label>Client</label><select id="fm_client"></select></div><button class="btn btn-ghost sans" onclick="loadFamily()">Open</button></div>
+      </div>
+      <div id="familyArea"></div>
+    </section>
+
+    <!-- ADMISSIONS -->
+    <section id="admissions" class="view">
+      <div class="card no-print">
+        <h3>Admissions &amp; Bed Board</h3>
+        <p class="sub sans">Every journey begins with a warm welcome — from the first phone call.</p>
+        <div class="grid3">
+          <div><label>Name</label><input id="ad_name"/></div>
+          <div><label>Referral source</label><input id="ad_ref" placeholder="e.g. Hospital, family"/></div>
+          <div><label>Phone</label><input id="ad_phone"/></div>
+        </div>
+        <div class="grid2"><div><label>Insurance</label><input id="ad_ins"/></div><div><label>Scheduled date</label><input id="ad_date" type="date"/></div></div>
+        <div class="toolbar"><button class="btn btn-gold sans" onclick="addAdmission()">Add to pipeline</button></div>
+      </div>
+      <div class="card"><h3>Pipeline</h3><div id="admBoard"></div></div>
+      <div class="card">
+        <h3>Bed Board</h3>
+        <div class="handoff-add no-print"><input id="bed_room" placeholder="Room"/><input id="bed_label" placeholder="Bed"/><input id="bed_unit" placeholder="Unit"/><button class="btn btn-ghost btn-sm sans" onclick="addBed()">Add bed</button></div>
+        <div id="bedBoard" class="bed-grid"></div>
+      </div>
+    </section>
+
+    <!-- TEAM -->
+    <section id="team" class="view">
+      <div class="card">
+        <h3>Team</h3>
+        <p class="sub sans">Ladies and Gentlemen serving Ladies and Gentlemen. Cared-for staff give cared-for care.</p>
+        <div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Today's Service Value</div>
+        <div id="teamValue" class="line-value"></div>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-primary btn-sm sans" id="trainBtn" onclick="ackTraining()">✓ I reviewed today's value</button><span id="trainMsg" class="hint" style="align-self:center"></span></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:2;min-width:300px">
+          <h3>Kudos — recognize a teammate</h3>
+          <div class="grid2"><div><label>To</label><select id="ku_to"></select></div><div></div></div>
+          <div class="handoff-add"><input id="ku_text" placeholder="What did they do that made someone feel cared for?"/><button class="btn btn-gold sans" onclick="giveKudos()">Give kudos</button></div>
+          <div id="kudosFeed"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:240px" data-admin>
+          <h3>Team wellbeing (7 days)</h3>
+          <div id="pulseTrend"></div>
+        </div>
+      </div>
+    </section>
 
     <!-- SURVEYS -->
     <section id="surveys" class="view">

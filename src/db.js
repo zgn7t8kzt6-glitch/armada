@@ -269,6 +269,95 @@ CREATE TABLE IF NOT EXISTS goals (
   met_at TEXT
 );
 
+-- Nursing: structured medications, the MAR, vitals, withdrawal scales.
+CREATE TABLE IF NOT EXISTS meds (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, dose TEXT, route TEXT, schedule TEXT,
+  prn INTEGER NOT NULL DEFAULT 0, notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS med_admin (
+  id INTEGER PRIMARY KEY,
+  med_id INTEGER NOT NULL REFERENCES meds(id) ON DELETE CASCADE,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'Given',  -- Given | Refused | Held
+  note TEXT, given_by INTEGER REFERENCES users(id),
+  given_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS vitals (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  bp TEXT, hr TEXT, temp TEXT, resp TEXT, o2 TEXT, weight TEXT, note TEXT,
+  taken_by INTEGER REFERENCES users(id),
+  taken_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS withdrawal_scores (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  scale TEXT NOT NULL,     -- CIWA-Ar | COWS
+  score INTEGER NOT NULL, note TEXT,
+  taken_by INTEGER REFERENCES users(id),
+  taken_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Family engagement: contacts, updates shared, visits.
+CREATE TABLE IF NOT EXISTS family_contacts (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, relationship TEXT, phone TEXT, email TEXT,
+  can_update INTEGER NOT NULL DEFAULT 1, notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS family_updates (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  contact_name TEXT, text TEXT NOT NULL,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS visits (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  contact_name TEXT, date TEXT NOT NULL, time TEXT,
+  type TEXT NOT NULL DEFAULT 'In-person',  -- In-person | Virtual | Family therapy
+  status TEXT NOT NULL DEFAULT 'Scheduled', -- Scheduled | Completed | Cancelled
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Admissions pipeline + bed board.
+CREATE TABLE IF NOT EXISTS admissions (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL, referral_source TEXT, phone TEXT, insurance TEXT,
+  status TEXT NOT NULL DEFAULT 'Inquiry', -- Inquiry | Screening | Scheduled | Admitted | Declined
+  scheduled_date TEXT, notes TEXT, client_id INTEGER REFERENCES clients(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS beds (
+  id INTEGER PRIMARY KEY,
+  room TEXT NOT NULL, label TEXT, unit TEXT,
+  status TEXT NOT NULL DEFAULT 'Open',   -- Open | Occupied | Hold | Cleaning
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL
+);
+
+-- Team: peer kudos + daily service-value training acknowledgement.
+CREATE TABLE IF NOT EXISTS kudos (
+  id INTEGER PRIMARY KEY,
+  to_user_id INTEGER REFERENCES users(id), to_name TEXT,
+  from_id INTEGER REFERENCES users(id), from_name TEXT,
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS training_ack (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id), user_name TEXT,
+  value_text TEXT, date TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Audit log: every access/modification of client data (HIPAA requirement)
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,

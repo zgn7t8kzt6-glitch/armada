@@ -83,7 +83,7 @@ const GROUP_OF={today:'today',
   family:'people',team:'people',lineup:'people',assign:'people',mytasks:'people',
   admissions:'admissions',alumni:'people',accountability:'insights',
   standard:'learn',library:'learn',training:'learn',
-  outcomes:'insights',scorecard:'insights','report-view':'insights',users:'insights',audit:'insights',
+  outcomes:'insights',scorecard:'insights',settings:'insights','report-view':'insights',users:'insights',audit:'insights',
   askai:'ask'};
 function renderGroups(){
   $('groupbar').innerHTML = GROUPS.map(x=>`<button data-g="${x.g}">${x.label}</button>`).join('');
@@ -112,6 +112,7 @@ function show(v){
   if(v==='training') loadTraining();
   if(v==='scorecard') loadScorecard();
   if(v==='mytasks') loadMyTasks();
+  if(v==='settings') loadSettings();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -367,6 +368,23 @@ async function assignTask(){
 async function saveCoordinator(){ await api('/settings/aftercare-coordinator',{method:'POST',body:JSON.stringify({user_id:$('acc_user').value||null})}); alert('Aftercare Coordinator saved. New discharges will auto-assign their calls.'); }
 async function saveOncall(){ await api('/settings/oncall',{method:'POST',body:JSON.stringify({email:$('oc_email').value,phone:$('oc_phone').value})}); alert('On-call leader saved. High alerts will reach them in real time.'); }
 
+/* ---- settings hub ---- */
+async function loadSettings(){
+  const st = await api('/settings');
+  const dot=(ok)=>ok?'<span class="risk risk-low">ready</span>':'<span class="risk risk-warn">not set</span>';
+  $('intStatus').innerHTML = `
+    <div class="ret-card"><div class="n" style="font-size:18px">${st.claudeReady?'✓':'—'}</div><div class="l">Claude AI ${st.claudeReady?'':'(ANTHROPIC_API_KEY)'}</div></div>
+    <div class="ret-card"><div class="n" style="font-size:18px">${st.emailReady?'✓':'—'}</div><div class="l">Email ${st.emailReady?'':'(RESEND_API_KEY)'}</div></div>
+    <div class="ret-card"><div class="n" style="font-size:18px">${st.smsReady?'✓':'—'}</div><div class="l">SMS ${st.smsReady?'':'(Twilio)'}</div></div>`;
+  const ac=st.aftercareCoordinator;
+  $('acc_user').innerHTML='<option value="">— none —</option>'+st.staff.map(s=>`<option value="${s.id}" ${ac&&ac.id===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  $('oc_email').value=st.oncallEmail||''; $('oc_phone').value=st.oncallPhone||'';
+  $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
+  $('kc_code').value = st.kioskCode||'';
+}
+async function saveKioskCode(){ await api('/settings/kiosk-code',{method:'POST',body:JSON.stringify({code:$('kc_code').value})}); alert('Kiosk/display code saved.'); }
+async function testAlert(){ const r=await api('/settings/test-alert',{method:'POST'}); alert(`Test sent. Email ${r.emailReady?'attempted':'not configured'}, SMS ${r.smsReady?'attempted':'not configured'}.`); }
+
 /* ---- huddle mode (full-screen daily lineup) ---- */
 async function startHuddle(){
   const [t, line, conc] = await Promise.all([api('/today'), api('/lineup'), api('/concerns').catch(()=>({concerns:[]}))]);
@@ -470,6 +488,18 @@ async function loadPlaybook(){
       </div>`);
   });
 }
+/* ---- ama sparkline ---- */
+function sparkline(vals, w=80, h=22){
+  if(!vals || vals.length<1) return '<span class="hint">—</span>';
+  if(vals.length===1) vals=[vals[0],vals[0]];
+  const max=3, n=vals.length, step=w/(n-1);
+  const y=v=>h-2-((v-1)/(max-1))*(h-4);
+  const pts=vals.map((v,i)=>`${(i*step).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const last=vals[vals.length-1];
+  const col=last>=3?'#9b2c2c':last>=2?'#9a6a1f':'#2f7a4f';
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="vertical-align:middle"><polyline fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${pts}"/><circle cx="${(w).toFixed(1)}" cy="${y(last).toFixed(1)}" r="2.5" fill="${col}"/></svg>`;
+}
+
 /* ---- retention dashboard ---- */
 function riskBadge(level){
   const m = { High:'risk-high', Elevated:'risk-elev', Low:'risk-low' };
@@ -485,11 +515,12 @@ async function loadRetention(){
     <div class="ret-card"><div class="n">${summary.total}</div><div class="l">Active clients</div></div>`;
 
   $('retClients').innerHTML = clients.length ? `<table class="tbl">
-    <tr><th>Client</th><th>Room</th><th>AMA risk</th><th>Last pulse</th><th>Today</th></tr>
-    ${clients.map(c=>`<tr class="ret-row" onclick="gotoPlaybook()">
+    <tr><th>Client</th><th>Room</th><th>AMA risk</th><th>Trend</th><th>Last pulse</th><th>Today</th></tr>
+    ${clients.map(c=>`<tr class="ret-row" onclick="openJourney(${c.id})">
       <td><strong>${esc(c.pref||c.name||'')}</strong>${c.summary?`<div class="hint" style="margin-top:2px">${esc(c.summary.slice(0,80))}${c.summary.length>80?'…':''}</div>`:''}</td>
       <td>${esc(c.room||'')}</td>
       <td>${riskBadge(c.level)}</td>
+      <td>${sparkline(c.trend)}</td>
       <td>${c.lastPulse?esc(c.lastPulse.date)+' '+esc(c.lastPulse.shift)+' · '+esc(c.lastPulse.concern):'<span class="hint">none</span>'}</td>
       <td>${c.pulsedToday?'<span class="risk risk-low">✓</span>':'<span class="risk risk-warn">—</span>'}</td>
     </tr>`).join('')}</table>` : '<div class="empty">No clients yet.</div>';
@@ -821,7 +852,9 @@ async function loadJourney(){
   const { journey:j } = await api('/clients/'+JOURNEY_ID+'/journey');
   const c=j.client;
   const sec=(t,inner)=>`<div class="jcard"><div class="h">${t}</div>${inner}</div>`;
-  const amaHtml = j.ama ? `<span class="risk ${j.ama.level==='High'?'risk-high':j.ama.level==='Elevated'?'risk-elev':'risk-low'}">AMA risk: ${esc(j.ama.level)}</span>` : '<span class="risk risk-none">No AMA read</span>';
+  const trendVals = (j.amaHistory||[]).map(r=>({High:3,Elevated:2,Low:1}[r.level]||0));
+  const amaHtml = (j.ama ? `<span class="risk ${j.ama.level==='High'?'risk-high':j.ama.level==='Elevated'?'risk-elev':'risk-low'}">AMA risk: ${esc(j.ama.level)}</span>` : '<span class="risk risk-none">No AMA read</span>')
+    + (trendVals.length>1?` <span title="AMA risk trend">${sparkline(trendVals,70,20)}</span>`:'');
   const goalsHtml = j.goals.length ? j.goals.map(g=>`<div class="todo"><div class="box" style="cursor:pointer" onclick="toggleGoal(${g.id},'${g.status==='Met'?'Active':'Met'}')">${g.status==='Met'?'✓':''}</div><div class="txt ${g.status==='Met'?'done':''}">${esc(g.text)}${g.target_date?' <span class="hint">· by '+esc(g.target_date)+'</span>':''}</div></div>`).join('') : '<div class="pc-note">No goals yet.</div>';
   const reqHtml = j.requests.length ? j.requests.map(r=>`<div class="pc-note">• ${esc(r.department)}: ${esc(r.text)} <span class="hint">(${esc(r.status)})</span></div>`).join('') : '<div class="pc-note">None open.</div>';
   const concernHtml = j.concerns.length ? j.concerns.map(x=>`<div class="pc-note">⚑ ${esc(x.text)}</div>`).join('') : '<div class="pc-note">None open.</div>';

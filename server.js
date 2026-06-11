@@ -260,6 +260,7 @@ app.get('/api/retention', requireAuth, (req, res) => {
       lastReadAt: ama ? ama.created_at : null,
       lastPulse: lastPulse || null,
       pulsedToday,
+      trend: db.prepare(`SELECT level FROM ama_reads WHERE client_id = ? ORDER BY id DESC LIMIT 8`).all(c.id).reverse().map((r) => ({ High: 3, Elevated: 2, Low: 1 }[r.level] || 0)),
     };
   });
   const rank = { High: 3, Elevated: 2, Low: 1 };
@@ -391,7 +392,7 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
   res.json({ entries: db.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all() });
 });
 
-app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? (process.env.KIOSK_CODE || 'armada') : undefined }));
+app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined }));
 
 // Change my own password.
 app.post('/api/change-password', requireAuth, (req, res) => {
@@ -488,8 +489,17 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     staff: db.prepare(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`).all(),
     oncallEmail: getState('oncall_email') || process.env.ONCALL_EMAIL || '',
     oncallPhone: getState('oncall_phone') || process.env.ONCALL_PHONE || '',
-    emailReady: emailConfigured(), smsReady: smsConfigured(),
+    emailReady: emailConfigured(), smsReady: smsConfigured(), claudeReady: claudeConfigured(),
+    kioskCode: kioskCode(),
   });
+});
+app.post('/api/settings/kiosk-code', requireAuth, requireAdmin, (req, res) => {
+  setState('kiosk_code', (req.body?.code || '').trim());
+  res.json({ ok: true });
+});
+app.post('/api/settings/test-alert', requireAuth, requireAdmin, (req, res) => {
+  notifyOnCall('TEST — your on-call alerts are working. (No action needed.)');
+  res.json({ ok: true, emailReady: emailConfigured(), smsReady: smsConfigured() });
 });
 app.post('/api/settings/aftercare-coordinator', requireAuth, requireAdmin, (req, res) => {
   setState('aftercare_coordinator', String(req.body?.user_id || ''));
@@ -658,6 +668,7 @@ app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
   res.json({ journey: {
     client: c,
     ama: latestAmaRead(c.id),
+    amaHistory: db.prepare(`SELECT level, created_at FROM ama_reads WHERE client_id = ? ORDER BY id DESC LIMIT 12`).all(c.id).reverse(),
     pulses: recentPulses(c.id, 5),
     requests: db.prepare(`SELECT * FROM requests WHERE client_id = ? AND status != 'Done' ORDER BY id DESC`).all(c.id),
     concerns: db.prepare(`SELECT * FROM concerns WHERE client_id = ? AND status = 'Open' ORDER BY id DESC`).all(c.id),
@@ -1125,7 +1136,8 @@ app.post('/api/alumni/:id/notes', requireAuth, (req, res) => {
 });
 
 /* ---------------- Client-facing kiosk (no staff login; guarded by a code) ---------------- */
-function kioskOk(req) { return (req.query.code || req.body?.code) === (process.env.KIOSK_CODE || 'armada'); }
+function kioskCode() { return getState('kiosk_code') || process.env.KIOSK_CODE || 'armada'; }
+function kioskOk(req) { return (req.query.code || req.body?.code) === kioskCode(); }
 app.get('/api/kiosk/data', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
   const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 AND key IN ('experience','meals') ORDER BY sort`).all();

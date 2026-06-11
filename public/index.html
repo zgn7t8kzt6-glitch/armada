@@ -72,6 +72,7 @@
     <button data-view="clients">Clients</button>
     <button data-view="editor">Care Card</button>
     <button data-view="assign" data-admin>Assign Staff</button>
+    <button data-view="settings" data-admin>Settings</button>
     <button data-view="report-view" data-admin>Report</button>
     <button data-view="users" data-admin>Staff</button>
     <button data-view="audit" data-admin>Audit Log</button>
@@ -203,15 +204,31 @@
         <div class="handoff-add"><input id="at_title" placeholder="e.g. Call Marc's mother with an update / restock snack station"/><button class="btn btn-gold sans" onclick="assignTask()">Assign</button></div>
       </div>
       <div class="card" data-admin>
+        <h3>All open team tasks</h3>
+        <p class="sub sans">Every teammate's open required tasks. Configure the Aftercare Coordinator and on-call leader under <strong>Settings</strong>.</p>
+        <div id="allTasksList"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS (admin hub) -->
+    <section id="settings" class="view">
+      <div class="card"><h3>Settings</h3><p class="sub sans">One place for the toggles that run the house.</p><div id="intStatus" class="ret-cards"></div></div>
+      <div class="card">
         <h3>Aftercare Coordinator</h3>
-        <p class="sub sans">All discharge aftercare calls (24h / 48h / 30-day) are auto-assigned to this person as required tasks.</p>
+        <p class="sub sans">All discharge aftercare calls (24h / 48h / 30-day) auto-assign to this person as required tasks.</p>
         <div class="controls"><div class="field"><label>Coordinator</label><select id="acc_user"></select></div><button class="btn btn-primary sans" onclick="saveCoordinator()">Save</button></div>
-        <h3 style="margin-top:14px">On-call leader — real-time alerts</h3>
-        <p class="sub sans">High-risk pulses, escalating AMA reads, urgent requests, and serious incidents are texted/emailed here the moment they happen.</p>
+      </div>
+      <div class="card">
+        <h3>On-call leader — real-time alerts</h3>
+        <p class="sub sans">High-risk pulses, escalating AMA reads, urgent requests, and serious incidents text/email here the moment they happen.</p>
         <div class="grid2"><div><label>Email</label><input id="oc_email" type="email"/></div><div><label>Mobile (for SMS)</label><input id="oc_phone" placeholder="+1..."/></div></div>
         <div id="ocStatus" class="hint"></div>
-        <div class="toolbar"><button class="btn btn-primary sans" onclick="saveOncall()">Save on-call</button></div>
-        <h3 style="margin-top:14px">All open team tasks</h3><div id="allTasksList"></div>
+        <div class="toolbar"><button class="btn btn-ghost sans" onclick="testAlert()">Send test alert</button><button class="btn btn-primary sans" onclick="saveOncall()">Save on-call</button></div>
+      </div>
+      <div class="card">
+        <h3>Kiosk &amp; display code</h3>
+        <p class="sub sans">Code staff enter to open the client kiosk and the break-room display. Share only with staff.</p>
+        <div class="controls"><div class="field"><label>Code</label><input id="kc_code"/></div><button class="btn btn-primary sans" onclick="saveKioskCode()">Save</button></div>
       </div>
     </section>
 

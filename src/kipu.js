@@ -143,25 +143,43 @@ export async function kipuSyncRoster() {
 // Pull a single patient's recent clinical documentation (evaluations/notes) and
 // return it as plain text for the AI risk read. Endpoint is configurable per
 // Kipu account via KIPU_NOTES_PATH (use {id} for the casefile id).
+const stripHtml = (s) => String(s)
+  .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ').replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+  .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&#?\w+;/g, ' ')
+  .replace(/\s+/g, ' ').trim();
+const extractText = (v) => {
+  if (v == null) return '';
+  if (typeof v === 'string') return stripHtml(v);
+  if (Array.isArray(v)) return v.map(extractText).filter(Boolean).join('\n');
+  if (typeof v === 'object') return Object.values(v).map(extractText).filter(Boolean).join(' ');
+  return String(v);
+};
+
 export async function kipuPatientNotes(casefileId) {
-  const tmpl = process.env.KIPU_NOTES_PATH || '/api/patients/{id}/patient_evaluations';
-  const path = tmpl.replace('{id}', encodeURIComponent(casefileId));
+  const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
+  const path = tmpl.replace('{id}', casefileId);
   const data = await kipuGet(path);
-  const list = data?.patient_evaluations || data?.evaluations || data?.records || (Array.isArray(data) ? data : []);
+  let list = data?.patient_evaluations || data?.evaluations || (Array.isArray(data) ? data : []);
+  // Most recent first (this admission's notes matter most).
+  list.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   const texts = [];
-  for (const e of list.slice(0, 60)) {
-    const nm = e.name || e.evaluation_name || e.type || 'Evaluation';
-    const date = (e.created_at || e.evaluation_date || '').toString().slice(0, 10);
-    const direct = e.progress_note || e.note || e.narrative || e.summary;
-    if (direct && String(direct).trim().length > 3) texts.push(`[${date} ${nm}] ${String(direct).trim()}`);
-    const items = e.patient_evaluation_items || e.items || e.answers || [];
-    for (const it of (Array.isArray(items) ? items : [])) {
-      const v = it.value || it.answer || it.description || it.note || it.text;
-      const label = it.label || it.name || it.question || '';
-      if (v && typeof v === 'string' && v.trim().length > 3) texts.push(`[${nm} · ${label}] ${v.trim()}`);
+  let detailBudget = 14;   // bound the per-note detail fetches
+  for (const e of list.slice(0, 30)) {
+    const nm = e.name || e.evaluation_name || 'Note';
+    const date = String(e.created_at || '').slice(0, 10);
+    let content = extractText(e.evaluation_content);
+    // If the list row didn't carry the content, fetch the evaluation detail.
+    if ((!content || content.length < 4) && e.id && detailBudget > 0) {
+      detailBudget--;
+      try {
+        const d = await kipuGet(`/api/patient_evaluations/${e.id}?patient_id=${casefileId}`);
+        const ev = d?.patient_evaluation || d?.evaluation || d;
+        content = extractText(ev?.evaluation_content || ev?.patient_evaluation_items || ev?.items);
+      } catch { /* skip this one */ }
     }
+    if (content && content.length > 4) texts.push(`[${date} · ${nm}]\n${content}`);
   }
-  return texts.join('\n\n').slice(0, 14000); // keep the prompt bounded
+  return texts.join('\n\n').slice(0, 16000); // keep the prompt bounded
 }
 
 // Diagnostic: probe the documentation endpoints for ONE patient and report which

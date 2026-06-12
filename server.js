@@ -597,6 +597,13 @@ app.post('/api/kipu/doc-inspect', requireAuth, requireAdmin, async (req, res) =>
   if (!cid) return res.status(400).json({ error: 'No client with a Kipu id — sync the roster first.' });
   try { res.json(await kipuDocInspect(cid)); } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Preview the documentation we pull for one patient (admin verification).
+app.post('/api/kipu/notes-preview', requireAuth, requireAdmin, async (req, res) => {
+  const c = db.prepare(`SELECT kipu_id FROM clients WHERE active = 1 AND kipu_id IS NOT NULL AND kipu_id != '' LIMIT 1`).get();
+  if (!c) return res.status(400).json({ error: 'No client with a Kipu id — sync the roster first.' });
+  try { const txt = await kipuPatientNotes(c.kipu_id); res.json({ chars: txt.length, preview: txt.slice(0, 2500) }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
 // Clean reset: wipe the roster and rebuild it from the live Kipu active census
 // (use after test-syncs left stale/duplicate clients).
 app.post('/api/kipu/reset', requireAuth, requireAdmin, async (req, res) => {

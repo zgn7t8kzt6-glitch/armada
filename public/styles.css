@@ -174,10 +174,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--aqua);bo
 .alert-line{color:var(--danger);font-weight:600;font-size:13px}
 /* retention dashboard */
 .ret-cards{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:4px}
-.ret-card{flex:1;min-width:118px;background:var(--paper);border:1px solid var(--line);border-radius:var(--r-sm);padding:16px 14px;text-align:center;box-shadow:var(--shadow);position:relative;overflow:hidden}
-.ret-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--grad);opacity:.85}
-.ret-card .n{font-family:var(--serif);font-size:30px;font-weight:600;color:var(--navy);line-height:1.05}
-.ret-card .l{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-top:4px;font-family:var(--sans);font-weight:500}
+.ret-card{flex:1;min-width:118px;background:var(--paper);border:1px solid var(--line);border-radius:var(--r-sm);padding:18px 14px;text-align:center;box-shadow:var(--shadow);transition:transform .14s,box-shadow .14s}
+.ret-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+.ret-card .n{font-family:var(--serif);font-size:32px;font-weight:600;color:var(--navy);line-height:1.05}
+.ret-card .l{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-top:5px;font-family:var(--sans);font-weight:600}
 .ret-card.rc-high{background:#fbecea;border-color:#e3b3ac}.ret-card.rc-high .n{color:var(--danger)}
 .ret-card.rc-elev{background:#fdf6ec;border-color:#e7c79a}.ret-card.rc-elev .n{color:#9a6a1f}
 .ret-card.rc-warn{background:#f3f6fb;border-color:#cdd9ea}

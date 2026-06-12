@@ -3,8 +3,8 @@
   "short_name": "Armada",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#2a585d",
-  "theme_color": "#2a585d",
+  "background_color": "#235056",
+  "theme_color": "#235056",
   "description": "The Gold Standard of Client Care",
   "icons": [
     { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }

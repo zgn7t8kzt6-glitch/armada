@@ -714,6 +714,7 @@ addColumn('ama_reads', 'transport', 'TEXT');           // Arranged | Needed | Un
 addColumn('ama_reads', 'anticipated_dc', 'TEXT');      // anticipated discharge date (free text)
 addColumn('ama_reads', 'discharge_plan', 'TEXT');      // 1-2 sentence step-down plan
 addColumn('ama_reads', 'doc_flags', 'TEXT');           // JSON array of missing/late documentation
+addColumn('clients', 'loc', 'TEXT');                   // current ASAM level of care (parsed code)
 addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapshot (kept fresh)
 addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
 addColumn('clients', 'likes', 'TEXT');                 // what the client likes/enjoys (AI, kept fresh)
@@ -729,6 +730,89 @@ db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
 export const CASE_CATEGORIES = ['Aftercare / Housing', 'Transportation', 'Legal / Court / Parole', 'Employment', 'Education', 'Insurance / Financial', 'ID / Documents', 'Medical / Dental', 'Family / Support', 'Benefits', 'Communication', 'Other'];
+
+// ---- ASAM levels of care: census breakdown, step-downs, length of stay ----
+// `rank` orders the care journey (higher = more acute / earlier). A move to a
+// LOWER rank is a step-down; a move to a higher rank is a step-up.
+export const ASAM_LEVELS = [
+  { code: '4.0',    label: '4.0 · Medically Managed Inpatient',     rank: 9 },
+  { code: '3.7-WM', label: '3.7-WM · Medical Withdrawal Mgmt',      rank: 8 },
+  { code: '3.7',    label: '3.7 · Medically Monitored Inpatient',   rank: 7 },
+  { code: '3.2-WM', label: '3.2-WM · Residential Withdrawal Mgmt',  rank: 6 },
+  { code: '3.5',    label: '3.5 · High-Intensity Residential',      rank: 5 },
+  { code: '3.1',    label: '3.1 · Low-Intensity Residential',       rank: 4 },
+  { code: '2.5',    label: '2.5 · Partial Hospitalization (PHP)',   rank: 3 },
+  { code: '2.1',    label: '2.1 · Intensive Outpatient (IOP)',      rank: 2 },
+  { code: '1.0',    label: '1.0 · Outpatient',                      rank: 1 },
+  { code: 'Detox',       label: 'Detox (unspecified level)',        rank: 6 },
+  { code: 'Residential', label: 'Residential (unspecified)',        rank: 5 },
+  { code: 'Unspecified', label: 'Unspecified',                      rank: 0 },
+];
+export const LOC_RANK = Object.fromEntries(ASAM_LEVELS.map((l) => [l.code, l.rank]));
+export const LOC_LABEL = Object.fromEntries(ASAM_LEVELS.map((l) => [l.code, l.label]));
+// Map a free-text level_of_care / program string to a known ASAM code.
+export function parseLoc(text) {
+  const s = String(text || '').toLowerCase();
+  if (!s.trim()) return 'Unspecified';
+  if (/3\.?7\s*-?\s*wm/.test(s)) return '3.7-WM';
+  if (/3\.?2\s*-?\s*wm/.test(s)) return '3.2-WM';
+  if (/\b4\.?0\b/.test(s)) return '4.0';
+  if (/\b3\.?7\b/.test(s)) return '3.7';
+  if (/\b3\.?5\b/.test(s)) return '3.5';
+  if (/\b3\.?1\b/.test(s)) return '3.1';
+  if (/\b2\.?5\b/.test(s) || /\bphp\b|partial hosp/.test(s)) return '2.5';
+  if (/\b2\.?1\b/.test(s) || /\biop\b|intensive out/.test(s)) return '2.1';
+  if (/\b1\.?0\b/.test(s) || /outpatient/.test(s)) return '1.0';
+  if (/withdrawal|detox|\bwm\b/.test(s)) return 'Detox';
+  if (/residential|\brtc\b/.test(s)) return 'Residential';
+  return 'Unspecified';
+}
+
+// ---- Flow events + daily metrics: the running record of how the house moves.
+// One event per real transition (admit / loc_change / discharge / ama), so a
+// re-run of the sync never double-counts. daily_metrics rolls these up per day.
+db.exec(`CREATE TABLE IF NOT EXISTS flow_events (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  kipu_id TEXT,
+  kind TEXT NOT NULL,                     -- admit | loc_change | discharge | ama
+  from_loc TEXT, to_loc TEXT,
+  date TEXT NOT NULL,                     -- YYYY-MM-DD the event happened
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS daily_metrics (
+  date TEXT PRIMARY KEY,                  -- YYYY-MM-DD
+  intakes INTEGER NOT NULL DEFAULT 0,
+  discharges INTEGER NOT NULL DEFAULT 0,
+  loc_changes INTEGER NOT NULL DEFAULT 0,
+  ama INTEGER NOT NULL DEFAULT 0,
+  census INTEGER,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+// The facility's local day boundary. Daily flow is cut off at LOCAL midnight
+// (default US Eastern) so the daily report matches what staff see on the floor,
+// not UTC. Set APP_TZ to override (e.g. America/Chicago).
+export const APP_TZ = process.env.APP_TZ || 'America/New_York';
+export function appToday(d = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TZ }).format(d); // YYYY-MM-DD
+}
+export function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+// Recompute a day's metrics from its flow events (idempotent upsert).
+export function rollupDailyMetrics(date) {
+  const c = (k) => db.prepare(`SELECT COUNT(*) n FROM flow_events WHERE date = ? AND kind = ?`).get(date, k).n;
+  const ama = c('ama');
+  const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n;
+  db.prepare(`INSERT INTO daily_metrics (date, intakes, discharges, loc_changes, ama, census, updated_at)
+    VALUES (?,?,?,?,?,?,datetime('now'))
+    ON CONFLICT(date) DO UPDATE SET intakes=excluded.intakes, discharges=excluded.discharges,
+      loc_changes=excluded.loc_changes, ama=excluded.ama, census=excluded.census, updated_at=datetime('now')`)
+    .run(date, c('admit'), c('discharge') + ama, c('loc_change'), ama, census);
+}
 
 // ---- Leadership: the Director's Daily Review (Brandon's recurring rounds) ----
 // One checklist instance per day, seeded from DIRECTOR_REVIEW on first open.

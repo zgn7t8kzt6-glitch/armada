@@ -7,6 +7,7 @@ import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, s
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
+import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
@@ -407,8 +408,8 @@ function daysSince(s) {
 const isDetoxProgram = (p) => /detox|withdrawal|\bwm\b|3\.?2|3\.?7/i.test(p || '');
 
 app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
-  const active = db.prepare(`SELECT id, pref, name, room, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const today = appToday();
+  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
 
   // Flow
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
@@ -420,6 +421,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     const a = latestAmaRead(c.id);
     return {
       id: c.id, name: c.pref || c.name, room: c.room, program: c.program, admit: c.admit,
+      loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (parseLoc(c.program) || 'Unspecified'),
       los: daysSince(c.admit),
       level: a?.level || null,
       step_down: a?.step_down || 'Unknown',
@@ -456,6 +458,33 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const gaps = slotsToday.filter((s) => s.sched < s.needed).map((s) => ({ part: s.part, role: s.role, short: s.needed - s.sched }));
   const callOffsToday = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date = ?`).get(today).n;
 
+  // Census by ASAM level of care: count + average length of stay per level.
+  const byLoc = {};
+  for (const c of enriched) {
+    const k = c.loc || 'Unspecified';
+    (byLoc[k] = byLoc[k] || { code: k, label: LOC_LABEL[k] || k, count: 0, losSum: 0, losN: 0 }).count++;
+    if (c.los != null) { byLoc[k].losSum += c.los; byLoc[k].losN++; }
+  }
+  const locCensus = Object.values(byLoc)
+    .map((r) => ({ code: r.code, label: r.label, count: r.count, avgLos: r.losN ? Math.round(r.losSum / r.losN * 10) / 10 : null }))
+    .sort((a, b) => (LOC_RANK[b.code] ?? -1) - (LOC_RANK[a.code] ?? -1));
+
+  // Step-downs: where clients have moved, over the last 30 days, by destination level.
+  const stepRows = db.prepare(`SELECT from_loc, to_loc FROM flow_events WHERE kind='loc_change' AND date >= date('now','-30 day')`).all();
+  const stepByDest = {};
+  let stepDowns = 0, stepUps = 0;
+  for (const r of stepRows) {
+    const fr = LOC_RANK[r.from_loc] ?? null, to = LOC_RANK[r.to_loc] ?? null;
+    if (fr != null && to != null) { if (to < fr) stepDowns++; else if (to > fr) stepUps++; }
+    if (r.to_loc) { (stepByDest[r.to_loc] = stepByDest[r.to_loc] || { code: r.to_loc, label: LOC_LABEL[r.to_loc] || r.to_loc, n: 0 }).n++; }
+  }
+  const stepDestList = Object.values(stepByDest).sort((a, b) => b.n - a.n);
+
+  // Daily flow snapshot — today, plus the running 14-day trend (from now on).
+  rollupDailyMetrics(today);
+  const todayMetrics = db.prepare(`SELECT intakes, discharges, loc_changes, ama, census FROM daily_metrics WHERE date = ?`).get(today) || { intakes: 0, discharges: 0, loc_changes: 0, ama: 0, census: active.length };
+  const trend = db.prepare(`SELECT date, intakes, discharges, loc_changes, ama, census FROM daily_metrics WHERE date >= date('now','-13 day') ORDER BY date`).all();
+
   // Checklist progress for today
   const chk = db.prepare(`SELECT COUNT(*) total, SUM(status='done') done FROM command_checklist WHERE date = ?`).get(today);
 
@@ -463,6 +492,8 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     asOf: new Date().toISOString(),
     flow: { census: active.length, admitsToday, dischargesToday, discharges7d },
     detox,
+    levels: { census: locCensus, stepDowns, stepUps, stepByDest: stepDestList },
+    daily: { today: todayMetrics, trend },
     planning: { stepDownCounts, transportNeeded, undecided, anticipated },
     documentation: { gaps: docGaps, clean: docClean, total: enriched.length },
     staffing: { needed, scheduled, gaps, callOffsToday, pct: needed ? Math.round(scheduled / needed * 100) : null },
@@ -478,7 +509,7 @@ function seedChecklist(date) {
   DIRECTOR_REVIEW.forEach(([section, item], i) => ins.run(date, section, item, i));
 }
 app.get('/api/command/checklist', requireAuth, requireAdmin, (req, res) => {
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : new Date().toISOString().slice(0, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
   seedChecklist(date);
   const rows = db.prepare(`SELECT * FROM command_checklist WHERE date = ? ORDER BY sort, id`).all(date);
   res.json({ date, items: rows });
@@ -1411,11 +1442,19 @@ function buildAnalytics(days) {
       AND ((discharge_reason IS NULL OR discharge_reason = '') OR (discharge_destination IS NULL OR discharge_destination = ''))
     ORDER BY discharge_date DESC LIMIT 50`).all(since);
 
+  // Which referral sources work best: inbound referrals by facility, with how
+  // many we actually admitted (conversion). The clearest signal we have today.
+  const byReferralSource = db.prepare(`SELECT COALESCE(NULLIF(facility_name,''),'(unspecified)') k,
+      COUNT(*) n,
+      SUM(CASE WHEN lower(outcome)='admitted' THEN 1 ELSE 0 END) admitted
+    FROM inbound_referrals WHERE ref_date >= ? GROUP BY k ORDER BY n DESC LIMIT 12`).all(since)
+    .map((r) => ({ key: r.k, n: r.n, admitted: r.admitted, admitRate: r.n ? Math.round(r.admitted / r.n * 100) : 0 }));
+
   return {
     rangeDays: days, sampleSize: total,
     totals: { discharges: total, amaRate: total ? Math.round(amaTotal / total * 100) : 0, avgLos: losN ? +(losSum / losN).toFixed(1) : null },
     byDow: dowArr, byTime: fmt(byTime), byDom: fmt(byDom),
-    byTherapist: staff(byTher), byCaseManager: staff(byCM),
+    byTherapist: staff(byTher), byCaseManager: staff(byCM), byReferralSource,
     risk, missingDischarge,
   };
 }
@@ -2161,6 +2200,30 @@ if (kipuConfigured()) {
     setInterval(autoSync, hrs * 3600 * 1000);    // then on the interval
   }
 }
+
+// ---- Daily cutoff: at LOCAL midnight, finalize the day just ended and open a
+// fresh one, so each day's intakes/discharges/LOC-changes/AMA is a fixed record.
+function msUntilLocalMidnight() {
+  const now = new Date();
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US',
+    { timeZone: APP_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    .formatToParts(now).filter((p) => p.type !== 'literal').map((p) => [p.type, +p.value]));
+  let h = parts.hour === 24 ? 0 : parts.hour;  // some engines render midnight as 24
+  const secsIntoDay = h * 3600 + parts.minute * 60 + parts.second;
+  return (86400 - secsIntoDay) * 1000 + 5000;  // 5s after midnight, safely past the boundary
+}
+function runDailyCutoff() {
+  try {
+    const today = appToday();
+    const yesterday = addDays(today, -1);
+    rollupDailyMetrics(yesterday);   // finalize the day that just ended
+    rollupDailyMetrics(today);       // open today's fresh record
+    db.prepare(`DELETE FROM command_checklist WHERE date < date(?, '-14 day')`).run(today); // tidy old checklists
+    console.log(`[cutoff] daily report finalized for ${yesterday} (${APP_TZ})`);
+  } catch (e) { console.error('[cutoff] failed:', e.message); }
+  setTimeout(runDailyCutoff, msUntilLocalMidnight());  // re-arm for the next midnight
+}
+setTimeout(runDailyCutoff, msUntilLocalMidnight());
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Armada Care Standards running on http://localhost:${PORT}`));

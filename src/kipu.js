@@ -6,7 +6,7 @@
 // version; this implements the documented v3 pattern and is verified on first
 // connect via /api/kipu/test before any sync.
 import crypto from 'node:crypto';
-import { db } from './db.js';
+import { db, parseLoc, rollupDailyMetrics, appToday, addDays } from './db.js';
 
 export function kipuConfigured() {
   return Boolean(process.env.KIPU_ACCESS_ID && process.env.KIPU_SECRET_KEY && process.env.KIPU_APP_ID);
@@ -56,9 +56,16 @@ export async function kipuSyncRoster() {
   const data = await kipuGet(path);
   const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
   let created = 0, matched = 0;
-  const byKipu = db.prepare(`SELECT id FROM clients WHERE kipu_id = ?`);
-  const byName = db.prepare(`SELECT id FROM clients WHERE name = ? OR pref = ?`);
-  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, admit, admit_time, therapist, case_manager, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
+  const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ?`);
+  const byName = db.prepare(`SELECT id, loc, active FROM clients WHERE name = ? OR pref = ?`);
+  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
+  // Flow-event recorder: one row per real transition, so re-running the sync
+  // never double-counts. parseLoc → a known ASAM code, or null if unspecified.
+  const evt = db.prepare(`INSERT INTO flow_events (client_id, kipu_id, kind, from_loc, to_loc, date, detail) VALUES (?,?,?,?,?,?,?)`);
+  const today = appToday();
+  const yest = addDays(today, -1);
+  const realLoc = (t) => { const c = parseLoc(t); return c === 'Unspecified' ? null : c; };
+  const isAma = (s) => /ama|against medical/i.test(String(s || ''));
 
   // Pull a field from the many shapes Kipu can return.
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
@@ -107,8 +114,18 @@ export async function kipuSyncRoster() {
       (dischStatus && !['active', 'admitted', 'current'].includes(String(dischStatus).toLowerCase())));
     if (!discharged && kid) activeKids.push(kid);
 
+    const newLoc = realLoc(program);
     const existing = (kid && byKipu.get(kid)) || byName.get(name, name);
     if (existing) {
+      // Level-of-care change: record it once, then advance the stored level.
+      if (newLoc && existing.loc && newLoc !== existing.loc) {
+        evt.run(existing.id, kid || null, 'loc_change', existing.loc, newLoc, today, null);
+      }
+      if (newLoc) db.prepare(`UPDATE clients SET loc = ? WHERE id = ?`).run(newLoc, existing.id);
+      // Discharge (or AMA) transition: only when they were active until now.
+      if (discharged && existing.active === 1) {
+        evt.run(existing.id, kid || null, isAma(dischStatus) ? 'ama' : 'discharge', existing.loc || newLoc || null, null, (dischDate ? String(dischDate).slice(0, 10) : today), dischStatus ? String(dischStatus) : null);
+      }
       // Kipu is the source of truth: set source, backfill blank descriptive
       // fields, and authoritatively set active/discharge from the census.
       db.prepare(`UPDATE clients SET source='kipu',
@@ -130,7 +147,11 @@ export async function kipuSyncRoster() {
       matched++;
     } else if (!discharged) {
       // Only create rows for currently-active patients.
-      ins.run(name, p.first_name || name, room, program, admit, admitTime, therapist, caseMgr, kid || null);
+      const info = ins.run(name, p.first_name || name, room, program, newLoc, admit, admitTime, therapist, caseMgr, kid || null);
+      // Record an admission event only for genuinely new intakes (admitted today
+      // or yesterday) — never for the initial baseline import of the standing
+      // census, which would inflate past days with a one-time spike.
+      if (admit && admit >= yest) evt.run(info.lastInsertRowid, kid || null, 'admit', null, newLoc, admit, null);
       created++;
     }
   }
@@ -140,6 +161,10 @@ export async function kipuSyncRoster() {
   let deactivated = 0;
   if (activeKids.length) {
     const ph = activeKids.map(() => '?').join(',');
+    // Capture a discharge event for each one BEFORE we deactivate it.
+    const gone = db.prepare(`SELECT id, kipu_id, loc FROM clients
+      WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).all(...activeKids);
+    for (const g of gone) evt.run(g.id, g.kipu_id || null, 'discharge', g.loc || null, null, today, 'left census');
     // Mark them discharged (date = now) so they flow into the discharge/outcomes
     // analytics and get a "what could we have done better" debrief.
     const r = db.prepare(`UPDATE clients SET active = 0,
@@ -148,6 +173,7 @@ export async function kipuSyncRoster() {
       WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).run(...activeKids);
     deactivated = r.changes || 0;
   }
+  rollupDailyMetrics(today);   // refresh today's intake/discharge/LOC-change/AMA snapshot
   return { total: list.length, created, matched, deactivated, activeNow: activeKids.length };
 }
 

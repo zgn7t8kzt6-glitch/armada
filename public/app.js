@@ -1087,6 +1087,29 @@ async function loadCommand(){
     <div class="ret-card ${d.staffing.gaps.length?'rc-high':''}"><div class="n">${d.staffing.pct!=null?d.staffing.pct+'%':'—'}</div><div class="l">Covered today</div></div>
     <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}"><div class="n">${d.documentation.gaps.length}</div><div class="l">Doc gaps</div></div>`;
 
+  // Daily snapshot (midnight cutoff) + 14-day trend
+  const dm = d.daily.today;
+  $('cmdCutoff').textContent = 'resets at midnight';
+  const spart = (label,val,cls)=>`<div class="cmd-day"><div class="cmd-day-n ${cls||''}">${val}</div><div class="cmd-day-l">${label}</div></div>`;
+  const tr = d.daily.trend||[];
+  const mx = Math.max(1,...tr.map(t=>Math.max(t.intakes,t.discharges,t.ama)));
+  const sched = tr.length ? `<div class="cmd-trend">${tr.map(t=>{
+    const dd=new Date(t.date+'T12:00').getDate();
+    return `<div class="cmd-trend-col" title="${t.date} · ${t.intakes} in · ${t.discharges} out · ${t.loc_changes} LOC · ${t.ama} AMA">
+      <div class="cmd-trend-bars"><span style="height:${Math.round(t.intakes/mx*40)}px;background:var(--good)"></span><span style="height:${Math.round(t.discharges/mx*40)}px;background:var(--gold)"></span><span style="height:${Math.round(t.ama/mx*40)}px;background:var(--danger)"></span></div>
+      <div class="cmd-trend-d">${dd}</div></div>`;}).join('')}</div>
+    <div class="hint" style="margin-top:6px"><span style="color:var(--good)">●</span> intakes &nbsp;<span style="color:var(--gold)">●</span> discharges &nbsp;<span style="color:var(--danger)">●</span> AMA</div>` : '<div class="hint">The daily trend builds up from today onward.</div>';
+  $('cmdDaily').innerHTML = `<div class="cmd-days">${spart('Intakes',dm.intakes)}${spart('Discharges',dm.discharges)}${spart('LOC changes',dm.loc_changes)}${spart('AMA',dm.ama,dm.ama?'cmd-day-bad':'')}${spart('Census',dm.census)}</div>${sched}`;
+
+  // Census by level of care + step-downs
+  const lv = d.levels;
+  const lvRows = lv.census.length ? lv.census.map(l=>`<tr><td><strong>${esc(l.code)}</strong> <span class="hint">${esc(l.label.replace(l.code+' · ',''))}</span></td><td style="text-align:right">${l.count}</td><td style="text-align:right">${l.avgLos!=null?l.avgLos+'d':'—'}</td></tr>`).join('') : '<tr><td colspan="3" class="hint">No level-of-care data yet — it fills in on the next Kipu sync.</td></tr>';
+  const dest = lv.stepByDest.length ? lv.stepByDest.map(s=>`<span class="chip">→ ${esc(s.code)} · ${s.n}</span>`).join(' ') : '<span class="hint">No level-of-care changes recorded in the last 30 days yet.</span>';
+  $('cmdLevels').innerHTML = `
+    <table class="tbl"><thead><tr><th>Level of care</th><th style="text-align:right">Clients</th><th style="text-align:right">Avg stay</th></tr></thead><tbody>${lvRows}</tbody></table>
+    <div class="cmd-sub">Step-downs · last 30 days <span class="hint" style="text-transform:none;letter-spacing:0">(${lv.stepDowns} down · ${lv.stepUps} up)</span></div>
+    <div>${dest}</div>`;
+
   // Detox step-down clock
   $('cmdDetox').innerHTML = d.detox.length ? d.detox.map(c=>{
     const los = c.los==null?'—':c.los+'d';
@@ -1120,7 +1143,47 @@ async function loadCommand(){
     <div class="pc-note"><span class="risk ${st.gaps.length?'risk-high':'risk-low'}">${st.pct!=null?st.pct+'% covered':'no schedule set'}</span> ${st.needed?'· '+st.scheduled+'/'+st.needed+' assigned':''}${st.callOffsToday?' · <strong>'+st.callOffsToday+' call-off'+(st.callOffsToday>1?'s':'')+'</strong>':''}</div>`+
     (st.gaps.length ? '<div class="cmd-sub">Open coverage</div>'+st.gaps.map(g=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main"><strong>${esc(g.part)}</strong> · ${esc(g.role)}</div><span class="risk risk-elev">short ${g.short}</span></div>`).join('') : (st.needed?'<div class="hint">Every shift covered today. ✓</div>':'<div class="hint">No shifts scheduled yet today. Set them on the Schedule screen.</div>'));
 
+  loadCommandTrends();
   loadCommandChecklist();
+}
+async function loadCommandTrends(){
+  const range = $('cmdTrendRange') ? $('cmdTrendRange').value : '365';
+  let a; try{ a = await api('/analytics?range='+range); }catch(e){ return; }
+  if(!a.sampleSize){ $('cmdTrends').innerHTML = '<div class="empty">No discharge history in this window yet. Day-of-week, time-of-day and referral-source trends appear automatically as clients are discharged through Kipu.</div>'; return; }
+  // A labeled retention table: avg stay + AMA-rate bar per bucket.
+  const bucketTbl = (rows, head, note)=>{
+    const live = rows.filter(r=>r.n>0);
+    if(!live.length) return '';
+    const noteHtml = note?`<div class="hint" style="margin:2px 0 8px">${note}</div>`:'';
+    return `<div class="cmd-sub">${head}</div>${noteHtml}`+live.map(r=>`
+      <div class="trbar">
+        <div class="trbar-l">${esc(r.key)} <span class="hint">(${r.n})</span></div>
+        <div class="trbar-track"><div class="trbar-fill" style="width:${r.amaRate}%;background:${r.amaRate>=40?'var(--danger)':r.amaRate>=20?'var(--gold)':'var(--good)'}"></div></div>
+        <div class="trbar-n">${r.amaRate}% AMA</div>
+        <div class="trbar-n" style="flex-basis:54px">${r.avgLos!=null?r.avgLos+'d stay':'—'}</div>
+      </div>`).join('');
+  };
+  // Day of week insight
+  const dow = a.byDow.filter(r=>r.n>0);
+  const shortest = dow.filter(r=>r.avgLos!=null).sort((x,y)=>x.avgLos-y.avgLos)[0];
+  const mostAma = [...dow].sort((x,y)=>y.amaRate-x.amaRate)[0];
+  const dowNote = (shortest&&mostAma)?`⏱ Shortest stays: <strong>${esc(shortest.key)}</strong> (${shortest.avgLos}d avg) · ⚠ Most AMA: <strong>${esc(mostAma.key)}</strong> (${mostAma.amaRate}%)`:'';
+  // Time of day insight
+  const tm = a.byTime.filter(r=>r.n>0);
+  const tmAma = [...tm].sort((x,y)=>y.amaRate-x.amaRate)[0];
+  const tmNote = tmAma?`⚠ Hardest window: <strong>${esc(tmAma.key)}</strong> (${tmAma.amaRate}% AMA)`:'';
+  // Referral sources
+  const rs = (a.byReferralSource||[]).filter(r=>r.n>0);
+  const rsBlock = rs.length ? `<div class="cmd-sub">Referral sources — conversion</div>`+rs.map(r=>`
+    <div class="trbar"><div class="trbar-l">${esc(r.key)} <span class="hint">(${r.n})</span></div>
+      <div class="trbar-track"><div class="trbar-fill" style="width:${r.admitRate}%;background:var(--good)"></div></div>
+      <div class="trbar-n">${r.admitRate}% admitted</div></div>`).join('')
+    : '<div class="cmd-sub">Referral sources</div><div class="hint">Log inbound referrals (Growth → Referrals) to see which sources convert best.</div>';
+  $('cmdTrends').innerHTML =
+    `<div class="pc-note" style="margin-bottom:10px">Based on ${a.sampleSize} discharges · AMA rate overall ${a.totals.amaRate}% · avg stay ${a.totals.avgLos!=null?a.totals.avgLos+'d':'—'}</div>`+
+    bucketTbl(a.byDow, 'By admit day of week', dowNote)+
+    bucketTbl(a.byTime, 'By admit time of day', tmNote)+
+    rsBlock;
 }
 async function loadCommandChecklist(){
   const {items} = await api('/command/checklist');

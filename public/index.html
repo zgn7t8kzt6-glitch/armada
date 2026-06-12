@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260612b" />
+<link rel="stylesheet" href="/styles.css?v=20260612c" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -145,6 +145,25 @@
         </div>
       </div>
       <div id="cmdFlow" class="ret-cards"></div>
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Daily snapshot</h3><p class="sub sans">Today's movement, cut off at midnight — a fixed daily record kept from here on.</p></div>
+          <span id="cmdCutoff" class="hint"></span>
+        </div>
+        <div id="cmdDaily"></div>
+      </div>
+      <div class="card">
+        <h3>Census by level of care</h3>
+        <p class="sub sans">Every ASAM level on the unit — how many clients, average length of stay, and where people have stepped down (last 30 days).</p>
+        <div id="cmdLevels"></div>
+      </div>
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Patterns &amp; trends</h3><p class="sub sans">What the data says about retention — which admit days and times hold clients vs. lose them, and which referral sources convert. Builds as discharges accumulate.</p></div>
+          <select id="cmdTrendRange" onchange="loadCommandTrends()" style="width:auto"><option value="365">Last year</option><option value="180">Last 6 months</option><option value="90">Last 90 days</option><option value="730">Last 2 years</option></select>
+        </div>
+        <div id="cmdTrends"></div>
+      </div>
       <div class="cmd-grid">
         <div class="card">
           <h3>Detox step-down clock</h3>
@@ -935,6 +954,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260612b"></script>
+<script src="/app.js?v=20260612c"></script>
 </body>
 </html>

@@ -576,7 +576,7 @@ async function pollAssess(){
       assessPoll=setTimeout(pollAssess, 2500);
     } else {
       $('assessBtn').disabled=false;
-      if(s.total){ $('assessProgress').innerHTML=`✓ Assessed ${s.done} clients — <strong style="color:var(--danger)">${s.high} high</strong>, <strong>${s.elevated} elevated</strong>, ${s.low} low${s.errors?' · '+s.errors+' errors':''}.`; loadRetention(); }
+      if(s.total){ $('assessProgress').innerHTML=`✓ Assessed ${s.done} clients — <strong style="color:var(--danger)">${s.high} high</strong>, <strong>${s.elevated} elevated</strong>, ${s.low} low${s.flagged?' · '+s.flagged+' red-flagged from notes':''}${s.errors?' · '+s.errors+' errors':''}.`; loadRetention(); }
     }
   }catch(e){ $('assessProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }

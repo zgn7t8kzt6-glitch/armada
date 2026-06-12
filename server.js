@@ -247,16 +247,34 @@ app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
 
 // ---- Batch risk assessment: read every active client's Kipu documentation and
 // score their AMA risk, in the background, with live progress. ----
-let assessJob = { running: false, total: 0, done: 0, high: 0, elevated: 0, low: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
+let assessJob = { running: false, total: 0, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
 async function runAssessAll(user) {
   const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
-  assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
+  assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
   for (const c of clients) {
     assessJob.current = c.pref || c.name;
     try {
       let extra = [];
       if (c.kipu_id && kipuConfigured()) {
-        try { const txt = await kipuPatientNotes(c.kipu_id); if (txt && txt.trim()) extra = [{ note: 'Kipu documentation:\n' + txt }]; } catch { /* notes optional */ }
+        try {
+          const txt = await kipuPatientNotes(c.kipu_id);
+          if (txt && txt.trim()) {
+            extra = [{ note: 'Kipu documentation:\n' + txt }];
+            // Red-flag scan of the documentation: surfaces complaints, med issues,
+            // withdrawal discomfort, unmet requests. Refreshed each run (idempotent).
+            try {
+              const scan = await scanNote(txt, c.pref || c.name);
+              db.prepare(`DELETE FROM notes WHERE client_id = ? AND source = 'Kipu (auto)'`).run(c.id);
+              if (scan && scan.flagged) {
+                db.prepare(`INSERT INTO notes (client_id, text, author, source, flagged, flag_level, flag_summary, categories, suggested_action)
+                  VALUES (?,?,?,?,?,?,?,?,?)`).run(c.id, txt.slice(0, 4000), 'Kipu EMR', 'Kipu (auto)', 1,
+                  scan.level || null, scan.summary || null, JSON.stringify(scan.categories || []), scan.suggested_action || null);
+                if (scan.level === 'High' || scan.level === 'Elevated') createAlert(c.id, 'concern', scan.level, `${c.pref || c.name} — ${scan.summary || 'flag from Kipu notes'}`);
+                assessJob.flagged++;
+              }
+            } catch { /* scan optional */ }
+          }
+        } catch { /* notes optional */ }
       }
       const read = await runAndStoreAmaRead(c, user, '0.0.0.0', extra);
       assessJob[read.level === 'High' ? 'high' : read.level === 'Elevated' ? 'elevated' : 'low']++;

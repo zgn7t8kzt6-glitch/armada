@@ -207,8 +207,9 @@ const AMA_SCHEMA = {
     withdrawal_level: { type: 'string', enum: ['None', 'Mild', 'Moderate', 'Severe', 'Unknown'], description: 'Detox withdrawal severity from the notes (use CIWA-Ar / COWS scores if documented).' },
     withdrawal: { type: 'string', description: 'Brief note on withdrawal status — latest CIWA/COWS score, symptoms, and whether it is worsening.' },
     med_concerns: { type: 'array', items: { type: 'string' }, description: 'Medication issues from the notes: refusals, side effects, missed doses, or unmet comfort-med needs. Empty array if none.' },
+    snapshot: { type: 'string', description: 'A warm, plain-language at-a-glance summary (3-5 sentences) anyone walking in could read to instantly know this client as a whole: who they are, why they came, how they are doing right now (withdrawal/mood/engagement), what matters most to them, and the one thing to focus on. No jargon, person-first, grounded in the notes.' },
   },
-  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'withdrawal_level', 'withdrawal', 'med_concerns'],
+  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'withdrawal_level', 'withdrawal', 'med_concerns', 'snapshot'],
   additionalProperties: false,
 };
 
@@ -514,6 +515,7 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   r.withdrawal_level = r.withdrawal_level || 'Unknown';
   r.withdrawal = r.withdrawal || '';
   r.med_concerns = r.med_concerns || [];
+  r.snapshot = r.snapshot || '';
   return r;
 }
 

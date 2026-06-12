@@ -170,10 +170,11 @@ async function renderClients(){
   $('clientEmpty').style.display = clients.length ? 'none':'block';
   clients.forEach(c => {
     const d = document.createElement('div'); d.className='ctile'; d.onclick=()=>openJourney(c.id);
-    const touch = c.touch ? `<div class="pref">★ ${esc(c.touch.slice(0,90))}${c.touch.length>90?'…':''}</div>` : '';
+    const snap = c.summary ? `<div class="pref" style="font-style:normal;color:#4a5a56">${esc(c.summary.slice(0,140))}${c.summary.length>140?'…':''}</div>`
+      : (c.touch ? `<div class="pref">★ ${esc(c.touch.slice(0,90))}${c.touch.length>90?'…':''}</div>` : '');
     d.innerHTML = `<h4>${esc(c.pref||c.name||'Unnamed')}</h4>
       <div class="meta">${esc(c.name||'')} ${c.room?'· Room '+esc(c.room):''}</div>
-      <div class="meta">${esc(c.program||'')}</div>${touch}
+      <div class="meta">${esc(c.program||'')}</div>${snap}
       <div style="margin-top:8px">${(c.tasks||[]).length} task${(c.tasks||[]).length===1?'':'s'}</div>`;
     g.appendChild(d);
   });
@@ -1226,6 +1227,10 @@ async function loadJourney(){
           <button class="btn btn-gold btn-sm sans" id="cbBtn" onclick="careBrief(${c.id})" style="${META.claude?'':'display:none'}">✦ AI Care Brief</button>
         </div>
       </div>
+      ${c.summary?`<div class="snapshot-card" style="margin-top:14px">
+        <div class="snapshot-head">◆ At a glance${c.summary_at?` <span class="snapshot-when">· updated ${esc((c.summary_at||'').slice(0,16))}</span>`:''}</div>
+        <div class="snapshot-body">${esc(c.summary)}</div>
+      </div>`:''}
       ${c.touch?`<div class="pc-touch" style="margin-top:12px">★ ${esc(c.touch)}</div>`:''}
       ${c.anchor_why?`<div class="anchor-card" style="margin-top:12px">
         <div class="anchor-head">⚓ Intake Anchor — why they came (their own words)</div>

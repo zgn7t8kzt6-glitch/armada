@@ -227,6 +227,8 @@ async function runAndStoreAmaRead(client, user, ip, extraNotes = []) {
     JSON.stringify(read.actions), read.approach, read.underlying || null,
     JSON.stringify(read.cared_for || []), read.best_play || null,
     read.withdrawal_level || null, read.withdrawal || null, JSON.stringify(read.med_concerns || []), user.id);
+  if (read.snapshot && read.snapshot.trim())
+    db.prepare(`UPDATE clients SET summary = ?, summary_at = datetime('now') WHERE id = ?`).run(read.snapshot.trim(), client.id);
   if (read.level === 'High' || read.level === 'Elevated')
     createAlert(client.id, 'risk', read.level, `${client.pref || client.name} — AMA risk ${read.level}: ${read.summary || 'review the action plan'}`);
   audit({ user, action: 'AMA_READ', entity: 'client', entity_id: client.id, detail: read.level, ip });

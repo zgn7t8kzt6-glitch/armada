@@ -708,6 +708,8 @@ addColumn('clients', 'source', 'TEXT');                // kipu | warehouse | man
 addColumn('ama_reads', 'withdrawal_level', 'TEXT');    // None | Mild | Moderate | Severe | Unknown
 addColumn('ama_reads', 'withdrawal_note', 'TEXT');
 addColumn('ama_reads', 'med_concerns', 'TEXT');        // JSON array
+addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapshot (kept fresh)
+addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
 
 // ---- Outbound-referral vocabulary (shared with the front-end via /api/meta) ----
 export const REFERRAL_DEPARTMENTS = ['Clinical', 'Business Development', 'Intake'];

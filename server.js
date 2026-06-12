@@ -6,7 +6,7 @@ import { db, audit, getState, setState } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
-import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES } from './src/db.js';
+import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
@@ -224,12 +224,14 @@ async function runAndStoreAmaRead(client, user, ip, extraNotes = []) {
   // extraNotes (e.g. Kipu documentation) are fed in as additional context.
   const read = await generateAmaRead(client, pulses, [...extraNotes, ...handoffs]);
   db.prepare(
-    `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, withdrawal_level, withdrawal_note, med_concerns, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, withdrawal_level, withdrawal_note, med_concerns, step_down, transport, anticipated_dc, discharge_plan, doc_flags, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(client.id, read.level, read.summary, JSON.stringify(read.triggers),
     JSON.stringify(read.actions), read.approach, read.underlying || null,
     JSON.stringify(read.cared_for || []), read.best_play || null,
-    read.withdrawal_level || null, read.withdrawal || null, JSON.stringify(read.med_concerns || []), user.id);
+    read.withdrawal_level || null, read.withdrawal || null, JSON.stringify(read.med_concerns || []),
+    read.step_down || null, read.transport || null, read.anticipated_dc || null,
+    read.discharge_plan || null, JSON.stringify(read.doc_flags || []), user.id);
   if (read.snapshot && read.snapshot.trim())
     db.prepare(`UPDATE clients SET summary = ?, summary_at = datetime('now') WHERE id = ?`).run(read.snapshot.trim(), client.id);
   if (read.likes && read.likes.trim())
@@ -390,6 +392,102 @@ app.get('/api/discharge-learnings', requireAuth, (req, res) => {
     FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-60 day')
     ORDER BY discharge_date DESC LIMIT 60`).all();
   res.json({ discharges: rows });
+});
+
+// ---- Leadership Command Center (admin/leadership only) ----
+// One screen that operationalizes the Clinical Director's daily review: flow,
+// the 3.2-WM step-down clock, discharge planning, documentation compliance,
+// staffing coverage — every number pulled live from Kipu where we have it.
+function daysSince(s) {
+  if (!s) return null;
+  const t = Date.parse(String(s).length <= 10 ? s + 'T00:00:00' : s);
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 864e5);
+}
+const isDetoxProgram = (p) => /detox|withdrawal|\bwm\b|3\.?2|3\.?7/i.test(p || '');
+
+app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const active = db.prepare(`SELECT id, pref, name, room, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+
+  // Flow
+  const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
+  const discharges7d = db.prepare(`SELECT COUNT(*) n FROM clients WHERE discharge_date >= date('now','-7 day')`).get().n;
+  const dischargesToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
+
+  // Per-client latest read, computed once.
+  const enriched = active.map((c) => {
+    const a = latestAmaRead(c.id);
+    return {
+      id: c.id, name: c.pref || c.name, room: c.room, program: c.program, admit: c.admit,
+      los: daysSince(c.admit),
+      level: a?.level || null,
+      step_down: a?.step_down || 'Unknown',
+      transport: a?.transport || 'Unknown',
+      anticipated_dc: a?.anticipated_dc || '',
+      discharge_plan: a?.discharge_plan || '',
+      doc_flags: a ? safeArr(a.doc_flags) : [],
+      withdrawal_level: a?.withdrawal_level || null,
+    };
+  });
+
+  // 3.2-WM step-down clock: detox clients, with the >4-day flag.
+  const detox = enriched.filter((c) => isDetoxProgram(c.program))
+    .map((c) => ({ ...c, overdue: c.los != null && c.los > 4 }))
+    .sort((a, b) => (b.los ?? -1) - (a.los ?? -1));
+
+  // Discharge planning
+  const stepDownCounts = {};
+  enriched.forEach((c) => { stepDownCounts[c.step_down] = (stepDownCounts[c.step_down] || 0) + 1; });
+  const transportNeeded = enriched.filter((c) => c.transport === 'Needed');
+  const undecided = enriched.filter((c) => c.step_down === 'Undecided');
+  const anticipated = enriched.filter((c) => c.anticipated_dc).map((c) => ({ id: c.id, name: c.name, room: c.room, when: c.anticipated_dc, step_down: c.step_down, transport: c.transport }));
+
+  // Documentation compliance: anyone with a flagged gap.
+  const docGaps = enriched.filter((c) => c.doc_flags.length).map((c) => ({ id: c.id, name: c.name, room: c.room, flags: c.doc_flags }));
+  const docClean = enriched.length - docGaps.length;
+
+  // Staffing coverage today
+  const slotsToday = db.prepare(`SELECT s.id, s.needed, s.part, s.role,
+    (SELECT COUNT(*) FROM schedule_assignments a WHERE a.slot_id=s.id AND a.status='scheduled') AS sched
+    FROM schedule_slots s WHERE s.date = ?`).all(today);
+  const needed = slotsToday.reduce((n, s) => n + s.needed, 0);
+  const scheduled = slotsToday.reduce((n, s) => n + s.sched, 0);
+  const gaps = slotsToday.filter((s) => s.sched < s.needed).map((s) => ({ part: s.part, role: s.role, short: s.needed - s.sched }));
+  const callOffsToday = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date = ?`).get(today).n;
+
+  // Checklist progress for today
+  const chk = db.prepare(`SELECT COUNT(*) total, SUM(status='done') done FROM command_checklist WHERE date = ?`).get(today);
+
+  res.json({
+    asOf: new Date().toISOString(),
+    flow: { census: active.length, admitsToday, dischargesToday, discharges7d },
+    detox,
+    planning: { stepDownCounts, transportNeeded, undecided, anticipated },
+    documentation: { gaps: docGaps, clean: docClean, total: enriched.length },
+    staffing: { needed, scheduled, gaps, callOffsToday, pct: needed ? Math.round(scheduled / needed * 100) : null },
+    checklist: { total: chk?.total || 0, done: chk?.done || 0 },
+  });
+});
+
+// Director's Daily Review checklist — seeded from the standing template each day.
+function seedChecklist(date) {
+  const has = db.prepare(`SELECT 1 FROM command_checklist WHERE date = ? LIMIT 1`).get(date);
+  if (has) return;
+  const ins = db.prepare(`INSERT OR IGNORE INTO command_checklist (date, section, item, sort) VALUES (?,?,?,?)`);
+  DIRECTOR_REVIEW.forEach(([section, item], i) => ins.run(date, section, item, i));
+}
+app.get('/api/command/checklist', requireAuth, requireAdmin, (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : new Date().toISOString().slice(0, 10);
+  seedChecklist(date);
+  const rows = db.prepare(`SELECT * FROM command_checklist WHERE date = ? ORDER BY sort, id`).all(date);
+  res.json({ date, items: rows });
+});
+app.post('/api/command/checklist/:id', requireAuth, requireAdmin, (req, res) => {
+  const status = ['open', 'done', 'na'].includes(req.body?.status) ? req.body.status : 'done';
+  db.prepare(`UPDATE command_checklist SET status = ?, note = ?, done_by = ?, done_at = ? WHERE id = ?`)
+    .run(status, req.body?.note ?? null, status === 'open' ? null : req.user.name, status === 'open' ? null : new Date().toISOString(), req.params.id);
+  res.json({ ok: true });
 });
 
 // Apply the latest plan's tasks (and feel-cared-for gestures) to the Care Card.

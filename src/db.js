@@ -708,6 +708,12 @@ addColumn('clients', 'source', 'TEXT');                // kipu | warehouse | man
 addColumn('ama_reads', 'withdrawal_level', 'TEXT');    // None | Mild | Moderate | Severe | Unknown
 addColumn('ama_reads', 'withdrawal_note', 'TEXT');
 addColumn('ama_reads', 'med_concerns', 'TEXT');        // JSON array
+// Leadership / clinical-director review signals (pulled from the same note read).
+addColumn('ama_reads', 'step_down', 'TEXT');           // planned next level of care / destination
+addColumn('ama_reads', 'transport', 'TEXT');           // Arranged | Needed | Unknown
+addColumn('ama_reads', 'anticipated_dc', 'TEXT');      // anticipated discharge date (free text)
+addColumn('ama_reads', 'discharge_plan', 'TEXT');      // 1-2 sentence step-down plan
+addColumn('ama_reads', 'doc_flags', 'TEXT');           // JSON array of missing/late documentation
 addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapshot (kept fresh)
 addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
 addColumn('clients', 'likes', 'TEXT');                 // what the client likes/enjoys (AI, kept fresh)
@@ -723,6 +729,43 @@ db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
 export const CASE_CATEGORIES = ['Aftercare / Housing', 'Transportation', 'Legal / Court / Parole', 'Employment', 'Education', 'Insurance / Financial', 'ID / Documents', 'Medical / Dental', 'Family / Support', 'Benefits', 'Communication', 'Other'];
+
+// ---- Leadership: the Director's Daily Review (Brandon's recurring rounds) ----
+// One checklist instance per day, seeded from DIRECTOR_REVIEW on first open.
+db.exec(`CREATE TABLE IF NOT EXISTS command_checklist (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,                      -- YYYY-MM-DD
+  section TEXT NOT NULL,
+  item TEXT NOT NULL,
+  sort INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'open',     -- open | done | na
+  note TEXT,
+  done_by TEXT, done_at TEXT,
+  UNIQUE(date, section, item)
+);`);
+// The standing review routine, grouped the way a director actually rounds.
+export const DIRECTOR_REVIEW = [
+  ['Census & Billing', 'Billing census updated for this morning (and as admits/discharges happen)'],
+  ['Census & Billing', 'At least one face-to-face service documented for every client today'],
+  ['Flow', 'Today\'s admissions reviewed (intake packet started)'],
+  ['Flow', 'Today\'s discharges reviewed (AMA vs. completed vs. transfer)'],
+  ['Flow', 'LOC changes reviewed — clients notified of the change'],
+  ['3.2-WM / Detox', 'Every 3.2-WM client checked — anyone past day 4 not yet stepped down?'],
+  ['3.2-WM / Detox', 'Detox→residential transfers confirmed; "not sure" clients have a documented conversation'],
+  ['Discharge Planning', 'Residential→PHP/other-service destinations confirmed with location'],
+  ['Discharge Planning', 'Anticipated discharge dates current; transportation arranged where needed'],
+  ['Groups', 'Groups completed on time today; topics varied and on the schedule'],
+  ['Groups', 'Group notes completed with attendance + signatures'],
+  ['Assessments', 'CM needs assessment done day of admission for new admits'],
+  ['Assessments', 'Biopsychosocial within 24h; initial Tx plan + ASAM completed'],
+  ['LOC Transfers', 'ASAM for residential + individualized Tx plan completed'],
+  ['LOC Transfers', 'Jane notified for authorization; auth entered into Kipu'],
+  ['Documentation', 'CM + individual counseling progress notes current for each client'],
+  ['Documentation', 'Discharge-planning process documented for active clients'],
+  ['RTs (paper)', 'Intake checklist, belongings search + inventory completed for new admits'],
+  ['RTs (paper)', 'Hourly rounds + shift checklists completed; beds cleaned, turnaround on track'],
+  ['Staffing', 'Adequate staff on every shift today; call-offs covered'],
+];
 
 // ---- Outbound-referral vocabulary (shared with the front-end via /api/meta) ----
 export const REFERRAL_DEPARTMENTS = ['Clinical', 'Business Development', 'Intake'];

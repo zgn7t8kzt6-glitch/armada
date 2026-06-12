@@ -43,6 +43,7 @@
     <div class="side-groups sans" id="groupbar"></div>
     <nav class="side-nav sans" id="nav">
     <button data-view="today">Today</button>
+    <button data-view="command" data-admin>Command Center</button>
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
     <button data-view="outcomes">Insights</button>
@@ -127,6 +128,52 @@
         <div class="card" style="flex:1;min-width:280px"><h3>Recent wins</h3><div id="todayWins"></div></div>
       </div>
       <div class="card"><h3>Today's admits &amp; discharges</h3><div id="todayAdmitsDischarges"></div></div>
+    </section>
+
+    <!-- LEADERSHIP COMMAND CENTER (admin only) -->
+    <section id="command" class="view">
+      <div class="card cmd-hero">
+        <div class="cmd-hero-row">
+          <div>
+            <h3>Command Center</h3>
+            <p class="sub sans">The daily clinical-director review, made live — flow, the detox step-down clock, discharge planning, documentation, and staffing in one place. Pulled straight from Kipu where we have it.</p>
+          </div>
+          <div class="cmd-hero-actions">
+            <button class="btn btn-ghost btn-sm sans" onclick="loadCommand()" title="Refresh">↻ Refresh</button>
+            <span id="cmdAsOf" class="hint"></span>
+          </div>
+        </div>
+      </div>
+      <div id="cmdFlow" class="ret-cards"></div>
+      <div class="cmd-grid">
+        <div class="card">
+          <h3>Detox step-down clock</h3>
+          <p class="sub sans">3.2-WM clients should move to residential within 4 days. Anyone over is flagged.</p>
+          <div id="cmdDetox"></div>
+        </div>
+        <div class="card">
+          <h3>Discharge planning</h3>
+          <p class="sub sans">Where each client is going next, transportation, and anticipated dates — read from the notes.</p>
+          <div id="cmdPlanning"></div>
+        </div>
+        <div class="card">
+          <h3>Documentation compliance</h3>
+          <p class="sub sans">Gaps the notes suggest are missing or late. Verify in Kipu before acting.</p>
+          <div id="cmdDocs"></div>
+        </div>
+        <div class="card">
+          <h3>Staffing — today</h3>
+          <p class="sub sans">Coverage against need, plus any call-offs to backfill.</p>
+          <div id="cmdStaffing"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Director's Daily Review</h3><p class="sub sans">Your standing rounds, made trackable. Check it off — it logs who and when, and resets fresh each day.</p></div>
+          <span id="cmdChkProgress" class="badge"></span>
+        </div>
+        <div id="cmdChecklist"></div>
+      </div>
     </section>
 
     <!-- ASK AI -->

@@ -83,7 +83,7 @@ async function boot(){
   $('r_date').value = today(); $('a_date').value = today();
   renderGroups();
   // Role-based landing: everyone opens already where they work.
-  const landing = ME.role==='admin' ? 'today'
+  const landing = ME.role==='admin' ? 'command'
     : ({ 'Nurse':'retention', 'Therapist':'casemgmt', 'BHT / Tech':'report', 'Kitchen':'concierge' }[ME.job_role] || 'today');
   show(landing);
 }
@@ -99,10 +99,12 @@ const GROUPS=[
   {g:'growth',label:'Growth',first:'admissions'},
   {g:'learn',label:'Learn',first:'training'},
   {g:'ask',label:'Ask AI',first:'askai'},
+  {g:'command',label:'Command',first:'command',admin:true},
   {g:'insights',label:'Insights',first:'outcomes',admin:true},
   {g:'admin',label:'Admin',first:'settings',admin:true},
 ];
 const GROUP_OF={
+  command:'command',
   today:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',
   report:'care',lineup:'care',concierge:'care',program:'care',
@@ -146,6 +148,7 @@ function show(v){
   if(activeBtn && $('topbarTitle')) $('topbarTitle').textContent = (GROUP_OF[v]==='insights'?'Insights':activeBtn.textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='today') loadToday();
+  if(v==='command') loadCommand();
   if(v==='askai') loadAskAI();
   if(v==='incidents') loadIncidents();
   if(v==='alumni') loadAlumni();
@@ -1070,6 +1073,70 @@ async function loadCaseMgmt(){
 async function cmDone(id, done){ await api('/case-tasks/'+id+'/done',{method:'POST',body:JSON.stringify({done})}); loadCaseMgmt(); }
 async function cmDelete(id){ await api('/case-tasks/'+id,{method:'DELETE'}); loadCaseMgmt(); }
 async function cmAdd(cid){ const item=$('cmitem_'+cid).value.trim(); if(!item)return; await api('/case-tasks',{method:'POST',body:JSON.stringify({client_id:cid,category:$('cmcat_'+cid).value,item})}); loadCaseMgmt(); }
+
+/* ---- Leadership Command Center ---- */
+async function loadCommand(){
+  let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
+  $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  const f = d.flow;
+  $('cmdFlow').innerHTML = `
+    <div class="ret-card"><div class="n">${f.census}</div><div class="l">Census</div></div>
+    <div class="ret-card"><div class="n">${f.admitsToday}</div><div class="l">Admits today</div></div>
+    <div class="ret-card"><div class="n">${f.dischargesToday}</div><div class="l">Discharges today</div></div>
+    <div class="ret-card"><div class="n">${f.discharges7d}</div><div class="l">Discharges · 7d</div></div>
+    <div class="ret-card ${d.staffing.gaps.length?'rc-high':''}"><div class="n">${d.staffing.pct!=null?d.staffing.pct+'%':'—'}</div><div class="l">Covered today</div></div>
+    <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}"><div class="n">${d.documentation.gaps.length}</div><div class="l">Doc gaps</div></div>`;
+
+  // Detox step-down clock
+  $('cmdDetox').innerHTML = d.detox.length ? d.detox.map(c=>{
+    const los = c.los==null?'—':c.los+'d';
+    return `<div class="cmd-row ${c.overdue?'cmd-row-flag':''}">
+      <div class="cmd-row-main"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}
+        <div class="hint">${esc(c.program||'Detox')}${c.step_down&&c.step_down!=='Unknown'?' → '+esc(c.step_down):''}</div></div>
+      <div class="cmd-row-tag"><span class="risk ${c.overdue?'risk-high':'risk-low'}">${los}${c.overdue?' · over 4':''}</span></div>
+    </div>`;
+  }).join('') : '<div class="hint">No detox/3.2-WM clients on the census.</div>';
+
+  // Discharge planning
+  const p = d.planning;
+  const sd = Object.entries(p.stepDownCounts).sort((a,b)=>b[1]-a[1]);
+  const chips = sd.map(([k,n])=>`<span class="chip">${esc(k)} · ${n}</span>`).join(' ');
+  const transRows = p.transportNeeded.length ? p.transportNeeded.map(c=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}<div class="hint">${esc(c.step_down)} · transport not yet arranged</div></div><span class="risk risk-elev">ride needed</span></div>`).join('') : '';
+  const antiRows = p.anticipated.length ? p.anticipated.map(c=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}<div class="hint">→ ${esc(c.step_down)} · transport: ${esc(c.transport)}</div></div><span class="chip">${esc(c.when)}</span></div>`).join('') : '';
+  $('cmdPlanning').innerHTML = `<div style="margin-bottom:10px">${chips||'<span class="hint">No step-down plans documented yet.</span>'}</div>`+
+    (p.undecided.length?`<div class="pc-note">⚠ ${p.undecided.length} client${p.undecided.length>1?'s':''} undecided on next level of care — needs a documented conversation.</div>`:'')+
+    (transRows?`<div class="cmd-sub">Transportation needed</div>${transRows}`:'')+
+    (antiRows?`<div class="cmd-sub">Anticipated discharges</div>${antiRows}`:'')+
+    (!transRows&&!antiRows&&!p.undecided.length?'<div class="hint">Nothing pending. Discharge planning looks current.</div>':'');
+
+  // Documentation compliance
+  const dg = d.documentation;
+  $('cmdDocs').innerHTML = `<div class="pc-note" style="margin-bottom:8px"><span class="risk risk-low">${dg.clean}</span> of ${dg.total} clients look documentation-complete.</div>`+
+    (dg.gaps.length ? dg.gaps.map(c=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}<div style="margin-top:4px">${c.flags.map(fl=>`<span class="chip chip-warn">${esc(fl)}</span>`).join(' ')}</div></div></div>`).join('') : '<div class="hint">No documentation gaps detected in the notes. ✓</div>');
+
+  // Staffing
+  const st = d.staffing;
+  $('cmdStaffing').innerHTML = `
+    <div class="pc-note"><span class="risk ${st.gaps.length?'risk-high':'risk-low'}">${st.pct!=null?st.pct+'% covered':'no schedule set'}</span> ${st.needed?'· '+st.scheduled+'/'+st.needed+' assigned':''}${st.callOffsToday?' · <strong>'+st.callOffsToday+' call-off'+(st.callOffsToday>1?'s':'')+'</strong>':''}</div>`+
+    (st.gaps.length ? '<div class="cmd-sub">Open coverage</div>'+st.gaps.map(g=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main"><strong>${esc(g.part)}</strong> · ${esc(g.role)}</div><span class="risk risk-elev">short ${g.short}</span></div>`).join('') : (st.needed?'<div class="hint">Every shift covered today. ✓</div>':'<div class="hint">No shifts scheduled yet today. Set them on the Schedule screen.</div>'));
+
+  loadCommandChecklist();
+}
+async function loadCommandChecklist(){
+  const {items} = await api('/command/checklist');
+  const done = items.filter(i=>i.status==='done').length;
+  const na = items.filter(i=>i.status==='na').length;
+  $('cmdChkProgress').textContent = `${done}/${items.length} done${na?' · '+na+' n/a':''}`;
+  const sections = [...new Set(items.map(i=>i.section))];
+  $('cmdChecklist').innerHTML = sections.map(sec=>{
+    const rows = items.filter(i=>i.section===sec).map(i=>`<div class="todo">
+      <div class="box" style="cursor:pointer" onclick="cmdChk(${i.id},'${i.status==='done'?'open':'done'}')">${i.status==='done'?'✓':(i.status==='na'?'–':'')}</div>
+      <div class="txt ${i.status==='done'?'done':''}">${esc(i.item)}${i.done_by&&i.status!=='open'?` <span class="hint">· ${esc(i.done_by)} ${i.done_at?new Date(i.done_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):''}</span>`:''}</div>
+      <button class="btn btn-ghost btn-sm sans" title="Not applicable today" onclick="cmdChk(${i.id},'${i.status==='na'?'open':'na'}')">${i.status==='na'?'undo':'n/a'}</button></div>`).join('');
+    return `<div class="cmd-chk-sec"><div class="cmd-sub">${esc(sec)}</div>${rows}</div>`;
+  }).join('');
+}
+async function cmdChk(id, status){ await api('/command/checklist/'+id,{method:'POST',body:JSON.stringify({status})}); loadCommandChecklist(); }
 
 /* ---- scheduling & workforce ---- */
 async function loadCoverage(){

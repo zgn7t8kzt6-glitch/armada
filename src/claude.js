@@ -179,6 +179,14 @@ Rules:
   and med problems are among the biggest early-AMA drivers.
 - Conversation approach: calm, non-confrontational, motivational. Never use
   shame, threats, or "you'll regret it."
+- LEADERSHIP REVIEW: a Clinical Director also reviews this. From the notes only,
+  capture the discharge / step-down plan (next level of care, destination,
+  transportation, any anticipated date) and flag documentation that appears
+  missing or late (biopsychosocial, treatment plan/ASAM, case-management note,
+  recent group or individual counseling note). Only flag what is genuinely
+  absent from the provided notes — never invent a gap, and never assume a
+  document is missing just because these particular notes didn't include it if
+  the notes are clearly a partial set; prefer the specific, defensible flag.
 - If there is little signal, say risk is Low and keep everything brief.`;
 
 const AMA_SCHEMA = {
@@ -207,6 +215,11 @@ const AMA_SCHEMA = {
     withdrawal_level: { type: 'string', enum: ['None', 'Mild', 'Moderate', 'Severe', 'Unknown'], description: 'Detox withdrawal severity from the notes (use CIWA-Ar / COWS scores if documented).' },
     withdrawal: { type: 'string', description: 'Brief note on withdrawal status — latest CIWA/COWS score, symptoms, and whether it is worsening.' },
     med_concerns: { type: 'array', items: { type: 'string' }, description: 'Medication issues from the notes: refusals, side effects, missed doses, or unmet comfort-med needs. Empty array if none.' },
+    step_down: { type: 'string', enum: ['Residential', 'PHP', 'IOP', 'Outpatient', 'Sober Living', 'Home', 'Other', 'Undecided', 'Unknown'], description: 'The next level of care / discharge destination the notes indicate is planned for this client. "Undecided" if the client has not committed; "Unknown" if nothing is documented.' },
+    transport: { type: 'string', enum: ['Arranged', 'Needed', 'Unknown'], description: 'Discharge transportation status from the notes. "Needed" if a ride/transport is clearly required but not yet arranged; "Arranged" if confirmed; "Unknown" if not mentioned.' },
+    anticipated_dc: { type: 'string', description: 'Anticipated discharge / transfer date if the notes mention one (plain text, e.g. "approx. June 16" or "within 2 days"). Empty string if not documented.' },
+    discharge_plan: { type: 'string', description: 'One or two plain sentences summarizing this client\'s discharge / step-down plan as documented: where they are going next and the state of planning. Empty string if nothing is documented.' },
+    doc_flags: { type: 'array', items: { type: 'string' }, description: 'Documentation that appears MISSING, LATE, or thin based ONLY on the notes you were given — for a Clinical Director\'s compliance review. Use short phrases such as "No biopsychosocial seen", "No treatment plan documented", "No case-management note this stay", "No group note in the last 48h", "No recent individual counseling note". Only flag what is genuinely absent from the provided notes; do NOT guess. Empty array if documentation looks complete.' },
     snapshot: { type: 'string', description: 'A warm, plain-language at-a-glance summary (3-5 sentences) anyone walking in could read to instantly know this client as a whole: who they are, why they came, how they are doing right now (withdrawal/mood/engagement), what matters most to them, and the one thing to focus on. No jargon, person-first, grounded in the notes.' },
     likes: { type: 'string', description: 'What this client LIKES and what makes them feel comfortable/cared for — foods, drinks, activities, interests, comfort items, important people — gathered from the notes. Empty string if nothing is documented.' },
     case_needs: {
@@ -223,7 +236,7 @@ const AMA_SCHEMA = {
       },
     },
   },
-  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'withdrawal_level', 'withdrawal', 'med_concerns', 'snapshot', 'likes', 'case_needs'],
+  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'withdrawal_level', 'withdrawal', 'med_concerns', 'step_down', 'transport', 'anticipated_dc', 'discharge_plan', 'doc_flags', 'snapshot', 'likes', 'case_needs'],
   additionalProperties: false,
 };
 
@@ -532,6 +545,11 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   r.snapshot = r.snapshot || '';
   r.likes = r.likes || '';
   r.case_needs = (r.case_needs || []).filter((n) => n && n.item);
+  r.step_down = r.step_down || 'Unknown';
+  r.transport = ['Arranged', 'Needed', 'Unknown'].includes(r.transport) ? r.transport : 'Unknown';
+  r.anticipated_dc = r.anticipated_dc || '';
+  r.discharge_plan = r.discharge_plan || '';
+  r.doc_flags = Array.isArray(r.doc_flags) ? r.doc_flags.filter((x) => x && String(x).trim()) : [];
   return r;
 }
 

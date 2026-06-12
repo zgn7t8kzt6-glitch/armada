@@ -163,7 +163,7 @@ export async function kipuPatientNotes(casefileId) {
   const data = await kipuGet(tmpl.replace('{id}', casefileId));
   let list = data?.patient_evaluations || data?.evaluations || (Array.isArray(data) ? data : []);
   // Narrative notes first (real free-text), then newest-first.
-  const narrative = (nm) => /progress|nursing|group|case ?manage|family|therapy|counsel|shift|psychosocial|\bbps\b|clinical|treatment plan|note|encounter|assessment/i.test(nm || '');
+  const narrative = (nm) => /progress|nursing|group|case ?manage|family session|counsel|physician|clinical note|shift|encounter|\bbht\b/i.test(nm || '');
   list.sort((a, b) => {
     const an = narrative(a.name), bn = narrative(b.name);
     if (an !== bn) return an ? -1 : 1;
@@ -196,13 +196,18 @@ function extractItems(items) {
   const out = [];
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
-    const label = stripHtml(String(it.label || it.name || it.field_name || it.question || ''));
-    const v = extractText(it.value ?? it.answer ?? it.description ?? it.note ?? it.text ?? it.string_value ?? it.records).trim();
+    // Only take genuine free-text answers (a string). Nested checkbox groups
+    // (objects/arrays of options) are template noise — skip them.
+    const raw = it.value ?? it.answer ?? it.note ?? it.text ?? it.string_value ?? it.description;
+    if (typeof raw !== 'string') continue;
+    const v = stripHtml(raw).trim();
     if (!v) continue;
     const lv = v.toLowerCase();
-    if (NOISE.has(lv)) continue;
-    if (lv === 'true') { if (label) out.push(`${label}: yes`); continue; } // a checked box
-    out.push(label ? `${label}: ${v}` : v);
+    if (NOISE.has(lv) || lv === 'true') continue;
+    if ((v.match(/n\/a/gi) || []).length > 1) continue;       // option dump
+    if (v.replace(/[^a-z]/gi, '').length < 8) continue;        // too short to be real
+    const label = stripHtml(String(it.label || it.name || it.field_name || it.question || ''));
+    out.push(label && v.length < 80 ? `${label}: ${v}` : v);
   }
   return out.join('\n');
 }

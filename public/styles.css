@@ -28,6 +28,7 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
 .login-card label{text-align:left}
 .err{color:var(--danger);font-size:13px;min-height:18px;margin-top:8px;font-family:sans-serif}
 /* brand logo */
+.login-logo{width:260px;max-width:80%;height:auto;display:block;margin:6px auto 14px}
 .login-brand{margin-bottom:4px}
 .login-lockup{width:240px;max-width:100%;height:auto;display:block;margin:0 auto 14px}
 .brand-mark{width:84px;height:auto;display:block;margin:0 auto 6px}
@@ -38,10 +39,9 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
 .shell{display:flex;min-height:100vh;align-items:stretch}
 .sidebar{width:252px;flex:0 0 252px;background:#fbfaf5;border-right:1px solid var(--line);
   display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
-.side-brand{display:flex;align-items:center;gap:11px;padding:20px 18px 14px}
-.side-mark{width:34px;height:34px;flex:0 0 auto;filter:drop-shadow(0 1px 2px rgba(35,80,86,.18))}
-.side-word{font-family:var(--serif);font-size:23px;font-weight:600;color:var(--navy);line-height:1;letter-spacing:-.015em;display:flex;flex-direction:column}
-.side-word span{font-family:var(--sans);font-size:9px;font-weight:600;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted);margin-top:5px}
+.side-brand{padding:22px 20px 16px}
+.side-logo{width:188px;max-width:100%;height:auto;display:block}
+[data-theme="dark"] .side-logo{filter:brightness(0) invert(1) opacity(.92)}
 .side-groups{display:flex;flex-direction:column;padding:8px 12px;gap:1px}
 .side-groups button{font-family:var(--sans);text-align:left;background:none;border:none;border-radius:9px;
   padding:9px 13px;font-size:13.5px;color:var(--ink);cursor:pointer;font-weight:500;transition:background .12s,color .12s}

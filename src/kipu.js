@@ -185,6 +185,11 @@ export async function kipuPatientNotes(casefileId) {
   }
   const seen = new Set();
   list = list.filter((e) => { const k = e.id ?? e.evaluation_id; if (k == null || seen.has(k)) return false; seen.add(k); return true; });
+  // CURRENT STAY ONLY: keep notes from the recent window (default 90 days) so a
+  // re-admit's old chart never leaks in. Configurable via KIPU_NOTE_DAYS.
+  const noteDays = +(process.env.KIPU_NOTE_DAYS || 90);
+  const noteCutoff = new Date(Date.now() - noteDays * 864e5).toISOString().slice(0, 10);
+  list = list.filter((e) => String(e.created_at || '').slice(0, 10) >= noteCutoff);
   // Narrative notes first (real free-text), then newest-first.
   const narrative = (nm) => /progress|nursing|group|case ?manage|family session|counsel|physician|clinical note|shift|encounter|\bbht\b/i.test(nm || '');
   list.sort((a, b) => {

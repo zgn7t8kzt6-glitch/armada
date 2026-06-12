@@ -1927,5 +1927,26 @@ app.post('/api/crisis-owner', requireAuth, (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
+// Keep the roster current automatically: re-sync the live Kipu census on a
+// schedule (default every 6h) so admits/discharges flow in without a manual
+// rebuild. Set KIPU_SYNC_HOURS=0 to disable. Optionally KIPU_AUTO_ASSESS=true
+// runs the risk assessment after each sync.
+if (kipuConfigured()) {
+  const hrs = process.env.KIPU_SYNC_HOURS != null ? +process.env.KIPU_SYNC_HOURS : 6;
+  if (hrs > 0) {
+    const autoSync = async () => {
+      try {
+        const r = await kipuSyncRoster();
+        console.log(`[kipu] auto-sync: ${r.activeNow} active (${r.created} new, ${r.deactivated} closed)`);
+        if (process.env.KIPU_AUTO_ASSESS === 'true' && !assessJob.running) {
+          runAssessAll({ id: null, name: 'Auto-sync' });
+        }
+      } catch (e) { console.error('[kipu] auto-sync failed:', e.message); }
+    };
+    setTimeout(autoSync, 30000);                 // first run shortly after boot
+    setInterval(autoSync, hrs * 3600 * 1000);    // then on the interval
+  }
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Armada Care Standards running on http://localhost:${PORT}`));

@@ -387,7 +387,16 @@
           <button class="btn btn-gold sans" id="assessBtn" onclick="assessAll()">✦ Assess every client's risk (reads Kipu notes)</button>
           <span id="assessProgress" class="hint"></span>
         </div>
+        <div class="toolbar no-print" style="justify-content:flex-start" data-admin>
+          <button class="btn btn-ghost sans" id="debriefBtn" onclick="debriefDischarges()">⟲ Review recent discharges — what could we do better?</button>
+          <span id="debriefProgress" class="hint"></span>
+        </div>
         <div id="retSummary" class="ret-cards"></div>
+      </div>
+      <div class="card" id="learnCard" style="display:none">
+        <h3>Discharge learnings (last 60 days)</h3>
+        <p class="sub sans">Every departure read for what we could have done better — so the next client like them stays.</p>
+        <div id="dischargeLearnings"></div>
       </div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
         <div class="card" style="flex:2;min-width:320px">

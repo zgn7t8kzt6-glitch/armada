@@ -317,6 +317,57 @@ export async function generateReferralInsights(contextText) {
   return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
 }
 
+// ---- AI Discharge debrief: learn from every departure (esp. AMA) ----
+const DEBRIEF_SYSTEM = `You are conducting a retrospective discharge review at a
+residential addiction-treatment center, in the Horst Schulze / Ritz-Carlton
+spirit, with the mission of REDUCING AMA (against-medical-advice) departures.
+Given a recently discharged client's documentation, determine what happened and
+what the team can learn — so the next client like this stays.
+- type: classify the discharge using ONLY the documentation — one of:
+  Completed, AMA, Transferred, Administrative, Unknown.
+- reason: the most likely REAL reason they left — the emotional/underlying
+  driver, not just the surface complaint.
+- warning_signs: signals in the notes that preceded the departure the team could
+  have caught earlier.
+- could_do_better: 2-4 concrete, specific things the team could have done to keep
+  or better serve this client (run the Save, fix the fixable, follow through,
+  the warm gesture). Constructive and systemic — never blame an individual.
+- summary: one or two sentences for leadership.
+Ground everything in the documentation. Do not invent. Person-first language.`;
+const DEBRIEF_SCHEMA = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', enum: ['Completed', 'AMA', 'Transferred', 'Administrative', 'Unknown'] },
+    reason: { type: 'string' },
+    warning_signs: { type: 'array', items: { type: 'string' } },
+    could_do_better: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+  },
+  required: ['type', 'reason', 'warning_signs', 'could_do_better', 'summary'],
+  additionalProperties: false,
+};
+export async function generateDischargeDebrief(careCard, notesText) {
+  const client = await getClient();
+  const names = [careCard.name, careCard.pref];
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1400,
+    system: G + DEBRIEF_SYSTEM,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: DEBRIEF_SCHEMA } },
+    messages: [{ role: 'user', content:
+      `Review this discharged client and what we could learn.\n\n=== CARE CARD ===\n${careCardText(careCard)}\n\n` +
+      `=== DOCUMENTATION (this stay) ===\n${scrub(notesText || 'No documentation available.', names)}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) throw new Error('No debrief returned.');
+  const r = JSON.parse(t.text);
+  if (!['Completed', 'AMA', 'Transferred', 'Administrative', 'Unknown'].includes(r.type)) r.type = 'Unknown';
+  r.warning_signs = r.warning_signs || [];
+  r.could_do_better = r.could_do_better || [];
+  return r;
+}
+
 // ---- AI Outcome analytics: read LOS/AMA patterns + staff attribution ----
 const OUTCOME_SYSTEM = `You are a data-driven clinical-operations advisor for a
 residential addiction-treatment center. You are given de-identified aggregate

@@ -140,7 +140,12 @@ export async function kipuSyncRoster() {
   let deactivated = 0;
   if (activeKids.length) {
     const ph = activeKids.map(() => '?').join(',');
-    const r = db.prepare(`UPDATE clients SET active = 0 WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).run(...activeKids);
+    // Mark them discharged (date = now) so they flow into the discharge/outcomes
+    // analytics and get a "what could we have done better" debrief.
+    const r = db.prepare(`UPDATE clients SET active = 0,
+      discharge_status = COALESCE(NULLIF(discharge_status,''), 'Discharged'),
+      discharge_date = COALESCE(NULLIF(discharge_date,''), date('now'))
+      WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).run(...activeKids);
     deactivated = r.changes || 0;
   }
   return { total: list.length, created, matched, deactivated, activeNow: activeKids.length };

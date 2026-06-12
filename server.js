@@ -15,7 +15,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -290,6 +290,43 @@ app.post('/api/assess-all', requireAuth, requireAdmin, (req, res) => {
   res.json({ started: true });
 });
 app.get('/api/assess-all/status', requireAuth, requireAdmin, (req, res) => res.json(assessJob));
+
+// ---- Discharge debriefs: read every recent discharge's notes and learn what we
+// could have done better (esp. AMA). Fills discharge type/reason/improve. ----
+let debriefJob = { running: false, total: 0, done: 0, ama: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
+async function runDischargeDebriefs(user) {
+  const clients = db.prepare(`SELECT * FROM clients WHERE source = 'kipu' AND discharge_status IS NOT NULL
+    AND discharge_date >= date('now','-21 day') AND (discharge_improve IS NULL OR discharge_improve = '')`).all();
+  debriefJob = { running: true, total: clients.length, done: 0, ama: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
+  for (const c of clients) {
+    debriefJob.current = c.pref || c.name;
+    try {
+      let notes = '';
+      if (c.kipu_id && kipuConfigured()) { try { notes = await kipuPatientNotes(c.kipu_id); } catch { /* care card only */ } }
+      const d = await generateDischargeDebrief(c, notes);
+      db.prepare(`UPDATE clients SET discharge_status = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
+        .run(d.type && d.type !== 'Unknown' ? d.type : (c.discharge_status || 'Discharged'),
+          d.reason || null, (d.warning_signs || []).join('; ') || null, (d.could_do_better || []).join('; ') || null, c.id);
+      if (d.type === 'AMA') { debriefJob.ama++; createAlert(c.id, 'concern', 'Elevated', `${c.pref || c.name} left AMA — learn: ${d.summary || 'see debrief'}`); }
+      audit({ user, action: 'DISCHARGE_DEBRIEF', entity: 'client', entity_id: c.id, detail: d.type, ip: '0.0.0.0' });
+    } catch { debriefJob.errors++; }
+    debriefJob.done++;
+  }
+  debriefJob.running = false; debriefJob.current = null; debriefJob.finishedAt = Date.now();
+}
+app.post('/api/debrief-discharges', requireAuth, requireAdmin, (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured.' });
+  if (debriefJob.running) return res.json({ started: false, already: true });
+  runDischargeDebriefs(req.user);
+  res.json({ started: true });
+});
+app.get('/api/debrief-discharges/status', requireAuth, requireAdmin, (req, res) => res.json(debriefJob));
+app.get('/api/discharge-learnings', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT id, pref, name, discharge_status, discharge_date, discharge_reason, discharge_improve
+    FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-60 day')
+    ORDER BY discharge_date DESC LIMIT 60`).all();
+  res.json({ discharges: rows });
+});
 
 // Apply the latest plan's tasks (and feel-cared-for gestures) to the Care Card.
 app.post('/api/clients/:id/plan-to-tasks', requireAuth, (req, res) => {
@@ -1937,7 +1974,9 @@ if (kipuConfigured()) {
     const autoSync = async () => {
       try {
         const r = await kipuSyncRoster();
-        console.log(`[kipu] auto-sync: ${r.activeNow} active (${r.created} new, ${r.deactivated} closed)`);
+        console.log(`[kipu] auto-sync: ${r.activeNow} active (${r.created} new, ${r.deactivated} discharged)`);
+        // Anyone newly discharged gets an automatic "what could we do better" debrief.
+        if (claudeConfigured() && !debriefJob.running) runDischargeDebriefs({ id: null, name: 'Auto-sync' });
         if (process.env.KIPU_AUTO_ASSESS === 'true' && !assessJob.running) {
           runAssessAll({ id: null, name: 'Auto-sync' });
         }

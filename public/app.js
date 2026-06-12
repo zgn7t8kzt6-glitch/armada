@@ -582,8 +582,39 @@ async function pollAssess(){
     }
   }catch(e){ $('assessProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
+let debriefPoll=null;
+async function debriefDischarges(){
+  try{ const r=await api('/debrief-discharges',{method:'POST'});
+    if(r.started===false && !r.already){ $('debriefProgress').textContent='Nothing to review.'; return; }
+    $('debriefBtn').disabled=true; pollDebrief();
+  }catch(e){ $('debriefProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function pollDebrief(){
+  clearTimeout(debriefPoll);
+  try{ const s=await api('/debrief-discharges/status');
+    if(s.running){ $('debriefProgress').innerHTML=`Reviewing discharges ${s.done}/${s.total}…${s.current?' · '+esc(s.current):''}`; debriefPoll=setTimeout(pollDebrief,2500); }
+    else { $('debriefBtn').disabled=false; if(s.total){ $('debriefProgress').innerHTML=`✓ Reviewed ${s.done} discharges${s.ama?' · <strong style="color:var(--danger)">'+s.ama+' AMA</strong>':''}.`; loadDischargeLearnings(); } }
+  }catch(e){ $('debriefProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function loadDischargeLearnings(){
+  try{ const { discharges } = await api('/discharge-learnings');
+    if(!discharges.length){ $('learnCard').style.display='none'; return; }
+    $('learnCard').style.display='block';
+    $('dischargeLearnings').innerHTML = discharges.map(d=>{
+      const ama = d.discharge_status==='AMA';
+      return `<div class="todo"><div class="txt">
+        <span class="risk ${ama?'risk-high':'risk-low'}">${esc(d.discharge_status||'Discharged')}</span>
+        <strong>${esc(d.pref||d.name||'')}</strong> <span class="hint">· ${esc(d.discharge_date||'')}</span>
+        ${d.discharge_reason?`<div class="pc-note">Why: ${esc(d.discharge_reason)}</div>`:''}
+        ${d.discharge_improve?`<div class="pc-note" style="color:var(--gold)">Could do better: ${esc(d.discharge_improve)}</div>`:''}
+      </div></div>`;
+    }).join('');
+  }catch(e){}
+}
 async function loadRetention(){
   pollAssess();   // resume the progress readout if a job is running
+  pollDebrief();
+  loadDischargeLearnings();
   const { clients, triggerCounts, summary } = await api('/retention');
   $('retSummary').innerHTML = `
     <div class="ret-card ${summary.high?'rc-high':''}"><div class="n">${summary.high}</div><div class="l">High risk</div></div>

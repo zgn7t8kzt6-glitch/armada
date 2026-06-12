@@ -27,11 +27,20 @@ async function getClient() {
   if (_client) return _client;
   if (PROVIDER === 'bedrock') {
     const { AnthropicBedrock } = await import('@anthropic-ai/bedrock-sdk');
-    // Credentials & region resolve from the standard AWS chain (env vars,
-    // shared profile, or an EC2/ECS instance role).
-    _client = new AnthropicBedrock(
-      process.env.AWS_REGION ? { awsRegion: process.env.AWS_REGION } : {}
-    );
+    // Read creds explicitly and TRIM them — a stray space pasted into a host's
+    // env var is a classic cause of "signature does not match" (403). Passing
+    // them in directly (rather than the ambient AWS chain) makes the source
+    // unambiguous.
+    const opts = {};
+    const region = (process.env.AWS_REGION || '').trim();
+    const access = (process.env.AWS_ACCESS_KEY_ID || '').trim();
+    const secret = (process.env.AWS_SECRET_ACCESS_KEY || '').trim();
+    const session = (process.env.AWS_SESSION_TOKEN || '').trim();
+    if (region) opts.awsRegion = region;
+    if (access) opts.awsAccessKey = access;
+    if (secret) opts.awsSecretKey = secret;
+    if (session) opts.awsSessionToken = session;
+    _client = new AnthropicBedrock(opts);
   } else {
     _client = new Anthropic(); // reads ANTHROPIC_API_KEY
   }
@@ -442,6 +451,15 @@ export async function generateShiftTasks(careCard) {
 // plain object — never throws — so an admin can read the result.
 export async function aiHealth() {
   const base = { provider: PROVIDER, model: MODEL, deidentify: DEID, configured: claudeConfigured() };
+  if (PROVIDER === 'bedrock') {
+    // Non-secret diagnostics: the access key id is public; we expose only the
+    // LENGTH of the secret (an AWS secret is exactly 40 chars — 41 means a
+    // trailing space slipped in). Helps pinpoint a 403 signature mismatch.
+    base.region = (process.env.AWS_REGION || '').trim();
+    base.accessKeyId = (process.env.AWS_ACCESS_KEY_ID || '').trim();
+    base.secretLen = (process.env.AWS_SECRET_ACCESS_KEY || '').trim().length;
+    base.secretRawLen = (process.env.AWS_SECRET_ACCESS_KEY || '').length;
+  }
   // Surface the *real* reason behind a generic "Connection error" — the SDK
   // wraps the underlying network/credential failure in e.cause / e.status.
   const describe = (e) => {

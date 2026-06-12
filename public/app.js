@@ -403,7 +403,11 @@ async function runAiHealth(){
   const el=$('aiHealthResult'); el.innerHTML='Checking…';
   try{ const r=await api('/ai/health');
     const tag=(ok)=>ok?'<span style="color:var(--good)">✓</span>':'<span style="color:var(--danger)">✗</span>';
+    const diag = (r.provider==='bedrock' && r.secretLen!=null)
+      ? `<div class="hint">region: ${esc(r.region||'—')} · access key: ${esc(r.accessKeyId||'—')} · secret length: ${r.secretLen}${r.secretLen===40?' ✓':' ⚠ (should be 40)'}${r.secretRawLen!==r.secretLen?' — has surrounding spaces!':''}</div>`
+      : '';
     el.innerHTML = `${tag(r.ok)} ${esc(r.provider)} · model ${esc(r.model||'?')} · structured output ${tag(r.structuredOutput)}`
+      + diag
       + (r.error?`<div class="hint" style="color:var(--danger)">${esc(r.error)}</div>`:'');
   }catch(e){ el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }

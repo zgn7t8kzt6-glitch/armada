@@ -222,7 +222,7 @@ async function dischargeClient(){
     show('clients');
   }
 }
-const FF = ['name','pref','room','program','admit','admit_time','sober','therapist','case_manager','touch','prefs','goals','triggers','safety','support','anchor_why','welcome_plan','aftercare_plan'];
+const FF = ['name','pref','room','program','admit','admit_time','sober','therapist','case_manager','referral_source','touch','prefs','goals','triggers','safety','support','anchor_why','welcome_plan','aftercare_plan'];
 function fillForm(c){
   FF.forEach(f => $('f_'+f).value = c[f]||'');
   const tl = $('taskList'); tl.innerHTML='';
@@ -1103,7 +1103,7 @@ async function loadCommand(){
 
   // Census by level of care + step-downs
   const lv = d.levels;
-  const lvRows = lv.census.length ? lv.census.map(l=>`<tr><td><strong>${esc(l.code)}</strong> <span class="hint">${esc(l.label.replace(l.code+' · ',''))}</span></td><td style="text-align:right">${l.count}</td><td style="text-align:right">${l.avgLos!=null?l.avgLos+'d':'—'}</td></tr>`).join('') : '<tr><td colspan="3" class="hint">No level-of-care data yet — it fills in on the next Kipu sync.</td></tr>';
+  const lvRows = lv.census.length ? lv.census.map(l=>`<tr><td>${l.code?`<strong>${esc(l.code)}</strong> <span class="hint">${esc(l.label)}</span>`:`<strong>${esc(l.label)}</strong>`}</td><td style="text-align:right">${l.count}</td><td style="text-align:right">${l.avgLos!=null?l.avgLos+'d':'—'}</td></tr>`).join('') : '<tr><td colspan="3" class="hint">No level-of-care data yet — it fills in on the next Kipu sync.</td></tr>';
   const dest = lv.stepByDest.length ? lv.stepByDest.map(s=>`<span class="chip">→ ${esc(s.code)} · ${s.n}</span>`).join(' ') : '<span class="hint">No level-of-care changes recorded in the last 30 days yet.</span>';
   $('cmdLevels').innerHTML = `
     <table class="tbl"><thead><tr><th>Level of care</th><th style="text-align:right">Clients</th><th style="text-align:right">Avg stay</th></tr></thead><tbody>${lvRows}</tbody></table>
@@ -1172,13 +1172,23 @@ async function loadCommandTrends(){
   const tm = a.byTime.filter(r=>r.n>0);
   const tmAma = [...tm].sort((x,y)=>y.amaRate-x.amaRate)[0];
   const tmNote = tmAma?`⚠ Hardest window: <strong>${esc(tmAma.key)}</strong> (${tmAma.amaRate}% AMA)`:'';
-  // Referral sources
-  const rs = (a.byReferralSource||[]).filter(r=>r.n>0);
-  const rsBlock = rs.length ? `<div class="cmd-sub">Referral sources — conversion</div>`+rs.map(r=>`
-    <div class="trbar"><div class="trbar-l">${esc(r.key)} <span class="hint">(${r.n})</span></div>
-      <div class="trbar-track"><div class="trbar-fill" style="width:${r.admitRate}%;background:var(--good)"></div></div>
-      <div class="trbar-n">${r.admitRate}% admitted</div></div>`).join('')
-    : '<div class="cmd-sub">Referral sources</div><div class="hint">Log inbound referrals (Growth → Referrals) to see which sources convert best.</div>';
+  // Referral sources — retention (which sources send clients who STAY), with
+  // inbound conversion as a secondary read.
+  const rso = (a.bySourceOutcome||[]).filter(r=>r.n>0);
+  const rsc = (a.byReferralSource||[]).filter(r=>r.n>0);
+  let rsBlock = '';
+  if (rso.length){
+    const best = [...rso].filter(r=>r.avgLos!=null).sort((x,y)=>y.avgLos-x.avgLos)[0];
+    rsBlock = bucketTbl(rso, 'Referral sources — retention', best?`✅ Best retention: <strong>${esc(best.key)}</strong> (${best.avgLos}d avg stay)`:'');
+  } else if (rsc.length){
+    rsBlock = `<div class="cmd-sub">Referral sources — conversion</div>`+rsc.map(r=>`
+      <div class="trbar"><div class="trbar-l">${esc(r.key)} <span class="hint">(${r.n})</span></div>
+        <div class="trbar-track"><div class="trbar-fill" style="width:${r.admitRate}%;background:var(--good)"></div></div>
+        <div class="trbar-n">${r.admitRate}% admitted</div></div>`).join('')+
+      `<div class="hint" style="margin-top:6px">Retention by source appears once discharged clients have a referral source recorded.</div>`;
+  } else {
+    rsBlock = '<div class="cmd-sub">Referral sources</div><div class="hint">Add a referral source on the Care Card (or it syncs from Kipu) to see which sources send clients who stay.</div>';
+  }
   $('cmdTrends').innerHTML =
     `<div class="pc-note" style="margin-bottom:10px">Based on ${a.sampleSize} discharges · AMA rate overall ${a.totals.amaRate}% · avg stay ${a.totals.avgLos!=null?a.totals.avgLos+'d':'—'}</div>`+
     bucketTbl(a.byDow, 'By admit day of week', dowNote)+

@@ -90,7 +90,7 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
   res.json({ client: c });
 });
 
-const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'admit_time', 'sober', 'therapist', 'case_manager', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'anchor_why', 'welcome_plan', 'aftercare_plan'];
+const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'admit_time', 'sober', 'therapist', 'case_manager', 'referral_source', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'anchor_why', 'welcome_plan', 'aftercare_plan'];
 
 function saveTasks(clientId, tasks = []) {
   db.prepare(`DELETE FROM tasks WHERE client_id = ?`).run(clientId);
@@ -459,15 +459,27 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const callOffsToday = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date = ?`).get(today).n;
 
   // Census by ASAM level of care: count + average length of stay per level.
+  // When a client has no parseable ASAM code, fall back to their raw program
+  // name so the row is meaningful (the real label) rather than "Unspecified".
   const byLoc = {};
   for (const c of enriched) {
-    const k = c.loc || 'Unspecified';
-    (byLoc[k] = byLoc[k] || { code: k, label: LOC_LABEL[k] || k, count: 0, losSum: 0, losN: 0 }).count++;
-    if (c.los != null) { byLoc[k].losSum += c.los; byLoc[k].losN++; }
+    let key = c.loc || 'Unspecified';
+    if (key === 'Unspecified' && c.program && String(c.program).trim()) key = String(c.program).trim();
+    const b = byLoc[key] || (byLoc[key] = { key, count: 0, losSum: 0, losN: 0 });
+    b.count++; if (c.los != null) { b.losSum += c.los; b.losN++; }
   }
   const locCensus = Object.values(byLoc)
-    .map((r) => ({ code: r.code, label: r.label, count: r.count, avgLos: r.losN ? Math.round(r.losSum / r.losN * 10) / 10 : null }))
-    .sort((a, b) => (LOC_RANK[b.code] ?? -1) - (LOC_RANK[a.code] ?? -1));
+    .map((r) => {
+      const coded = LOC_RANK[r.key] != null;     // a known ASAM/pseudo level
+      const fullLabel = LOC_LABEL[r.key] || r.key;
+      return {
+        code: coded ? r.key : '',
+        label: coded ? fullLabel.replace(r.key + ' · ', '') : r.key,   // program name when uncoded
+        count: r.count,
+        avgLos: r.losN ? Math.round(r.losSum / r.losN * 10) / 10 : null,
+      };
+    })
+    .sort((a, b) => (LOC_RANK[b.code] ?? -1) - (LOC_RANK[a.code] ?? -1) || b.count - a.count);
 
   // Step-downs: where clients have moved, over the last 30 days, by destination level.
   const stepRows = db.prepare(`SELECT from_loc, to_loc FROM flow_events WHERE kind='loc_change' AND date >= date('now','-30 day')`).all();
@@ -1397,7 +1409,7 @@ app.post('/api/salesforce/sync', requireAuth, requireAdmin, async (req, res) => 
 // discharges still missing where/why (the manual-fallback when Kipu can't fill it).
 function buildAnalytics(days) {
   const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
-  const rows = db.prepare(`SELECT id, admit, admit_time, discharge_status, discharge_date, therapist, case_manager
+  const rows = db.prepare(`SELECT id, admit, admit_time, discharge_status, discharge_date, therapist, case_manager, referral_source
     FROM clients WHERE admit IS NOT NULL AND admit != '' AND discharge_date IS NOT NULL AND discharge_date >= ?`).all(since);
 
   // Experience score per client (avg of scale answers on the experience survey).
@@ -1417,7 +1429,7 @@ function buildAnalytics(days) {
 
   const mk = () => ({});
   const add = (map, key, los, ama) => { const m = map[key] || (map[key] = { n: 0, losSum: 0, losN: 0, ama: 0 }); m.n++; if (los != null) { m.losSum += los; m.losN++; } if (ama) m.ama++; };
-  const byDow = mk(), byTime = mk(), byDom = mk(), byTher = mk(), byCM = mk();
+  const byDow = mk(), byTime = mk(), byDom = mk(), byTher = mk(), byCM = mk(), bySource = mk();
   const expTher = {};
   let total = 0, amaTotal = 0, losSum = 0, losN = 0;
   for (const r of rows) {
@@ -1428,6 +1440,7 @@ function buildAnalytics(days) {
     add(byDom, domBucket(r.admit), los, ama);
     if (r.therapist) { add(byTher, r.therapist, los, ama); if (expByClient[r.id] != null) { const e = expTher[r.therapist] || (expTher[r.therapist] = { sum: 0, n: 0 }); e.sum += expByClient[r.id]; e.n++; } }
     if (r.case_manager) add(byCM, r.case_manager, los, ama);
+    if (r.referral_source && r.referral_source.trim()) add(bySource, r.referral_source.trim(), los, ama);
   }
   const fmt = (map) => Object.entries(map).map(([k, m]) => ({ key: k, n: m.n, avgLos: m.losN ? +(m.losSum / m.losN).toFixed(1) : null, ama: m.ama, amaRate: m.n ? Math.round(m.ama / m.n * 100) : 0 })).sort((a, b) => b.n - a.n);
   const staff = (map) => fmt(map).map((s) => ({ ...s, exp: expTher[s.key] ? +(expTher[s.key].sum / expTher[s.key].n).toFixed(2) : null }));
@@ -1454,7 +1467,9 @@ function buildAnalytics(days) {
     rangeDays: days, sampleSize: total,
     totals: { discharges: total, amaRate: total ? Math.round(amaTotal / total * 100) : 0, avgLos: losN ? +(losSum / losN).toFixed(1) : null },
     byDow: dowArr, byTime: fmt(byTime), byDom: fmt(byDom),
-    byTherapist: staff(byTher), byCaseManager: staff(byCM), byReferralSource,
+    byTherapist: staff(byTher), byCaseManager: staff(byCM),
+    byReferralSource,                 // inbound conversion (admitted vs declined)
+    bySourceOutcome: fmt(bySource),   // retention by source (avg stay + AMA rate)
     risk, missingDischarge,
   };
 }

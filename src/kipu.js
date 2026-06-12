@@ -58,7 +58,8 @@ export async function kipuSyncRoster() {
   let created = 0, matched = 0;
   const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ?`);
   const byName = db.prepare(`SELECT id, loc, active FROM clients WHERE name = ? OR pref = ?`);
-  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
+  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
+  const admRef = db.prepare(`SELECT referral_source FROM admissions WHERE referral_source IS NOT NULL AND referral_source != '' AND (name = ? OR name = ?) ORDER BY id DESC LIMIT 1`);
   // Flow-event recorder: one row per real transition, so re-running the sync
   // never double-counts. parseLoc → a known ASAM code, or null if unspecified.
   const evt = db.prepare(`INSERT INTO flow_events (client_id, kipu_id, kind, from_loc, to_loc, date, detail) VALUES (?,?,?,?,?,?,?)`);
@@ -105,7 +106,14 @@ export async function kipuSyncRoster() {
     const therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
     const caseMgr = pick(p, 'case_manager', 'casemanager');
     const room = pick(p, 'bed_name', 'room', 'bed');
-    const program = pick(p, 'level_of_care', 'program', 'loc');
+    // Level of care / program can be charted under many field names (and is
+    // sometimes nested). Cast a wide net so the ASAM level actually comes in.
+    let programRaw = pick(p, 'level_of_care', 'levelOfCare', 'level_of_care_name', 'loc', 'level',
+      'care_level', 'program', 'program_name', 'treatment_program', 'service', 'service_name',
+      'census_program', 'bed_type', 'unit', 'track');
+    if (programRaw && typeof programRaw === 'object') programRaw = programRaw.name || programRaw.label || programRaw.title || JSON.stringify(programRaw);
+    const program = programRaw != null ? String(programRaw) : null;
+    const refSrcRaw = pick(p, 'referral_source', 'referrer', 'referring_provider', 'referral', 'marketing_source', 'lead_source', 'referred_by', 'referral_name', 'source_of_referral');
     const dischStatus = pick(p, 'discharge_type', 'discharge_status');
     const dischDate = pick(p, 'discharge_date', 'discharged_at');
     const dischDest = pick(p, 'discharge_destination', 'referred_to', 'aftercare_facility');
@@ -115,6 +123,8 @@ export async function kipuSyncRoster() {
     if (!discharged && kid) activeKids.push(kid);
 
     const newLoc = realLoc(program);
+    const adm = !refSrcRaw ? admRef.get(name, p.first_name || name) : null;
+    const refSource = (refSrcRaw && String(refSrcRaw)) || (adm && adm.referral_source) || null;
     const existing = (kid && byKipu.get(kid)) || byName.get(name, name);
     if (existing) {
       // Level-of-care change: record it once, then advance the stored level.
@@ -136,18 +146,19 @@ export async function kipuSyncRoster() {
         case_manager = COALESCE(NULLIF(case_manager,''), ?),
         room = COALESCE(NULLIF(room,''), ?),
         program = COALESCE(NULLIF(program,''), ?),
+        referral_source = COALESCE(NULLIF(referral_source,''), ?),
         discharge_status = ?, discharge_date = ?,
         discharge_destination = COALESCE(NULLIF(discharge_destination,''), ?),
         discharge_reason = COALESCE(NULLIF(discharge_reason,''), ?),
         active = ?
-        WHERE id = ?`).run(kid || null, admit, admitTime, therapist, caseMgr, room, program,
+        WHERE id = ?`).run(kid || null, admit, admitTime, therapist, caseMgr, room, program, refSource,
           discharged ? (dischStatus ? String(dischStatus) : 'Discharged') : null,
           discharged ? (dischDate ? String(dischDate).slice(0, 10) : null) : null,
           dischDest, dischReason, discharged ? 0 : 1, existing.id);
       matched++;
     } else if (!discharged) {
       // Only create rows for currently-active patients.
-      const info = ins.run(name, p.first_name || name, room, program, newLoc, admit, admitTime, therapist, caseMgr, kid || null);
+      const info = ins.run(name, p.first_name || name, room, program, newLoc, admit, admitTime, therapist, caseMgr, refSource, kid || null);
       // Record an admission event only for genuinely new intakes (admitted today
       // or yesterday) — never for the initial baseline import of the standing
       // census, which would inflate past days with a one-time spike.

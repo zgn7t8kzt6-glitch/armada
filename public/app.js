@@ -122,10 +122,14 @@ function renderGroups(){
 }
 function selectGroup(g){
   document.querySelectorAll('#groupbar button').forEach(b=>b.classList.toggle('active', b.dataset.g===g));
-  document.querySelectorAll('#nav button').forEach(b=>{
+  const navBtns=[...document.querySelectorAll('#nav button')];
+  navBtns.forEach(b=>{
     const adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
     b.style.display = (b.dataset.group===g && !adminHidden) ? '' : 'none';
   });
+  // Hide the sub-nav when a section has only one screen (no redundant repeat).
+  const visible=navBtns.filter(b=>b.dataset.group===g && b.style.display!=='none').length;
+  const navEl=document.getElementById('nav'); if(navEl) navEl.style.display = visible<=1 ? 'none' : '';
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.view));
 function toggleNav(){ document.getElementById('shell').classList.toggle('nav-open'); }

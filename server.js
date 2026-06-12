@@ -7,7 +7,7 @@ import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, s
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -591,6 +591,11 @@ app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
 });
 app.post('/api/kipu/inspect', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuInspect()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/kipu/doc-inspect', requireAuth, requireAdmin, async (req, res) => {
+  const cid = req.body?.kipu_id || db.prepare(`SELECT kipu_id FROM clients WHERE active = 1 AND kipu_id IS NOT NULL AND kipu_id != '' LIMIT 1`).get()?.kipu_id;
+  if (!cid) return res.status(400).json({ error: 'No client with a Kipu id — sync the roster first.' });
+  try { res.json(await kipuDocInspect(cid)); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Clean reset: wipe the roster and rebuild it from the live Kipu active census
 // (use after test-syncs left stale/duplicate clients).

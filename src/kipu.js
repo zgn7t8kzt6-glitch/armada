@@ -164,6 +164,47 @@ export async function kipuPatientNotes(casefileId) {
   return texts.join('\n\n').slice(0, 14000); // keep the prompt bounded
 }
 
+// Diagnostic: probe the documentation endpoints for ONE patient and report which
+// return data + where the note text lives (so we can wire the real pull). Returns
+// structure only (keys/counts), plus one short sample value, no full chart dump.
+export async function kipuDocInspect(casefileId) {
+  const candidates = [
+    `/api/patients/${casefileId}/patient_evaluations`,
+    `/api/patients/${casefileId}/evaluations`,
+    `/api/patient_evaluations?patient_id=${casefileId}`,
+    `/api/patients/${casefileId}/groups`,
+    `/api/patients/${casefileId}/group_sessions`,
+    `/api/patients/${casefileId}`,
+  ];
+  const probes = [];
+  let evalId = null;
+  for (const path of candidates) {
+    try {
+      const data = await kipuGet(path);
+      const arr = data?.patient_evaluations || data?.evaluations || data?.groups || data?.group_sessions || (Array.isArray(data) ? data : null);
+      const first = Array.isArray(arr) && arr.length ? arr[0] : null;
+      probes.push({ path, ok: true, topKeys: Object.keys(data || {}).slice(0, 15), listLen: Array.isArray(arr) ? arr.length : null, firstKeys: first ? Object.keys(first) : (!arr && data ? Object.keys(data).slice(0, 40) : null) });
+      if (first && !evalId && (first.id || first.evaluation_id)) evalId = first.id || first.evaluation_id;
+    } catch (e) { probes.push({ path, ok: false, error: String(e.message).slice(0, 140) }); }
+  }
+  // Fetch one evaluation's detail to find where the note text actually lives.
+  let detail = null;
+  if (evalId) {
+    for (const dpath of [`/api/patient_evaluations/${evalId}?patient_id=${casefileId}`, `/api/patient_evaluations/${evalId}`, `/api/patients/${casefileId}/patient_evaluations/${evalId}`]) {
+      try {
+        const d = await kipuGet(dpath);
+        const ev = d?.patient_evaluation || d?.evaluation || d;
+        const items = ev?.patient_evaluation_items || ev?.items || ev?.evaluation_items;
+        const it0 = Array.isArray(items) && items[0] ? items[0] : null;
+        detail = { path: dpath, evalKeys: Object.keys(ev || {}).slice(0, 40), itemCount: Array.isArray(items) ? items.length : null, itemKeys: it0 ? Object.keys(it0) : null,
+          sampleItem: it0 ? Object.fromEntries(Object.entries(it0).slice(0, 8).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 60) : v])) : null };
+        break;
+      } catch (e) { detail = { tried: dpath, error: String(e.message).slice(0, 140) }; }
+    }
+  }
+  return { casefileId, evalId, probes, detail };
+}
+
 // Diagnostic: shows the SHAPE of the Kipu census response (field names + the
 // distinct values of location/status/discharge-looking fields) so we can write
 // the exact active+location filter. PHI-safe: no patient names returned.

@@ -155,31 +155,47 @@ const extractText = (v) => {
   return String(v);
 };
 
+// The list endpoint returns each note's name + a template tag in
+// evaluation_content (e.g. "standard"); the WRITTEN text lives in the
+// evaluation detail's patient_evaluation_items. So fetch detail per recent note.
 export async function kipuPatientNotes(casefileId) {
   const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
-  const path = tmpl.replace('{id}', casefileId);
-  const data = await kipuGet(path);
+  const data = await kipuGet(tmpl.replace('{id}', casefileId));
   let list = data?.patient_evaluations || data?.evaluations || (Array.isArray(data) ? data : []);
-  // Most recent first (this admission's notes matter most).
-  list.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  list.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))); // newest first
+  const max = +(process.env.KIPU_NOTES_MAX || 16);
   const texts = [];
-  let detailBudget = 14;   // bound the per-note detail fetches
-  for (const e of list.slice(0, 30)) {
-    const nm = e.name || e.evaluation_name || 'Note';
+  for (const e of list.slice(0, max)) {
+    const nm = (e.name || 'Note').trim();
     const date = String(e.created_at || '').slice(0, 10);
-    let content = extractText(e.evaluation_content);
-    // If the list row didn't carry the content, fetch the evaluation detail.
-    if ((!content || content.length < 4) && e.id && detailBudget > 0) {
-      detailBudget--;
+    let content = '';
+    if (e.id) {
       try {
         const d = await kipuGet(`/api/patient_evaluations/${e.id}?patient_id=${casefileId}`);
         const ev = d?.patient_evaluation || d?.evaluation || d;
-        content = extractText(ev?.evaluation_content || ev?.patient_evaluation_items || ev?.items);
-      } catch { /* skip this one */ }
+        // Prefer the answered items; fall back to the whole evaluation object.
+        content = extractItems(ev?.patient_evaluation_items || ev?.evaluation_items || ev?.items) || extractText(ev?.evaluation_content);
+        if (!content) content = extractText(ev);
+      } catch { /* skip this note */ }
     }
-    if (content && content.length > 4) texts.push(`[${date} · ${nm}]\n${content}`);
+    content = (content || '').replace(/^\s*standard\s*$/i, '').trim();
+    if (content && content.length > 12) texts.push(`[${date} · ${nm}]\n${content}`);
   }
-  return texts.join('\n\n').slice(0, 16000); // keep the prompt bounded
+  return texts.join('\n\n').slice(0, 18000); // keep the prompt bounded
+}
+
+// Pull label: value pairs out of Kipu evaluation items (only answered fields).
+function extractItems(items) {
+  if (!Array.isArray(items)) return '';
+  const out = [];
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const label = it.label || it.name || it.field_name || it.question || '';
+    const val = it.value ?? it.answer ?? it.description ?? it.note ?? it.text ?? it.string_value ?? it.records;
+    const v = extractText(val);
+    if (v && v.length > 1) out.push(label ? `${stripHtml(String(label))}: ${v}` : v);
+  }
+  return out.join('\n');
 }
 
 // Diagnostic: probe the documentation endpoints for ONE patient and report which
@@ -208,14 +224,14 @@ export async function kipuDocInspect(casefileId) {
   // Fetch one evaluation's detail to find where the note text actually lives.
   let detail = null;
   if (evalId) {
-    for (const dpath of [`/api/patient_evaluations/${evalId}?patient_id=${casefileId}`, `/api/patient_evaluations/${evalId}`, `/api/patients/${casefileId}/patient_evaluations/${evalId}`]) {
+    for (const dpath of [`/api/patient_evaluations/${evalId}?patient_id=${casefileId}`, `/api/patient_evaluations/${evalId}`]) {
       try {
         const d = await kipuGet(dpath);
         const ev = d?.patient_evaluation || d?.evaluation || d;
         const items = ev?.patient_evaluation_items || ev?.items || ev?.evaluation_items;
         const it0 = Array.isArray(items) && items[0] ? items[0] : null;
         detail = { path: dpath, evalKeys: Object.keys(ev || {}).slice(0, 40), itemCount: Array.isArray(items) ? items.length : null, itemKeys: it0 ? Object.keys(it0) : null,
-          sampleItem: it0 ? Object.fromEntries(Object.entries(it0).slice(0, 8).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 60) : v])) : null };
+          sampleItems: Array.isArray(items) ? items.slice(0, 4).map((it) => Object.fromEntries(Object.entries(it || {}).slice(0, 10).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 80) : v]))) : null };
         break;
       } catch (e) { detail = { tried: dpath, error: String(e.message).slice(0, 140) }; }
     }

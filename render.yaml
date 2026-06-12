@@ -77,6 +77,20 @@ services:
         sync: false
       - key: KIPU_APP_ID
         sync: false
+      # ── Kipu data warehouse (Azure SQL — Chaim's existing dashboard DB) ───
+      # Read-only sync of census/LOS/discharges/notes. Use a SELECT-only login.
+      - key: WH_SERVER
+        sync: false                  # e.g. armada-sql.database.windows.net
+      - key: WH_DATABASE
+        sync: false                  # e.g. Armada
+      - key: WH_USER
+        sync: false                  # dedicated read-only login (e.g. armada_app)
+      - key: WH_PASSWORD
+        sync: false
+      - key: WH_CENSUS_SQL
+        sync: false                  # roster query, e.g. SELECT * FROM kipu.census
+      - key: WH_NOTES_SQL
+        sync: false                  # optional: recent clinical notes for red-flag scan
     disk:
       name: armada-data
       mountPath: /var/data

@@ -9,6 +9,7 @@ import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
+import { whConfigured, whTest, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
@@ -539,6 +540,19 @@ app.post('/api/kipu/test', requireAuth, requireAdmin, async (req, res) => {
 });
 app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
   try { const r = await kipuSyncRoster(); audit({ user: req.user, action: 'KIPU_SYNC', detail: `${r.created} new`, ip: req.ip }); res.json(r); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Azure SQL data-warehouse (Chaim's Kipu warehouse) — read-only sync.
+app.get('/api/warehouse/status', requireAuth, requireAdmin, (req, res) => res.json({ configured: whConfigured() }));
+app.post('/api/warehouse/test', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await whTest()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/warehouse/sync', requireAuth, requireAdmin, async (req, res) => {
+  try { const r = await whSyncRoster(db); audit({ user: req.user, action: 'WH_SYNC', detail: `${r.created} new, ${r.matched} updated`, ip: req.ip }); res.json(r); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/warehouse/sync-notes', requireAuth, requireAdmin, async (req, res) => {
+  try { const r = await whSyncNotes(db, scanNote, { days: +req.body?.days || 3 }); audit({ user: req.user, action: 'WH_NOTES', detail: `${r.flagged} flagged`, ip: req.ip }); res.json(r); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/settings/aftercare-coordinator', requireAuth, requireAdmin, (req, res) => {

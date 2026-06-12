@@ -49,7 +49,10 @@ export async function kipuTest() {
 // can't clobber staff edits. Maps the analytics fields (admit time, therapist,
 // discharge where/why) whenever Kipu charts them — so they're never re-entered.
 export async function kipuSyncRoster() {
-  const path = process.env.KIPU_ROSTER_PATH || '/api/patients/census';
+  let path = process.env.KIPU_ROSTER_PATH || '/api/patients/census';
+  // Scope the census to one location server-side when KIPU_LOCATION_ID is set.
+  const locId = (process.env.KIPU_LOCATION_ID || '').trim();
+  if (locId && !/location_id=/.test(path)) path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
   const data = await kipuGet(path);
   const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
   let created = 0, matched = 0;
@@ -62,10 +65,15 @@ export async function kipuSyncRoster() {
   const timeOf = (v) => { if (!v) return null; const m = String(v).match(/[T ](\d{2}:\d{2})/); return m ? m[1] : null; };
   const activeKids = [];   // census patients who are currently active (no discharge)
 
-  // Optional location scoping: set KIPU_LOCATION (e.g. "Armada Detox of Akron")
-  // to keep only patients at that location/program.
+  // Location scoping. Prefer KIPU_LOCATION_ID (exact); fall back to a
+  // KIPU_LOCATION name match. Belt-and-suspenders on top of the API filter.
+  const wantLocId = (process.env.KIPU_LOCATION_ID || '').trim();
   const wantLoc = (process.env.KIPU_LOCATION || '').trim().toLowerCase();
   const matchesLoc = (p) => {
+    if (wantLocId) {
+      const id = pick(p, 'location_id', 'locationId', 'location_id_value', 'location');
+      return id != null && String(id) === wantLocId;
+    }
     if (!wantLoc) return true;
     const c = pick(p, 'location_name', 'location', 'program', 'level_of_care', 'facility_name', 'facility', 'building', 'unit', 'site');
     if (c && String(c).toLowerCase().includes(wantLoc)) return true;
@@ -147,5 +155,12 @@ export async function kipuInspect() {
     for (const p of list) { const v = p[k]; if (v != null && v !== '') vals.add(typeof v === 'object' ? JSON.stringify(v) : String(v)); if (vals.size > 40) break; }
     facets[k] = [...vals].sort();
   }
-  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets };
+  // Also pull the location list (id -> name) so the right location_id is obvious.
+  let locations = [];
+  try {
+    const loc = await kipuGet('/api/locations');
+    const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
+    locations = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: l.location_name ?? l.name ?? l.enabled_location_name ?? JSON.stringify(l).slice(0, 80) }));
+  } catch { /* locations endpoint optional */ }
+  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations };
 }

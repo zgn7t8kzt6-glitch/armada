@@ -166,8 +166,25 @@ const extractText = (v) => {
 // evaluation detail's patient_evaluation_items. So fetch detail per recent note.
 export async function kipuPatientNotes(casefileId) {
   const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
-  const data = await kipuGet(tmpl.replace('{id}', casefileId));
-  let list = data?.patient_evaluations || data?.evaluations || (Array.isArray(data) ? data : []);
+  const base = tmpl.replace('{id}', casefileId);
+  const first = await kipuGet(base);
+  let list = first?.patient_evaluations || first?.evaluations || (Array.isArray(first) ? first : []);
+  // Kipu paginates a re-admit's evaluations OLDEST-first, so the current stay's
+  // notes are on the LAST page(s). Pull those too, then dedupe.
+  const pag = first?.pagination || {};
+  const per = +(pag.per_page || pag.records_per_page || pag.per || 100) || 100;
+  const totalRecords = +(pag.total_records || pag.total_count || pag.total || pag.count || 0) || 0;
+  let totalPages = +(pag.total_pages || pag.total_page || pag.last_page || pag.pages || pag.page_count || 0) || 0;
+  if (!totalPages && totalRecords) totalPages = Math.ceil(totalRecords / per);
+  if (!totalPages) totalPages = list.length >= per ? 2 : 1;   // assume more if page is full
+  for (const pg of [totalPages, totalPages - 1, totalPages - 2]) {
+    if (pg > 1) {
+      try { const d = await kipuGet(base + (base.includes('?') ? '&' : '?') + 'page=' + pg);
+        list = list.concat(d?.patient_evaluations || d?.evaluations || []); } catch { /* ignore */ }
+    }
+  }
+  const seen = new Set();
+  list = list.filter((e) => { const k = e.id ?? e.evaluation_id; if (k == null || seen.has(k)) return false; seen.add(k); return true; });
   // Narrative notes first (real free-text), then newest-first.
   const narrative = (nm) => /progress|nursing|group|case ?manage|family session|counsel|physician|clinical note|shift|encounter|\bbht\b/i.test(nm || '');
   list.sort((a, b) => {

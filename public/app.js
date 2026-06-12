@@ -453,6 +453,23 @@ async function kipuInspect(){ $('kipuResult').textContent='Inspecting Kipu field
   + '\n\nFIELDS: '+r.fields.join(', ')
   + '\n\nFACETS:\n'+Object.entries(r.facets).map(([k,v])=>'  '+k+': '+v.join(' | ')).join('\n')
   + (r.patientDetail ? '\n\nPATIENT DETAIL (where level-of-care lives):\n  level of care found: '+(r.patientDetail.levelOfCareFound||r.patientDetail.error||'?')+'\n  referral source found: '+(r.patientDetail.referralFound||'?')+'\n  detail fields: '+((r.patientDetail.keys||[]).join(', ')||'—') : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+async function kipuCoverage(){
+  $('kipuResult').textContent='Checking what each field is pulling…';
+  $('kipuInspect').style.display='none'; const el=$('kipuCoverage'); el.style.display='none';
+  try{
+    const r=await api('/kipu/coverage');
+    $('kipuResult').textContent=`Data coverage — ${r.activeCount} active client(s), ${r.dischargedCount} discharged in last 90 days:`;
+    el.style.display='block';
+    el.innerHTML = `<table class="tbl"><thead><tr><th>Field</th><th>Source</th><th style="text-align:right">Filled</th><th style="width:120px">Coverage</th></tr></thead><tbody>`+
+      r.fields.map(f=>{
+        const pct = f.total ? Math.round(f.filled/f.total*100) : 0;
+        const col = f.total===0 ? 'var(--muted)' : pct>=80?'var(--good)':pct>=1?'var(--gold)':'var(--danger)';
+        return `<tr><td>${esc(f.label)}</td><td><span class="hint">${esc(f.source)}</span></td><td style="text-align:right">${f.total?f.filled+'/'+f.total:'—'}</td>
+          <td><div class="trbar-track" style="margin:0"><div class="trbar-fill" style="width:${pct}%;background:${col}"></div></div></td></tr>`;
+      }).join('')+`</tbody></table>
+      <p class="hint" style="margin-top:8px">Anything at 0% means Kipu isn't charting that field under a name we recognize. Run "Inspect fields" and send me the result and I'll map it exactly. Census fields fill on Sync; patient-detail fields (level of care, therapist, etc.) fill on the next full sync.</p>`;
+  }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function kipuDocInspect(){ $('kipuResult').textContent='Probing Kipu documentation for one client…'; const el=$('kipuInspect'); el.style.display='none'; try{ const r=await api('/kipu/doc-inspect',{method:'POST'}); $('kipuResult').textContent='Documentation probe — copy this whole box to your assistant:'; el.style.display='block'; el.textContent=JSON.stringify(r,null,2); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuNotesPreview(){ $('kipuResult').textContent='Pulling one client\'s documentation…'; const el=$('kipuInspect'); el.style.display='none'; try{ const r=await api('/kipu/notes-preview',{method:'POST'}); $('kipuResult').textContent=`Pulled ${r.noteCount||0} notes · ${r.chars} characters. Per-note breakdown + preview below:`; el.style.display='block'; const bd=(r.breakdown||[]).map(b=>`  ${b.chars} chars — ${b.head}`).join('\n'); el.textContent='BREAKDOWN:\n'+bd+'\n\n----- PREVIEW -----\n'+(r.preview||'(empty — no note content returned)'); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuReset(){ if(!confirm('This clears the current client list and rebuilds it from the live Kipu active census. Continue?'))return; $('kipuResult').textContent='Rebuilding roster from Kipu…'; try{ const r=await api('/kipu/reset',{method:'POST'}); $('kipuResult').textContent=`✓ Roster rebuilt: ${r.activeNow} active clients (of ${r.total} census records).`; }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }

@@ -81,7 +81,7 @@ export async function kipuSyncRoster() {
   let created = 0, matched = 0;
   const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ?`);
   const byName = db.prepare(`SELECT id, loc, active FROM clients WHERE name = ? OR pref = ?`);
-  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
+  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, dob, diagnosis, insurance, phone, pronouns, language, mrn, payment_method, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
   const admRef = db.prepare(`SELECT referral_source FROM admissions WHERE referral_source IS NOT NULL AND referral_source != '' AND (name = ? OR name = ?) ORDER BY id DESC LIMIT 1`);
   // Flow-event recorder: one row per real transition, so re-running the sync
   // never double-counts. parseLoc → a known ASAM code, or null if unspecified.
@@ -130,9 +130,19 @@ export async function kipuSyncRoster() {
     const admit = admitRaw ? String(admitRaw).slice(0, 10) : null;
     if (admitCutoff && admit && admit < admitCutoff) continue;   // opt-in recency filter
     const admitTime = timeOf(admitRaw);
-    const therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
-    const caseMgr = pick(p, 'case_manager', 'casemanager');
-    const room = pick(p, 'bed_name', 'room', 'bed');
+    let therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
+    let caseMgr = pick(p, 'case_manager', 'casemanager');
+    let room = pick(p, 'bed_name', 'room', 'bed', 'bed_name_full');
+    // Demographics the census DOES carry — map them straight through.
+    const flat = (v) => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v != null ? String(v) : null);
+    const dob = flat(pick(p, 'dob', 'date_of_birth'));
+    const diagnosis = flat(pick(p, 'diagnosis_codes', 'diagnoses', 'diagnosis'));
+    const insurance = flat(pick(p, 'insurance_company', 'insurance', 'insurance_name'));
+    const phone = flat(pick(p, 'phone', 'phone_number', 'mobile'));
+    const pronouns = flat(pick(p, 'pronouns', 'gender_pronoun'));
+    const language = flat(pick(p, 'preferred_language', 'language'));
+    const mrn = flat(pick(p, 'mr_number', 'mrn', 'medical_record_number'));
+    const paymentMethod = flat(pick(p, 'payment_method', 'payment_method_category'));
     // Level of care / program can be charted under many field names (and is
     // sometimes nested). Cast a wide net so the ASAM level actually comes in.
     let programRaw = pick(p, 'level_of_care', 'levelOfCare', 'level_of_care_name', 'loc', 'level',
@@ -140,23 +150,33 @@ export async function kipuSyncRoster() {
       'census_program', 'bed_type', 'unit', 'track');
     if (programRaw && typeof programRaw === 'object') programRaw = programRaw.name || programRaw.label || programRaw.title || JSON.stringify(programRaw);
     let refSrcRaw = pick(p, 'referral_source', 'referrer', 'referring_provider', 'referral', 'marketing_source', 'lead_source', 'referred_by', 'referral_name', 'source_of_referral');
-    const dischStatus = pick(p, 'discharge_type', 'discharge_status');
+    let dischStatus = pick(p, 'discharge_type', 'discharge_status');
     const dischDate = pick(p, 'discharge_date', 'discharged_at');
-    const dischDest = pick(p, 'discharge_destination', 'referred_to', 'aftercare_facility');
-    const dischReason = pick(p, 'discharge_reason', 'discharge_note');
+    let dischDest = pick(p, 'discharge_destination', 'referred_to', 'aftercare_facility');
+    let dischReason = pick(p, 'discharge_reason', 'discharge_note');
     const discharged = Boolean((dischDate && String(dischDate).trim()) ||
       (dischStatus && !['active', 'admitted', 'current'].includes(String(dischStatus).toLowerCase())));
     if (!discharged && kid) activeKids.push(kid);
 
-    // The census lacks level-of-care; pull it from the patient detail (and grab
-    // a referral source there too) for active patients. Bounded + best-effort.
-    if (useDetail && kid && !discharged && (programRaw == null || refSrcRaw == null) && detailBudget > 0) {
+    // The census lacks the clinical fields (level of care, therapist, case
+    // manager, room, discharge type/reason/destination, referral). Pull each
+    // patient's detail and deep-search it for whatever's still missing.
+    // Bounded + best-effort; KIPU_PATIENT_DETAIL=false disables it.
+    const needsActive = !discharged && (programRaw == null || refSrcRaw == null || therapist == null || caseMgr == null || room == null);
+    const needsDisch = discharged && (dischStatus == null || dischReason == null || dischDest == null);
+    if (useDetail && kid && detailBudget > 0 && (needsActive || needsDisch)) {
       detailBudget--;
       try {
         const det = await kipuPatientDetail(kid);
         if (det) {
           if (programRaw == null) programRaw = deepFind(det, LOC_KEY_RE);
           if (refSrcRaw == null) refSrcRaw = deepFind(det, REF_KEY_RE);
+          if (therapist == null) therapist = deepFind(det, /(therapist|counselor|primary.?clinician)/i);
+          if (caseMgr == null) caseMgr = deepFind(det, /(case.?manager|casemanager)/i);
+          if (room == null) room = deepFind(det, /(bed.?name|^bed$|^room$|room.?name|^unit$)/i);
+          if (dischStatus == null) dischStatus = deepFind(det, /(discharge.?type|discharge.?status)/i);
+          if (dischReason == null) dischReason = deepFind(det, /(discharge.?reason|discharge.?note)/i);
+          if (dischDest == null) dischDest = deepFind(det, /(discharge.?destination|referred.?to|aftercare|discharge.?location)/i);
         }
       } catch { /* best-effort */ }
     }
@@ -186,18 +206,28 @@ export async function kipuSyncRoster() {
         room = COALESCE(NULLIF(room,''), ?),
         program = COALESCE(NULLIF(program,''), ?),
         referral_source = COALESCE(NULLIF(referral_source,''), ?),
+        dob = COALESCE(NULLIF(dob,''), ?),
+        diagnosis = COALESCE(NULLIF(diagnosis,''), ?),
+        insurance = COALESCE(NULLIF(insurance,''), ?),
+        phone = COALESCE(NULLIF(phone,''), ?),
+        pronouns = COALESCE(NULLIF(pronouns,''), ?),
+        language = COALESCE(NULLIF(language,''), ?),
+        mrn = COALESCE(NULLIF(mrn,''), ?),
+        payment_method = COALESCE(NULLIF(payment_method,''), ?),
         discharge_status = ?, discharge_date = ?,
         discharge_destination = COALESCE(NULLIF(discharge_destination,''), ?),
         discharge_reason = COALESCE(NULLIF(discharge_reason,''), ?),
         active = ?
         WHERE id = ?`).run(kid || null, admit, admitTime, therapist, caseMgr, room, program, refSource,
+          dob, diagnosis, insurance, phone, pronouns, language, mrn, paymentMethod,
           discharged ? (dischStatus ? String(dischStatus) : 'Discharged') : null,
           discharged ? (dischDate ? String(dischDate).slice(0, 10) : null) : null,
           dischDest, dischReason, discharged ? 0 : 1, existing.id);
       matched++;
     } else if (!discharged) {
       // Only create rows for currently-active patients.
-      const info = ins.run(name, p.first_name || name, room, program, newLoc, admit, admitTime, therapist, caseMgr, refSource, kid || null);
+      const info = ins.run(name, p.first_name || name, room, program, newLoc, admit, admitTime, therapist, caseMgr, refSource,
+        dob, diagnosis, insurance, phone, pronouns, language, mrn, paymentMethod, kid || null);
       // Record an admission event only for genuinely new intakes (admitted today
       // or yesterday) — never for the initial baseline import of the standing
       // census, which would inflate past days with a one-time spike.

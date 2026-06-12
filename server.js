@@ -834,6 +834,35 @@ app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
 app.post('/api/kipu/inspect', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuInspect()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Data coverage: for every field the app uses, show how many clients have it
+// filled and where it comes from — so "is everything pulling?" is answerable.
+app.get('/api/kipu/coverage', requireAuth, requireAdmin, (req, res) => {
+  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const discharged = db.prepare(`SELECT * FROM clients WHERE discharge_date IS NOT NULL AND discharge_date >= date('now','-90 day')`).all();
+  const filled = (rows, fn) => rows.filter((c) => { const v = fn(c); return v != null && String(v).trim() !== ''; }).length;
+  const F = (label, source, col, set = active) => ({ label, source, filled: filled(set, (c) => c[col]), total: set.length });
+  const fields = [
+    F('Name', 'Census', 'name'),
+    F('Admit date', 'Census', 'admit'),
+    F('Date of birth', 'Census', 'dob'),
+    F('Diagnosis', 'Census', 'diagnosis'),
+    F('Insurance', 'Census', 'insurance'),
+    F('Phone', 'Census', 'phone'),
+    F('Pronouns', 'Census', 'pronouns'),
+    F('Language', 'Census', 'language'),
+    F('Level of care (ASAM)', 'Patient detail', 'loc'),
+    F('Program', 'Patient detail', 'program'),
+    F('Room / bed', 'Patient detail', 'room'),
+    F('Primary therapist', 'Patient detail', 'therapist'),
+    F('Case manager', 'Patient detail', 'case_manager'),
+    F('Referral source', 'Patient detail / manual', 'referral_source'),
+    { label: 'AI snapshot (from notes)', source: 'Evaluations', filled: filled(active, (c) => c.summary), total: active.length },
+    F('Discharge type (AMA?)', 'Patient detail', 'discharge_status', discharged),
+    F('Discharge reason', 'Patient detail', 'discharge_reason', discharged),
+    F('Discharge destination', 'Patient detail', 'discharge_destination', discharged),
+  ];
+  res.json({ activeCount: active.length, dischargedCount: discharged.length, fields, kipu: kipuConfigured() });
+});
 app.post('/api/kipu/doc-inspect', requireAuth, requireAdmin, async (req, res) => {
   const cid = req.body?.kipu_id || db.prepare(`SELECT kipu_id FROM clients WHERE active = 1 AND kipu_id IS NOT NULL AND kipu_id != '' LIMIT 1`).get()?.kipu_id;
   if (!cid) return res.status(400).json({ error: 'No client with a Kipu id — sync the roster first.' });

@@ -716,6 +716,15 @@ addColumn('ama_reads', 'discharge_plan', 'TEXT');      // 1-2 sentence step-down
 addColumn('ama_reads', 'doc_flags', 'TEXT');           // JSON array of missing/late documentation
 addColumn('clients', 'loc', 'TEXT');                   // current ASAM level of care (parsed code)
 addColumn('clients', 'referral_source', 'TEXT');       // who referred them in (for source→outcome trends)
+// Demographics pulled from the Kipu census (these fields ARE in the census).
+addColumn('clients', 'dob', 'TEXT');
+addColumn('clients', 'diagnosis', 'TEXT');             // diagnosis_codes
+addColumn('clients', 'insurance', 'TEXT');             // insurance_company
+addColumn('clients', 'phone', 'TEXT');
+addColumn('clients', 'pronouns', 'TEXT');
+addColumn('clients', 'language', 'TEXT');              // preferred_language
+addColumn('clients', 'mrn', 'TEXT');                   // medical record number
+addColumn('clients', 'payment_method', 'TEXT');
 addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapshot (kept fresh)
 addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
 addColumn('clients', 'likes', 'TEXT');                 // what the client likes/enjoys (AI, kept fresh)

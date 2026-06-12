@@ -9,7 +9,7 @@ import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
-import { whConfigured, whTest, whSyncRoster, whSyncNotes } from './src/warehouse.js';
+import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
@@ -546,6 +546,9 @@ app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
 app.get('/api/warehouse/status', requireAuth, requireAdmin, (req, res) => res.json({ configured: whConfigured() }));
 app.post('/api/warehouse/test', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await whTest()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/warehouse/columns', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await whColumns()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/warehouse/sync', requireAuth, requireAdmin, async (req, res) => {
   try { const r = await whSyncRoster(db); audit({ user: req.user, action: 'WH_SYNC', detail: `${r.created} new, ${r.matched} updated`, ip: req.ip }); res.json(r); }

@@ -43,19 +43,24 @@ async function query(q) {
   return r.recordset || [];
 }
 
+const CENSUS = () => (process.env.WH_CENSUS_SQL || 'SELECT * FROM kipu.census').replace(/;\s*$/, '');
+
 // Connectivity / auth / firewall check used by Settings before any sync.
 export async function whTest() {
-  await query('SELECT 1 AS ok');
-  // If a census query is configured, also report how many rows it returns.
+  await query('SELECT 1 AS ok');           // confirms connect + auth + firewall
   let sampleCount = null;
-  if (process.env.WH_CENSUS_SQL || true) {
-    try {
-      const census = process.env.WH_CENSUS_SQL || 'SELECT * FROM kipu.census';
-      const rows = await query(`SELECT COUNT(*) AS n FROM (${census.replace(/;\s*$/, '')}) AS _c`);
-      sampleCount = rows[0]?.n ?? null;
-    } catch { /* census table/view may differ; connectivity already confirmed */ }
-  }
+  try {
+    const rows = await query(`SELECT COUNT(*) AS n FROM (${CENSUS()}) AS _c`);
+    sampleCount = rows[0]?.n ?? null;
+  } catch { /* census table/view may differ; connectivity already confirmed */ }
   return { ok: true, sampleCount };
+}
+
+// Returns the COLUMN NAMES of the census query (no row values) so we can scope
+// it to the right location/active filter. Safe: names only.
+export async function whColumns() {
+  const rows = await query(`SELECT TOP 1 * FROM (${CENSUS()}) AS _c`);
+  return { columns: rows.length ? Object.keys(rows[0]) : [] };
 }
 
 // Pull the warehouse census and upsert into clients. Idempotent on the external

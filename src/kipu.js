@@ -62,9 +62,21 @@ export async function kipuSyncRoster() {
   const timeOf = (v) => { if (!v) return null; const m = String(v).match(/[T ](\d{2}:\d{2})/); return m ? m[1] : null; };
   const activeKids = [];   // census patients who are currently active (no discharge)
 
+  // Optional location scoping: set KIPU_LOCATION (e.g. "Armada Detox of Akron")
+  // to keep only patients at that location/program.
+  const wantLoc = (process.env.KIPU_LOCATION || '').trim().toLowerCase();
+  const matchesLoc = (p) => {
+    if (!wantLoc) return true;
+    const c = pick(p, 'location_name', 'location', 'program', 'level_of_care', 'facility_name', 'facility', 'building', 'unit', 'site');
+    if (c && String(c).toLowerCase().includes(wantLoc)) return true;
+    for (const v of Object.values(p)) { if (typeof v === 'string' && v.toLowerCase().includes(wantLoc)) return true; }
+    return false;
+  };
+
   for (const p of list) {
     const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name;
     if (!name) continue;
+    if (!matchesLoc(p)) continue;
     const kid = pick(p, 'id', 'casefile_id', 'patient_id', 'mrn') && String(pick(p, 'id', 'casefile_id', 'patient_id', 'mrn'));
     const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
     const admit = admitRaw ? String(admitRaw).slice(0, 10) : null;
@@ -118,4 +130,22 @@ export async function kipuSyncRoster() {
     deactivated = r.changes || 0;
   }
   return { total: list.length, created, matched, deactivated, activeNow: activeKids.length };
+}
+
+// Diagnostic: shows the SHAPE of the Kipu census response (field names + the
+// distinct values of location/status/discharge-looking fields) so we can write
+// the exact active+location filter. PHI-safe: no patient names returned.
+export async function kipuInspect() {
+  const path = process.env.KIPU_ROSTER_PATH || '/api/patients/census';
+  const data = await kipuGet(path);
+  const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
+  const fields = list.length ? Object.keys(list[0]) : [];
+  const facetKeys = fields.filter((k) => /location|program|level|facility|status|discharge|building|unit|site|admit|state|active|census/i.test(k));
+  const facets = {};
+  for (const k of facetKeys) {
+    const vals = new Set();
+    for (const p of list) { const v = p[k]; if (v != null && v !== '') vals.add(typeof v === 'object' ? JSON.stringify(v) : String(v)); if (vals.size > 40) break; }
+    facets[k] = [...vals].sort();
+  }
+  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets };
 }

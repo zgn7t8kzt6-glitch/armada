@@ -22,6 +22,9 @@ import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBr
 ensureAdmin();
 if (process.env.SEED_SAMPLE === 'true') ensureSampleData();
 ensureExampleClient12A();
+// One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.
+// the early contaminated batch). The scheduled assessment regenerates clean ones.
+try { db.prepare(`DELETE FROM alerts WHERE kind IN ('risk', 'concern') AND status = 'New'`).run(); } catch {}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -2009,11 +2012,13 @@ if (kipuConfigured()) {
       try {
         const r = await kipuSyncRoster();
         console.log(`[kipu] auto-sync: ${r.activeNow} active (${r.created} new, ${r.deactivated} discharged)`);
+        // Re-assess the census automatically (clears stale alerts + refreshes every
+        // client's clean read/snapshot). Disable with KIPU_AUTO_ASSESS=false.
+        if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
+          await runAssessAll({ id: null, name: 'Auto-sync' });
+        }
         // Anyone newly discharged gets an automatic "what could we do better" debrief.
         if (claudeConfigured() && !debriefJob.running) runDischargeDebriefs({ id: null, name: 'Auto-sync' });
-        if (process.env.KIPU_AUTO_ASSESS === 'true' && !assessJob.running) {
-          runAssessAll({ id: null, name: 'Auto-sync' });
-        }
       } catch (e) { console.error('[kipu] auto-sync failed:', e.message); }
     };
     setTimeout(autoSync, 30000);                 // first run shortly after boot

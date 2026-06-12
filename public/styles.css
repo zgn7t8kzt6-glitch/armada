@@ -47,6 +47,10 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
   padding:10px 14px;font-size:13.5px;color:var(--ink);cursor:pointer;font-weight:500;transition:background .12s,color .12s}
 .side-groups button:hover{background:rgba(27,42,39,.05)}
 .side-groups button.active{background:rgba(35,80,86,.10);color:var(--navy);font-weight:600}
+.side-groups button.side-admingroup{color:var(--muted)}
+.side-groups button.side-admingroup.active{color:var(--navy)}
+.side-divider{height:1px;background:var(--line);margin:9px 14px 7px}
+.side-cap{font-family:var(--sans);font-size:9.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:4px 14px 2px;margin-top:2px}
 .side-nav{display:flex;flex-direction:column;padding:2px 12px 10px;gap:1px;margin:4px 8px 0;border-top:1px solid var(--line)}
 .side-nav button{font-family:var(--sans);text-align:left;background:none;border:none;border-radius:8px;
   padding:7px 12px 7px 15px;font-size:12.5px;color:var(--muted);cursor:pointer;border-left:2px solid transparent;transition:.12s}

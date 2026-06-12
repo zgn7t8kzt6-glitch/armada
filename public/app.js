@@ -86,31 +86,37 @@ async function boot(){
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
 
-/* ---- grouped nav ---- */
+/* ---- grouped nav (role-aware: everyday up top; leadership & admin tucked away) ---- */
 const GROUPS=[
   {g:'today',label:'Today',first:'today'},
+  {g:'clients',label:'Clients',first:'clients'},
   {g:'care',label:'Care',first:'report'},
   {g:'clinical',label:'Clinical',first:'retention'},
-  {g:'people',label:'People',first:'lineup'},
-  {g:'admissions',label:'Admissions',first:'admissions'},
-  {g:'workforce',label:'Schedule',first:'coverage'},
-  {g:'referrals',label:'Referrals',first:'referrals'},
-  {g:'insights',label:'Insights',first:'outcomes'},
+  {g:'team',label:'Team',first:'mytasks'},
+  {g:'growth',label:'Growth',first:'admissions'},
   {g:'learn',label:'Learn',first:'training'},
   {g:'ask',label:'Ask AI',first:'askai'},
+  {g:'insights',label:'Insights',first:'outcomes',admin:true},
+  {g:'admin',label:'Admin',first:'settings',admin:true},
 ];
-const GROUP_OF={today:'today',
-  report:'care',clients:'care',editor:'care',journey:'care',concierge:'care',program:'care',
-  retention:'clinical',surveys:'clinical',incidents:'clinical',casemgmt:'clinical',
-  family:'people',team:'people',lineup:'people',assign:'people',mytasks:'people',
-  admissions:'admissions',alumni:'people',accountability:'insights',
-  referrals:'referrals',partners:'referrals',
-  coverage:'workforce',schedule:'workforce',
-  standard:'learn',library:'learn',training:'learn',
-  outcomes:'insights',analytics:'insights',scorecard:'insights',settings:'insights','report-view':'insights',users:'insights',audit:'insights',
-  askai:'ask'};
+const GROUP_OF={
+  today:'today',
+  clients:'clients',editor:'clients',journey:'clients',family:'clients',
+  report:'care',lineup:'care',concierge:'care',program:'care',
+  retention:'clinical',casemgmt:'clinical',surveys:'clinical',incidents:'clinical',
+  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',
+  admissions:'growth',referrals:'growth',partners:'growth',alumni:'growth',
+  outcomes:'insights',analytics:'insights',scorecard:'insights','report-view':'insights',accountability:'insights',
+  training:'learn',library:'learn',standard:'learn',
+  askai:'ask',
+  settings:'admin',users:'admin',audit:'admin',
+};
 function renderGroups(){
-  $('groupbar').innerHTML = GROUPS.map(x=>`<button data-g="${x.g}">${x.label}</button>`).join('');
+  const isAdmin = ME && ME.role==='admin';
+  const mk = x=>`<button data-g="${x.g}"${x.admin?' class="side-admingroup"':''}>${x.label}</button>`;
+  const everyday = GROUPS.filter(x=>!x.admin).map(mk).join('');
+  const leadership = isAdmin ? GROUPS.filter(x=>x.admin).map(mk).join('') : '';
+  $('groupbar').innerHTML = everyday + (leadership ? '<div class="side-divider"></div>'+leadership : '');
   document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'care'; });
   document.querySelectorAll('#groupbar button').forEach(b=>b.onclick=()=>{ const grp=GROUPS.find(x=>x.g===b.dataset.g); show(grp.first); });
 }

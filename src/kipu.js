@@ -254,9 +254,10 @@ function extractItems(itemsLike) {
     else if (raw != null && typeof raw !== 'object') v = String(raw);
     if (!v && Array.isArray(it.records)) {
       const picks = it.records.map((r) => {
-        const rv = String(r && (r.value ?? r.checked ?? r.answer) ?? '').toLowerCase();
+        const rraw = r ? (r.value ?? r.checked ?? r.answer) : null;
+        const rv = String(rraw == null ? '' : rraw).toLowerCase();
         const rl = stripHtml(String((r && (r.label || r.name)) || ''));
-        return (rv && rv !== 'false' && rv !== 'n/a' && rv !== '') ? (rl || rv) : '';
+        return (rv && rv !== 'false' && rv !== 'n/a') ? (rl || rv) : '';
       }).filter(Boolean);
       if (picks.length) v = picks.join(', ');
     }

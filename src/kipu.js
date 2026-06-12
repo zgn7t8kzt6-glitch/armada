@@ -162,38 +162,47 @@ export async function kipuPatientNotes(casefileId) {
   const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
   const data = await kipuGet(tmpl.replace('{id}', casefileId));
   let list = data?.patient_evaluations || data?.evaluations || (Array.isArray(data) ? data : []);
-  list.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))); // newest first
-  const max = +(process.env.KIPU_NOTES_MAX || 16);
+  // Narrative notes first (real free-text), then newest-first.
+  const narrative = (nm) => /progress|nursing|group|case ?manage|family|therapy|counsel|shift|psychosocial|\bbps\b|clinical|treatment plan|note|encounter|assessment/i.test(nm || '');
+  list.sort((a, b) => {
+    const an = narrative(a.name), bn = narrative(b.name);
+    if (an !== bn) return an ? -1 : 1;
+    return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+  });
+  const want = +(process.env.KIPU_NOTES_MAX || 12);
+  let budget = 30;                 // bound detail fetches per patient
   const texts = [];
-  for (const e of list.slice(0, max)) {
-    const nm = (e.name || 'Note').trim();
-    const date = String(e.created_at || '').slice(0, 10);
+  for (const e of list) {
+    if (texts.length >= want || budget <= 0) break;
+    if (!e.id) continue;
+    budget--;
     let content = '';
-    if (e.id) {
-      try {
-        const d = await kipuGet(`/api/patient_evaluations/${e.id}?patient_id=${casefileId}`);
-        const ev = d?.patient_evaluation || d?.evaluation || d;
-        // Prefer the answered items; fall back to the whole evaluation object.
-        content = extractItems(ev?.patient_evaluation_items || ev?.evaluation_items || ev?.items) || extractText(ev?.evaluation_content);
-        if (!content) content = extractText(ev);
-      } catch { /* skip this note */ }
-    }
-    content = (content || '').replace(/^\s*standard\s*$/i, '').trim();
-    if (content && content.length > 12) texts.push(`[${date} · ${nm}]\n${content}`);
+    try {
+      const d = await kipuGet(`/api/patient_evaluations/${e.id}?patient_id=${casefileId}`);
+      const ev = d?.patient_evaluation || d?.evaluation || d;
+      content = extractItems(ev?.patient_evaluation_items || ev?.evaluation_items || ev?.items);
+      if (!content) { const t = extractText(ev?.evaluation_content); if (t && !/^standard$/i.test(t)) content = t; }
+    } catch { /* skip this note */ }
+    if (content && content.length > 15) texts.push(`[${String(e.created_at || '').slice(0, 10)} · ${(e.name || 'Note').trim()}]\n${content}`);
   }
   return texts.join('\n\n').slice(0, 18000); // keep the prompt bounded
 }
 
-// Pull label: value pairs out of Kipu evaluation items (only answered fields).
+// Pull label: value pairs out of Kipu evaluation items, keeping only REAL
+// answers (drop blank/n-a/false checkbox noise).
+const NOISE = new Set(['n/a', 'na', 'none', 'false', 'no', '0', 'null', '--', '', 'unknown', '.', 'n/a.', 'not applicable']);
 function extractItems(items) {
   if (!Array.isArray(items)) return '';
   const out = [];
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
-    const label = it.label || it.name || it.field_name || it.question || '';
-    const val = it.value ?? it.answer ?? it.description ?? it.note ?? it.text ?? it.string_value ?? it.records;
-    const v = extractText(val);
-    if (v && v.length > 1) out.push(label ? `${stripHtml(String(label))}: ${v}` : v);
+    const label = stripHtml(String(it.label || it.name || it.field_name || it.question || ''));
+    const v = extractText(it.value ?? it.answer ?? it.description ?? it.note ?? it.text ?? it.string_value ?? it.records).trim();
+    if (!v) continue;
+    const lv = v.toLowerCase();
+    if (NOISE.has(lv)) continue;
+    if (lv === 'true') { if (label) out.push(`${label}: yes`); continue; } // a checked box
+    out.push(label ? `${label}: ${v}` : v);
   }
   return out.join('\n');
 }

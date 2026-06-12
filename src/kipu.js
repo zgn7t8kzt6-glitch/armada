@@ -194,7 +194,13 @@ export async function kipuPatientNotes(casefileId) {
   // notes that belong to this exact patient (paginated pages can otherwise leak
   // other patients' notes).
   const want_cf = String(casefileId);
-  list = list.filter((e) => { const cf = e.patient_casefile_id ?? e.casefile_id; return cf == null || String(cf) === want_cf; });
+  const want_pref = want_cf.split(':')[0];
+  list = list.filter((e) => {
+    const cf = e.patient_casefile_id ?? e.casefile_id ?? e.patient_id;
+    if (cf == null || cf === '') return true;            // keep if the note doesn't say
+    const s = String(cf);
+    return s === want_cf || s.split(':')[0] === want_pref;
+  });
   // CURRENT STAY ONLY: keep notes from the recent window (default 90 days) so a
   // re-admit's old chart never leaks in. Configurable via KIPU_NOTE_DAYS.
   const noteDays = +(process.env.KIPU_NOTE_DAYS || 30);

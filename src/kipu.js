@@ -44,6 +44,29 @@ export async function kipuTest() {
   return { ok: true, sampleCount: n };
 }
 
+// Deep-search an object for the first value whose KEY matches a pattern (the
+// level of care / referral source can live nested in the patient detail).
+function deepFind(obj, keyRe, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 4) return null;
+  for (const [k, v] of Object.entries(obj)) {
+    if (keyRe.test(k) && v != null && typeof v !== 'object' && String(v).trim()) return String(v);
+  }
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') { const f = deepFind(v, keyRe, depth + 1); if (f) return f; }
+  }
+  return null;
+}
+const LOC_KEY_RE = /(level.*of.*care|levelofcare|^loc$|care.?level|^asam|asam.?level|program|treatment.?track|^level$|^track$)/i;
+const REF_KEY_RE = /(referr|marketing.?source|lead.?source|source.?of|referral)/i;
+// Fetch one patient's full record (the census omits LOC/program/referral).
+async function kipuPatientDetail(casefileId) {
+  for (const path of [`/api/patients/${casefileId}`, `/api/patients/${casefileId}?include=evaluations`]) {
+    try { const d = await kipuGet(path); return d?.patient || (Array.isArray(d?.patients) ? d.patients[0] : null) || d; }
+    catch { /* try next shape */ }
+  }
+  return null;
+}
+
 // Pull the roster and upsert into clients. Idempotent on the Kipu id (falls back
 // to name). Non-destructive: only fills blank fields on existing clients so it
 // can't clobber staff edits. Maps the analytics fields (admit time, therapist,
@@ -93,6 +116,10 @@ export async function kipuSyncRoster() {
   // Set KIPU_ADMIT_DAYS only if you want to drop very old admissions.
   const admitDays = process.env.KIPU_ADMIT_DAYS ? +process.env.KIPU_ADMIT_DAYS : 0;
   const admitCutoff = admitDays ? new Date(Date.now() - admitDays * 864e5).toISOString().slice(0, 10) : null;
+  // The census has no level-of-care/program field, so fetch each active
+  // patient's detail to find it. On by default; KIPU_PATIENT_DETAIL=false to skip.
+  const useDetail = process.env.KIPU_PATIENT_DETAIL !== 'false';
+  let detailBudget = +(process.env.KIPU_DETAIL_MAX || 80);
 
   for (const p of list) {
     const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name;
@@ -112,8 +139,7 @@ export async function kipuSyncRoster() {
       'care_level', 'program', 'program_name', 'treatment_program', 'service', 'service_name',
       'census_program', 'bed_type', 'unit', 'track');
     if (programRaw && typeof programRaw === 'object') programRaw = programRaw.name || programRaw.label || programRaw.title || JSON.stringify(programRaw);
-    const program = programRaw != null ? String(programRaw) : null;
-    const refSrcRaw = pick(p, 'referral_source', 'referrer', 'referring_provider', 'referral', 'marketing_source', 'lead_source', 'referred_by', 'referral_name', 'source_of_referral');
+    let refSrcRaw = pick(p, 'referral_source', 'referrer', 'referring_provider', 'referral', 'marketing_source', 'lead_source', 'referred_by', 'referral_name', 'source_of_referral');
     const dischStatus = pick(p, 'discharge_type', 'discharge_status');
     const dischDate = pick(p, 'discharge_date', 'discharged_at');
     const dischDest = pick(p, 'discharge_destination', 'referred_to', 'aftercare_facility');
@@ -122,6 +148,19 @@ export async function kipuSyncRoster() {
       (dischStatus && !['active', 'admitted', 'current'].includes(String(dischStatus).toLowerCase())));
     if (!discharged && kid) activeKids.push(kid);
 
+    // The census lacks level-of-care; pull it from the patient detail (and grab
+    // a referral source there too) for active patients. Bounded + best-effort.
+    if (useDetail && kid && !discharged && (programRaw == null || refSrcRaw == null) && detailBudget > 0) {
+      detailBudget--;
+      try {
+        const det = await kipuPatientDetail(kid);
+        if (det) {
+          if (programRaw == null) programRaw = deepFind(det, LOC_KEY_RE);
+          if (refSrcRaw == null) refSrcRaw = deepFind(det, REF_KEY_RE);
+        }
+      } catch { /* best-effort */ }
+    }
+    const program = programRaw != null ? String(programRaw) : null;
     const newLoc = realLoc(program);
     const adm = !refSrcRaw ? admRef.get(name, p.first_name || name) : null;
     const refSource = (refSrcRaw && String(refSrcRaw)) || (adm && adm.referral_source) || null;
@@ -382,5 +421,19 @@ export async function kipuInspect() {
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     locations = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: l.location_name ?? l.name ?? l.enabled_location_name ?? JSON.stringify(l).slice(0, 80) }));
   } catch { /* locations endpoint optional */ }
-  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations };
+  // The census has no level-of-care field — probe one patient's DETAIL to find
+  // where the LOC/program actually lives, so we can confirm the sync will see it.
+  let patientDetail = null;
+  const cf = list.length ? (list[0].casefile_id ?? list[0].id ?? list[0].patient_id) : null;
+  if (cf) {
+    try {
+      const det = await kipuPatientDetail(String(cf));
+      if (det) {
+        const locFound = deepFind(det, LOC_KEY_RE);
+        const refFound = deepFind(det, REF_KEY_RE);
+        patientDetail = { keys: Object.keys(det).slice(0, 60), levelOfCareFound: locFound || '(none — LOC not in patient detail either)', referralFound: refFound || '(none)' };
+      } else { patientDetail = { error: 'patient detail returned nothing' }; }
+    } catch (e) { patientDetail = { error: String(e.message).slice(0, 140) }; }
+  }
+  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail };
 }

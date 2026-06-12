@@ -59,14 +59,25 @@ function deepFind(obj, keyRe, depth = 0) {
 const LOC_KEY_RE = /(level.*of.*care|levelofcare|^loc$|care.?level|^asam|asam.?level|program|treatment.?track|^level$|^track$)/i;
 const REF_KEY_RE = /(referr|marketing.?source|lead.?source|source.?of|referral)/i;
 // Fetch one patient's full record (the census omits LOC/program/referral).
-// Kipu's patient-detail endpoint REQUIRES phi_level (else 422); high returns the
-// clinical fields we need. patient_master_id is the numeric half of casefile_id.
-async function kipuPatientDetail(casefileId) {
+// Kipu addresses the patient as {patient_master_id}:{casefile_id}: the PATH is
+// the numeric master (Integer-parsed) and the casefile UUID rides in the query.
+// phi_level is required (else 422); high returns the clinical fields we need.
+function kipuDetailPaths(casefileId) {
   const phi = process.env.KIPU_PHI_LEVEL || 'high';
-  const master = String(casefileId).split(':')[0];
-  const q = `phi_level=${encodeURIComponent(phi)}&patient_master_id=${encodeURIComponent(master)}`;
-  for (const path of [`/api/patients/${casefileId}?${q}`, `/api/patients/${master}?${q}`]) {
-    try { const d = await kipuGet(path); return d?.patient || (Array.isArray(d?.patients) ? d.patients[0] : null) || d; }
+  const s = String(casefileId);
+  const master = s.split(':')[0];
+  const uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+  const e = encodeURIComponent;
+  return [
+    `/api/patients/${master}?phi_level=${phi}&patient_master_id=${e(uuid)}`,
+    `/api/patients/${master}?phi_level=${phi}&casefile_id=${e(uuid)}`,
+    `/api/patients/${master}?phi_level=${phi}&patient_master_id=${master}&casefile_id=${e(uuid)}`,
+    `/api/patients/${e(uuid)}?phi_level=${phi}&patient_master_id=${master}`,
+  ];
+}
+async function kipuPatientDetail(casefileId) {
+  for (const path of kipuDetailPaths(casefileId)) {
+    try { const d = await kipuGet(path); const det = d?.patient || (Array.isArray(d?.patients) ? d.patients[0] : null) || d; if (det && typeof det === 'object') return det; }
     catch { /* try next shape */ }
   }
   return null;
@@ -461,10 +472,7 @@ export async function kipuInspect() {
   let patientDetail = null;
   const cf = list.length ? String(list[0].casefile_id ?? list[0].id ?? list[0].patient_id ?? '') : null;
   if (cf) {
-    const phi = process.env.KIPU_PHI_LEVEL || 'high';
-    const master = cf.split(':')[0];
-    const q = `phi_level=${phi}&patient_master_id=${master}`;
-    const tries = [`/api/patients/${cf}?${q}`, `/api/patients/${master}?${q}`, `/api/patients/${cf}?phi_level=${phi}`];
+    const tries = kipuDetailPaths(cf);
     const attempts = []; let det = null;
     for (const path of tries) {
       try {

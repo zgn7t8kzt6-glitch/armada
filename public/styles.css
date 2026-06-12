@@ -51,6 +51,12 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
 .side-groups button.side-admingroup.active{color:var(--navy)}
 .side-divider{height:1px;background:var(--line);margin:9px 14px 7px}
 .side-cap{font-family:var(--sans);font-size:9.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:4px 14px 2px;margin-top:2px}
+/* Insights in-page tabs */
+.itabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:18px;padding-bottom:0}
+.itab{font-family:var(--sans);background:none;border:none;border-bottom:2px solid transparent;padding:9px 14px;font-size:13.5px;font-weight:500;color:var(--muted);cursor:pointer;margin-bottom:-1px;transition:color .15s}
+.itab:hover{color:var(--navy)}
+.itab.active{color:var(--navy);font-weight:600;border-bottom-color:var(--gold)}
+[data-theme="dark"] .itab.active{color:#cfe3df}
 .side-nav{display:flex;flex-direction:column;padding:2px 12px 10px;gap:1px;margin:4px 8px 0;border-top:1px solid var(--line)}
 .side-nav button{font-family:var(--sans);text-align:left;background:none;border:none;border-radius:8px;
   padding:7px 12px 7px 15px;font-size:12.5px;color:var(--muted);cursor:pointer;border-left:2px solid transparent;transition:.12s}

@@ -82,7 +82,10 @@ async function boot(){
   fillSelect($('u_job'), META.jobRoles);
   $('r_date').value = today(); $('a_date').value = today();
   renderGroups();
-  show('today');
+  // Role-based landing: everyone opens already where they work.
+  const landing = ME.role==='admin' ? 'today'
+    : ({ 'Nurse':'retention', 'Therapist':'casemgmt', 'BHT / Tech':'report', 'Kitchen':'concierge' }[ME.job_role] || 'today');
+  show(landing);
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
 
@@ -125,7 +128,8 @@ function selectGroup(g){
   const navBtns=[...document.querySelectorAll('#nav button')];
   navBtns.forEach(b=>{
     const adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
-    b.style.display = (b.dataset.group===g && !adminHidden) ? '' : 'none';
+    const sub = b.hasAttribute('data-subview');   // reached via in-page tabs, not the sidebar
+    b.style.display = (b.dataset.group===g && !adminHidden && !sub) ? '' : 'none';
   });
   // Hide the sub-nav when a section has only one screen (no redundant repeat).
   const visible=navBtns.filter(b=>b.dataset.group===g && b.style.display!=='none').length;
@@ -137,8 +141,9 @@ function show(v){
   selectGroup(GROUP_OF[v]||'care');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
+  document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  if(activeBtn && $('topbarTitle')) $('topbarTitle').textContent = activeBtn.textContent;
+  if(activeBtn && $('topbarTitle')) $('topbarTitle').textContent = (GROUP_OF[v]==='insights'?'Insights':activeBtn.textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='today') loadToday();
   if(v==='askai') loadAskAI();

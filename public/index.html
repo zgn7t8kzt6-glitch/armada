@@ -45,9 +45,9 @@
     <button data-view="today">Today</button>
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
-    <button data-view="outcomes">Outcomes</button>
-    <button data-view="analytics" data-admin>Risk Analytics</button>
-    <button data-view="scorecard">Scorecard</button>
+    <button data-view="outcomes">Insights</button>
+    <button data-view="analytics" data-admin data-subview>Risk Analytics</button>
+    <button data-view="scorecard" data-subview>Scorecard</button>
     <button data-view="lineup">Lineup</button>
     <button data-view="surveys">Surveys</button>
     <button data-view="concierge">Concierge</button>
@@ -61,7 +61,7 @@
     <button data-view="family">Family</button>
     <button data-view="admissions">Admissions</button>
     <button data-view="alumni">Alumni</button>
-    <button data-view="accountability" data-admin>Accountability</button>
+    <button data-view="accountability" data-admin data-subview>Accountability</button>
     <button data-view="team">Team</button>
     <button data-view="coverage">Coverage</button>
     <button data-view="schedule" data-admin>Schedule</button>
@@ -72,7 +72,7 @@
     <button data-view="editor">Care Card</button>
     <button data-view="assign" data-admin>Assign Staff</button>
     <button data-view="settings" data-admin>Settings</button>
-    <button data-view="report-view" data-admin>Report</button>
+    <button data-view="report-view" data-admin data-subview>Reports</button>
     <button data-view="users" data-admin>Staff</button>
     <button data-view="audit" data-admin>Audit Log</button>
   </nav>
@@ -254,6 +254,13 @@
 
     <!-- ACCOUNTABILITY -->
     <section id="accountability" class="view">
+      <div class="itabs sans no-print">
+        <button class="itab" data-tab="outcomes" onclick="show('outcomes')">Overview</button>
+        <button class="itab" data-tab="analytics" data-admin onclick="show('analytics')">Risk Analytics</button>
+        <button class="itab" data-tab="scorecard" onclick="show('scorecard')">Scorecard</button>
+        <button class="itab" data-tab="accountability" data-admin onclick="show('accountability')">Accountability</button>
+        <button class="itab" data-tab="report-view" data-admin onclick="show('report-view')">Reports</button>
+      </div>
       <div class="card no-print">
         <h3>Employee Accountability</h3>
         <p class="sub sans">How often each teammate showed up in the care system — and where check-ins were missed. The teammate who missed the least each month earns recognition.</p>
@@ -349,6 +356,13 @@
 
     <!-- SCORECARD -->
     <section id="scorecard" class="view">
+      <div class="itabs sans no-print">
+        <button class="itab" data-tab="outcomes" onclick="show('outcomes')">Overview</button>
+        <button class="itab" data-tab="analytics" data-admin onclick="show('analytics')">Risk Analytics</button>
+        <button class="itab" data-tab="scorecard" onclick="show('scorecard')">Scorecard</button>
+        <button class="itab" data-tab="accountability" data-admin onclick="show('accountability')">Accountability</button>
+        <button class="itab" data-tab="report-view" data-admin onclick="show('report-view')">Reports</button>
+      </div>
       <div class="card"><h3>Excellence Scorecard</h3><p class="sub sans">The numbers the Standard says to review monthly. Green = on target.</p><div id="scoreGrid" class="ret-cards"></div></div>
       <div class="card">
         <h3>The Save (PAUSE) tracker</h3>
@@ -639,6 +653,13 @@
 
     <!-- OUTCOMES -->
     <section id="outcomes" class="view">
+      <div class="itabs sans no-print">
+        <button class="itab" data-tab="outcomes" onclick="show('outcomes')">Overview</button>
+        <button class="itab" data-tab="analytics" data-admin onclick="show('analytics')">Risk Analytics</button>
+        <button class="itab" data-tab="scorecard" onclick="show('scorecard')">Scorecard</button>
+        <button class="itab" data-tab="accountability" data-admin onclick="show('accountability')">Accountability</button>
+        <button class="itab" data-tab="report-view" data-admin onclick="show('report-view')">Reports</button>
+      </div>
       <div class="card">
         <h3>Outcomes</h3>
         <p class="sub sans">Are we keeping clients and helping them complete? The numbers that prove the care is working.</p>
@@ -718,6 +739,13 @@
 
     <!-- RISK ANALYTICS -->
     <section id="analytics" class="view">
+      <div class="itabs sans no-print">
+        <button class="itab" data-tab="outcomes" onclick="show('outcomes')">Overview</button>
+        <button class="itab" data-tab="analytics" data-admin onclick="show('analytics')">Risk Analytics</button>
+        <button class="itab" data-tab="scorecard" onclick="show('scorecard')">Scorecard</button>
+        <button class="itab" data-tab="accountability" data-admin onclick="show('accountability')">Accountability</button>
+        <button class="itab" data-tab="report-view" data-admin onclick="show('report-view')">Reports</button>
+      </div>
       <div class="card">
         <h3>Risk &amp; Outcome Analytics</h3>
         <p class="sub sans">What the data says about who's at risk and why — length of stay and AMA by when clients are admitted and by staff. Correlation, not diagnosis. Fills in automatically as discharges accumulate (and once Kipu backfills history).</p>
@@ -817,6 +845,13 @@
 
     <!-- REPORT -->
     <section id="report-view" class="view">
+      <div class="itabs sans no-print">
+        <button class="itab" data-tab="outcomes" onclick="show('outcomes')">Overview</button>
+        <button class="itab" data-tab="analytics" data-admin onclick="show('analytics')">Risk Analytics</button>
+        <button class="itab" data-tab="scorecard" onclick="show('scorecard')">Scorecard</button>
+        <button class="itab" data-tab="accountability" data-admin onclick="show('accountability')">Accountability</button>
+        <button class="itab" data-tab="report-view" data-admin onclick="show('report-view')">Reports</button>
+      </div>
       <div class="card no-print">
         <h3>Weekly Leadership Report</h3>
         <p class="sub sans">Outcomes, wow stories, delights, and open concerns for the past 7 days.</p>

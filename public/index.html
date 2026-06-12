@@ -37,23 +37,14 @@
 
 <!-- APP -->
 <div id="app" style="display:none">
-  <header>
-    <img src="/logo.svg" alt="Armada Recovery" class="header-mark"/>
-    <div>
-      <h1>Armada Recovery</h1>
-      <div class="tag">Care Standards · The Gold Standard of Client Care</div>
+  <div class="shell" id="shell">
+   <aside class="sidebar" id="sidebar">
+    <div class="side-brand">
+      <img src="/logo.svg" alt="Armada Recovery" class="side-mark"/>
+      <div class="side-word">Armada<span>Recovery</span></div>
     </div>
-    <div class="userbox sans">
-      <span id="whoami"></span>
-      <button class="btn btn-ghost btn-sm" onclick="toggleTheme()" id="themeBtn" title="Day / night">🌙</button>
-      <button class="btn btn-ghost btn-sm" onclick="manageMfa()" title="Two-factor">🔐 2FA</button>
-      <button class="btn btn-ghost btn-sm" onclick="changeMyPassword()">Change password</button>
-      <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign out</button>
-    </div>
-  </header>
-
-  <div class="sans" id="groupbar"></div>
-  <nav class="sans" id="nav">
+    <div class="side-groups sans" id="groupbar"></div>
+    <nav class="side-nav sans" id="nav">
     <button data-view="today">Today</button>
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
@@ -87,7 +78,21 @@
     <button data-view="users" data-admin>Staff</button>
     <button data-view="audit" data-admin>Audit Log</button>
   </nav>
-
+    <div class="side-foot sans">
+      <div class="side-user"><span class="avatar avatar-sm" id="sideAvatar"></span><span id="whoami"></span></div>
+      <div class="side-actions">
+        <button class="iconbtn" onclick="toggleTheme()" id="themeBtn" title="Day / night">🌙</button>
+        <button class="iconbtn" onclick="manageMfa()" title="Two-factor">🔐</button>
+        <button class="iconbtn" onclick="changeMyPassword()" title="Change password">⚙</button>
+        <button class="iconbtn" onclick="doLogout()" title="Sign out">⏻</button>
+      </div>
+    </div>
+   </aside>
+   <div class="content">
+    <header class="topbar sans">
+      <button class="hamb" onclick="toggleNav()" aria-label="Menu">☰</button>
+      <div class="topbar-title" id="topbarTitle">Today</div>
+    </header>
   <main>
     <!-- TODAY (command center) -->
     <section id="today" class="view">
@@ -794,6 +799,9 @@
     </section>
   </main>
   <footer class="sans">Armada Care Standards · shared workspace</footer>
+   </div><!-- /content -->
+   <div class="scrim" onclick="toggleNav()"></div>
+  </div><!-- /shell -->
   <div id="huddle" class="huddle" style="display:none"><div id="huddleBody"></div>
     <div class="huddle-actions"><button class="btn btn-gold sans" onclick="lineupDone()">✓ Lineup done</button><button class="btn btn-ghost sans" onclick="closeHuddle()">Close</button></div>
   </div>

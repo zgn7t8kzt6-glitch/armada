@@ -71,7 +71,8 @@ async function changeMyPassword(){
 
 async function boot(){
   $('loginScreen').style.display='none'; $('app').style.display='block';
-  $('whoami').textContent = `${ME.name} · ${ME.job_role}${ME.role==='admin'?' · Admin':''}`;
+  $('whoami').textContent = `${ME.name}${ME.role==='admin'?' · Admin':''}`;
+  if($('sideAvatar')) $('sideAvatar').textContent = initials(ME.name);
   document.querySelectorAll('[data-admin]').forEach(el => el.style.display = ME.role==='admin' ? '' : 'none');
   try { META = await api('/meta'); } catch(e){}
   if (META.claude) { $('aiBtn').style.display = 'inline-block'; $('briefBtn').style.display = 'inline-block'; }
@@ -121,10 +122,14 @@ function selectGroup(g){
   });
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.view));
+function toggleNav(){ document.getElementById('shell').classList.toggle('nav-open'); }
 function show(v){
   selectGroup(GROUP_OF[v]||'care');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
+  const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
+  if(activeBtn && $('topbarTitle')) $('topbarTitle').textContent = activeBtn.textContent;
+  document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='today') loadToday();
   if(v==='askai') loadAskAI();
   if(v==='incidents') loadIncidents();

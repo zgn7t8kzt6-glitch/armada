@@ -6,7 +6,7 @@ import { db, audit, getState, setState } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
-import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES } from './src/db.js';
+import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import {
@@ -14,7 +14,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -85,7 +85,7 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
   res.json({ client: c });
 });
 
-const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'sober', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'anchor_why', 'welcome_plan', 'aftercare_plan'];
+const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'admit_time', 'sober', 'therapist', 'case_manager', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'anchor_why', 'welcome_plan', 'aftercare_plan'];
 
 function saveTasks(clientId, tasks = []) {
   db.prepare(`DELETE FROM tasks WHERE client_id = ?`).run(clientId);
@@ -453,12 +453,12 @@ const SERVICE_VALUES = [
 // Discharge a client; auto-create aftercare follow-up calls (the fond farewell).
 app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
   const { status, date } = req.body || {};
-  if (!['Completed', 'AMA', 'Transferred'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  if (!DISCHARGE_TYPES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   const d = date || new Date().toISOString().slice(0, 10);
   const b = req.body || {};
   const steps = b.steps ? JSON.stringify(b.steps) : null;
-  db.prepare(`UPDATE clients SET discharge_status = ?, discharge_date = ?, departure_steps = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
-    .run(status, d, steps, b.reason || null, b.followthrough || null, b.improve || null, req.params.id);
+  db.prepare(`UPDATE clients SET discharge_status = ?, discharge_date = ?, discharge_destination = ?, departure_steps = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
+    .run(status, d, b.destination || null, steps, b.reason || null, b.followthrough || null, b.improve || null, req.params.id);
   if (status !== 'Transferred') {
     // Aftercare calls are REQUIRED tasks, auto-assigned to the Aftercare Coordinator.
     const coordId = getState('aftercare_coordinator');
@@ -1065,6 +1065,96 @@ app.post('/api/salesforce/test', requireAuth, requireAdmin, async (req, res) => 
 app.post('/api/salesforce/sync', requireAuth, requireAdmin, async (req, res) => {
   try { const r = await sfSyncInbound(db); audit({ user: req.user, action: 'SF_SYNC', detail: `${r.created} inbound`, ip: req.ip }); res.json(r); }
   catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* ---------------- Risk & outcome analytics ---------------- */
+// Computes length-of-stay (LOS) and AMA patterns across time-of-admit
+// dimensions and staff attribution, plus the biggest active risks and a queue of
+// discharges still missing where/why (the manual-fallback when Kipu can't fill it).
+function buildAnalytics(days) {
+  const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+  const rows = db.prepare(`SELECT id, admit, admit_time, discharge_status, discharge_date, therapist, case_manager
+    FROM clients WHERE admit IS NOT NULL AND admit != '' AND discharge_date IS NOT NULL AND discharge_date >= ?`).all(since);
+
+  // Experience score per client (avg of scale answers on the experience survey).
+  const expSurvey = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get();
+  const expByClient = {};
+  if (expSurvey) {
+    db.prepare(`SELECT r.client_id cid, AVG(a.value_num) avg FROM survey_responses r
+      JOIN survey_answers a ON a.response_id = r.id
+      WHERE r.survey_id = ? AND a.value_num IS NOT NULL GROUP BY r.client_id`).all(expSurvey.id)
+      .forEach((x) => { if (x.cid) expByClient[x.cid] = x.avg; });
+  }
+
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const losOf = (a, d) => { const ms = new Date(d + 'T00:00') - new Date(a + 'T00:00'); return ms >= 0 ? Math.round(ms / 864e5) : null; };
+  const timeBucket = (t) => { if (!t) return 'Unknown'; const h = +String(t).slice(0, 2); if (isNaN(h)) return 'Unknown'; return h < 6 ? 'Overnight (12–6a)' : h < 12 ? 'Morning (6a–12p)' : h < 18 ? 'Afternoon (12–6p)' : 'Evening (6p–12a)'; };
+  const domBucket = (a) => { const d = +a.slice(8, 10); return d <= 10 ? 'Early (1–10)' : d <= 20 ? 'Mid (11–20)' : 'Late (21–31)'; };
+
+  const mk = () => ({});
+  const add = (map, key, los, ama) => { const m = map[key] || (map[key] = { n: 0, losSum: 0, losN: 0, ama: 0 }); m.n++; if (los != null) { m.losSum += los; m.losN++; } if (ama) m.ama++; };
+  const byDow = mk(), byTime = mk(), byDom = mk(), byTher = mk(), byCM = mk();
+  const expTher = {};
+  let total = 0, amaTotal = 0, losSum = 0, losN = 0;
+  for (const r of rows) {
+    const los = losOf(r.admit, r.discharge_date); const ama = r.discharge_status === 'AMA';
+    total++; if (ama) amaTotal++; if (los != null) { losSum += los; losN++; }
+    add(byDow, DOW[new Date(r.admit + 'T00:00').getDay()], los, ama);
+    add(byTime, timeBucket(r.admit_time), los, ama);
+    add(byDom, domBucket(r.admit), los, ama);
+    if (r.therapist) { add(byTher, r.therapist, los, ama); if (expByClient[r.id] != null) { const e = expTher[r.therapist] || (expTher[r.therapist] = { sum: 0, n: 0 }); e.sum += expByClient[r.id]; e.n++; } }
+    if (r.case_manager) add(byCM, r.case_manager, los, ama);
+  }
+  const fmt = (map) => Object.entries(map).map(([k, m]) => ({ key: k, n: m.n, avgLos: m.losN ? +(m.losSum / m.losN).toFixed(1) : null, ama: m.ama, amaRate: m.n ? Math.round(m.ama / m.n * 100) : 0 })).sort((a, b) => b.n - a.n);
+  const staff = (map) => fmt(map).map((s) => ({ ...s, exp: expTher[s.key] ? +(expTher[s.key].sum / expTher[s.key].n).toFixed(2) : null }));
+  const dowArr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => { const m = byDow[d]; return { key: d, n: m ? m.n : 0, avgLos: m && m.losN ? +(m.losSum / m.losN).toFixed(1) : null, ama: m ? m.ama : 0, amaRate: m && m.n ? Math.round(m.ama / m.n * 100) : 0 }; });
+
+  const risk = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL`).all()
+    .map((c) => { const a = latestAmaRead(c.id); return a && a.level !== 'Low' ? { id: c.id, name: c.pref || c.name, room: c.room, level: a.level, summary: a.summary } : null; })
+    .filter(Boolean).sort((a, b) => (b.level === 'High') - (a.level === 'High'));
+
+  const missingDischarge = db.prepare(`SELECT id, pref, name, discharge_status, discharge_date FROM clients
+    WHERE discharge_date IS NOT NULL AND discharge_date >= ?
+      AND ((discharge_reason IS NULL OR discharge_reason = '') OR (discharge_destination IS NULL OR discharge_destination = ''))
+    ORDER BY discharge_date DESC LIMIT 50`).all(since);
+
+  return {
+    rangeDays: days, sampleSize: total,
+    totals: { discharges: total, amaRate: total ? Math.round(amaTotal / total * 100) : 0, avgLos: losN ? +(losSum / losN).toFixed(1) : null },
+    byDow: dowArr, byTime: fmt(byTime), byDom: fmt(byDom),
+    byTherapist: staff(byTher), byCaseManager: staff(byCM),
+    risk, missingDischarge,
+  };
+}
+
+app.get('/api/analytics', requireAuth, (req, res) => {
+  const days = ({ '90': 90, '180': 180, '365': 365, '730': 730 })[String(req.query.range)] || 365;
+  res.json(buildAnalytics(days));
+});
+
+// Fill the gap Kipu couldn't: where/why a client went. Manual fallback only.
+app.post('/api/clients/:id/discharge-info', requireAuth, (req, res) => {
+  const b = req.body || {};
+  db.prepare(`UPDATE clients SET discharge_destination = COALESCE(?, discharge_destination), discharge_reason = COALESCE(?, discharge_reason) WHERE id = ?`)
+    .run(b.destination || null, b.reason || null, req.params.id);
+  audit({ user: req.user, action: 'DISCHARGE_INFO', entity: 'client', entity_id: +req.params.id, ip: req.ip });
+  res.json({ ok: true });
+});
+
+app.get('/api/analytics/insights', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured.' });
+  const a = buildAnalytics(({ '90': 90, '180': 180, '365': 365, '730': 730 })[String(req.query.range)] || 365);
+  if (a.sampleSize < 3) return res.json({ brief: `Only ${a.sampleSize} completed stays in this window — not enough to read patterns yet. The analysis turns on automatically as discharges accumulate (or once Kipu backfills history).` });
+  const line = (rows) => rows.map((r) => `  - ${r.key}: ${r.n} stays, avg LOS ${r.avgLos ?? '—'}d, AMA ${r.amaRate}%`).join('\n');
+  const staffLine = (rows) => rows.map((r) => `  - ${r.key}: ${r.n} clients, avg LOS ${r.avgLos ?? '—'}d, AMA ${r.amaRate}%${r.exp != null ? `, experience ${r.exp}/5` : ''}`).join('\n');
+  const ctx = `Length-of-stay (LOS) & AMA analytics, last ${a.rangeDays} days. ${a.totals.discharges} completed stays. Overall AMA ${a.totals.amaRate}%, avg LOS ${a.totals.avgLos}d.\n\n` +
+    `By day of week admitted:\n${line(a.byDow)}\n\nBy time of admit:\n${line(a.byTime)}\n\nBy day-of-month admitted:\n${line(a.byDom)}\n\n` +
+    `By therapist:\n${staffLine(a.byTherapist) || '  (no therapist attribution yet)'}\n\nBy case manager:\n${staffLine(a.byCaseManager) || '  (none)'}`;
+  try {
+    const brief = await generateOutcomeInsights(ctx);
+    audit({ user: req.user, action: 'ANALYTICS_INSIGHTS', ip: req.ip });
+    res.json({ brief });
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 /* ---------------- Family engagement ---------------- */

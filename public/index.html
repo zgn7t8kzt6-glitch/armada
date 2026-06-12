@@ -55,6 +55,7 @@
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
     <button data-view="outcomes">Outcomes</button>
+    <button data-view="analytics" data-admin>Risk Analytics</button>
     <button data-view="scorecard">Scorecard</button>
     <button data-view="lineup">Lineup</button>
     <button data-view="surveys">Surveys</button>
@@ -520,7 +521,12 @@
         <div class="grid3">
           <div><label>Program / Level of Care</label><input id="f_program"/></div>
           <div><label>Admission Date</label><input id="f_admit" type="date"/></div>
+          <div><label>Time of Admit</label><input id="f_admit_time" type="time"/></div>
+        </div>
+        <div class="grid3">
           <div><label>Sobriety / Milestone Date</label><input id="f_sober" type="date"/></div>
+          <div><label>Primary Therapist</label><input id="f_therapist" placeholder="for outcome tracking"/></div>
+          <div><label>Case Manager</label><input id="f_case_manager"/></div>
         </div>
         <label>★ Personal Touch — what makes this client feel genuinely cared for</label>
         <textarea id="f_touch"></textarea>
@@ -604,6 +610,34 @@
         <h3>Open concerns</h3>
         <p class="sub sans">Whoever heard it owns it until it's resolved.</p>
         <div id="outConcerns"></div>
+      </div>
+    </section>
+
+    <!-- RISK ANALYTICS -->
+    <section id="analytics" class="view">
+      <div class="card">
+        <h3>Risk &amp; Outcome Analytics</h3>
+        <p class="sub sans">What the data says about who's at risk and why — length of stay and AMA by when clients are admitted and by staff. Correlation, not diagnosis. Fills in automatically as discharges accumulate (and once Kipu backfills history).</p>
+        <div class="controls">
+          <div class="field"><label>Window</label><select id="an_range" onchange="loadAnalytics()"><option value="90">Last 90 days</option><option value="180">Last 6 months</option><option value="365" selected>Last year</option><option value="730">Last 2 years</option></select></div>
+          <button class="btn btn-ghost sans" onclick="loadAnalytics()">Refresh</button>
+          <button class="btn btn-gold sans" id="anInsightBtn" onclick="analyticsInsights()" style="display:none">✦ AI: what the data says</button>
+        </div>
+        <div id="anKpis" class="ret-cards"></div>
+        <div id="anInsight"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:300px"><h3>By day of week admitted</h3><div id="anDow"></div></div>
+        <div class="card" style="flex:1;min-width:260px"><h3>By time of admit</h3><div id="anTime"></div></div>
+        <div class="card" style="flex:1;min-width:240px"><h3>By day of month</h3><div id="anDom"></div></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:320px"><h3>By therapist</h3><p class="sub sans">Supportive look — share what's working. Small samples are unreliable.</p><div id="anTher"></div></div>
+        <div class="card" style="flex:1;min-width:320px"><h3>By case manager</h3><div id="anCM"></div></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:300px"><h3>Biggest risks right now</h3><p class="sub sans">Active clients flagged Elevated/High by the AMA read.</p><div id="anRisk"></div></div>
+        <div class="card" style="flex:1;min-width:300px"><h3>Discharges missing where/why</h3><p class="sub sans">Add only what Kipu couldn't fill — the rest pulls in automatically.</p><div id="anMissing"></div></div>
       </div>
     </section>
 

@@ -642,6 +642,12 @@ addColumn('users', 'mfa_secret', 'TEXT');
 addColumn('users', 'mfa_enabled', 'INTEGER');
 addColumn('clients', 'consent_on_file', 'INTEGER');
 addColumn('clients', 'anchor_why', 'TEXT');
+// Analytics dimensions: time-of-admit + staff attribution + discharge destination.
+addColumn('clients', 'admit_time', 'TEXT');            // HH:MM (24h) — for time-of-admit analysis
+addColumn('clients', 'therapist', 'TEXT');             // primary therapist (for outcome attribution)
+addColumn('clients', 'case_manager', 'TEXT');          // case manager
+addColumn('clients', 'discharge_destination', 'TEXT'); // where they went (facility/home/etc.)
+addColumn('clients', 'kipu_id', 'TEXT');               // external EMR id (idempotent Kipu sync)
 
 // ---- Outbound-referral vocabulary (shared with the front-end via /api/meta) ----
 export const REFERRAL_DEPARTMENTS = ['Clinical', 'Business Development', 'Intake'];
@@ -668,6 +674,7 @@ export const FACILITY_TYPES = [
   'Detox', 'Residential / RTC', 'PHP', 'IOP', 'Outpatient', 'Sober Living',
   'Mental Health', 'Hospital / Medical', 'Dual Diagnosis', 'Other',
 ];
+export const DISCHARGE_TYPES = ['Completed', 'AMA', 'Transferred', 'Administrative', 'Detox complete', 'Other'];
 
 // Seed the default surveys (idempotent — only inserts questions on first creation).
 function ensureSurvey(key, title, description, sort, questions) {

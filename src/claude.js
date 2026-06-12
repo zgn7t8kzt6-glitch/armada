@@ -317,6 +317,37 @@ export async function generateReferralInsights(contextText) {
   return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
 }
 
+// ---- AI Outcome analytics: read LOS/AMA patterns + staff attribution ----
+const OUTCOME_SYSTEM = `You are a data-driven clinical-operations advisor for a
+residential addiction-treatment center. You are given de-identified aggregate
+analytics: length-of-stay (LOS) and AMA (against-medical-advice) rates broken
+down by day-of-week admitted, time of admit, day-of-month, and by therapist and
+case manager. Write a sharp, practical leadership read:
+- THE BIGGEST RISK PATTERNS — which admit timing (day/time) correlates with the
+  shortest stays and highest AMA, stated carefully as correlation, not cause.
+- STAFF SIGNAL — where therapist/case-manager outcomes diverge meaningfully
+  (LOS, AMA, experience). Frame as "worth a supportive look / share what's
+  working," never as blame; small samples are unreliable, say so.
+- WHAT TO TEST THIS MONTH — 2-4 concrete operational experiments (e.g., a
+  stronger first-night protocol for high-risk admit windows, pairing a struggling
+  caseload with a high-retention therapist's playbook).
+- DATA GAPS — note where the sample is too small or attribution is missing.
+Be specific and grounded ONLY in the numbers given. Never name a client. Always
+flag small samples. Short headers and bullets.`;
+
+export async function generateOutcomeInsights(contextText) {
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1600,
+    system: G + OUTCOME_SYSTEM,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: contextText }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+}
+
 // ---- AI Shift Briefing: the daily lineup for the whole house ----
 const SHIFT_BRIEF_SYSTEM = `You are the care coordinator giving the shift-huddle
 briefing for a residential recovery center, in the Ritz-Carlton spirit. Given the

@@ -104,7 +104,7 @@ const GROUP_OF={today:'today',
   admissions:'admissions',alumni:'people',accountability:'insights',
   referrals:'referrals',partners:'referrals',
   standard:'learn',library:'learn',training:'learn',
-  outcomes:'insights',scorecard:'insights',settings:'insights','report-view':'insights',users:'insights',audit:'insights',
+  outcomes:'insights',analytics:'insights',scorecard:'insights',settings:'insights','report-view':'insights',users:'insights',audit:'insights',
   askai:'ask'};
 function renderGroups(){
   $('groupbar').innerHTML = GROUPS.map(x=>`<button data-g="${x.g}">${x.label}</button>`).join('');
@@ -136,6 +136,7 @@ function show(v){
   if(v==='settings') loadSettings();
   if(v==='referrals') loadReferrals();
   if(v==='partners') loadPartners();
+  if(v==='analytics') loadAnalytics();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -192,7 +193,7 @@ async function dischargeClient(){
     show('clients');
   }
 }
-const FF = ['name','pref','room','program','admit','sober','touch','prefs','goals','triggers','safety','support','anchor_why','welcome_plan','aftercare_plan'];
+const FF = ['name','pref','room','program','admit','admit_time','sober','therapist','case_manager','touch','prefs','goals','triggers','safety','support','anchor_why','welcome_plan','aftercare_plan'];
 function fillForm(c){
   FF.forEach(f => $('f_'+f).value = c[f]||'');
   const tl = $('taskList'); tl.innerHTML='';
@@ -883,6 +884,49 @@ async function syncSalesforce(){
   $('pt_msg').textContent='Syncing Salesforce…';
   try{ const r=await api('/salesforce/sync',{method:'POST'}); $('pt_msg').textContent=`✓ Synced ${r.created} inbound referrals.`; loadPartners(); }
   catch(e){ $('pt_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+
+/* ---- risk & outcome analytics ---- */
+async function loadAnalytics(){
+  if(META.claude) $('anInsightBtn').style.display='inline-block';
+  const a = await api('/analytics?range='+($('an_range').value||'365'));
+  const t = a.totals;
+  $('anKpis').innerHTML = `
+    <div class="ret-card"><div class="n">${a.sampleSize}</div><div class="l">Completed stays</div></div>
+    <div class="ret-card ${t.amaRate>=20?'rc-high':''}"><div class="n">${t.amaRate}%</div><div class="l">AMA rate</div></div>
+    <div class="ret-card"><div class="n">${t.avgLos??'—'}</div><div class="l">Avg length of stay (days)</div></div>
+    <div class="ret-card ${a.risk.length?'rc-warn':''}"><div class="n">${a.risk.length}</div><div class="l">At-risk now</div></div>`;
+  // distribution table: label, n, avg LOS, AMA% with a small bar by AMA rate
+  const distTable = (rows, lblHead) => rows.length ? `<table class="tbl"><tr><th>${lblHead}</th><th>Stays</th><th>Avg LOS</th><th>AMA %</th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r.key)}</td><td>${r.n}</td><td>${r.avgLos??'—'}</td><td>${r.n?`<span class="risk ${r.amaRate>=30?'risk-high':r.amaRate>=15?'risk-elev':'risk-low'}">${r.amaRate}%</span>`:'—'}</td></tr>`).join('')+`</table>`
+    : '<div class="hint">No completed stays in this window yet.</div>';
+  $('anDow').innerHTML = distTable(a.byDow, 'Day');
+  $('anTime').innerHTML = distTable(a.byTime, 'Time');
+  $('anDom').innerHTML = distTable(a.byDom, 'Part of month');
+  const staffTable = (rows) => rows.length ? `<table class="tbl"><tr><th>Staff</th><th>Clients</th><th>Avg LOS</th><th>AMA %</th><th>Exp /5</th></tr>`+
+    rows.map(r=>`<tr><td><strong>${esc(r.key)}</strong></td><td>${r.n}</td><td>${r.avgLos??'—'}</td><td><span class="risk ${r.amaRate>=30?'risk-high':r.amaRate>=15?'risk-elev':'risk-low'}">${r.amaRate}%</span></td><td>${r.exp??'—'}</td></tr>`).join('')+`</table>`
+    : '<div class="hint">No staff attribution yet — set Primary Therapist / Case Manager on Care Cards (or sync Kipu).</div>';
+  $('anTher').innerHTML = staffTable(a.byTherapist);
+  $('anCM').innerHTML = staffTable(a.byCaseManager);
+  $('anRisk').innerHTML = a.risk.length ? a.risk.map(r=>`<div class="todo"><div class="txt"><span class="risk ${r.level==='High'?'risk-high':'risk-elev'}">${esc(r.level)}</span> <strong>${esc(r.name)}</strong>${r.room?' · '+esc(r.room):''} <span class="hint">${esc(r.summary||'')}</span></div><button class="btn btn-ghost btn-sm sans" onclick="openJourney(${r.id})">Open</button></div>`).join('') : '<div class="hint">No active clients flagged Elevated/High. 🎉</div>';
+  $('anMissing').innerHTML = a.missingDischarge.length ? a.missingDischarge.map(m=>`<div class="todo">
+      <div class="txt"><strong>${esc(m.pref||m.name)}</strong> <span class="hint">· ${esc(m.discharge_status||'')} ${esc(m.discharge_date||'')}</span></div>
+      <button class="btn btn-gold btn-sm sans" onclick="fillDischargeInfo(${m.id},'${esc((m.pref||m.name||'').replace(/'/g,''))}')">Add where/why</button>
+    </div>`).join('') : '<div class="hint">Nothing missing — every discharge has where &amp; why. ✓</div>';
+}
+async function analyticsInsights(){
+  const btn=$('anInsightBtn'); btn.disabled=true; const l=btn.textContent; btn.textContent='✦ Thinking…';
+  $('anInsight').innerHTML='<div class="hint">Reading the patterns…</div>';
+  try{ const { brief } = await api('/analytics/insights?range='+($('an_range').value||'365'));
+    $('anInsight').innerHTML = `<div class="ama-banner ama-low" style="margin-top:12px"><div class="ama-head" style="color:var(--gold)">✦ What the data says</div><div class="brief-body">${esc(brief).replace(/\n/g,'<br>')}</div></div>`;
+  }catch(e){ $('anInsight').innerHTML='<span class="hint" style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+  finally{ btn.disabled=false; btn.textContent=l; }
+}
+async function fillDischargeInfo(id, name){
+  const destination = prompt('Where did '+name+' go? (facility / home / sober living…)'); if(destination===null) return;
+  const reason = prompt('Why did they leave? (reason)')||'';
+  await api('/clients/'+id+'/discharge-info',{method:'POST',body:JSON.stringify({destination:destination||null,reason:reason||null})});
+  loadAnalytics();
 }
 
 /* ---- lineup / culture ---- */

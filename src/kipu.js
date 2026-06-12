@@ -43,20 +43,61 @@ export async function kipuTest() {
   return { ok: true, sampleCount: n };
 }
 
-// Pull the active roster and upsert into clients (matched by name). Non-destructive.
+// Pull the roster and upsert into clients. Idempotent on the Kipu id (falls back
+// to name). Non-destructive: only fills blank fields on existing clients so it
+// can't clobber staff edits. Maps the analytics fields (admit time, therapist,
+// discharge where/why) whenever Kipu charts them — so they're never re-entered.
 export async function kipuSyncRoster() {
   const path = process.env.KIPU_ROSTER_PATH || '/api/patients/census';
   const data = await kipuGet(path);
   const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
-  let created = 0, matched = 0;
-  const find = db.prepare(`SELECT id FROM clients WHERE name = ? OR pref = ?`);
-  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, admit) VALUES (?, ?, ?, ?, ?)`);
+  let created = 0, matched = 0, updated = 0;
+  const byKipu = db.prepare(`SELECT id FROM clients WHERE kipu_id = ?`);
+  const byName = db.prepare(`SELECT id FROM clients WHERE name = ? OR pref = ?`);
+  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, admit, admit_time, therapist, case_manager, kipu_id) VALUES (?,?,?,?,?,?,?,?,?)`);
+
+  // Pull a field from the many shapes Kipu can return.
+  const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const timeOf = (v) => { if (!v) return null; const m = String(v).match(/[T ](\d{2}:\d{2})/); return m ? m[1] : null; };
+
   for (const p of list) {
     const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name;
     if (!name) continue;
-    if (find.get(name, name)) { matched++; continue; }
-    ins.run(name, p.first_name || name, p.bed_name || p.room || null, p.level_of_care || p.program || null, (p.admission_date || '').slice(0, 10) || null);
-    created++;
+    const kid = pick(p, 'id', 'casefile_id', 'patient_id', 'mrn') && String(pick(p, 'id', 'casefile_id', 'patient_id', 'mrn'));
+    const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
+    const admit = admitRaw ? String(admitRaw).slice(0, 10) : null;
+    const admitTime = timeOf(admitRaw);
+    const therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
+    const caseMgr = pick(p, 'case_manager', 'casemanager');
+    const room = pick(p, 'bed_name', 'room', 'bed');
+    const program = pick(p, 'level_of_care', 'program', 'loc');
+    const dischStatus = pick(p, 'discharge_type', 'discharge_status');
+    const dischDate = pick(p, 'discharge_date', 'discharged_at');
+    const dischDest = pick(p, 'discharge_destination', 'referred_to', 'aftercare_facility');
+    const dischReason = pick(p, 'discharge_reason', 'discharge_note');
+
+    let existing = (kid && byKipu.get(kid)) || byName.get(name, name);
+    if (existing) {
+      // Backfill only blank fields (never overwrite staff edits).
+      db.prepare(`UPDATE clients SET
+        kipu_id = COALESCE(kipu_id, ?),
+        admit = COALESCE(NULLIF(admit,''), ?),
+        admit_time = COALESCE(NULLIF(admit_time,''), ?),
+        therapist = COALESCE(NULLIF(therapist,''), ?),
+        case_manager = COALESCE(NULLIF(case_manager,''), ?),
+        room = COALESCE(NULLIF(room,''), ?),
+        program = COALESCE(NULLIF(program,''), ?),
+        discharge_status = COALESCE(NULLIF(discharge_status,''), ?),
+        discharge_date = COALESCE(NULLIF(discharge_date,''), ?),
+        discharge_destination = COALESCE(NULLIF(discharge_destination,''), ?),
+        discharge_reason = COALESCE(NULLIF(discharge_reason,''), ?)
+        WHERE id = ?`).run(kid || null, admit, admitTime, therapist, caseMgr, room, program,
+          dischStatus, dischDate ? String(dischDate).slice(0, 10) : null, dischDest, dischReason, existing.id);
+      matched++; updated++;
+    } else {
+      ins.run(name, p.first_name || name, room, program, admit, admitTime, therapist, caseMgr, kid || null);
+      created++;
+    }
   }
-  return { total: list.length, created, matched };
+  return { total: list.length, created, matched, updated };
 }

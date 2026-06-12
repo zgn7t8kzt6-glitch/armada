@@ -59,6 +59,24 @@ services:
         sync: false
       - key: TWILIO_FROM
         sync: false                  # your Twilio phone number, e.g. +1...
+      # ── Salesforce (referral reciprocity sync) — optional ────────────────
+      # Connected App, OAuth client-credentials flow. Lets the Partners page
+      # show inbound referrals (who sends us business) alongside outbound.
+      - key: SF_INSTANCE_URL
+        sync: false                  # e.g. https://yourorg.my.salesforce.com
+      - key: SF_CLIENT_ID
+        sync: false                  # Connected App consumer key
+      - key: SF_CLIENT_SECRET
+        sync: false                  # Connected App consumer secret
+      - key: SF_INBOUND_SOQL
+        sync: false                  # optional: override to match your SF objects/fields
+      # ── Kipu EMR (roster + note red-flags) — optional ────────────────────
+      - key: KIPU_ACCESS_ID
+        sync: false
+      - key: KIPU_SECRET_KEY
+        sync: false
+      - key: KIPU_APP_ID
+        sync: false
     disk:
       name: armada-data
       mountPath: /var/data

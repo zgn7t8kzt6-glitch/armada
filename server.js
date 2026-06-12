@@ -6,13 +6,15 @@ import { db, audit, getState, setState } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
+import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster } from './src/kipu.js';
+import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -886,6 +888,183 @@ app.post('/api/incidents/:id/status', requireAuth, (req, res) => {
   const st = ['Open', 'Reviewed', 'Closed'].includes(req.body?.status) ? req.body.status : 'Reviewed';
   db.prepare(`UPDATE incidents SET status = ? WHERE id = ?`).run(st, req.params.id);
   res.json({ ok: true });
+});
+
+/* ---------------- Outbound referrals & partners ---------------- */
+// Vocabulary for the front-end (kept here so a new reason/department deploys once).
+app.get('/api/referrals/meta', requireAuth, (req, res) => res.json({
+  departments: REFERRAL_DEPARTMENTS, categories: REFERRAL_CATEGORIES,
+  reasons: REFERRAL_REASONS, facilityTypes: FACILITY_TYPES,
+  salesforce: sfConfigured(),
+}));
+
+app.get('/api/facilities', requireAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT f.*,
+      (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id) AS sent,
+      (SELECT COUNT(*) FROM inbound_referrals i WHERE i.facility_id = f.id) AS received
+    FROM facilities f WHERE f.active = 1 ORDER BY f.name COLLATE NOCASE`).all();
+  res.json({ facilities: rows });
+});
+app.post('/api/facilities', requireAuth, (req, res) => {
+  const b = req.body || {}; const name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Facility name required.' });
+  const existing = db.prepare(`SELECT id FROM facilities WHERE name = ? COLLATE NOCASE`).get(name);
+  if (existing) return res.json({ id: existing.id, existed: true });
+  const info = db.prepare(`INSERT INTO facilities (name, type, location, contact, notes) VALUES (?,?,?,?,?)`)
+    .run(name, b.type || null, b.location || null, b.contact || null, b.notes || null);
+  audit({ user: req.user, action: 'CREATE', entity: 'facility', entity_id: info.lastInsertRowid, detail: name, ip: req.ip });
+  res.json({ id: info.lastInsertRowid });
+});
+
+app.get('/api/referrals', requireAuth, (req, res) => {
+  const where = [], args = [];
+  if (req.query.category) { where.push('o.category = ?'); args.push(req.query.category); }
+  if (req.query.department) { where.push('o.department = ?'); args.push(req.query.department); }
+  if (req.query.facility_id) { where.push('o.facility_id = ?'); args.push(+req.query.facility_id); }
+  if (req.query.referred_by) { where.push('o.referred_by = ?'); args.push(+req.query.referred_by); }
+  if (req.query.from) { where.push('o.ref_date >= ?'); args.push(req.query.from); }
+  if (req.query.to) { where.push('o.ref_date <= ?'); args.push(req.query.to); }
+  const sql = `SELECT o.*, c.pref AS client_pref FROM outbound_referrals o
+    LEFT JOIN clients c ON c.id = o.client_id
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY o.ref_date DESC, o.id DESC LIMIT 200`;
+  res.json({ referrals: db.prepare(sql).all(...args) });
+});
+
+app.post('/api/referrals', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const category = REFERRAL_CATEGORIES.some((c) => c.key === b.category) ? b.category : 'declined';
+  const department = REFERRAL_DEPARTMENTS.includes(b.department) ? b.department : 'Clinical';
+  if (!b.facility_id && !(b.facility_name || '').trim()) return res.status(400).json({ error: 'Pick or name a destination facility.' });
+  if (!(b.reason || '').trim()) return res.status(400).json({ error: 'Pick a reason.' });
+
+  // Resolve / create the destination facility.
+  let facilityId = b.facility_id ? +b.facility_id : null;
+  let facilityName = (b.facility_name || '').trim();
+  if (!facilityId && facilityName) {
+    const f = db.prepare(`SELECT id FROM facilities WHERE name = ? COLLATE NOCASE`).get(facilityName);
+    facilityId = f ? f.id : db.prepare(`INSERT INTO facilities (name) VALUES (?)`).run(facilityName).lastInsertRowid;
+  }
+  if (facilityId && !facilityName) facilityName = db.prepare(`SELECT name FROM facilities WHERE id = ?`).get(facilityId)?.name || '';
+
+  // Who referred — default to the logged-in user.
+  const byId = b.referred_by ? +b.referred_by : req.user.id;
+  const byName = b.referred_by_name || db.prepare(`SELECT name FROM users WHERE id = ?`).get(byId)?.name || req.user.name;
+
+  const info = db.prepare(`INSERT INTO outbound_referrals
+    (ref_date, category, department, referred_by, referred_by_name, client_id, person_ref, facility_id, facility_name, loc_needed, reason, reason_detail, insurance, created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    (b.ref_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+    category, department, byId, byName,
+    b.client_id ? +b.client_id : null, (b.person_ref || '').trim() || null,
+    facilityId, facilityName || null, (b.loc_needed || '').trim() || null,
+    b.reason.trim(), (b.reason_detail || '').trim() || null, (b.insurance || '').trim() || null,
+    req.user.id);
+  audit({ user: req.user, action: 'REFERRAL', entity: 'referral', entity_id: info.lastInsertRowid, detail: `${category} → ${facilityName} (${b.reason.trim()})`, ip: req.ip });
+  res.json({ id: info.lastInsertRowid });
+});
+
+app.delete('/api/referrals/:id', requireAuth, (req, res) => {
+  db.prepare(`DELETE FROM outbound_referrals WHERE id = ?`).run(req.params.id);
+  audit({ user: req.user, action: 'DELETE', entity: 'referral', entity_id: +req.params.id, ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Log an inbound referral by hand (when not syncing Salesforce).
+app.post('/api/inbound-referrals', requireAuth, (req, res) => {
+  const b = req.body || {}; const name = (b.facility_name || '').trim();
+  if (!name && !b.facility_id) return res.status(400).json({ error: 'Name the referring partner.' });
+  let facilityId = b.facility_id ? +b.facility_id : null, facilityName = name;
+  if (!facilityId && name) {
+    const f = db.prepare(`SELECT id FROM facilities WHERE name = ? COLLATE NOCASE`).get(name);
+    facilityId = f ? f.id : db.prepare(`INSERT INTO facilities (name) VALUES (?)`).run(name).lastInsertRowid;
+  }
+  if (facilityId && !facilityName) facilityName = db.prepare(`SELECT name FROM facilities WHERE id = ?`).get(facilityId)?.name || '';
+  db.prepare(`INSERT INTO inbound_referrals (ref_date, facility_id, facility_name, outcome) VALUES (?,?,?,?)`)
+    .run((b.ref_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10), facilityId, facilityName || null, (b.outcome || 'pending'));
+  res.json({ ok: true });
+});
+
+// Roll-up analytics: counters + breakdowns + weekly trend + reciprocity.
+app.get('/api/referrals/summary', requireAuth, (req, res) => {
+  const days = ({ '7': 7, '30': 30, '90': 90, '365': 365 })[String(req.query.range)] || 30;
+  const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
+  const cnt = (sql, ...a) => db.prepare(sql).get(...a)?.n ?? 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const week = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
+  const month = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+
+  const counters = {
+    today: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date = ?`, today),
+    week: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?`, week),
+    month: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?`, month),
+    range: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?`, since),
+  };
+  const grp = (col) => db.prepare(`SELECT ${col} AS k, COUNT(*) AS n FROM outbound_referrals WHERE ref_date >= ? AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY n DESC`).all(since);
+  const byReason = grp('reason');
+  const byDestination = grp('facility_name');
+  const byReferrer = grp('referred_by_name');
+  const byDepartment = grp('department');
+  const byCategory = grp('category');
+
+  // Weekly trend — last 8 weeks of outbound counts (oldest→newest) for a sparkline.
+  const trend = [];
+  for (let w = 7; w >= 0; w--) {
+    const a = new Date(Date.now() - (w * 7 + 6) * 864e5).toISOString().slice(0, 10);
+    const b = new Date(Date.now() - w * 7 * 864e5).toISOString().slice(0, 10);
+    trend.push(cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ? AND ref_date <= ?`, a, b));
+  }
+
+  // Reciprocity: per partner, sent vs received (within range), with net + flag.
+  const reciprocity = db.prepare(`
+    SELECT f.id, f.name,
+      (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id AND o.ref_date >= ?) AS sent,
+      (SELECT COUNT(*) FROM inbound_referrals i WHERE i.facility_id = f.id AND i.ref_date >= ?) AS received
+    FROM facilities f WHERE f.active = 1`).all(since, since)
+    .filter((r) => r.sent || r.received)
+    .map((r) => ({ ...r, net: r.sent - r.received }))
+    .sort((a, b) => (b.sent + b.received) - (a.sent + a.received));
+
+  res.json({ rangeDays: days, counters, byReason, byDestination, byReferrer, byDepartment, byCategory, trend, reciprocity, salesforce: sfConfigured() });
+});
+
+// AI: why people are leaving + BD relationship read. De-identified aggregates only.
+app.get('/api/referrals/insights', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured.' });
+  const days = ({ '7': 7, '30': 30, '90': 90, '365': 365 })[String(req.query.range)] || 90;
+  const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
+  const list = (col, label) => {
+    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS n FROM outbound_referrals WHERE ref_date >= ? AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY n DESC`).all(since);
+    return `${label}:\n` + (rows.length ? rows.map((r) => `  - ${r.k}: ${r.n}`).join('\n') : '  (none)') + '\n';
+  };
+  const recip = db.prepare(`
+    SELECT f.name,
+      (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id AND o.ref_date >= ?) AS sent,
+      (SELECT COUNT(*) FROM inbound_referrals i WHERE i.facility_id = f.id AND i.ref_date >= ?) AS received
+    FROM facilities f WHERE f.active = 1`).all(since, since).filter((r) => r.sent || r.received);
+  const total = db.prepare(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?`).get(since).n;
+  const ctx = `Outbound-referral data for the last ${days} days. Total outbound: ${total}.\n\n` +
+    list('reason', 'By reason') + '\n' + list('category', 'By type (discharge/transfer/declined)') + '\n' +
+    list('facility_name', 'By destination facility') + '\n' + list('department', 'By department') + '\n' +
+    list('referred_by_name', 'By employee') + '\n' +
+    'Partner reciprocity (we sent ↔ they sent us):\n' +
+    (recip.length ? recip.map((r) => `  - ${r.name}: sent ${r.sent}, received ${r.received}, net ${r.sent - r.received}`).join('\n') : '  (no partner data yet)');
+  try {
+    const brief = await generateReferralInsights(ctx);
+    audit({ user: req.user, action: 'REFERRAL_INSIGHTS', ip: req.ip });
+    res.json({ brief });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* ---------------- Salesforce (referral reciprocity sync) ---------------- */
+app.get('/api/salesforce/status', requireAuth, requireAdmin, (req, res) => res.json({ configured: sfConfigured() }));
+app.post('/api/salesforce/test', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await sfTest()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/salesforce/sync', requireAuth, requireAdmin, async (req, res) => {
+  try { const r = await sfSyncInbound(db); audit({ user: req.user, action: 'SF_SYNC', detail: `${r.created} inbound`, ip: req.ip }); res.json(r); }
+  catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 /* ---------------- Family engagement ---------------- */

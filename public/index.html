@@ -61,6 +61,8 @@
     <button data-view="concierge">Concierge</button>
     <button data-view="program">Program</button>
     <button data-view="incidents">Incidents</button>
+    <button data-view="referrals">Referrals</button>
+    <button data-view="partners">Partners</button>
     <button data-view="askai">Ask AI</button>
     <button data-view="mytasks">My Tasks</button>
     <button data-view="family">Family</button>
@@ -149,6 +151,77 @@
         <div class="toolbar"><button class="btn btn-gold sans" onclick="addIncident()">File report</button></div>
       </div>
       <div class="card"><h3>Reports</h3><div id="inList"></div></div>
+    </section>
+
+    <!-- OUTBOUND REFERRALS -->
+    <section id="referrals" class="view">
+      <div class="card no-print">
+        <h3>Log an outbound referral</h3>
+        <p class="sub sans">Fast and simple. Every person we send out — discharged, transferred mid-treatment, or one we couldn't accept. ~15 seconds.</p>
+        <div class="grid3">
+          <div><label>Date</label><input id="rf_date" type="date"/></div>
+          <div><label>Type</label><select id="rf_category"></select></div>
+          <div><label>Department</label><select id="rf_department"></select></div>
+        </div>
+        <div class="grid3">
+          <div><label>Referred by</label><select id="rf_by"></select></div>
+          <div><label>Destination facility</label><input id="rf_facility" list="rf_facility_list" placeholder="Type or pick a facility…"/><datalist id="rf_facility_list"></datalist></div>
+          <div><label>Reason</label><select id="rf_reason"></select></div>
+        </div>
+        <div class="grid3">
+          <div><label>Client (if admitted — optional)</label><select id="rf_client"></select></div>
+          <div><label>Person ref. (declined — initials/age, optional)</label><input id="rf_person" placeholder="e.g. J.M., 34"/></div>
+          <div><label>Insurance (optional)</label><input id="rf_insurance" placeholder="e.g. Aetna / self-pay"/></div>
+        </div>
+        <label>Notes (optional)</label>
+        <div class="voicewrap"><textarea id="rf_detail" placeholder="Anything useful — what they needed, who they spoke to…"></textarea><button type="button" class="mic" onclick="dictateInto(this)" title="Dictate">🎤</button></div>
+        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="addReferral()">Log referral</button><span id="rf_msg" class="hint"></span></div>
+      </div>
+
+      <div class="card">
+        <div class="controls">
+          <div class="field"><label>Window</label><select id="rf_range" onchange="loadReferrals()"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select></div>
+          <button class="btn btn-ghost sans" onclick="loadReferrals()">Refresh</button>
+          <button class="btn btn-gold sans" id="rfInsightBtn" onclick="referralInsights()" style="display:none">✦ AI: why people leave + partner read</button>
+        </div>
+        <div id="rfKpis" class="ret-cards"></div>
+        <div id="rfInsight"></div>
+      </div>
+
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:260px"><h3>Reasons people leave</h3><div id="rfByReason"></div></div>
+        <div class="card" style="flex:1;min-width:240px"><h3>Top destinations</h3><div id="rfByDest"></div></div>
+        <div class="card" style="flex:1;min-width:240px"><h3>Who's referring</h3><div id="rfByRef"></div></div>
+      </div>
+      <div class="card"><h3>Recent referrals</h3><div id="rfList"></div></div>
+    </section>
+
+    <!-- PARTNERS / RECIPROCITY -->
+    <section id="partners" class="view">
+      <div class="card no-print">
+        <h3>Referral partners</h3>
+        <p class="sub sans">Who we do business with — and whether it goes both ways. <strong>Sent</strong> = we referred to them · <strong>Received</strong> = they referred to us · <strong>Net</strong> = balance.</p>
+        <div id="sfRow" class="hint" style="margin-bottom:10px"></div>
+        <div class="controls">
+          <div class="field"><label>Window</label><select id="pt_range" onchange="loadPartners()"><option value="30">Last 30 days</option><option value="90" selected>Last 90 days</option><option value="365">Last year</option></select></div>
+          <button class="btn btn-ghost sans" onclick="loadPartners()">Refresh</button>
+          <button class="btn btn-ghost sans" data-admin onclick="syncSalesforce()">Sync inbound from Salesforce</button>
+        </div>
+        <div id="ptTable"></div>
+      </div>
+      <div class="card no-print">
+        <h3>Add a partner / log an inbound referral</h3>
+        <div class="grid3">
+          <div><label>Facility name</label><input id="pt_name" placeholder="e.g. Lakeside Detox"/></div>
+          <div><label>Type</label><select id="pt_type"></select></div>
+          <div><label>Location</label><input id="pt_location" placeholder="City, ST"/></div>
+        </div>
+        <div class="toolbar" style="justify-content:flex-start">
+          <button class="btn btn-gold sans" onclick="addPartner()">Add partner</button>
+          <button class="btn btn-ghost sans" onclick="logInbound()">Log inbound referral from this partner</button>
+          <span id="pt_msg" class="hint"></span>
+        </div>
+      </div>
     </section>
 
     <!-- ALUMNI -->

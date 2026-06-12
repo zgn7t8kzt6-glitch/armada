@@ -286,6 +286,37 @@ export async function generateCareBrief(contextText) {
   return r;
 }
 
+// ---- AI Referral insights: why people leave + BD relationship read ----
+const REFERRAL_SYSTEM = `You are an operations and business-development advisor for
+a residential addiction-treatment center, in the Horst Schulze / Ritz-Carlton
+spirit: obsessed with why guests leave and with the health of partner
+relationships. You are given de-identified outbound-referral data: counts by
+reason, by destination facility, by department and employee, the discharge/
+transfer/declined mix, and partner reciprocity (referrals we send a partner vs.
+referrals they send us). Write a tight leadership brief:
+- TOP REASONS PEOPLE LEAVE OR ARE TURNED AWAY — name the biggest drivers and what
+  they signal. Separate what we can FIX (service, follow-through, LOC fit,
+  capacity, intake screening) from what is appropriate clinical routing.
+- WHAT TO FIX THIS MONTH — 2-4 concrete, specific actions, each tied to the data.
+- PARTNER RELATIONSHIPS — call out one-sided relationships (we send a lot, they
+  send little, or vice versa) and where to invest or rebalance BD effort.
+- WHO IS REFERRING & TO WHERE — note any concentration worth a conversation.
+Be specific and grounded in the numbers provided. No PHI, no individual client
+details. Short headers and bullets. This is decision support for leadership.`;
+
+export async function generateReferralInsights(contextText) {
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1600,
+    system: G + REFERRAL_SYSTEM,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: contextText }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+}
+
 // ---- AI Shift Briefing: the daily lineup for the whole house ----
 const SHIFT_BRIEF_SYSTEM = `You are the care coordinator giving the shift-huddle
 briefing for a residential recovery center, in the Ritz-Carlton spirit. Given the

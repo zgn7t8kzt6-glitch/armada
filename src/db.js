@@ -484,6 +484,54 @@ CREATE TABLE IF NOT EXISTS audit_log (
   ip TEXT,
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Referral partners (facilities we send to and/or that send to us).
+CREATE TABLE IF NOT EXISTS facilities (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT,                   -- Detox | Residential | PHP | IOP | Outpatient | Sober Living | ...
+  location TEXT,
+  contact TEXT,
+  notes TEXT,
+  salesforce_id TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Outbound referrals: a client we discharge/step-down, OR a person we could not
+-- accept and referred out (flagged by BD, Intake, or Clinical-on-arrival).
+CREATE TABLE IF NOT EXISTS outbound_referrals (
+  id INTEGER PRIMARY KEY,
+  ref_date TEXT NOT NULL DEFAULT (date('now')),
+  category TEXT NOT NULL,                 -- discharge | declined
+  department TEXT NOT NULL,               -- Clinical | Business Development | Intake
+  referred_by INTEGER REFERENCES users(id),
+  referred_by_name TEXT,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  person_ref TEXT,                        -- initials/age for declined (minimal PII)
+  facility_id INTEGER REFERENCES facilities(id) ON DELETE SET NULL,
+  facility_name TEXT,
+  loc_needed TEXT,
+  reason TEXT,
+  reason_detail TEXT,
+  insurance TEXT,
+  salesforce_id TEXT,
+  synced_to_sf INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by INTEGER REFERENCES users(id)
+);
+
+-- Inbound referrals (who sends us business) — powers partner reciprocity.
+-- Usually synced from Salesforce; can also be logged by hand.
+CREATE TABLE IF NOT EXISTS inbound_referrals (
+  id INTEGER PRIMARY KEY,
+  ref_date TEXT NOT NULL DEFAULT (date('now')),
+  facility_id INTEGER REFERENCES facilities(id) ON DELETE SET NULL,
+  facility_name TEXT,
+  outcome TEXT,                           -- admitted | declined | pending
+  salesforce_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // ---- Seed SOP library + training courses + daily focus (idempotent) ----
@@ -594,6 +642,32 @@ addColumn('users', 'mfa_secret', 'TEXT');
 addColumn('users', 'mfa_enabled', 'INTEGER');
 addColumn('clients', 'consent_on_file', 'INTEGER');
 addColumn('clients', 'anchor_why', 'TEXT');
+
+// ---- Outbound-referral vocabulary (shared with the front-end via /api/meta) ----
+export const REFERRAL_DEPARTMENTS = ['Clinical', 'Business Development', 'Intake'];
+export const REFERRAL_CATEGORIES = [
+  { key: 'discharge', label: 'Discharge / step-down (completed or progressing)' },
+  { key: 'transfer', label: 'Mid-treatment transfer (admitted client → another facility)' },
+  { key: 'declined', label: 'Declined / could not accept (referred out)' },
+];
+export const REFERRAL_REASONS = [
+  'Wrong level of care for us (needs higher LOC)',
+  'Wrong level of care for us (needs lower LOC / step-down)',
+  'Needs detox / medical stabilization first',
+  'Behavioral issues / not appropriate for the milieu',
+  'Client / family wants a different facility',
+  "Specialized care we don't offer (ED, primary MH, etc.)",
+  'Insurance / out-of-network / financial',
+  'No bed / capacity',
+  'Geographic / closer to home',
+  'Completed program — aftercare placement',
+  'Left AMA — referred to alternative',
+  'Other',
+];
+export const FACILITY_TYPES = [
+  'Detox', 'Residential / RTC', 'PHP', 'IOP', 'Outpatient', 'Sober Living',
+  'Mental Health', 'Hospital / Medical', 'Dual Diagnosis', 'Other',
+];
 
 // Seed the default surveys (idempotent — only inserts questions on first creation).
 function ensureSurvey(key, title, description, sort, questions) {

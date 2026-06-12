@@ -92,6 +92,7 @@ const GROUPS=[
   {g:'clinical',label:'Clinical',first:'retention'},
   {g:'people',label:'People',first:'lineup'},
   {g:'admissions',label:'Admissions',first:'admissions'},
+  {g:'referrals',label:'Referrals',first:'referrals'},
   {g:'insights',label:'Insights',first:'outcomes'},
   {g:'learn',label:'Learn',first:'training'},
   {g:'ask',label:'Ask AI',first:'askai'},
@@ -101,6 +102,7 @@ const GROUP_OF={today:'today',
   retention:'clinical',surveys:'clinical',incidents:'clinical',
   family:'people',team:'people',lineup:'people',assign:'people',mytasks:'people',
   admissions:'admissions',alumni:'people',accountability:'insights',
+  referrals:'referrals',partners:'referrals',
   standard:'learn',library:'learn',training:'learn',
   outcomes:'insights',scorecard:'insights',settings:'insights','report-view':'insights',users:'insights',audit:'insights',
   askai:'ask'};
@@ -132,6 +134,8 @@ function show(v){
   if(v==='scorecard') loadScorecard();
   if(v==='mytasks') loadMyTasks();
   if(v==='settings') loadSettings();
+  if(v==='referrals') loadReferrals();
+  if(v==='partners') loadPartners();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -763,6 +767,122 @@ async function resolveConcern(id){
   const resolution = prompt('How was it resolved? (optional)')||'';
   await api('/concerns/'+id+'/resolve',{method:'POST',body:JSON.stringify({resolution})});
   loadOutcomes();
+}
+
+/* ---- outbound referrals & partners ---- */
+let REFMETA = null;
+async function ensureReferralMeta(){
+  if(REFMETA) return REFMETA;
+  REFMETA = await api('/referrals/meta');
+  // categories (key/label), departments, reasons, facility types
+  $('rf_category').innerHTML = REFMETA.categories.map(c=>`<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('');
+  fillSelect($('rf_department'), REFMETA.departments);
+  $('rf_reason').innerHTML = '<option value="">— reason —</option>'+REFMETA.reasons.map(r=>`<option>${esc(r)}</option>`).join('');
+  fillSelect($('pt_type'), REFMETA.facilityTypes);
+  // staff (referred-by) + clients
+  try{ const { users } = await api('/users'); $('rf_by').innerHTML = users.filter(u=>u.active!==0).map(u=>`<option value="${u.id}" ${ME&&u.id===ME.id?'selected':''}>${esc(u.name)}</option>`).join(''); }
+  catch(e){ $('rf_by').innerHTML = `<option value="${ME?ME.id:''}">${esc(ME?ME.name:'Me')}</option>`; }
+  try{ const { clients } = await api('/clients'); $('rf_client').innerHTML = '<option value="">— none / not admitted —</option>'+clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}</option>`).join(''); }catch(e){}
+  return REFMETA;
+}
+async function refreshFacilityList(){
+  try{ const { facilities } = await api('/facilities'); window._FACS = facilities;
+    $('rf_facility_list').innerHTML = facilities.map(f=>`<option data-id="${f.id}" value="${esc(f.name)}">`).join('');
+  }catch(e){}
+}
+async function loadReferrals(){
+  await ensureReferralMeta(); await refreshFacilityList();
+  if(!$('rf_date').value) $('rf_date').value = today();
+  if(META.claude) $('rfInsightBtn').style.display='inline-block';
+  const range = $('rf_range').value || '30';
+  const s = await api('/referrals/summary?range='+range);
+  const c = s.counters;
+  $('rfKpis').innerHTML = `
+    <div class="ret-card"><div class="n">${c.today}</div><div class="l">Today</div></div>
+    <div class="ret-card"><div class="n">${c.week}</div><div class="l">This week</div></div>
+    <div class="ret-card"><div class="n">${c.month}</div><div class="l">Last 30 days</div></div>
+    <div class="ret-card"><div class="n">${c.range}</div><div class="l">In window ${sparkline(s.trend,70,20)}</div></div>
+    ${s.byCategory.map(x=>`<div class="ret-card"><div class="n">${x.n}</div><div class="l">${esc(x.k)}</div></div>`).join('')}`;
+  const bars = (rows, total) => rows.length ? rows.map(r=>{
+    const pct = total? Math.round(r.n/total*100):0;
+    return `<div class="pc-note" style="display:flex;justify-content:space-between;gap:8px"><span>${esc(r.k)}</span><span class="hint">${r.n} · ${pct}%</span></div><div style="height:5px;background:var(--gold);width:${pct}%;border-radius:3px;margin:2px 0 8px"></div>`;
+  }).join('') : '<div class="hint">No data in this window.</div>';
+  const tot = s.counters.range || 1;
+  $('rfByReason').innerHTML = bars(s.byReason, tot);
+  $('rfByDest').innerHTML = bars(s.byDestination, tot);
+  $('rfByRef').innerHTML = bars(s.byReferrer, tot);
+  const { referrals } = await api('/referrals?from='+new Date(Date.now()-(({'7':7,'30':30,'90':90,'365':365})[range]||30)*864e5).toISOString().slice(0,10));
+  $('rfList').innerHTML = referrals.length ? referrals.map(r=>`<div class="todo">
+      <div class="txt"><span class="badge ${r.category==='declined'?'':'admin'}">${esc(r.category)}</span> <strong>${esc(r.facility_name||'—')}</strong>
+        <span class="hint">· ${esc(r.reason||'')}</span>
+        <div class="hint">${esc(r.ref_date)} · ${esc(r.department)} · by ${esc(r.referred_by_name||'?')}${r.client_pref?' · '+esc(r.client_pref):''}${r.person_ref?' · '+esc(r.person_ref):''}${r.reason_detail?' · '+esc(r.reason_detail):''}</div></div>
+      ${ME&&ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="delReferral(${r.id})">✕</button>`:''}
+    </div>`).join('') : '<div class="hint">No referrals logged yet.</div>';
+}
+async function addReferral(){
+  const fname = $('rf_facility').value.trim();
+  const match = (window._FACS||[]).find(f=>f.name.toLowerCase()===fname.toLowerCase());
+  const body = {
+    ref_date: $('rf_date').value || today(),
+    category: $('rf_category').value,
+    department: $('rf_department').value,
+    referred_by: $('rf_by').value || null,
+    facility_id: match?match.id:null,
+    facility_name: match?null:fname,
+    reason: $('rf_reason').value,
+    client_id: $('rf_client').value || null,
+    person_ref: $('rf_person').value || null,
+    insurance: $('rf_insurance').value || null,
+    reason_detail: $('rf_detail').value || null,
+  };
+  $('rf_msg').textContent='Saving…';
+  try{ await api('/referrals',{method:'POST',body:JSON.stringify(body)});
+    $('rf_msg').textContent='✓ Logged.'; setTimeout(()=>$('rf_msg').textContent='',2500);
+    ['rf_facility','rf_person','rf_insurance','rf_detail'].forEach(id=>$(id).value=''); $('rf_reason').value='';
+    loadReferrals();
+  }catch(e){ $('rf_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function delReferral(id){ if(!confirm('Delete this referral?'))return; await api('/referrals/'+id,{method:'DELETE'}); loadReferrals(); }
+async function referralInsights(){
+  const btn=$('rfInsightBtn'); btn.disabled=true; const l=btn.textContent; btn.textContent='✦ Thinking…';
+  $('rfInsight').innerHTML='<div class="hint">Reading the trends…</div>';
+  try{ const { brief } = await api('/referrals/insights?range='+($('rf_range').value||'90'));
+    $('rfInsight').innerHTML = `<div class="ama-banner ama-low" style="margin-top:12px"><div class="ama-head" style="color:var(--gold)">✦ Why people leave + partner read</div><div class="brief-body">${esc(brief).replace(/\n/g,'<br>')}</div></div>`;
+  }catch(e){ $('rfInsight').innerHTML='<span class="hint" style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+  finally{ btn.disabled=false; btn.textContent=l; }
+}
+async function loadPartners(){
+  await ensureReferralMeta();
+  const range = $('pt_range').value || '90';
+  const s = await api('/referrals/summary?range='+range);
+  $('sfRow').innerHTML = s.salesforce ? '<span class="risk risk-low">Salesforce connected</span>' : '<span class="risk risk-warn">Salesforce not connected — inbound referrals are manual until SF credentials are set</span>';
+  const rows = s.reciprocity;
+  $('ptTable').innerHTML = rows.length ? `<table class="tbl"><tr><th>Partner</th><th>Sent →</th><th>← Received</th><th>Net</th><th>Relationship</th></tr>`+
+    rows.map(r=>{
+      const flag = r.received===0 && r.sent>0 ? '<span class="risk risk-warn">we send, they don\'t</span>'
+        : r.sent===0 && r.received>0 ? '<span class="risk risk-elev">they send, we don\'t</span>'
+        : Math.abs(r.net)<=1 ? '<span class="risk risk-low">balanced</span>'
+        : (r.net>0?'<span class="hint">we send more</span>':'<span class="hint">they send more</span>');
+      return `<tr><td><strong>${esc(r.name)}</strong></td><td>${r.sent}</td><td>${r.received}</td><td>${r.net>0?'+':''}${r.net}</td><td>${flag}</td></tr>`;
+    }).join('')+`</table>` : '<div class="hint">No partner activity in this window. Log referrals and partners below.</div>';
+}
+async function addPartner(){
+  const name=$('pt_name').value.trim(); if(!name){ $('pt_msg').textContent='Name required.'; return; }
+  $('pt_msg').textContent='Saving…';
+  try{ await api('/facilities',{method:'POST',body:JSON.stringify({name,type:$('pt_type').value,location:$('pt_location').value})});
+    $('pt_msg').textContent='✓ Partner saved.'; setTimeout(()=>$('pt_msg').textContent='',2500); refreshFacilityList(); loadPartners();
+  }catch(e){ $('pt_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function logInbound(){
+  const name=$('pt_name').value.trim(); if(!name){ $('pt_msg').textContent='Name the partner first.'; return; }
+  try{ await api('/inbound-referrals',{method:'POST',body:JSON.stringify({facility_name:name,outcome:'pending'})});
+    $('pt_msg').textContent='✓ Inbound referral logged.'; setTimeout(()=>$('pt_msg').textContent='',2500); loadPartners();
+  }catch(e){ $('pt_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function syncSalesforce(){
+  $('pt_msg').textContent='Syncing Salesforce…';
+  try{ const r=await api('/salesforce/sync',{method:'POST'}); $('pt_msg').textContent=`✓ Synced ${r.created} inbound referrals.`; loadPartners(); }
+  catch(e){ $('pt_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 
 /* ---- lineup / culture ---- */

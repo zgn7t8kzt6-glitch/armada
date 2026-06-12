@@ -6,7 +6,7 @@ import { db, audit, getState, setState } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
-import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES } from './src/db.js';
+import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
@@ -232,6 +232,19 @@ async function runAndStoreAmaRead(client, user, ip, extraNotes = []) {
     read.withdrawal_level || null, read.withdrawal || null, JSON.stringify(read.med_concerns || []), user.id);
   if (read.snapshot && read.snapshot.trim())
     db.prepare(`UPDATE clients SET summary = ?, summary_at = datetime('now') WHERE id = ?`).run(read.snapshot.trim(), client.id);
+  if (read.likes && read.likes.trim())
+    db.prepare(`UPDATE clients SET likes = ? WHERE id = ?`).run(read.likes.trim(), client.id);
+  // Refresh the AI case-management tasks: drop prior open AI ones, re-add current
+  // needs (preserving anything already logged or marked done).
+  if (Array.isArray(read.case_needs)) {
+    db.prepare(`DELETE FROM case_tasks WHERE client_id = ? AND source = 'ai' AND status = 'open'`).run(client.id);
+    const keep = new Set(db.prepare(`SELECT lower(item) i FROM case_tasks WHERE client_id = ?`).all(client.id).map((r) => r.i));
+    const ins = db.prepare(`INSERT INTO case_tasks (client_id, category, item, source) VALUES (?,?,?,'ai')`);
+    for (const n of read.case_needs) {
+      const item = (n.item || '').trim(); if (!item || keep.has(item.toLowerCase())) continue;
+      ins.run(client.id, n.category || 'Other', item); keep.add(item.toLowerCase());
+    }
+  }
   if (read.level === 'High' || read.level === 'Elevated')
     createAlert(client.id, 'risk', read.level, `${client.pref || client.name} — AMA risk ${read.level}: ${read.summary || 'review the action plan'}`);
   audit({ user, action: 'AMA_READ', entity: 'client', entity_id: client.id, detail: read.level, ip });
@@ -330,6 +343,31 @@ app.post('/api/debrief-discharges', requireAuth, requireAdmin, (req, res) => {
   res.json({ started: true });
 });
 app.get('/api/debrief-discharges/status', requireAuth, requireAdmin, (req, res) => res.json(debriefJob));
+/* ---------------- Case management ---------------- */
+// Per-client case-management needs (AI from notes + manual), so the CM sees what
+// to help with before the client asks. Plus what each client likes.
+app.get('/api/case-management', requireAuth, (req, res) => {
+  const clients = db.prepare(`SELECT id, pref, name, room, program, likes FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const getTasks = db.prepare(`SELECT * FROM case_tasks WHERE client_id = ? ORDER BY (status='done'), id DESC`);
+  const rows = clients.map((c) => ({ ...c, name: c.pref || c.name, tasks: getTasks.all(c.id) })).filter((c) => c.tasks.length || c.likes);
+  const openCount = db.prepare(`SELECT COUNT(*) n FROM case_tasks t JOIN clients c ON c.id=t.client_id WHERE t.status='open' AND c.active=1 AND c.discharge_status IS NULL`).get().n;
+  const byCat = db.prepare(`SELECT category k, COUNT(*) n FROM case_tasks t JOIN clients c ON c.id=t.client_id WHERE t.status='open' AND c.active=1 AND c.discharge_status IS NULL GROUP BY category ORDER BY n DESC`).all();
+  res.json({ clients: rows, openCount, byCategory: byCat, categories: CASE_CATEGORIES });
+});
+app.post('/api/case-tasks', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.client_id || !(b.item || '').trim()) return res.status(400).json({ error: 'client_id and item required' });
+  const info = db.prepare(`INSERT INTO case_tasks (client_id, category, item, source) VALUES (?,?,?,'manual')`).run(+b.client_id, b.category || 'Other', b.item.trim());
+  res.json({ id: info.lastInsertRowid });
+});
+app.post('/api/case-tasks/:id/done', requireAuth, (req, res) => {
+  const done = req.body?.done !== false;
+  db.prepare(`UPDATE case_tasks SET status = ?, done_by = ?, done_at = ? WHERE id = ?`)
+    .run(done ? 'done' : 'open', done ? req.user.name : null, done ? new Date().toISOString() : null, req.params.id);
+  res.json({ ok: true });
+});
+app.delete('/api/case-tasks/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM case_tasks WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+
 // Detox Watch: active clients with moderate/severe withdrawal or med concerns.
 app.get('/api/detox-watch', requireAuth, (req, res) => {
   const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();

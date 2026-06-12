@@ -101,7 +101,7 @@ const GROUPS=[
 ];
 const GROUP_OF={today:'today',
   report:'care',clients:'care',editor:'care',journey:'care',concierge:'care',program:'care',
-  retention:'clinical',surveys:'clinical',incidents:'clinical',
+  retention:'clinical',surveys:'clinical',incidents:'clinical',casemgmt:'clinical',
   family:'people',team:'people',lineup:'people',assign:'people',mytasks:'people',
   admissions:'admissions',alumni:'people',accountability:'insights',
   referrals:'referrals',partners:'referrals',
@@ -148,6 +148,7 @@ function show(v){
   if(v==='schedule') loadSchedule();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
+  if(v==='casemgmt') loadCaseMgmt();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
   if(v==='surveys') loadSurveys();
@@ -1018,6 +1019,43 @@ async function fillDischargeInfo(id, name){
   await api('/clients/'+id+'/discharge-info',{method:'POST',body:JSON.stringify({destination:destination||null,reason:reason||null})});
   loadAnalytics();
 }
+
+/* ---- case management ---- */
+let CM_CATS = null;
+async function loadCaseMgmt(){
+  const d = await api('/case-management');
+  CM_CATS = d.categories;
+  $('cmKpis').innerHTML = `
+    <div class="ret-card ${d.openCount?'rc-warn':''}"><div class="n">${d.openCount}</div><div class="l">Open needs</div></div>
+    <div class="ret-card"><div class="n">${d.clients.length}</div><div class="l">Clients with needs</div></div>
+    ${d.byCategory.slice(0,4).map(c=>`<div class="ret-card"><div class="n">${c.n}</div><div class="l">${esc(c.k||'Other')}</div></div>`).join('')}`;
+  $('cmList').innerHTML = d.clients.length ? d.clients.map(c=>{
+    const open = c.tasks.filter(t=>t.status==='open');
+    const done = c.tasks.filter(t=>t.status==='done');
+    const opts = CM_CATS.map(x=>`<option>${esc(x)}</option>`).join('');
+    const taskRow = t=>`<div class="todo">
+      <div class="box" style="cursor:pointer" onclick="cmDone(${t.id},${t.status==='open'?'true':'false'})">${t.status==='done'?'✓':''}</div>
+      <div class="txt ${t.status==='done'?'done':''}"><span class="badge">${esc(t.category||'Other')}</span> ${esc(t.item)}${t.source==='ai'?'':' <span class="hint">· added</span>'}</div>
+      <button class="btn btn-ghost btn-sm sans" onclick="cmDelete(${t.id})">✕</button></div>`;
+    return `<div class="card">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <strong style="font-size:16px">${esc(c.name)}</strong>${c.room?' <span class="hint">· Room '+esc(c.room)+'</span>':''}${c.program?' <span class="hint">· '+esc(c.program)+'</span>':''}
+        <button class="btn btn-ghost btn-sm sans" style="margin-left:auto" onclick="openJourney(${c.id})">Open</button>
+      </div>
+      ${c.likes?`<div class="pc-touch" style="margin:10px 0">★ Likes: ${esc(c.likes)}</div>`:''}
+      <div style="margin-top:8px">${open.length?open.map(taskRow).join(''):'<div class="hint">No open needs.</div>'}</div>
+      ${done.length?`<details style="margin-top:6px"><summary class="hint" style="cursor:pointer">${done.length} completed</summary>${done.map(taskRow).join('')}</details>`:''}
+      <div class="handoff-add no-print" style="margin-top:10px">
+        <select id="cmcat_${c.id}" style="width:auto">${opts}</select>
+        <input id="cmitem_${c.id}" placeholder="Add a need to help with…"/>
+        <button class="btn btn-ghost btn-sm sans" onclick="cmAdd(${c.id})">Add</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="card"><div class="empty">No case-management needs yet. They populate automatically when the assessment reads the notes.</div></div>';
+}
+async function cmDone(id, done){ await api('/case-tasks/'+id+'/done',{method:'POST',body:JSON.stringify({done})}); loadCaseMgmt(); }
+async function cmDelete(id){ await api('/case-tasks/'+id,{method:'DELETE'}); loadCaseMgmt(); }
+async function cmAdd(cid){ const item=$('cmitem_'+cid).value.trim(); if(!item)return; await api('/case-tasks',{method:'POST',body:JSON.stringify({client_id:cid,category:$('cmcat_'+cid).value,item})}); loadCaseMgmt(); }
 
 /* ---- scheduling & workforce ---- */
 async function loadCoverage(){

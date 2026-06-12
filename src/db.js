@@ -710,6 +710,19 @@ addColumn('ama_reads', 'withdrawal_note', 'TEXT');
 addColumn('ama_reads', 'med_concerns', 'TEXT');        // JSON array
 addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapshot (kept fresh)
 addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
+addColumn('clients', 'likes', 'TEXT');                 // what the client likes/enjoys (AI, kept fresh)
+// Case-management needs the team should help with, pulled from the notes + manual.
+db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  category TEXT,
+  item TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',   -- open | done
+  source TEXT NOT NULL DEFAULT 'ai',     -- ai | manual
+  done_by TEXT, done_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+export const CASE_CATEGORIES = ['Aftercare / Housing', 'Transportation', 'Legal / Court / Parole', 'Employment', 'Education', 'Insurance / Financial', 'ID / Documents', 'Medical / Dental', 'Family / Support', 'Benefits', 'Communication', 'Other'];
 
 // ---- Outbound-referral vocabulary (shared with the front-end via /api/meta) ----
 export const REFERRAL_DEPARTMENTS = ['Clinical', 'Business Development', 'Intake'];

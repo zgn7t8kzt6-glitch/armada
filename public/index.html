@@ -53,6 +53,7 @@
     <button data-view="concierge">Concierge</button>
     <button data-view="program">Program</button>
     <button data-view="incidents">Incidents</button>
+    <button data-view="casemgmt">Case Mgmt</button>
     <button data-view="referrals">Referrals</button>
     <button data-view="partners">Partners</button>
     <button data-view="askai">Ask AI</button>
@@ -159,6 +160,16 @@
         <div class="toolbar"><button class="btn btn-gold sans" onclick="addIncident()">File report</button></div>
       </div>
       <div class="card"><h3>Reports</h3><div id="inList"></div></div>
+    </section>
+
+    <!-- CASE MANAGEMENT -->
+    <section id="casemgmt" class="view">
+      <div class="card">
+        <h3>Case Management</h3>
+        <p class="sub sans">What each client needs help with — pulled live from their notes so you can act before they ask. Plus what they like.</p>
+        <div id="cmKpis" class="ret-cards"></div>
+      </div>
+      <div id="cmList"></div>
     </section>
 
     <!-- OUTBOUND REFERRALS -->

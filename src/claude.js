@@ -208,8 +208,22 @@ const AMA_SCHEMA = {
     withdrawal: { type: 'string', description: 'Brief note on withdrawal status — latest CIWA/COWS score, symptoms, and whether it is worsening.' },
     med_concerns: { type: 'array', items: { type: 'string' }, description: 'Medication issues from the notes: refusals, side effects, missed doses, or unmet comfort-med needs. Empty array if none.' },
     snapshot: { type: 'string', description: 'A warm, plain-language at-a-glance summary (3-5 sentences) anyone walking in could read to instantly know this client as a whole: who they are, why they came, how they are doing right now (withdrawal/mood/engagement), what matters most to them, and the one thing to focus on. No jargon, person-first, grounded in the notes.' },
+    likes: { type: 'string', description: 'What this client LIKES and what makes them feel comfortable/cared for — foods, drinks, activities, interests, comfort items, important people — gathered from the notes. Empty string if nothing is documented.' },
+    case_needs: {
+      type: 'array',
+      description: 'Concrete case-management needs the team should proactively help with — anticipate before the client asks. Empty array if none documented.',
+      items: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', enum: ['Aftercare / Housing', 'Transportation', 'Legal / Court / Parole', 'Employment', 'Education', 'Insurance / Financial', 'ID / Documents', 'Medical / Dental', 'Family / Support', 'Benefits', 'Communication', 'Other'] },
+          item: { type: 'string', description: 'One specific, actionable need (e.g. "Needs ride to court hearing Thursday 9am", "Lost ID — help replace", "Wants to reconnect with daughter").' },
+        },
+        required: ['category', 'item'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'withdrawal_level', 'withdrawal', 'med_concerns', 'snapshot'],
+  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'withdrawal_level', 'withdrawal', 'med_concerns', 'snapshot', 'likes', 'case_needs'],
   additionalProperties: false,
 };
 
@@ -516,6 +530,8 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   r.withdrawal = r.withdrawal || '';
   r.med_concerns = r.med_concerns || [];
   r.snapshot = r.snapshot || '';
+  r.likes = r.likes || '';
+  r.case_needs = (r.case_needs || []).filter((n) => n && n.item);
   return r;
 }
 

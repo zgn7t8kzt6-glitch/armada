@@ -1266,10 +1266,19 @@ async function loadJourney(){
 }
 async function loadClientNotes(id){
   try { const { notes } = await api('/clients/'+id+'/notes');
-    $('notesList').innerHTML = notes.length ? notes.map(n=>`<div class="todo">
-      <div class="txt">${n.flagged?'<span class="risk '+(n.flag_level==='High'?'risk-high':'risk-elev')+'">⚑ '+esc(n.flag_level)+'</span> ':''}${esc(n.text.slice(0,180))}${n.text.length>180?'…':''}
-        ${n.flag_summary?'<div class="hint">'+esc(n.flag_summary)+(n.suggested_action?' → '+esc(n.suggested_action):'')+'</div>':''}
-        <div class="hint">${esc(n.source||'')} · ${esc(n.author||'')} · ${esc((n.created_at||'').slice(0,16))}</div></div></div>`).join('') : '<div class="pc-note" style="margin-top:8px">No notes yet.</div>';
+    $('notesList').innerHTML = notes.length ? notes.map(n=>{
+      const lvl = n.flag_level==='High'?'risk-high':n.flag_level==='Elevated'?'risk-elev':'risk-low';
+      // Lead with the clean AI read; tuck the raw chart text behind a toggle.
+      return `<div class="note-card">
+        <div class="note-top">
+          ${n.flagged?`<span class="risk ${lvl}">⚑ ${esc(n.flag_level||'Flag')}</span>`:'<span class="risk risk-low">note</span>'}
+          <span class="hint">${esc(n.source||'')} · ${esc((n.created_at||'').slice(0,16))}</span>
+        </div>
+        ${n.flag_summary?`<div class="note-sum">${esc(n.flag_summary)}</div>`:''}
+        ${n.suggested_action?`<div class="note-act">→ ${esc(n.suggested_action)}</div>`:''}
+        ${n.text?`<details class="note-raw"><summary>View source note</summary><div class="note-rawbody">${esc(n.text.slice(0,4000))}</div></details>`:''}
+      </div>`;
+    }).join('') : '<div class="pc-note" style="margin-top:8px">No notes yet.</div>';
   } catch(e){}
 }
 async function addNote(clientId){

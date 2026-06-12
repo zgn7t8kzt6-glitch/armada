@@ -253,6 +253,9 @@ app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
 let assessJob = { running: false, total: 0, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
 async function runAssessAll(user) {
   const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  // Clear stale auto-generated risk/concern alerts so a re-run refreshes rather
+  // than piling up duplicates.
+  db.prepare(`DELETE FROM alerts WHERE kind IN ('risk', 'concern') AND status = 'New'`).run();
   assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
   for (const c of clients) {
     assessJob.current = c.pref || c.name;

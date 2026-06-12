@@ -162,6 +162,14 @@ input:focus,select:focus,textarea:focus{outline:none;background:var(--paper);bor
 .snapshot-head{font-family:var(--sans);font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--teal);margin-bottom:6px}
 .snapshot-when{font-weight:500;text-transform:none;letter-spacing:0;color:var(--muted)}
 .snapshot-body{font-size:15px;line-height:1.6;color:var(--ink)}
+.note-card{border:1px solid var(--line);border-radius:var(--r-sm);padding:13px 15px;margin-top:10px;background:var(--paper)}
+.note-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.note-sum{font-size:14px;line-height:1.55;color:var(--ink)}
+.note-act{font-size:13.5px;line-height:1.5;color:var(--teal);margin-top:6px;font-weight:500}
+.note-raw{margin-top:8px}
+.note-raw summary{font-size:12px;color:var(--muted);cursor:pointer;font-family:var(--sans)}
+.note-rawbody{font-size:12px;color:var(--muted);white-space:pre-wrap;margin-top:6px;max-height:220px;overflow:auto;background:#faf8f4;border:1px solid var(--line);border-radius:8px;padding:8px}
+[data-theme="dark"] .note-rawbody{background:#10171d}
 [data-theme="dark"] .snapshot-card{background:#16242a;border-color:#28403c}
 [data-theme="dark"] .snapshot-body{color:#dfe9e6}
 .anchor-card{background:linear-gradient(125deg,#20484e,#2d6168);color:#fff;border-radius:var(--r-sm);padding:18px 20px;border-left:3px solid var(--gold-2)}

@@ -81,13 +81,19 @@ export async function kipuSyncRoster() {
     return false;
   };
 
+  // Census has no discharge dates, so it includes never-closed old charts. Keep
+  // only recent admissions (real current patients). Configurable; default 120d.
+  const admitDays = +(process.env.KIPU_ADMIT_DAYS || 120);
+  const admitCutoff = new Date(Date.now() - admitDays * 864e5).toISOString().slice(0, 10);
+
   for (const p of list) {
     const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name;
     if (!name) continue;
     if (!matchesLoc(p)) continue;
-    const kid = pick(p, 'id', 'casefile_id', 'patient_id', 'mrn') && String(pick(p, 'id', 'casefile_id', 'patient_id', 'mrn'));
+    const kid = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn') && String(pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'));
     const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
     const admit = admitRaw ? String(admitRaw).slice(0, 10) : null;
+    if (admit && admit < admitCutoff) continue;   // skip stale long-ago admissions
     const admitTime = timeOf(admitRaw);
     const therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
     const caseMgr = pick(p, 'case_manager', 'casemanager');

@@ -221,11 +221,12 @@ async function runAndStoreAmaRead(client, user, ip, extraNotes = []) {
   // extraNotes (e.g. Kipu documentation) are fed in as additional context.
   const read = await generateAmaRead(client, pulses, [...extraNotes, ...handoffs]);
   db.prepare(
-    `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, withdrawal_level, withdrawal_note, med_concerns, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(client.id, read.level, read.summary, JSON.stringify(read.triggers),
     JSON.stringify(read.actions), read.approach, read.underlying || null,
-    JSON.stringify(read.cared_for || []), read.best_play || null, user.id);
+    JSON.stringify(read.cared_for || []), read.best_play || null,
+    read.withdrawal_level || null, read.withdrawal || null, JSON.stringify(read.med_concerns || []), user.id);
   if (read.level === 'High' || read.level === 'Elevated')
     createAlert(client.id, 'risk', read.level, `${client.pref || client.name} — AMA risk ${read.level}: ${read.summary || 'review the action plan'}`);
   audit({ user, action: 'AMA_READ', entity: 'client', entity_id: client.id, detail: read.level, ip });
@@ -321,6 +322,23 @@ app.post('/api/debrief-discharges', requireAuth, requireAdmin, (req, res) => {
   res.json({ started: true });
 });
 app.get('/api/debrief-discharges/status', requireAuth, requireAdmin, (req, res) => res.json(debriefJob));
+// Detox Watch: active clients with moderate/severe withdrawal or med concerns.
+app.get('/api/detox-watch', requireAuth, (req, res) => {
+  const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const rank = { Severe: 0, Moderate: 1 };
+  const watch = [];
+  for (const c of clients) {
+    const a = latestAmaRead(c.id);
+    if (!a) continue;
+    const med = safeArr(a.med_concerns);
+    const w = a.withdrawal_level;
+    if ((w && ['Moderate', 'Severe'].includes(w)) || med.length) {
+      watch.push({ id: c.id, name: c.pref || c.name, room: c.room, withdrawal_level: w || 'Unknown', withdrawal: a.withdrawal_note || '', med_concerns: med });
+    }
+  }
+  watch.sort((x, y) => (rank[x.withdrawal_level] ?? 9) - (rank[y.withdrawal_level] ?? 9) || y.med_concerns.length - x.med_concerns.length);
+  res.json({ watch });
+});
 app.get('/api/discharge-learnings', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT id, pref, name, discharge_status, discharge_date, discharge_reason, discharge_improve
     FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-60 day')

@@ -611,10 +611,26 @@ async function loadDischargeLearnings(){
     }).join('');
   }catch(e){}
 }
+async function loadDetoxWatch(){
+  try{ const { watch } = await api('/detox-watch');
+    if(!watch.length){ $('detoxCard').style.display='none'; return; }
+    $('detoxCard').style.display='block';
+    $('detoxWatch').innerHTML = watch.map(w=>{
+      const sev = w.withdrawal_level==='Severe', mod = w.withdrawal_level==='Moderate';
+      return `<div class="todo"><div class="txt">
+        ${w.withdrawal_level&&w.withdrawal_level!=='Unknown'?`<span class="risk ${sev?'risk-high':mod?'risk-elev':'risk-low'}">Withdrawal: ${esc(w.withdrawal_level)}</span> `:''}
+        <strong>${esc(w.name)}</strong>${w.room?' · '+esc(w.room):''}
+        ${w.withdrawal?`<div class="pc-note">${esc(w.withdrawal)}</div>`:''}
+        ${w.med_concerns.length?`<div class="pc-note" style="color:var(--danger)">💊 ${w.med_concerns.map(esc).join(' · ')}</div>`:''}
+      </div><button class="btn btn-ghost btn-sm sans" onclick="openJourney(${w.id})">Open</button></div>`;
+    }).join('');
+  }catch(e){}
+}
 async function loadRetention(){
   pollAssess();   // resume the progress readout if a job is running
   pollDebrief();
   loadDischargeLearnings();
+  loadDetoxWatch();
   const { clients, triggerCounts, summary } = await api('/retention');
   $('retSummary').innerHTML = `
     <div class="ret-card ${summary.high?'rc-high':''}"><div class="n">${summary.high}</div><div class="l">High risk</div></div>

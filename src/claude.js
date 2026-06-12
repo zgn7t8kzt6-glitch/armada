@@ -173,6 +173,10 @@ Rules:
 - Ground every point in the information provided. Do not invent symptoms,
   events, medications, or diagnoses.
 - Weight the first 72 hours and first week as higher-risk windows.
+- DETOX SETTING: also assess WITHDRAWAL severity (use CIWA-Ar / COWS scores and
+  symptoms if documented) and flag any MEDICATION concerns (refusals, side
+  effects, missed doses, unmet comfort-med needs) — severe/worsening withdrawal
+  and med problems are among the biggest early-AMA drivers.
 - Conversation approach: calm, non-confrontational, motivational. Never use
   shame, threats, or "you'll regret it."
 - If there is little signal, say risk is Low and keep everything brief.`;
@@ -200,8 +204,11 @@ const AMA_SCHEMA = {
       },
     },
     approach: { type: 'string', description: 'How to talk with this client right now.' },
+    withdrawal_level: { type: 'string', enum: ['None', 'Mild', 'Moderate', 'Severe', 'Unknown'], description: 'Detox withdrawal severity from the notes (use CIWA-Ar / COWS scores if documented).' },
+    withdrawal: { type: 'string', description: 'Brief note on withdrawal status — latest CIWA/COWS score, symptoms, and whether it is worsening.' },
+    med_concerns: { type: 'array', items: { type: 'string' }, description: 'Medication issues from the notes: refusals, side effects, missed doses, or unmet comfort-med needs. Empty array if none.' },
   },
-  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach'],
+  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'withdrawal_level', 'withdrawal', 'med_concerns'],
   additionalProperties: false,
 };
 
@@ -504,6 +511,9 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   r.actions = (r.actions || []).filter((a) => a.text && SHIFTS.includes(a.shift) && ROLES.includes(a.job_role));
   r.triggers = r.triggers || [];
   r.cared_for = r.cared_for || [];
+  r.withdrawal_level = r.withdrawal_level || 'Unknown';
+  r.withdrawal = r.withdrawal || '';
+  r.med_concerns = r.med_concerns || [];
   return r;
 }
 

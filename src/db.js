@@ -705,6 +705,9 @@ addColumn('clients', 'case_manager', 'TEXT');          // case manager
 addColumn('clients', 'discharge_destination', 'TEXT'); // where they went (facility/home/etc.)
 addColumn('clients', 'kipu_id', 'TEXT');               // external EMR id (idempotent Kipu sync)
 addColumn('clients', 'source', 'TEXT');                // kipu | warehouse | manual (null = manual)
+addColumn('ama_reads', 'withdrawal_level', 'TEXT');    // None | Mild | Moderate | Severe | Unknown
+addColumn('ama_reads', 'withdrawal_note', 'TEXT');
+addColumn('ama_reads', 'med_concerns', 'TEXT');        // JSON array
 
 // ---- Outbound-referral vocabulary (shared with the front-end via /api/meta) ----
 export const REFERRAL_DEPARTMENTS = ['Clinical', 'Business Development', 'Intake'];

@@ -213,11 +213,11 @@ export async function kipuPatientNotes(casefileId) {
     try {
       const d = await kipuGet(`/api/patient_evaluations/${e.id}?patient_id=${casefileId}`);
       const ev = d?.patient_evaluation || d?.evaluation || d;
-      const items = extractItems(ev?.patient_evaluation_items || ev?.evaluation_items || ev?.items);
+      const items = extractItems(ev);                                    // finds the items array wherever it lives
       const body = extractText(ev?.evaluation_content);                  // the rendered note paragraph
       const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';
       content = [bodyClean, items].filter(Boolean).join('\n').trim();    // narrative first, then answered fields
-      if (!content) content = extractText(ev);
+      // (no raw-structure fallback — empty is better than dumping metadata)
     } catch { /* skip this note */ }
     if (content && content.length > 10) texts.push(`[${String(e.created_at || '').slice(0, 10)} · ${(e.name || 'Note').trim()}]\n${content}`);
   }
@@ -225,25 +225,47 @@ export async function kipuPatientNotes(casefileId) {
 }
 
 // Pull label: value pairs out of Kipu evaluation items, keeping only REAL
-// answers (drop blank/n-a/false checkbox noise).
-const NOISE = new Set(['n/a', 'na', 'none', 'false', 'no', '0', 'null', '--', '', 'unknown', '.', 'n/a.', 'not applicable']);
-function extractItems(items) {
-  if (!Array.isArray(items)) return '';
+// answers (drop blank/n-a/false checkbox noise, section titles, metadata).
+const NOISE = new Set(['n/a', 'na', 'none', 'false', 'no', '0', 'null', '--', '', 'unknown', '.', 'n/a.', 'not applicable', 'true']);
+// Find the array of evaluation items wherever it lives in the detail object.
+function findItemsArray(x, depth = 0) {
+  if (Array.isArray(x)) return (x[0] && typeof x[0] === 'object' && (x[0].field_type || x[0].label || x[0].name != null)) ? x : null;
+  if (x && typeof x === 'object' && depth < 3) {
+    for (const k of ['patient_evaluation_items', 'evaluation_items', 'items', 'records', 'patient_evaluation']) {
+      if (x[k]) { const f = findItemsArray(x[k], depth + 1); if (f) return f; }
+    }
+    for (const v of Object.values(x)) { const f = findItemsArray(v, depth + 1); if (f) return f; }
+  }
+  return null;
+}
+function extractItems(itemsLike) {
+  const items = findItemsArray(itemsLike);
+  if (!items) return '';
   const out = [];
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
-    // Only take genuine free-text answers (a string). Nested checkbox groups
-    // (objects/arrays of options) are template noise — skip them.
-    const raw = it.value ?? it.answer ?? it.note ?? it.text ?? it.string_value ?? it.description;
-    if (typeof raw !== 'string') continue;
-    const v = stripHtml(raw).trim();
+    const ft = String(it.field_type || it.type || '').toLowerCase();
+    if (ft === 'title' || ft.includes('divider') || ft.includes('golden_thread') || ft === 'evaluation_name_drop_down') continue;
+    const label = stripHtml(String(it.label || it.name || it.field_name || it.question || ''));
+    // Pull the answer: a string value, else checked checkbox/record options.
+    let v = '';
+    const raw = it.value ?? it.answer ?? it.string_value ?? it.text ?? it.description;
+    if (typeof raw === 'string') v = stripHtml(raw).trim();
+    else if (raw != null && typeof raw !== 'object') v = String(raw);
+    if (!v && Array.isArray(it.records)) {
+      const picks = it.records.map((r) => {
+        const rv = String(r && (r.value ?? r.checked ?? r.answer) ?? '').toLowerCase();
+        const rl = stripHtml(String((r && (r.label || r.name)) || ''));
+        return (rv && rv !== 'false' && rv !== 'n/a' && rv !== '') ? (rl || rv) : '';
+      }).filter(Boolean);
+      if (picks.length) v = picks.join(', ');
+    }
     if (!v) continue;
     const lv = v.toLowerCase();
-    if (NOISE.has(lv) || lv === 'true') continue;
+    if (NOISE.has(lv)) continue;
     if ((v.match(/n\/a/gi) || []).length > 1) continue;       // option dump
-    if (v.replace(/[^a-z]/gi, '').length < 4) continue;        // too short to be real
-    const label = stripHtml(String(it.label || it.name || it.field_name || it.question || ''));
-    out.push(label && v.length < 80 ? `${label}: ${v}` : v);
+    if (v.replace(/[^a-z]/gi, '').length < 3) continue;        // too short to be real
+    out.push(label && v.length < 90 ? `${label}: ${v}` : v);
   }
   return out.join('\n');
 }

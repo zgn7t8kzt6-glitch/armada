@@ -213,10 +213,13 @@ export async function kipuPatientNotes(casefileId) {
     try {
       const d = await kipuGet(`/api/patient_evaluations/${e.id}?patient_id=${casefileId}`);
       const ev = d?.patient_evaluation || d?.evaluation || d;
-      content = extractItems(ev?.patient_evaluation_items || ev?.evaluation_items || ev?.items);
-      if (!content) { const t = extractText(ev?.evaluation_content); if (t && !/^standard$/i.test(t)) content = t; }
+      const items = extractItems(ev?.patient_evaluation_items || ev?.evaluation_items || ev?.items);
+      const body = extractText(ev?.evaluation_content);                  // the rendered note paragraph
+      const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';
+      content = [bodyClean, items].filter(Boolean).join('\n').trim();    // narrative first, then answered fields
+      if (!content) content = extractText(ev);
     } catch { /* skip this note */ }
-    if (content && content.length > 15) texts.push(`[${String(e.created_at || '').slice(0, 10)} · ${(e.name || 'Note').trim()}]\n${content}`);
+    if (content && content.length > 10) texts.push(`[${String(e.created_at || '').slice(0, 10)} · ${(e.name || 'Note').trim()}]\n${content}`);
   }
   return texts.join('\n\n').slice(0, 18000); // keep the prompt bounded
 }
@@ -238,7 +241,7 @@ function extractItems(items) {
     const lv = v.toLowerCase();
     if (NOISE.has(lv) || lv === 'true') continue;
     if ((v.match(/n\/a/gi) || []).length > 1) continue;       // option dump
-    if (v.replace(/[^a-z]/gi, '').length < 8) continue;        // too short to be real
+    if (v.replace(/[^a-z]/gi, '').length < 4) continue;        // too short to be real
     const label = stripHtml(String(it.label || it.name || it.field_name || it.question || ''));
     out.push(label && v.length < 80 ? `${label}: ${v}` : v);
   }

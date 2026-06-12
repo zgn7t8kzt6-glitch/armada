@@ -656,8 +656,12 @@ app.post('/api/kipu/doc-inspect', requireAuth, requireAdmin, async (req, res) =>
 app.post('/api/kipu/notes-preview', requireAuth, requireAdmin, async (req, res) => {
   const c = db.prepare(`SELECT kipu_id FROM clients WHERE active = 1 AND kipu_id IS NOT NULL AND kipu_id != '' LIMIT 1`).get();
   if (!c) return res.status(400).json({ error: 'No client with a Kipu id — sync the roster first.' });
-  try { const txt = await kipuPatientNotes(c.kipu_id); res.json({ chars: txt.length, preview: txt.slice(0, 2500) }); }
-  catch (e) { res.status(502).json({ error: e.message }); }
+  try {
+    const txt = await kipuPatientNotes(c.kipu_id);
+    const blocks = txt.split(/\n\n(?=\[)/).filter(Boolean);
+    const breakdown = blocks.map((b) => { const m = b.match(/^\[([^\]]+)\]/); return { head: m ? m[1] : '?', chars: b.length }; });
+    res.json({ chars: txt.length, noteCount: breakdown.length, breakdown, preview: txt.slice(0, 4000) });
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Clean reset: wipe the roster and rebuild it from the live Kipu active census
 // (use after test-syncs left stale/duplicate clients).

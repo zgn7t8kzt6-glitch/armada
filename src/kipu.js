@@ -25,6 +25,7 @@ async function kipuGet(path) {
   const r = await fetch(base + uri, {
     headers: {
       Accept: contentType,
+      'Content-Type': contentType,
       'Content-MD5': contentMd5,
       Date: date,
       Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}`,

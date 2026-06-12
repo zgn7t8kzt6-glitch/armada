@@ -60,8 +60,8 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
   cursor:pointer;font-size:14px;color:var(--navy);transition:.12s}
 .iconbtn:hover{border-color:var(--aqua);background:#f4fafa}
 .content{flex:1;min-width:0;display:flex;flex-direction:column}
-.topbar{display:flex;align-items:center;gap:12px;padding:14px 32px;background:rgba(247,244,237,.82);
-  backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:6}
+.topbar{display:flex;align-items:center;gap:12px;padding:14px 32px;background:var(--cream);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:6}
 .topbar-title{font-family:var(--serif);font-size:19px;color:var(--navy);font-weight:600;letter-spacing:-.01em}
 .hamb{display:none;background:none;border:none;font-size:21px;cursor:pointer;color:var(--navy);line-height:1}
 .scrim{display:none}
@@ -109,8 +109,8 @@ main{max-width:1120px;margin:0;padding:28px 34px 90px;width:100%}
   main{padding:20px 18px 80px}
   .topbar{padding:12px 18px}
 }
-.view{display:none}.view.active{display:block;animation:fadeUp .25s ease}
-@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.view{display:none}.view.active{display:block;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:22px 24px;margin-bottom:18px}
 .card h3{margin:0 0 4px;color:var(--navy);font-size:19px}
 .sub{color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5}
@@ -152,9 +152,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--aqua);bo
 .task-row select{width:130px;flex:0 0 auto}.task-row input{flex:1}
 
 .playbook-client{background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
-.pc-head{background:var(--navy);color:#fff;padding:14px 18px;display:flex;align-items:center;gap:12px}
-.pc-head h3{margin:0;color:#fff;font-size:18px}
-.pc-head .room{margin-left:auto;color:var(--gold-soft);font-size:13px}
+.pc-head{background:var(--navy);color:#fff;padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.pc-head h3{margin:0;color:#fff;font-size:18px;min-width:0;flex:1}
+.pc-head .room{margin-left:auto;color:var(--gold-soft);font-size:13px;white-space:nowrap}
 .pc-body{padding:16px 18px}
 .pc-touch{background:#faf6ee;border-left:3px solid var(--gold);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-style:italic;color:#5b4a2e}
 .anchor-card{background:linear-gradient(125deg,#20484e,#2d6168);color:#fff;border-radius:var(--r-sm);padding:18px 20px;border-left:3px solid var(--gold-2)}

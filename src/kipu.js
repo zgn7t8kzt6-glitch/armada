@@ -140,6 +140,30 @@ export async function kipuSyncRoster() {
   return { total: list.length, created, matched, deactivated, activeNow: activeKids.length };
 }
 
+// Pull a single patient's recent clinical documentation (evaluations/notes) and
+// return it as plain text for the AI risk read. Endpoint is configurable per
+// Kipu account via KIPU_NOTES_PATH (use {id} for the casefile id).
+export async function kipuPatientNotes(casefileId) {
+  const tmpl = process.env.KIPU_NOTES_PATH || '/api/patients/{id}/patient_evaluations';
+  const path = tmpl.replace('{id}', encodeURIComponent(casefileId));
+  const data = await kipuGet(path);
+  const list = data?.patient_evaluations || data?.evaluations || data?.records || (Array.isArray(data) ? data : []);
+  const texts = [];
+  for (const e of list.slice(0, 60)) {
+    const nm = e.name || e.evaluation_name || e.type || 'Evaluation';
+    const date = (e.created_at || e.evaluation_date || '').toString().slice(0, 10);
+    const direct = e.progress_note || e.note || e.narrative || e.summary;
+    if (direct && String(direct).trim().length > 3) texts.push(`[${date} ${nm}] ${String(direct).trim()}`);
+    const items = e.patient_evaluation_items || e.items || e.answers || [];
+    for (const it of (Array.isArray(items) ? items : [])) {
+      const v = it.value || it.answer || it.description || it.note || it.text;
+      const label = it.label || it.name || it.question || '';
+      if (v && typeof v === 'string' && v.trim().length > 3) texts.push(`[${nm} · ${label}] ${v.trim()}`);
+    }
+  }
+  return texts.join('\n\n').slice(0, 14000); // keep the prompt bounded
+}
+
 // Diagnostic: shows the SHAPE of the Kipu census response (field names + the
 // distinct values of location/status/discharge-looking fields) so we can write
 // the exact active+location filter. PHI-safe: no patient names returned.

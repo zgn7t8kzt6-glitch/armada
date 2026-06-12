@@ -560,7 +560,28 @@ function riskBadge(level){
   const m = { High:'risk-high', Elevated:'risk-elev', Low:'risk-low' };
   return `<span class="risk ${m[level]||'risk-none'}">${esc(level||'No read')}</span>`;
 }
+let assessPoll = null;
+async function assessAll(){
+  const btn=$('assessBtn');
+  try{ const r=await api('/assess-all',{method:'POST'});
+    if(r.started===false && !r.already){ $('assessProgress').textContent='Could not start.'; return; }
+    btn.disabled=true; pollAssess();
+  }catch(e){ $('assessProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function pollAssess(){
+  clearTimeout(assessPoll);
+  try{ const s=await api('/assess-all/status');
+    if(s.running){
+      $('assessProgress').innerHTML=`Assessing ${s.done}/${s.total}… <strong>${s.high}</strong> high · <strong>${s.elevated}</strong> elevated${s.current?' · reading '+esc(s.current):''}`;
+      assessPoll=setTimeout(pollAssess, 2500);
+    } else {
+      $('assessBtn').disabled=false;
+      if(s.total){ $('assessProgress').innerHTML=`✓ Assessed ${s.done} clients — <strong style="color:var(--danger)">${s.high} high</strong>, <strong>${s.elevated} elevated</strong>, ${s.low} low${s.errors?' · '+s.errors+' errors':''}.`; loadRetention(); }
+    }
+  }catch(e){ $('assessProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function loadRetention(){
+  pollAssess();   // resume the progress readout if a job is running
   const { clients, triggerCounts, summary } = await api('/retention');
   $('retSummary').innerHTML = `
     <div class="ret-card ${summary.high?'rc-high':''}"><div class="n">${summary.high}</div><div class="l">High risk</div></div>

@@ -7,7 +7,7 @@ import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, s
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -215,10 +215,11 @@ function createAlert(client_id, kind, level, message) {
 
 // Gather context, ask Claude, store the read. Reused by the button and by
 // auto-generation when a High-concern pulse is logged.
-async function runAndStoreAmaRead(client, user, ip) {
+async function runAndStoreAmaRead(client, user, ip, extraNotes = []) {
   const pulses = recentPulses(client.id);
   const handoffs = db.prepare(`SELECT note FROM handoffs WHERE client_id = ? ORDER BY id DESC LIMIT 6`).all(client.id);
-  const read = await generateAmaRead(client, pulses, handoffs);
+  // extraNotes (e.g. Kipu documentation) are fed in as additional context.
+  const read = await generateAmaRead(client, pulses, [...extraNotes, ...handoffs]);
   db.prepare(
     `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -243,6 +244,34 @@ app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
     res.status(502).json({ error: e.message || 'Could not assess.' });
   }
 });
+
+// ---- Batch risk assessment: read every active client's Kipu documentation and
+// score their AMA risk, in the background, with live progress. ----
+let assessJob = { running: false, total: 0, done: 0, high: 0, elevated: 0, low: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
+async function runAssessAll(user) {
+  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
+  for (const c of clients) {
+    assessJob.current = c.pref || c.name;
+    try {
+      let extra = [];
+      if (c.kipu_id && kipuConfigured()) {
+        try { const txt = await kipuPatientNotes(c.kipu_id); if (txt && txt.trim()) extra = [{ note: 'Kipu documentation:\n' + txt }]; } catch { /* notes optional */ }
+      }
+      const read = await runAndStoreAmaRead(c, user, '0.0.0.0', extra);
+      assessJob[read.level === 'High' ? 'high' : read.level === 'Elevated' ? 'elevated' : 'low']++;
+    } catch { assessJob.errors++; }
+    assessJob.done++;
+  }
+  assessJob.running = false; assessJob.current = null; assessJob.finishedAt = Date.now();
+}
+app.post('/api/assess-all', requireAuth, requireAdmin, (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured.' });
+  if (assessJob.running) return res.json({ started: false, already: true });
+  runAssessAll(req.user);                 // fire-and-forget; poll status
+  res.json({ started: true });
+});
+app.get('/api/assess-all/status', requireAuth, requireAdmin, (req, res) => res.json(assessJob));
 
 // Apply the latest plan's tasks (and feel-cared-for gestures) to the Care Card.
 app.post('/api/clients/:id/plan-to-tasks', requireAuth, (req, res) => {

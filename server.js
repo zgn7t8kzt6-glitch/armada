@@ -837,6 +837,7 @@ app.delete('/api/schedule/:id', requireAuth, (req, res) => { db.prepare(`DELETE 
 
 // Treatment goals
 app.get('/api/goals', requireAuth, (req, res) => {
+  if (!req.query.client_id) return res.json({ goals: [] });
   res.json({ goals: db.prepare(`SELECT * FROM goals WHERE client_id = ? ORDER BY (status = 'Met'), id DESC`).all(req.query.client_id) });
 });
 app.post('/api/goals', requireAuth, (req, res) => {
@@ -1631,9 +1632,15 @@ maybeSendWeeklyReport();
 /* ---------------- Proactive alerts ---------------- */
 app.get('/api/alerts', requireAuth, (req, res) => {
   const status = req.query.status || 'New';
-  const rows = db.prepare(`SELECT a.*, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id ${status === 'all' ? '' : 'WHERE a.status = ?'} ORDER BY a.id DESC LIMIT 100`)
-    .all(...(status === 'all' ? [] : [status]));
-  res.json({ alerts: rows, newCount: db.prepare(`SELECT COUNT(*) n FROM alerts WHERE status = 'New'`).get().n });
+  // De-dupe: keep only the latest alert per client + kind so the panel stays clean.
+  const sub = status === 'all'
+    ? `SELECT MAX(id) FROM alerts GROUP BY client_id, kind`
+    : `SELECT MAX(id) FROM alerts WHERE status = ? GROUP BY client_id, kind`;
+  const where = status === 'all' ? `WHERE a.id IN (${sub})` : `WHERE a.status = ? AND a.id IN (${sub})`;
+  const args = status === 'all' ? [] : [status, status];
+  const rows = db.prepare(`SELECT a.*, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id ${where} ORDER BY a.id DESC LIMIT 100`).all(...args);
+  const newCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT MAX(id) FROM alerts WHERE status = 'New' GROUP BY client_id, kind)`).get().n;
+  res.json({ alerts: rows, newCount });
 });
 app.post('/api/alerts/:id/ack', requireAuth, (req, res) => {
   db.prepare(`UPDATE alerts SET status = 'Ack', ack_by = ?, ack_name = ?, ack_at = datetime('now') WHERE id = ?`).run(req.user.id, req.user.name, req.params.id);

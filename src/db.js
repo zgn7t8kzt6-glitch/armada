@@ -532,6 +532,62 @@ CREATE TABLE IF NOT EXISTS inbound_referrals (
   salesforce_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Scheduling: a staffing need (one row per part×role on a date, with how many needed).
+CREATE TABLE IF NOT EXISTS schedule_slots (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,                      -- YYYY-MM-DD
+  part TEXT NOT NULL,                      -- Morning | Day | Evening | Night
+  role TEXT NOT NULL,                      -- BHT / Tech | Nurse | Therapist | Kitchen
+  needed INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Who is assigned to a slot, and whether they called off.
+CREATE TABLE IF NOT EXISTS schedule_assignments (
+  id INTEGER PRIMARY KEY,
+  slot_id INTEGER NOT NULL REFERENCES schedule_slots(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_name TEXT,
+  status TEXT NOT NULL DEFAULT 'scheduled', -- scheduled | called_off
+  calloff_reason TEXT,
+  calloff_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Time clock punches. source = app (in-app) | kipu | qbtime | adp | ... for later sync.
+CREATE TABLE IF NOT EXISTS time_entries (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_name TEXT,
+  clock_in TEXT NOT NULL DEFAULT (datetime('now')),
+  clock_out TEXT,
+  source TEXT NOT NULL DEFAULT 'app',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Safety rounds (from Kipu when charted there; manual fallback otherwise).
+CREATE TABLE IF NOT EXISTS rounds (
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL DEFAULT (datetime('now')),
+  by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  by_name TEXT,
+  area TEXT,
+  note TEXT,
+  source TEXT NOT NULL DEFAULT 'app',
+  kipu_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Shift job-duty completions (simple log → completion % on the dashboard).
+CREATE TABLE IF NOT EXISTS duty_logs (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL DEFAULT (date('now')),
+  part TEXT,
+  role TEXT,
+  text TEXT NOT NULL,
+  by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // ---- Seed SOP library + training courses + daily focus (idempotent) ----

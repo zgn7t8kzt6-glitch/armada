@@ -1157,6 +1157,118 @@ app.get('/api/analytics/insights', requireAuth, async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
+/* ---------------- Scheduling & workforce ---------------- */
+// The schedule for a date: each slot with assignments, plus live coverage
+// (needed vs scheduled vs called-off vs currently clocked-in).
+app.get('/api/staffing', requireAuth, (req, res) => {
+  const date = (req.query.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const slots = db.prepare(`SELECT * FROM schedule_slots WHERE date = ? ORDER BY
+    CASE part WHEN 'Morning' THEN 0 WHEN 'Day' THEN 1 WHEN 'Evening' THEN 2 WHEN 'Night' THEN 3 ELSE 4 END, role`).all(date);
+  const getA = db.prepare(`SELECT * FROM schedule_assignments WHERE slot_id = ? ORDER BY id`);
+  // Who is clocked in right now (open punch today).
+  const onNow = new Set(db.prepare(`SELECT user_id FROM time_entries WHERE clock_out IS NULL AND date(clock_in) = date('now')`).all().map((r) => r.user_id));
+  const out = slots.map((s) => {
+    const a = getA.all(s.id);
+    const scheduled = a.filter((x) => x.status === 'scheduled');
+    const calledOff = a.filter((x) => x.status === 'called_off');
+    const present = scheduled.filter((x) => onNow.has(x.user_id)).length;
+    return { ...s, assignments: a, scheduledCount: scheduled.length, calledOffCount: calledOff.length, present, covered: scheduled.length >= s.needed };
+  });
+  res.json({ date, slots: out });
+});
+app.post('/api/staffing/slots', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (!b.date || !b.part || !b.role) return res.status(400).json({ error: 'date, part, role required' });
+  const info = db.prepare(`INSERT INTO schedule_slots (date, part, role, needed, notes, created_by) VALUES (?,?,?,?,?,?)`)
+    .run(b.date.slice(0, 10), b.part, b.role, Math.max(1, +b.needed || 1), b.notes || null, req.user.id);
+  res.json({ id: info.lastInsertRowid });
+});
+app.delete('/api/staffing/slots/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare(`DELETE FROM schedule_slots WHERE id = ?`).run(req.params.id); res.json({ ok: true });
+});
+app.post('/api/staffing/slots/:id/assign', requireAuth, requireAdmin, (req, res) => {
+  const u = db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(+req.body?.user_id);
+  if (!u) return res.status(400).json({ error: 'Unknown staff member' });
+  db.prepare(`INSERT INTO schedule_assignments (slot_id, user_id, user_name) VALUES (?,?,?)`).run(req.params.id, u.id, u.name);
+  res.json({ ok: true });
+});
+app.delete('/api/staffing/assignments/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare(`DELETE FROM schedule_assignments WHERE id = ?`).run(req.params.id); res.json({ ok: true });
+});
+app.post('/api/staffing/assignments/:id/calloff', requireAuth, (req, res) => {
+  const a = db.prepare(`SELECT a.*, s.date, s.part, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.id = ?`).get(req.params.id);
+  if (!a) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE schedule_assignments SET status='called_off', calloff_reason=?, calloff_at=datetime('now') WHERE id = ?`).run(req.body?.reason || null, req.params.id);
+  // Flag the coverage gap to the on-call leader.
+  const open = db.prepare(`SELECT s.needed - (SELECT COUNT(*) FROM schedule_assignments x WHERE x.slot_id=s.id AND x.status='scheduled') AS gap FROM schedule_slots s WHERE s.id=?`).get(a.slot_id);
+  if (open && open.gap > 0) createAlert(null, 'coverage', 'Elevated', `Call-off: ${a.user_name} for ${a.date} ${a.part} ${a.role}. Coverage short by ${open.gap}.`);
+  audit({ user: req.user, action: 'CALLOFF', entity: 'assignment', entity_id: +req.params.id, detail: `${a.user_name} ${a.date} ${a.part}`, ip: req.ip });
+  res.json({ ok: true });
+});
+
+// In-app time clock (default until an external system is connected).
+app.get('/api/clock/status', requireAuth, (req, res) => {
+  const mine = db.prepare(`SELECT * FROM time_entries WHERE user_id = ? AND clock_out IS NULL ORDER BY id DESC LIMIT 1`).get(req.user.id);
+  const onNow = db.prepare(`SELECT user_id, user_name, clock_in FROM time_entries WHERE clock_out IS NULL ORDER BY clock_in`).all();
+  res.json({ clockedIn: !!mine, since: mine?.clock_in || null, onNow });
+});
+app.post('/api/clock/in', requireAuth, (req, res) => {
+  const open = db.prepare(`SELECT id FROM time_entries WHERE user_id = ? AND clock_out IS NULL`).get(req.user.id);
+  if (open) return res.json({ ok: true, already: true });
+  db.prepare(`INSERT INTO time_entries (user_id, user_name) VALUES (?,?)`).run(req.user.id, req.user.name);
+  audit({ user: req.user, action: 'CLOCK_IN', ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/clock/out', requireAuth, (req, res) => {
+  db.prepare(`UPDATE time_entries SET clock_out = datetime('now') WHERE user_id = ? AND clock_out IS NULL`).run(req.user.id);
+  audit({ user: req.user, action: 'CLOCK_OUT', ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Safety rounds + job-duty completions.
+app.get('/api/rounds/today', requireAuth, (req, res) => {
+  res.json({ rounds: db.prepare(`SELECT * FROM rounds WHERE date(ts) = date('now') ORDER BY ts DESC`).all() });
+});
+app.post('/api/rounds', requireAuth, (req, res) => {
+  db.prepare(`INSERT INTO rounds (by_id, by_name, area, note) VALUES (?,?,?,?)`).run(req.user.id, req.user.name, req.body?.area || null, req.body?.note || null);
+  res.json({ ok: true });
+});
+app.post('/api/duties', requireAuth, (req, res) => {
+  if (!(req.body?.text || '').trim()) return res.status(400).json({ error: 'What was done?' });
+  db.prepare(`INSERT INTO duty_logs (date, part, role, text, by_id, by_name) VALUES (date('now'),?,?,?,?,?)`)
+    .run(req.body.part || null, req.body.role || null, req.body.text.trim(), req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+
+// Workforce dashboard: on now, coverage today, call-off patterns, rounds/duties.
+app.get('/api/workforce/summary', requireAuth, (req, res) => {
+  const days = ({ '30': 30, '90': 90 })[String(req.query.range)] || 30;
+  const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const onNow = db.prepare(`SELECT user_name, clock_in FROM time_entries WHERE clock_out IS NULL ORDER BY clock_in`).all();
+  // Today coverage roll-up.
+  const slotsToday = db.prepare(`SELECT s.id, s.needed,
+    (SELECT COUNT(*) FROM schedule_assignments a WHERE a.slot_id=s.id AND a.status='scheduled') AS sched
+    FROM schedule_slots s WHERE s.date = ?`).all(today);
+  const needed = slotsToday.reduce((n, s) => n + s.needed, 0);
+  const scheduled = slotsToday.reduce((n, s) => n + s.sched, 0);
+  const gaps = slotsToday.filter((s) => s.sched < s.needed).length;
+  // Call-off patterns.
+  const byPerson = db.prepare(`SELECT user_name k, COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id
+    WHERE a.status='called_off' AND s.date >= ? GROUP BY user_name ORDER BY n DESC`).all(since);
+  const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const calloffRows = db.prepare(`SELECT s.date FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?`).all(since);
+  const byDow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => ({ k: d, n: 0 }));
+  calloffRows.forEach((r) => { const d = dowNames[new Date(r.date + 'T00:00').getDay()]; const e = byDow.find((x) => x.k === d); if (e) e.n++; });
+  const roundsToday = db.prepare(`SELECT COUNT(*) n FROM rounds WHERE date(ts) = date('now')`).get().n;
+  const dutiesToday = db.prepare(`SELECT COUNT(*) n FROM duty_logs WHERE date = ?`).get(today).n;
+  const calloffsWeek = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?`).get(new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10)).n;
+  res.json({
+    onNow, coverage: { needed, scheduled, gaps, pct: needed ? Math.round(scheduled / needed * 100) : null },
+    calloffsWeek, byPerson, byDow, roundsToday, dutiesToday,
+  });
+});
+
 /* ---------------- Family engagement ---------------- */
 app.get('/api/clients/:id/family', requireAuth, (req, res) => {
   const cid = req.params.id;

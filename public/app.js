@@ -92,6 +92,7 @@ const GROUPS=[
   {g:'clinical',label:'Clinical',first:'retention'},
   {g:'people',label:'People',first:'lineup'},
   {g:'admissions',label:'Admissions',first:'admissions'},
+  {g:'workforce',label:'Schedule',first:'coverage'},
   {g:'referrals',label:'Referrals',first:'referrals'},
   {g:'insights',label:'Insights',first:'outcomes'},
   {g:'learn',label:'Learn',first:'training'},
@@ -103,6 +104,7 @@ const GROUP_OF={today:'today',
   family:'people',team:'people',lineup:'people',assign:'people',mytasks:'people',
   admissions:'admissions',alumni:'people',accountability:'insights',
   referrals:'referrals',partners:'referrals',
+  coverage:'workforce',schedule:'workforce',
   standard:'learn',library:'learn',training:'learn',
   outcomes:'insights',analytics:'insights',scorecard:'insights',settings:'insights','report-view':'insights',users:'insights',audit:'insights',
   askai:'ask'};
@@ -137,6 +139,8 @@ function show(v){
   if(v==='referrals') loadReferrals();
   if(v==='partners') loadPartners();
   if(v==='analytics') loadAnalytics();
+  if(v==='coverage') loadCoverage();
+  if(v==='schedule') loadSchedule();
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='outcomes') loadOutcomes();
@@ -928,6 +932,70 @@ async function fillDischargeInfo(id, name){
   await api('/clients/'+id+'/discharge-info',{method:'POST',body:JSON.stringify({destination:destination||null,reason:reason||null})});
   loadAnalytics();
 }
+
+/* ---- scheduling & workforce ---- */
+async function loadCoverage(){
+  // clock-in/out widget
+  try{ const c = await api('/clock/status');
+    $('clockBox').innerHTML = c.clockedIn
+      ? `<span class="risk risk-low" style="margin-right:8px">On the clock</span><button class="btn btn-ghost sans" onclick="clockToggle(false)">Clock out</button>`
+      : `<button class="btn btn-gold sans" onclick="clockToggle(true)">🕐 Clock in</button>`;
+  }catch(e){}
+  const s = await api('/workforce/summary?range=30');
+  const cov = s.coverage;
+  $('wfKpis').innerHTML = `
+    <div class="ret-card"><div class="n">${s.onNow.length}</div><div class="l">On shift now</div></div>
+    <div class="ret-card ${cov.pct!=null&&cov.pct<100?'rc-warn':''}"><div class="n">${cov.pct!=null?cov.pct+'%':'—'}</div><div class="l">Today covered (${cov.scheduled}/${cov.needed})</div></div>
+    <div class="ret-card ${cov.gaps?'rc-high':''}"><div class="n">${cov.gaps}</div><div class="l">Coverage gaps today</div></div>
+    <div class="ret-card ${s.calloffsWeek?'rc-elev':''}"><div class="n">${s.calloffsWeek}</div><div class="l">Call-offs this week</div></div>
+    <div class="ret-card"><div class="n">${s.roundsToday}</div><div class="l">Rounds today</div></div>
+    <div class="ret-card"><div class="n">${s.dutiesToday}</div><div class="l">Duties logged today</div></div>`;
+  $('wfOnNow').innerHTML = s.onNow.length ? s.onNow.map(p=>`<div class="pc-note">🟢 <strong>${esc(p.user_name||'')}</strong> <span class="hint">since ${esc((p.clock_in||'').slice(11,16))}</span></div>`).join('') : '<div class="hint">No one clocked in right now.</div>';
+  const bars=(rows)=>{ const max=Math.max(1,...rows.map(r=>r.n)); return rows.length&&rows.some(r=>r.n)?rows.map(r=>`<div class="pc-note" style="display:flex;justify-content:space-between"><span>${esc(r.k)}</span><span class="hint">${r.n}</span></div><div style="height:5px;background:var(--gold);width:${Math.round(r.n/max*100)}%;border-radius:3px;margin:2px 0 8px"></div>`).join(''):'<div class="hint">No call-offs in this window. 🎉</div>'; };
+  $('wfByPerson').innerHTML = bars(s.byPerson);
+  $('wfByDow').innerHTML = bars(s.byDow);
+  // duty/round selects
+  await ensureReferralMeta().catch(()=>{});
+  fillSelect($('du_part'), META.shifts||['Morning','Day','Evening','Night']);
+  fillSelect($('du_role'), ['All',...(META.jobRoles||['BHT / Tech','Nurse','Therapist','Kitchen'])]);
+  loadRoundsToday();
+}
+async function clockToggle(inn){ await api('/clock/'+(inn?'in':'out'),{method:'POST'}); loadCoverage(); }
+async function logRound(){ const area=$('rd_area').value.trim(); await api('/rounds',{method:'POST',body:JSON.stringify({area,note:$('rd_note').value})}); $('rd_area').value='';$('rd_note').value=''; $('rd_msg').textContent='✓ Logged'; setTimeout(()=>$('rd_msg').textContent='',2000); loadRoundsToday(); loadCoverage(); }
+async function loadRoundsToday(){ try{ const {rounds}=await api('/rounds/today'); $('rdList').innerHTML = rounds.length?rounds.map(r=>`<div class="pc-note">✓ ${esc((r.ts||'').slice(11,16))} · ${esc(r.area||'round')} <span class="hint">${esc(r.by_name||'')}${r.note?' · '+esc(r.note):''}</span></div>`).join(''):'<div class="hint">No rounds logged today yet.</div>'; }catch(e){} }
+async function logDuty(){ const text=$('du_text').value.trim(); if(!text){return;} await api('/duties',{method:'POST',body:JSON.stringify({part:$('du_part').value,role:$('du_role').value,text})}); $('du_text').value=''; $('du_msg').textContent='✓ Logged'; setTimeout(()=>$('du_msg').textContent='',2000); loadCoverage(); }
+
+let SCHED_STAFF=null;
+async function loadSchedule(){
+  if(!$('sc_date').value) $('sc_date').value=today();
+  await ensureReferralMeta().catch(()=>{});
+  fillSelect($('sc_part'), META.shifts||['Morning','Day','Evening','Night']);
+  fillSelect($('sc_role'), META.jobRoles||['BHT / Tech','Nurse','Therapist','Kitchen']);
+  if(!SCHED_STAFF){ try{ const {users}=await api('/users'); SCHED_STAFF=users.filter(u=>u.active!==0); }catch(e){ SCHED_STAFF=[]; } }
+  const { slots } = await api('/staffing?date='+$('sc_date').value);
+  $('scBoard').innerHTML = slots.length ? slots.map(s=>{
+    const opt = SCHED_STAFF.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('');
+    const people = s.assignments.map(a=>`<span class="chip" style="${a.status==='called_off'?'text-decoration:line-through;opacity:.6':''}">${esc(a.user_name||'?')}${a.status==='called_off'?' (off)':''}
+      ${a.status!=='called_off'?`<a onclick="callOff(${a.id})" title="Mark call-off" style="cursor:pointer;color:var(--danger);margin-left:4px">⊘</a>`:''}
+      <a onclick="unassign(${a.id})" title="Remove" style="cursor:pointer;color:var(--muted);margin-left:4px">✕</a></span>`).join(' ');
+    return `<div class="card" style="border-left:4px solid ${s.covered?'var(--good)':'var(--gold)'}">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <strong>${esc(s.part)}</strong> · ${esc(s.role)}
+        <span class="risk ${s.covered?'risk-low':'risk-elev'}">${s.scheduledCount}/${s.needed} ${s.covered?'covered':'short '+(s.needed-s.scheduledCount)}</span>
+        ${s.calledOffCount?`<span class="risk risk-warn">${s.calledOffCount} off</span>`:''}
+        ${ME&&ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" style="margin-left:auto" onclick="delSlot(${s.id})">Delete</button>`:''}
+      </div>
+      <div style="margin:8px 0">${people||'<span class="hint">No one assigned.</span>'}</div>
+      ${ME&&ME.role==='admin'?`<div class="handoff-add"><select id="asgn_${s.id}">${opt}</select><button class="btn btn-ghost btn-sm sans" onclick="assignSlot(${s.id})">Assign</button></div>`:''}
+    </div>`;
+  }).join('') : '<div class="card"><div class="empty">No shifts scheduled for this day. Add shift needs above.</div></div>';
+}
+function schShift(n){ const d=new Date($('sc_date').value||today()); d.setDate(d.getDate()+n); $('sc_date').value=d.toISOString().slice(0,10); loadSchedule(); }
+async function addSlot(){ try{ await api('/staffing/slots',{method:'POST',body:JSON.stringify({date:$('sc_date').value||today(),part:$('sc_part').value,role:$('sc_role').value,needed:$('sc_needed').value})}); $('sc_msg').textContent='✓ Added'; setTimeout(()=>$('sc_msg').textContent='',2000); loadSchedule(); }catch(e){ $('sc_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+async function delSlot(id){ if(!confirm('Delete this shift need?'))return; await api('/staffing/slots/'+id,{method:'DELETE'}); loadSchedule(); }
+async function assignSlot(id){ const u=$('asgn_'+id).value; if(!u)return; await api('/staffing/slots/'+id+'/assign',{method:'POST',body:JSON.stringify({user_id:u})}); loadSchedule(); }
+async function unassign(id){ await api('/staffing/assignments/'+id,{method:'DELETE'}); loadSchedule(); }
+async function callOff(id){ const reason=prompt('Call-off reason (optional):'); if(reason===null)return; await api('/staffing/assignments/'+id+'/calloff',{method:'POST',body:JSON.stringify({reason})}); loadSchedule(); }
 
 /* ---- lineup / culture ---- */
 let staffLoad = null;

@@ -74,6 +74,8 @@
     <button data-view="alumni">Alumni</button>
     <button data-view="accountability" data-admin>Accountability</button>
     <button data-view="team">Team</button>
+    <button data-view="coverage">Coverage</button>
+    <button data-view="schedule" data-admin>Schedule</button>
     <button data-view="training">Training</button>
     <button data-view="library">Library / SOPs</button>
     <button data-view="standard">Standard</button>
@@ -614,6 +616,59 @@
         <p class="sub sans">Whoever heard it owns it until it's resolved.</p>
         <div id="outConcerns"></div>
       </div>
+    </section>
+
+    <!-- WORKFORCE COVERAGE -->
+    <section id="coverage" class="view">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <div><h3>Coverage &amp; Workforce</h3><p class="sub sans" style="margin:0">Always-covered at a glance — who's on, who called off, and the patterns behind it.</p></div>
+          <div style="margin-left:auto" id="clockBox"></div>
+        </div>
+        <div id="wfKpis" class="ret-cards" style="margin-top:14px"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:260px"><h3>On shift now</h3><div id="wfOnNow"></div></div>
+        <div class="card" style="flex:1;min-width:260px"><h3>Call-offs by person</h3><p class="sub sans">Last 30 days.</p><div id="wfByPerson"></div></div>
+        <div class="card" style="flex:1;min-width:240px"><h3>Call-offs by weekday</h3><div id="wfByDow"></div></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card no-print" style="flex:1;min-width:300px">
+          <h3>Log a safety round</h3>
+          <div class="grid2"><div><label>Area / unit</label><input id="rd_area" placeholder="e.g. East hall"/></div><div><label>Note (optional)</label><input id="rd_note" placeholder="all quiet"/></div></div>
+          <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="logRound()">Log round</button><span class="hint" id="rd_msg"></span></div>
+          <div id="rdList"></div>
+        </div>
+        <div class="card no-print" style="flex:1;min-width:300px">
+          <h3>Log a completed duty</h3>
+          <div class="grid3"><div><label>Shift</label><select id="du_part"></select></div><div><label>Role</label><select id="du_role"></select></div><div></div></div>
+          <label>What was completed</label>
+          <div class="handoff-add"><input id="du_text" placeholder="e.g. kitchen reset · linens stocked · meds room checked"/><button class="btn btn-gold sans" onclick="logDuty()">Log</button></div>
+          <span class="hint" id="du_msg"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCHEDULE BUILDER -->
+    <section id="schedule" class="view">
+      <div class="card no-print">
+        <div class="controls">
+          <div class="field"><label>Date</label><input id="sc_date" type="date" onchange="loadSchedule()"/></div>
+          <button class="btn btn-ghost sans" onclick="schShift(-1)">← Prev</button>
+          <button class="btn btn-ghost sans" onclick="schShift(1)">Next →</button>
+          <button class="btn btn-ghost sans" onclick="loadSchedule()">Refresh</button>
+        </div>
+      </div>
+      <div class="card no-print">
+        <h3>Add a shift need</h3>
+        <div class="grid3">
+          <div><label>Shift</label><select id="sc_part"></select></div>
+          <div><label>Role</label><select id="sc_role"></select></div>
+          <div><label>How many needed</label><input id="sc_needed" type="number" min="1" value="1"/></div>
+        </div>
+        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="addSlot()">Add to schedule</button><span class="hint" id="sc_msg"></span></div>
+      </div>
+      <div id="scBoard"></div>
     </section>
 
     <!-- RISK ANALYTICS -->

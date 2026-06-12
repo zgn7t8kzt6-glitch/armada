@@ -673,7 +673,6 @@ async function loadRetention(){
       <div class="trbar-track"><div class="trbar-fill" style="width:${Math.round(t.count/max*100)}%"></div></div>
       <div class="trbar-n">${t.count}</div></div>`).join('') : '<div class="hint">No pulses logged in the last 14 days.</div>';
 }
-function gotoPlaybook(){ show('report'); }
 
 /* ---- AMA retention: banner + daily pulse ---- */
 function retentionBanner(c){
@@ -1715,18 +1714,6 @@ async function loadAudit(){
     entries.map(e=>`<tr><td>${esc(e.at)}</td><td>${esc(e.username||'')}</td><td>${esc(e.action)}</td>
       <td>${esc(e.entity||'')} ${e.entity_id||''}</td><td>${esc(e.detail||'')}</td></tr>`).join('')}</table>`;
 }
-
-/* ---- brand logo: if an official /logo.png is added to the repo, use it ---- */
-// Drop a file at public/logo.png (the horizontal Armada lockup) and it replaces
-// the SVG fallback automatically — no code change needed.
-(function applyBrandLogo(){
-  const probe = new Image();
-  probe.onload = () => {            // only fires for a real image, not the SPA's index.html fallback
-    const el = document.getElementById('loginBrand');
-    if (el) el.innerHTML = '<img src="/logo.png" alt="Armada Recovery" class="login-lockup"/>';
-  };
-  probe.src = '/logo.png?v=' + Date.now();
-})();
 
 /* ---- start ---- */
 (async()=>{ try{ const { user } = await api('/me'); if(user){ ME=user; boot(); } else showLogin(); }catch(e){ showLogin(); } })();

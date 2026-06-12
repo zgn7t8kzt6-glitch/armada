@@ -28,7 +28,7 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
 .login-card label{text-align:left}
 .err{color:var(--danger);font-size:13px;min-height:18px;margin-top:8px;font-family:sans-serif}
 /* brand logo */
-.login-logo{width:260px;max-width:80%;height:auto;display:block;margin:6px auto 14px}
+.login-logo{width:auto;max-width:240px;max-height:180px;height:auto;display:block;margin:4px auto 12px}
 .login-brand{margin-bottom:4px}
 .login-lockup{width:240px;max-width:100%;height:auto;display:block;margin:0 auto 14px}
 .brand-mark{width:84px;height:auto;display:block;margin:0 auto 6px}
@@ -39,8 +39,8 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
 .shell{display:flex;min-height:100vh;align-items:stretch}
 .sidebar{width:252px;flex:0 0 252px;background:#fbfaf5;border-right:1px solid var(--line);
   display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
-.side-brand{padding:22px 20px 16px}
-.side-logo{width:188px;max-width:100%;height:auto;display:block}
+.side-brand{padding:20px 20px 14px;display:flex;justify-content:center}
+.side-logo{width:auto;max-width:160px;max-height:104px;height:auto;display:block}
 [data-theme="dark"] .side-logo{filter:brightness(0) invert(1) opacity(.92)}
 .side-groups{display:flex;flex-direction:column;padding:8px 12px;gap:1px}
 .side-groups button{font-family:var(--sans);text-align:left;background:none;border:none;border-radius:9px;

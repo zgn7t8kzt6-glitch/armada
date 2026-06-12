@@ -57,9 +57,36 @@ export function ensureSampleData() {
     'Asked how long she has to stay', 'Quiet at breakfast, picked at food.');
 }
 
+// A second sample built from a real (de-identified) intake — handy to demo the
+// AMA-read and Care Brief on realistic answers. Idempotent: keyed on the name,
+// so it loads once and never duplicates. NOTE: a relative's first name and a
+// date remain in this text; it is sample/pilot data, not Safe-Harbor de-id.
+export function ensureExampleClient12A() {
+  if (db.prepare(`SELECT id FROM clients WHERE name = ?`).get('Sample Client 12A')) return;
+  const info = db.prepare(`INSERT INTO clients (name, pref, room, program, sober, touch, prefs, triggers, support, anchor_why)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+    'Sample Client 12A', '12A', '12A', 'PHP', '2025-05-19',
+    'Feels safest with alone time and space to collect his thoughts; music gives him a sense of security. Quiet comforts matter — extra pillow, room cool (65–68°), shower after the last group.',
+    'Drinks: black coffee; loves apple juice & Coca-Cola; likes orange juice but finds it too acidic; chocolate milk at dinner. Foods: chicken parmesan, tacos, burritos, burgers & fries, seafood, salad. Nicotine: smoker — offer gum or Zyns. Comfort: shower after last group, room 65–68°, extra pillow; early bird. Interests: making music, guitar, fishing, handheld games, color & word searches.',
+    'Unnecessary or rude comments. Staff (especially nurses) saying they will do something and not following through — makes him feel unheard. Staff not following the rules. Follow through on every promise and close the loop with him.',
+    'Son — Rocco (5th birthday).',
+    'His son Rocco (just turned 5). Sober since May 19 — proud he made it to PHP.'
+  );
+  const cid = info.lastInsertRowid;
+  const ins = db.prepare(`INSERT INTO tasks (client_id, shift, job_role, text, priority, sort) VALUES (?,?,?,?,?,?)`);
+  [
+    ['Morning', 'BHT / Tech', 'Early riser — greet him warmly; offer gum or a Zyn at the first smoke break.', 'Normal'],
+    ['Morning', 'Kitchen', 'Black coffee at wake-up; apple juice or chocolate milk available at dinner.', 'Normal'],
+    ['Day', 'BHT / Tech', 'Protect some alone time with his music — it is how he resets and feels secure.', 'Normal'],
+    ['Evening', 'BHT / Tech', 'Shower after last group; set room to 65–68° and leave an extra pillow.', 'Normal'],
+    ['Evening', 'All', 'CLOSE THE LOOP: if you tell him you will do something, do it and report back. Feeling unheard is his biggest AMA trigger.', 'High'],
+  ].forEach((t, i) => ins.run(cid, t[0], t[1], t[2], t[3], i));
+}
+
 // Allow `npm run seed` to set up admin + sample data locally.
 if (import.meta.url === `file://${process.argv[1]}`) {
   ensureAdmin();
   ensureSampleData();
+  ensureExampleClient12A();
   console.log('Seed complete.');
 }

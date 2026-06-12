@@ -11,13 +11,14 @@ import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData } from './src/seed.js';
+import { ensureAdmin, ensureSampleData, ensureExampleClient12A } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
 ensureAdmin();
 if (process.env.SEED_SAMPLE === 'true') ensureSampleData();
+ensureExampleClient12A();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();

@@ -452,7 +452,7 @@ async function kipuInspect(){ $('kipuResult').textContent='Inspecting Kipu field
   + (r.locations&&r.locations.length ? '\n\nLOCATIONS (set KIPU_LOCATION_ID to the right id):\n'+r.locations.map(l=>'  '+l.id+'  =  '+l.name).join('\n') : '')
   + '\n\nFIELDS: '+r.fields.join(', ')
   + '\n\nFACETS:\n'+Object.entries(r.facets).map(([k,v])=>'  '+k+': '+v.join(' | ')).join('\n')
-  + (r.patientDetail ? '\n\nPATIENT DETAIL (where level-of-care lives):\n  level of care found: '+(r.patientDetail.levelOfCareFound||r.patientDetail.error||'?')+'\n  referral source found: '+(r.patientDetail.referralFound||'?')+'\n  detail fields: '+((r.patientDetail.keys||[]).join(', ')||'—') : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+  + (r.patientDetail ? '\n\n===== PATIENT DETAIL PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.patientDetail,null,2) : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuCoverage(){
   $('kipuResult').textContent='Checking what each field is pulling…';
   $('kipuInspect').style.display='none'; const el=$('kipuCoverage'); el.style.display='none';

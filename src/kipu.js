@@ -451,19 +451,51 @@ export async function kipuInspect() {
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     locations = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: l.location_name ?? l.name ?? l.enabled_location_name ?? JSON.stringify(l).slice(0, 80) }));
   } catch { /* locations endpoint optional */ }
-  // The census has no level-of-care field — probe one patient's DETAIL to find
-  // where the LOC/program actually lives, so we can confirm the sync will see it.
+  // The census has no level-of-care field — probe one patient's DETAIL and dump
+  // its structure so we can SEE exactly where the LOC/program/referral live.
   let patientDetail = null;
-  const cf = list.length ? (list[0].casefile_id ?? list[0].id ?? list[0].patient_id) : null;
+  const cf = list.length ? String(list[0].casefile_id ?? list[0].id ?? list[0].patient_id ?? '') : null;
   if (cf) {
-    try {
-      const det = await kipuPatientDetail(String(cf));
-      if (det) {
-        const locFound = deepFind(det, LOC_KEY_RE);
-        const refFound = deepFind(det, REF_KEY_RE);
-        patientDetail = { keys: Object.keys(det).slice(0, 60), levelOfCareFound: locFound || '(none — LOC not in patient detail either)', referralFound: refFound || '(none)' };
-      } else { patientDetail = { error: 'patient detail returned nothing' }; }
-    } catch (e) { patientDetail = { error: String(e.message).slice(0, 140) }; }
+    const enc = encodeURIComponent(cf);
+    const tries = [`/api/patients/${cf}`, `/api/patients/${enc}`, `/api/patients/${cf}?detail=true`];
+    const attempts = []; let det = null;
+    for (const path of tries) {
+      try {
+        const d = await kipuGet(path);
+        det = d?.patient || (Array.isArray(d?.patients) ? d.patients[0] : null) || d;
+        attempts.push({ path, ok: true, wrapperKeys: Object.keys(d || {}).slice(0, 12) });
+        break;
+      } catch (e) { attempts.push({ path, ok: false, error: String(e.message).slice(0, 120) }); }
+    }
+    if (det && typeof det === 'object') {
+      // One-level-deep key map (so nested LOC/program is visible).
+      const nested = {};
+      for (const [k, v] of Object.entries(det)) {
+        if (v && typeof v === 'object') nested[k] = Array.isArray(v)
+          ? `[${v.length}]` + (v[0] && typeof v[0] === 'object' ? ' of {' + Object.keys(v[0]).slice(0, 12).join(', ') + '}' : '')
+          : '{' + Object.keys(v).slice(0, 12).join(', ') + '}';
+      }
+      // Any value that LOOKS like a level of care, anywhere — with its key path.
+      const asamLike = [];
+      (function scan(o, prefix, depth) {
+        if (!o || typeof o !== 'object' || depth > 4) return;
+        for (const [k, v] of Object.entries(o)) {
+          if (v != null && typeof v !== 'object') {
+            if (/\b[1-4]\.\d\b|\bwm\b|asam|level.?of.?care|\bphp\b|\biop\b|detox|residential|withdrawal/i.test(String(v)) && String(v).length < 60)
+              asamLike.push(`${prefix}${k} = ${String(v).slice(0, 44)}`);
+          } else scan(v, `${prefix}${k}.`, depth + 1);
+        }
+      })(det, '', 0);
+      patientDetail = {
+        casefileId: cf,
+        fields: Object.keys(det).slice(0, 60),
+        nested,
+        levelOfCareFound: deepFind(det, LOC_KEY_RE) || '(none by key name)',
+        referralFound: deepFind(det, REF_KEY_RE) || '(none by key name)',
+        asamLikeValues: asamLike.slice(0, 14),
+        attempts,
+      };
+    } else { patientDetail = { error: 'no patient detail returned', attempts }; }
   }
   return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail };
 }

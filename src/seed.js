@@ -63,6 +63,9 @@ export function ensureSampleData() {
 // date remain in this text; it is sample/pilot data, not Safe-Harbor de-id.
 export function ensureExampleClient12A() {
   if (db.prepare(`SELECT id FROM clients WHERE name = ?`).get('Sample Client 12A')) return;
+  // Don't seed the demo client once a real Kipu roster is present (it would
+  // skew the live census count).
+  if (db.prepare(`SELECT id FROM clients WHERE source = 'kipu' LIMIT 1`).get()) return;
   const info = db.prepare(`INSERT INTO clients (name, pref, room, program, sober, touch, prefs, triggers, support, anchor_why)
     VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
     'Sample Client 12A', '12A', '12A', 'PHP', '2025-05-19',

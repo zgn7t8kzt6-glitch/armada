@@ -52,14 +52,15 @@ export async function kipuSyncRoster() {
   const path = process.env.KIPU_ROSTER_PATH || '/api/patients/census';
   const data = await kipuGet(path);
   const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
-  let created = 0, matched = 0, updated = 0;
+  let created = 0, matched = 0;
   const byKipu = db.prepare(`SELECT id FROM clients WHERE kipu_id = ?`);
   const byName = db.prepare(`SELECT id FROM clients WHERE name = ? OR pref = ?`);
-  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, admit, admit_time, therapist, case_manager, kipu_id) VALUES (?,?,?,?,?,?,?,?,?)`);
+  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, admit, admit_time, therapist, case_manager, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
 
   // Pull a field from the many shapes Kipu can return.
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
   const timeOf = (v) => { if (!v) return null; const m = String(v).match(/[T ](\d{2}:\d{2})/); return m ? m[1] : null; };
+  const activeKids = [];   // census patients who are currently active (no discharge)
 
   for (const p of list) {
     const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name;
@@ -76,11 +77,15 @@ export async function kipuSyncRoster() {
     const dischDate = pick(p, 'discharge_date', 'discharged_at');
     const dischDest = pick(p, 'discharge_destination', 'referred_to', 'aftercare_facility');
     const dischReason = pick(p, 'discharge_reason', 'discharge_note');
+    const discharged = Boolean((dischDate && String(dischDate).trim()) ||
+      (dischStatus && !['active', 'admitted', 'current'].includes(String(dischStatus).toLowerCase())));
+    if (!discharged && kid) activeKids.push(kid);
 
-    let existing = (kid && byKipu.get(kid)) || byName.get(name, name);
+    const existing = (kid && byKipu.get(kid)) || byName.get(name, name);
     if (existing) {
-      // Backfill only blank fields (never overwrite staff edits).
-      db.prepare(`UPDATE clients SET
+      // Kipu is the source of truth: set source, backfill blank descriptive
+      // fields, and authoritatively set active/discharge from the census.
+      db.prepare(`UPDATE clients SET source='kipu',
         kipu_id = COALESCE(kipu_id, ?),
         admit = COALESCE(NULLIF(admit,''), ?),
         admit_time = COALESCE(NULLIF(admit_time,''), ?),
@@ -88,17 +93,29 @@ export async function kipuSyncRoster() {
         case_manager = COALESCE(NULLIF(case_manager,''), ?),
         room = COALESCE(NULLIF(room,''), ?),
         program = COALESCE(NULLIF(program,''), ?),
-        discharge_status = COALESCE(NULLIF(discharge_status,''), ?),
-        discharge_date = COALESCE(NULLIF(discharge_date,''), ?),
+        discharge_status = ?, discharge_date = ?,
         discharge_destination = COALESCE(NULLIF(discharge_destination,''), ?),
-        discharge_reason = COALESCE(NULLIF(discharge_reason,''), ?)
+        discharge_reason = COALESCE(NULLIF(discharge_reason,''), ?),
+        active = ?
         WHERE id = ?`).run(kid || null, admit, admitTime, therapist, caseMgr, room, program,
-          dischStatus, dischDate ? String(dischDate).slice(0, 10) : null, dischDest, dischReason, existing.id);
-      matched++; updated++;
-    } else {
+          discharged ? (dischStatus ? String(dischStatus) : 'Discharged') : null,
+          discharged ? (dischDate ? String(dischDate).slice(0, 10) : null) : null,
+          dischDest, dischReason, discharged ? 0 : 1, existing.id);
+      matched++;
+    } else if (!discharged) {
+      // Only create rows for currently-active patients.
       ins.run(name, p.first_name || name, room, program, admit, admitTime, therapist, caseMgr, kid || null);
       created++;
     }
   }
-  return { total: list.length, created, matched, updated };
+
+  // Authoritative roster: any Kipu-sourced client NOT in the current active
+  // census is no longer here — deactivate it (discharged/transferred elsewhere).
+  let deactivated = 0;
+  if (activeKids.length) {
+    const ph = activeKids.map(() => '?').join(',');
+    const r = db.prepare(`UPDATE clients SET active = 0 WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).run(...activeKids);
+    deactivated = r.changes || 0;
+  }
+  return { total: list.length, created, matched, deactivated, activeNow: activeKids.length };
 }

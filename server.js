@@ -542,6 +542,16 @@ app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
   try { const r = await kipuSyncRoster(); audit({ user: req.user, action: 'KIPU_SYNC', detail: `${r.created} new`, ip: req.ip }); res.json(r); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Clean reset: wipe the roster and rebuild it from the live Kipu active census
+// (use after test-syncs left stale/duplicate clients).
+app.post('/api/kipu/reset', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    db.prepare(`DELETE FROM clients`).run();
+    const r = await kipuSyncRoster();
+    audit({ user: req.user, action: 'KIPU_RESET', detail: `rebuilt: ${r.created} active`, ip: req.ip });
+    res.json(r);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 // Azure SQL data-warehouse (Chaim's Kipu warehouse) — read-only sync.
 app.get('/api/warehouse/status', requireAuth, requireAdmin, (req, res) => res.json({ configured: whConfigured() }));
 app.post('/api/warehouse/test', requireAuth, requireAdmin, async (req, res) => {

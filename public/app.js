@@ -412,6 +412,7 @@ async function loadSettings(){
   $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
   $('kc_code').value = st.kioskCode||'';
   try { const k = await api('/kipu/status'); $('kipuStatus').innerHTML = k.configured ? '<span class="risk risk-low">credentials set</span>' : '<span class="risk risk-warn">not configured — set Kipu env vars on your host</span>'; } catch(e){}
+  try { const w = await api('/warehouse/status'); $('whStatus').innerHTML = w.configured ? '<span class="risk risk-low">credentials set</span>' : '<span class="risk risk-warn">not configured — set WH_* env vars on your host</span>'; } catch(e){}
 }
 async function runAiHealth(){
   const el=$('aiHealthResult'); el.innerHTML='Checking…';
@@ -427,6 +428,9 @@ async function runAiHealth(){
 }
 async function kipuTest(){ $('kipuResult').textContent='Testing…'; try{ const r=await api('/kipu/test',{method:'POST'}); $('kipuResult').innerHTML='<span style="color:var(--good)">✓ Connected'+(r.sampleCount!=null?' · '+r.sampleCount+' patients visible':'')+'</span>'; }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuSync(){ $('kipuResult').textContent='Syncing…'; try{ const r=await api('/kipu/sync',{method:'POST'}); $('kipuResult').textContent=`Synced: ${r.created} new clients, ${r.matched} already here (of ${r.total}).`; }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+async function whTestConn(){ $('whResult').textContent='Connecting… (first connect can take ~20s)'; try{ const r=await api('/warehouse/test',{method:'POST'}); $('whResult').innerHTML='<span style="color:var(--good)">✓ Connected'+(r.sampleCount!=null?' · census returns '+r.sampleCount+' rows':' (census query not confirmed yet)')+'</span>'; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+async function whSync(){ $('whResult').textContent='Syncing census…'; try{ const r=await api('/warehouse/sync',{method:'POST'}); $('whResult').textContent=`Synced: ${r.created} new, ${r.matched} updated (of ${r.total} in warehouse).`; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+async function whSyncNotes(){ $('whResult').textContent='Scanning recent notes for red flags…'; try{ const r=await api('/warehouse/sync-notes',{method:'POST',body:JSON.stringify({days:3})}); $('whResult').textContent=`Scanned ${r.scanned} notes · ${r.flagged} red-flagged.`; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function saveKioskCode(){ await api('/settings/kiosk-code',{method:'POST',body:JSON.stringify({code:$('kc_code').value})}); alert('Kiosk/display code saved.'); }
 async function testAlert(){ const r=await api('/settings/test-alert',{method:'POST'}); alert(`Test sent. Email ${r.emailReady?'attempted':'not configured'}, SMS ${r.smsReady?'attempted':'not configured'}.`); }
 

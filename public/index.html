@@ -316,6 +316,17 @@
         <div id="kipuResult" class="hint"></div>
       </div>
       <div class="card">
+        <h3>Kipu data warehouse (Azure SQL)</h3>
+        <p class="sub sans">Read the existing Kipu data warehouse (census, length-of-stay, discharges, notes) — refreshed daily. Set <code>WH_SERVER</code>, <code>WH_DATABASE</code>, <code>WH_USER</code>, <code>WH_PASSWORD</code>, <code>WH_CENSUS_SQL</code> on your host.</p>
+        <div id="whStatus" class="hint"></div>
+        <div class="toolbar" style="justify-content:flex-start">
+          <button class="btn btn-ghost sans" onclick="whTestConn()">Test connection</button>
+          <button class="btn btn-gold sans" onclick="whSync()">Sync census</button>
+          <button class="btn btn-ghost sans" onclick="whSyncNotes()">Scan recent notes</button>
+        </div>
+        <div id="whResult" class="hint"></div>
+      </div>
+      <div class="card">
         <h3>Kiosk &amp; display code</h3>
         <p class="sub sans">Code staff enter to open the client kiosk and the break-room display. Share only with staff.</p>
         <div class="controls"><div class="field"><label>Code</label><input id="kc_code"/></div><button class="btn btn-primary sans" onclick="saveKioskCode()">Save</button></div>

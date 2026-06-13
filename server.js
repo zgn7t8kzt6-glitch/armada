@@ -409,7 +409,7 @@ const isDetoxProgram = (p) => /detox|withdrawal|\bwm\b|3\.?2|3\.?7/i.test(p || '
 
 app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
-  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, next_loc, anticipated_dc FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
 
   // Flow
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
@@ -424,9 +424,11 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
       loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (parseLoc(c.program) || 'Unspecified'),
       los: daysSince(c.admit),
       level: a?.level || null,
-      step_down: a?.step_down || 'Unknown',
+      // Prefer Kipu's structured next-level-of-care + anticipated date; fall back
+      // to what the AI inferred from the notes.
+      step_down: c.next_loc ? (parseLoc(c.next_loc) !== 'Unspecified' ? parseLoc(c.next_loc) : c.next_loc) : (a?.step_down || 'Unknown'),
       transport: a?.transport || 'Unknown',
-      anticipated_dc: a?.anticipated_dc || '',
+      anticipated_dc: c.anticipated_dc || a?.anticipated_dc || '',
       discharge_plan: a?.discharge_plan || '',
       doc_flags: a ? safeArr(a.doc_flags) : [],
       withdrawal_level: a?.withdrawal_level || null,

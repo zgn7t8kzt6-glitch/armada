@@ -725,6 +725,8 @@ addColumn('clients', 'pronouns', 'TEXT');
 addColumn('clients', 'language', 'TEXT');              // preferred_language
 addColumn('clients', 'mrn', 'TEXT');                   // medical record number
 addColumn('clients', 'payment_method', 'TEXT');
+addColumn('clients', 'next_loc', 'TEXT');              // Kipu next_level_of_care (planned step-down)
+addColumn('clients', 'anticipated_dc', 'TEXT');        // Kipu anticipated_discharge_date
 addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapshot (kept fresh)
 addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
 addColumn('clients', 'likes', 'TEXT');                 // what the client likes/enjoys (AI, kept fresh)

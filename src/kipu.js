@@ -329,30 +329,38 @@ export async function kipuPatientNotes(casefileId) {
     const s = String(cf);
     return s === want_cf || s.split(':')[0] === want_pref;
   });
-  // CURRENT STAY ONLY: keep notes from the recent window (default 90 days) so a
-  // re-admit's old chart never leaks in. Configurable via KIPU_NOTE_DAYS.
-  const noteDays = +(process.env.KIPU_NOTE_DAYS || 30);
+  // CURRENT STAY ONLY: keep notes from the recent window so a re-admit's old
+  // chart doesn't leak in — but ONLY when the list actually carries dates. Some
+  // Kipu accounts return list rows with no created_at (just id/name/status); in
+  // that case do NOT date-filter (it would drop everything) and rely on note-id
+  // recency instead (higher id = newer). Configurable via KIPU_NOTE_DAYS.
+  const noteDays = +(process.env.KIPU_NOTE_DAYS || 45);
   const noteCutoff = new Date(Date.now() - noteDays * 864e5).toISOString().slice(0, 10);
-  list = list.filter((e) => String(e.created_at || '').slice(0, 10) >= noteCutoff);
-  // Narrative notes first (real free-text), then newest-first.
-  const narrative = (nm) => /progress|nursing|group|case ?manage|family session|counsel|physician|clinical note|shift|encounter|\bbht\b/i.test(nm || '');
+  const anyDated = list.some((e) => e.created_at);
+  if (anyDated) list = list.filter((e) => !e.created_at || String(e.created_at).slice(0, 10) >= noteCutoff);
+  // Narrative notes first (real free-text), then newest-first (by date, else id).
+  const narrative = (nm) => /progress|nursing|group|case ?manage|family session|counsel|physician|clinical note|shift|encounter|assessment|treatment plan|biopsych|\bbht\b/i.test(nm || '');
   list.sort((a, b) => {
     const an = narrative(a.name), bn = narrative(b.name);
     if (an !== bn) return an ? -1 : 1;
-    return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    const ad = a.created_at || '', bd = b.created_at || '';
+    if (ad || bd) return String(bd).localeCompare(String(ad));
+    return (+b.id || 0) - (+a.id || 0);
   });
   const want = +(process.env.KIPU_NOTES_MAX || 12);
   let budget = 30;                 // bound detail fetches per patient
   const texts = [];
   let therapist = null, caseMgrName = null;   // inferred from note authors
+  const debug = { candidates: list.length, anyDated, fetched: 0, withContent: 0, sampleNames: [...new Set(list.map((e) => e.name).filter(Boolean))].slice(0, 8) };
   for (const e of list) {
     if (texts.length >= want || budget <= 0) break;
     if (!e.id) continue;
-    budget--;
-    let content = '';
+    budget--; debug.fetched++;
+    let content = '', evDate = e.created_at || '';
     try {
       const d = await kipuGet(`/api/patient_evaluations/${e.id}?patient_id=${casefileId}`);
       const ev = d?.patient_evaluation || d?.evaluation || d;
+      evDate = evDate || ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '';
       const items = extractItems(ev);                                    // finds the items array wherever it lives
       const body = extractText(ev?.evaluation_content);                  // the rendered note paragraph
       const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';
@@ -366,9 +374,9 @@ export async function kipuPatientNotes(casefileId) {
         if (!caseMgrName && /case ?manage|case ?mgmt|\bcm\b|discharge plan/i.test(nm)) caseMgrName = au;
       }
     } catch { /* skip this note */ }
-    if (content && content.length > 10) texts.push(`[${String(e.created_at || '').slice(0, 10)} · ${(e.name || 'Note').trim()}]\n${content}`);
+    if (content && content.length > 10) { debug.withContent++; const dt = String(evDate).slice(0, 10); texts.push(`[${dt ? dt + ' · ' : ''}${(e.name || 'Note').trim()}]\n${content}`); }
   }
-  return { text: texts.join('\n\n').slice(0, 18000), therapist, case_manager: caseMgrName };
+  return { text: texts.join('\n\n').slice(0, 18000), therapist, case_manager: caseMgrName, debug };
 }
 
 // The clinician who signed/created an evaluation — for care-team attribution.

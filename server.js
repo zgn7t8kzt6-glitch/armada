@@ -993,7 +993,7 @@ app.post('/api/kipu/notes-preview', requireAuth, requireAdmin, async (req, res) 
     const txt = np.text;
     const blocks = txt.split(/\n\n(?=\[)/).filter(Boolean);
     const breakdown = blocks.map((b) => { const m = b.match(/^\[([^\]]+)\]/); return { head: m ? m[1] : '?', chars: b.length }; });
-    res.json({ chars: txt.length, noteCount: breakdown.length, breakdown, therapist: np.therapist || null, case_manager: np.case_manager || null, preview: txt.slice(0, 4000) });
+    res.json({ chars: txt.length, noteCount: breakdown.length, breakdown, therapist: np.therapist || null, case_manager: np.case_manager || null, debug: np.debug || null, preview: txt.slice(0, 4000) });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Clean reset: wipe the roster and rebuild it from the live Kipu active census

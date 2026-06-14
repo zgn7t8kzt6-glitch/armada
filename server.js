@@ -830,7 +830,7 @@ app.post('/api/kipu/test', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuTest()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
-  try { const r = await kipuSyncRoster(); audit({ user: req.user, action: 'KIPU_SYNC', detail: `${r.created} new`, ip: req.ip }); res.json(r); }
+  try { const r = await kipuSyncRoster(); audit({ user: req.user, action: 'KIPU_SYNC', detail: `${r.created} new`, ip: req.ip }); afterSyncAssess(req.user); res.json(r); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/kipu/inspect', requireAuth, requireAdmin, async (req, res) => {
@@ -888,9 +888,17 @@ app.post('/api/kipu/reset', requireAuth, requireAdmin, async (req, res) => {
     db.prepare(`DELETE FROM clients`).run();
     const r = await kipuSyncRoster();
     audit({ user: req.user, action: 'KIPU_RESET', detail: `rebuilt: ${r.created} active`, ip: req.ip });
+    afterSyncAssess(req.user);
     res.json(r);
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// After a manual sync/rebuild, run the AI note-read in the background so the
+// snapshot / AMA risk / case needs populate without a separate click.
+function afterSyncAssess(user) {
+  if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
+    runAssessAll({ id: user?.id ?? null, name: user?.name || 'Sync' }).catch((e) => console.error('[assess] after sync:', e.message));
+  }
+}
 // Azure SQL data-warehouse (Chaim's Kipu warehouse) — read-only sync.
 app.get('/api/warehouse/status', requireAuth, requireAdmin, (req, res) => res.json({ configured: whConfigured() }));
 app.post('/api/warehouse/test', requireAuth, requireAdmin, async (req, res) => {

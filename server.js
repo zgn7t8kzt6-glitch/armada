@@ -377,7 +377,7 @@ app.delete('/api/case-tasks/:id', requireAuth, (req, res) => { db.prepare(`DELET
 
 // ---- Dignity Kit: every active client gets one; delivery must be confirmed by
 // the owner. Outstanding kits raise an alert; overdue ones are tracked. ----
-const DIGNITY_DUE_HOURS = +(process.env.DIGNITY_DUE_HOURS || 4);
+const DIGNITY_DUE_HOURS = +(process.env.DIGNITY_DUE_HOURS || 2);
 const DIGNITY_ROLE = process.env.DIGNITY_OWNER_ROLE || 'BHT / Tech';
 function ensureDignityKits() {
   const need = db.prepare(`SELECT id, pref, name FROM clients
@@ -387,6 +387,10 @@ function ensureDignityKits() {
     ins.run(c.id, `+${DIGNITY_DUE_HOURS} hours`, DIGNITY_ROLE);
     createAlert(c.id, 'dignity', 'Normal', `${c.pref || c.name} — deliver Dignity Kit and confirm`);
   }
+  // Keep the delivery window + owner in step with the current config for kits
+  // still outstanding (so a config change applies retroactively).
+  db.prepare(`UPDATE dignity_kits SET due_by = datetime(needed_at, ?), assigned_role = COALESCE(assigned_role, ?)
+    WHERE status = 'needed'`).run(`+${DIGNITY_DUE_HOURS} hours`, DIGNITY_ROLE);
   return need.length;
 }
 app.get('/api/dignity', requireAuth, (req, res) => {

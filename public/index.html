@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260613d" />
+<link rel="stylesheet" href="/styles.css?v=20260613e" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -154,6 +154,13 @@
           <span id="censusAsOf" class="hint"></span>
         </div>
         <div id="cmdCensus"></div>
+      </div>
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Care Cards — known within the first hour</h3><p class="sub sans">Every new admit needs their Care Card (preferences) filled fast, so staff can care for them by name and need right away. Identity is from Kipu; staff add the human details.</p></div>
+          <span id="ccProgress" class="badge"></span>
+        </div>
+        <div id="cmdCareCards"></div>
       </div>
       <div class="card">
         <div class="cmd-hero-row">
@@ -669,7 +676,7 @@
 
     <!-- CLIENTS -->
     <section id="clients" class="view">
-      <div class="toolbar"><button class="btn btn-gold sans" onclick="newClient()">+ New Client Care Card</button></div>
+      <div class="toolbar" id="clientsToolbar"></div>
       <div id="clientGrid" class="clientlist"></div>
       <div id="clientEmpty" class="empty" style="display:none">No clients yet. Create your first Care Card.</div>
     </section>
@@ -1003,6 +1010,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260613d"></script>
+<script src="/app.js?v=20260613e"></script>
 </body>
 </html>

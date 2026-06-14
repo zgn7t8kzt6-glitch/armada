@@ -187,15 +187,20 @@ function show(v){
 /* ---- clients ---- */
 async function renderClients(){
   const { clients } = await api('/clients');
+  // Single source of truth: with Kipu connected, clients come from the chart —
+  // no manual creation. Otherwise allow it (standalone/demo use).
+  if($('clientsToolbar')) $('clientsToolbar').innerHTML = (META&&META.kipu)
+    ? '<span class="hint">Clients sync from Kipu. Create the admission in Kipu — the Care Card appears here to fill in.</span>'
+    : '<button class="btn btn-gold sans" onclick="newClient()">+ New Client Care Card</button>';
   const g = $('clientGrid'); g.innerHTML='';
   $('clientEmpty').style.display = clients.length ? 'none':'block';
   clients.forEach(c => {
     const d = document.createElement('div'); d.className='ctile'; d.onclick=()=>openJourney(c.id);
     const snap = c.summary ? `<div class="pref" style="font-style:normal;color:#4a5a56">${esc(c.summary.slice(0,140))}${c.summary.length>140?'…':''}</div>`
       : (c.touch ? `<div class="pref">★ ${esc(c.touch.slice(0,90))}${c.touch.length>90?'…':''}</div>` : '');
-    d.innerHTML = `<h4>${esc(c.pref||c.name||'Unnamed')}</h4>
+    d.innerHTML = `<div style="display:flex;gap:12px;align-items:flex-start">${c.photo?`<img src="${esc(c.photo)}" class="client-photo sm" alt=""/>`:''}<div style="flex:1;min-width:0"><h4>${esc(c.pref||c.name||'Unnamed')}</h4>
       <div class="meta">${esc(c.name||'')} ${c.room?'· Room '+esc(c.room):''}</div>
-      <div class="meta">${esc(c.program||'')}</div>${snap}
+      <div class="meta">${esc(c.program||'')}</div></div></div>${snap}
       <div style="margin-top:8px">${(c.tasks||[]).length} task${(c.tasks||[]).length===1?'':'s'}</div>`;
     g.appendChild(d);
   });
@@ -268,6 +273,10 @@ async function dischargeClient(){
 const FF = ['name','pref','room','program','admit','admit_time','sober','therapist','case_manager','referral_source','touch','prefs','goals','triggers','safety','support','anchor_why','welcome_plan','aftercare_plan'];
 function fillForm(c){
   FF.forEach(f => $('f_'+f).value = c[f]||'');
+  // Identity comes from Kipu (single source of truth) — lock those fields; staff
+  // edit the hospitality/preferences fields only.
+  const fromKipu = !!c.kipu_id;
+  ['name','room','program','admit','admit_time'].forEach(f=>{ const el=$('f_'+f); if(el){ el.readOnly=fromKipu; el.classList.toggle('locked',fromKipu); el.title = fromKipu?'From Kipu — edit in the chart':''; } });
   renderKipuDemo(c);
   const tl = $('taskList'); tl.innerHTML='';
   (c.tasks||[]).forEach(t=>addTaskRow(t));
@@ -1294,7 +1303,23 @@ async function loadCommand(){
   loadCommandTrends();
   loadCommandChecklist();
   loadCommandIssues(ISSUE_RANGE);
+  loadCareCards();
   cmdAssessPoll();
+}
+async function loadCareCards(){
+  const box=$('cmdCareCards'); if(!box) return;
+  let d; try{ d=await api('/carecards'); }catch(e){ return; }
+  if($('ccProgress')) $('ccProgress').textContent = `${d.complete}/${d.total} complete${d.overdue?' · '+d.overdue+' overdue':''}`;
+  const inc=d.incomplete||[];
+  box.innerHTML = inc.length ? inc.map(c=>{
+    const m=c.minsSinceAdmit;
+    const clock = m==null?'admit time unknown':(m<60?m+'m':Math.floor(m/60)+'h '+(m%60)+'m')+' since admit';
+    return `<div class="cmd-row ${c.overdue?'cmd-row-flag':''}">
+      <div class="cmd-row-main"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}
+        <div class="hint">${c.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}${clock} · missing: ${c.missing.map(esc).join(', ')}</div></div>
+      <button class="btn btn-gold btn-sm sans" onclick="openJourney(${c.id})">Fill Care Card</button>
+    </div>`;
+  }).join('') : '<div class="hint">Every active client has a complete Care Card. ✓</div>';
 }
 async function sendoutAdd(){
   const client_name=$('so_name').value.trim(); if(!client_name){ $('censusMsg').textContent='Enter a client.'; return; }
@@ -1624,7 +1649,7 @@ async function loadJourney(){
   $('journeyBody').innerHTML = `
     <div class="card">
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <span class="avatar" style="width:48px;height:48px;font-size:18px">${initials(c.name||c.pref)}</span>
+        ${c.photo?`<img src="${esc(c.photo)}" class="client-photo" alt="${esc(c.pref||c.name||'')}"/>`:`<span class="avatar" style="width:48px;height:48px;font-size:18px">${initials(c.name||c.pref)}</span>`}
         <div><h2 style="margin:0;color:var(--navy)">${esc(c.pref||c.name)} ${c.pref&&c.name?'<span class="hint">('+esc(c.name)+')</span>':''}</h2>
           <div class="hint">${c.room?'Room '+esc(c.room)+' · ':''}${esc(c.program||'')} · ${phase}</div></div>
         <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${amaHtml}

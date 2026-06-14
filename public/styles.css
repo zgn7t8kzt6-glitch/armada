@@ -327,6 +327,12 @@ input:focus,select:focus,textarea:focus{outline:none;background:var(--paper);bor
 .cmd-chk-sec{margin-bottom:4px}
 .chip-warn{background:#fdf3ea;border-color:#e7c79a;color:#9a6a1f}
 [data-theme="dark"] .chip-warn{background:#2a2114;border-color:#5a4a2a;color:#e7c79a}
+input.locked,textarea.locked{background:#f1efe9;color:var(--muted);cursor:not-allowed}
+[data-theme="dark"] input.locked{background:#10171d}
+/* Patient photo (face-matching) */
+.client-photo{width:48px;height:48px;border-radius:50%;object-fit:cover;flex:0 0 auto;border:2px solid var(--line);background:#eee}
+.client-photo.sm{width:40px;height:40px}
+.client-photo.lg{width:72px;height:72px}
 /* Full Kipu chart viewer */
 .chart-note{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:var(--paper);overflow:hidden}
 .chart-note summary{cursor:pointer;padding:11px 14px;font-family:var(--sans);font-size:14px;list-style:none;display:flex;align-items:center;gap:6px}

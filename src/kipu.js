@@ -47,6 +47,36 @@ async function kipuGet(path) {
   try { return JSON.parse(text); } catch (e) { return text; }
 }
 
+// Fetch a path that may return an image (or JSON with base64) → a data URL.
+async function kipuGetBinary(path) {
+  if (!kipuConfigured()) return null;
+  const base = process.env.KIPU_BASE_URL || 'https://api.kipuapi.com';
+  const uri = path + (path.includes('?') ? '&' : '?') + 'app_id=' + encodeURIComponent(process.env.KIPU_APP_ID);
+  const contentType = 'application/vnd.kipusystems+json; version=3';
+  const date = new Date().toUTCString();
+  const contentMd5 = crypto.createHash('md5').update('').digest('base64');
+  const canonical = [contentType, contentMd5, uri, date].join(',');
+  const sig = crypto.createHmac('sha1', process.env.KIPU_SECRET_KEY).update(canonical).digest('base64');
+  const r = await fetch(base + uri, { headers: { Accept: contentType, 'Content-Type': contentType, 'Content-MD5': contentMd5, Date: date, Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}` } });
+  if (!r.ok) return null;
+  const ct = r.headers.get('content-type') || '';
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (/^image\//.test(ct)) return `data:${ct};base64,${buf.toString('base64')}`;
+  try { const j = JSON.parse(buf.toString('utf8')); const b64 = j.data || j.image || j.photo || j.base64 || j.picture; if (b64) return /^data:/.test(b64) ? b64 : `data:${j.content_type || j.mime || 'image/jpeg'};base64,${b64}`; } catch { /* not json */ }
+  return null;
+}
+// A patient's photo (for face-matching), best-effort across endpoint shapes.
+export async function kipuPatientPhoto(casefileId) {
+  const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+  const phi = process.env.KIPU_PHI_LEVEL || 'high', e = encodeURIComponent;
+  for (const path of [
+    `/api/patients/${master}/patient_picture?phi_level=${phi}&patient_master_id=${e(uuid)}`,
+    `/api/patients/${master}/picture?phi_level=${phi}&patient_master_id=${e(uuid)}`,
+    `/api/patients/${master}/photo?phi_level=${phi}&patient_master_id=${e(uuid)}`,
+  ]) { try { const d = await kipuGetBinary(path); if (d) return d; } catch { /* try next */ } }
+  return null;
+}
+
 // Fetch ONE evaluation's detail, robust to addressing. A patient (master) can
 // have several casefiles (re-admissions); a note may belong to a different
 // casefile than the current stay, so try master-scoped addressing first (works
@@ -405,8 +435,17 @@ export async function kipuSyncRoster() {
       WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).run(...activeKids);
     deactivated = r.changes || 0;
   }
+  // Pull patient photos for face-matching — active clients missing one, in
+  // parallel, best-effort. Once set they're skipped on later syncs.
+  let photos = 0;
+  if (process.env.KIPU_PHOTO_SYNC !== 'false') {
+    const noPhoto = db.prepare(`SELECT id, kipu_id FROM clients WHERE source='kipu' AND active = 1 AND kipu_id IS NOT NULL AND (photo IS NULL OR photo = '')`).all();
+    const setP = db.prepare(`UPDATE clients SET photo = ? WHERE id = ?`);
+    const got = await mapLimit(noPhoto, +(process.env.KIPU_CONCURRENCY || 6), async (c) => { let ph = null; try { ph = await kipuPatientPhoto(c.kipu_id); } catch { /* best-effort */ } return { id: c.id, ph }; });
+    for (const x of got) if (x.ph) { setP.run(x.ph, x.id); photos++; }
+  }
   rollupDailyMetrics(today);   // refresh today's intake/discharge/LOC-change/AMA snapshot
-  return { total: list.length, created, matched, deactivated, importedDischarges, activeNow: activeKids.length };
+  return { total: list.length, created, matched, deactivated, importedDischarges, photos, activeNow: activeKids.length };
 }
 
 // Pull a single patient's recent clinical documentation (evaluations/notes) and
@@ -749,5 +788,8 @@ export async function kipuInspect() {
       dischargeAnalysis.probes.push({ path: c, ok: true, rows: Array.isArray(arr) ? arr.length : null, withDischargeDate: Array.isArray(arr) ? arr.filter(hasDc).length : null });
     } catch (e) { dischargeAnalysis.probes.push({ path: c, ok: false, error: String(e.message).slice(0, 100) }); }
   }
-  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail, dischargeAnalysis };
+  // Photo probe: did we get a patient picture for the first census patient?
+  let photoProbe = null;
+  if (cf) { try { const ph = await kipuPatientPhoto(cf); photoProbe = { found: !!ph, bytes: ph ? ph.length : 0 }; } catch (e) { photoProbe = { error: String(e.message).slice(0, 100) }; } }
+  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail, dischargeAnalysis, photoProbe };
 }

@@ -133,6 +133,41 @@ app.post('/api/sendouts/:id/close', requireAuth, (req, res) => {
 });
 app.delete('/api/sendouts/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM medical_sendouts WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 
+// ---- Care Card completion: the hospitality layer ON TOP of the Kipu chart.
+// Every new admit must have it filled within the first hour so we can care for
+// them by their preferences right away. (Identity comes from Kipu — single
+// source of truth; staff fill the preferences.) ----
+const CARECARD_CORE = [
+  { key: 'touch', label: 'Personal touch' },
+  { key: 'prefs', label: 'Preferences' },
+  { key: 'anchor_why', label: 'Intake anchor (why they came)' },
+];
+const CARECARD_DUE_MIN = +(process.env.CARECARD_DUE_MIN || 60);
+function careCardStatus(c) {
+  const missing = CARECARD_CORE.filter((f) => !(c[f.key] && String(c[f.key]).trim())).map((f) => f.label);
+  return { complete: missing.length === 0, missing };
+}
+function careCardMinsSinceAdmit(c) {
+  if (!c.admit) return null;
+  const ts = Date.parse(String(c.admit).slice(0, 10) + 'T' + (c.admit_time && /^\d{2}:\d{2}/.test(c.admit_time) ? c.admit_time.slice(0, 5) : '00:00') + ':00');
+  return Number.isNaN(ts) ? null : Math.floor((Date.now() - ts) / 60000);
+}
+app.get('/api/carecards', requireAuth, (req, res) => {
+  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, admit_time, touch, prefs, anchor_why, goals, triggers, safety FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY admit DESC, room`).all();
+  const rows = active.map((c) => {
+    const st = careCardStatus(c);
+    const mins = careCardMinsSinceAdmit(c);
+    return { id: c.id, name: c.pref || c.name, room: c.room, loc: c.loc, admit: c.admit, minsSinceAdmit: mins,
+      complete: st.complete, missing: st.missing, overdue: !st.complete && mins != null && mins > CARECARD_DUE_MIN };
+  });
+  res.json({
+    dueMin: CARECARD_DUE_MIN, total: rows.length,
+    complete: rows.filter((r) => r.complete).length,
+    incomplete: rows.filter((r) => !r.complete),
+    overdue: rows.filter((r) => r.overdue).length,
+  });
+});
+
 // Build the nightly census (the in-app equal of the manual email) as HTML+text.
 function buildCensusReport() {
   const today = appToday();
@@ -216,6 +251,9 @@ function saveTasks(clientId, tasks = []) {
 
 app.post('/api/clients', requireAuth, (req, res) => {
   const b = req.body || {};
+  // Single source of truth: when Kipu is connected, clients come ONLY from the
+  // chart. No manually-created clients (that would be a second source of truth).
+  if (kipuConfigured()) return res.status(400).json({ error: 'Clients are pulled from Kipu — create the admission in Kipu, then fill the Care Card here.' });
   if (!b.name?.trim() && !b.pref?.trim()) return res.status(400).json({ error: 'Name required' });
   const vals = CLIENT_FIELDS.map(f => b[f] ?? null);
   const info = db.prepare(
@@ -696,6 +734,12 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const todayMetrics = db.prepare(`SELECT intakes, discharges, loc_changes, ama, census FROM daily_metrics WHERE date = ?`).get(today) || { intakes: 0, discharges: 0, loc_changes: 0, ama: 0, census: active.length };
   const trend = db.prepare(`SELECT date, intakes, discharges, loc_changes, ama, census FROM daily_metrics WHERE date >= date('now','-13 day') ORDER BY date`).all();
 
+  // Care Card completion (hospitality layer) — within the first hour of admit.
+  const ccRows = db.prepare(`SELECT touch, prefs, anchor_why, admit, admit_time FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  let ccComplete = 0, ccOverdue = 0;
+  for (const c of ccRows) { const st = careCardStatus(c); if (st.complete) ccComplete++; else { const m = careCardMinsSinceAdmit(c); if (m != null && m > CARECARD_DUE_MIN) ccOverdue++; } }
+  const careCards = { total: ccRows.length, complete: ccComplete, incomplete: ccRows.length - ccComplete, overdue: ccOverdue, dueMin: CARECARD_DUE_MIN };
+
   // Checklist progress for today
   const chk = db.prepare(`SELECT COUNT(*) total, SUM(status='done') done FROM command_checklist WHERE date = ?`).get(today);
 
@@ -710,6 +754,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     planning: { stepDownCounts, transportNeeded, undecided, anticipated },
     documentation: { gaps: docGaps, clean: docClean, total: enriched.length },
     staffing: { needed, scheduled, gaps, callOffsToday, pct: needed ? Math.round(scheduled / needed * 100) : null },
+    careCards,
     checklist: { total: chk?.total || 0, done: chk?.done || 0 },
   });
 });
@@ -953,7 +998,7 @@ app.get('/api/ai/health', requireAuth, requireAdmin, async (req, res) => {
   catch (e) { res.status(500).json({ ok: false, error: e.message, provider: aiProvider() }); }
 });
 
-app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined, deidentify: DEID }));
+app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), kipu: kipuConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined, deidentify: DEID }));
 
 // Change my own password.
 app.post('/api/change-password', requireAuth, (req, res) => {

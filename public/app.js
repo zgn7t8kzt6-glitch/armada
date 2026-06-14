@@ -1640,7 +1640,7 @@ async function loadCommand(){
     <div class="ret-card" ${clk('dcToday')}><div class="n">${f.dischargesToday}</div><div class="l">Discharges today ›</div></div>
     <div class="ret-card" ${clk('dc7d')}><div class="n">${f.discharges7d}</div><div class="l">Discharges · 7d ›</div></div>
     <div class="ret-card ${d.staffing.gaps.length?'rc-high':''}" onclick="show('schedule')" style="cursor:pointer"><div class="n">${d.staffing.pct!=null?d.staffing.pct+'%':'—'}</div><div class="l">Covered today ›</div></div>
-    <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}" onclick="show('compliance')" style="cursor:pointer"><div class="n">${d.documentation.gaps.length}</div><div class="l">Doc gaps ›</div></div>
+    <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}" onclick="show('compliance')" style="cursor:pointer"><div class="n">${d.documentation.gaps.length}</div><div class="l">Notes to finish ›</div></div>
     ${d.rounds?`<div class="ret-card ${d.rounds.overdue?'rc-high':''}" onclick="show('rounds')" style="cursor:pointer"><div class="n">${d.rounds.overdue}</div><div class="l">Rounds overdue ›</div></div>`:''}
     ${d.careCards?`<div class="ret-card ${d.careCards.overdue?'rc-high':(d.careCards.incomplete?'rc-warn':'')}" ${clk('carecards')}><div class="n">${d.careCards.incomplete}</div><div class="l">Care cards to fill ›</div></div>`:''}`;
 
@@ -2256,6 +2256,13 @@ async function loadDashboard(){
           <h3 style="margin:2px 0 0">${esc(fc.topic)}</h3>${fc.goal?`<p class="sub sans" style="margin:4px 0 0">${esc(fc.goal)}</p>`:''}</div>
         <button class="btn btn-gold btn-sm sans" onclick="dashJoinFocus(this)">I'm on it ✋</button>
       </div></div>` : '';
+  // Your week — healthy pride
+  const st=d.stats||{};
+  $('dashStats').innerHTML = `<div class="ret-cards" style="margin-top:0">
+      <div class="ret-card"><div class="n">${st.standardStreak||0}</div><div class="l">Day Standard streak${(st.standardStreak||0)>=3?' 🔥':''}</div></div>
+      <div class="ret-card"><div class="n">${st.wowsWeek||0}</div><div class="l">Wows this week</div></div>
+      <div class="ret-card"><div class="n">${st.delightsWeek||0}</div><div class="l">Touches delivered this week</div></div>
+    </div>`;
   // Anticipation — deliver these without being asked (the unexpressed need)
   const nudges=(d.nudges||[]);
   $('dashNudges').innerHTML = nudges.length ? `<div class="card" style="border-left:4px solid var(--aqua);background:#f4fafb">

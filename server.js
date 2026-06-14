@@ -1995,7 +1995,15 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     .map((w) => ({ text: w.text, by: w.by_name || '', client: w.pref || '' }));
   // Anticipation nudges for the care-facing roles (the unexpressed-need engine).
   const nudges = (jr === 'Nurse' || jr === 'BHT / Tech' || jr === '' || jr === 'Team') ? anticipationNudges(active, h) : [];
-  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, focus: { topic: focus.t, goal: focus.g }, wins });
+  // Your week — healthy pride: recognition you've given, touches delivered, and
+  // your streak of showing up to the daily Standard.
+  const uid = req.user.id;
+  const wowsWeek = db.prepare(`SELECT COUNT(*) n FROM wows WHERE by_id = ? AND created_at >= datetime('now','-7 day')`).get(uid).n;
+  const delightsWeek = db.prepare(`SELECT COUNT(*) n FROM delights WHERE by_id = ? AND created_at >= datetime('now','-7 day')`).get(uid).n;
+  const fdays = new Set(db.prepare(`SELECT DISTINCT date FROM focus_logs WHERE user_id = ? AND date >= date('now','-30 day')`).all(uid).map((r) => r.date));
+  let streak = 0, cursor = today; while (fdays.has(cursor)) { streak++; cursor = addDays(cursor, -1); }
+  const stats = { wowsWeek, delightsWeek, standardStreak: streak };
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, stats, focus: { topic: focus.t, goal: focus.g }, wins });
 });
 app.get('/api/today', requireAuth, (req, res) => {
   const today = appToday();

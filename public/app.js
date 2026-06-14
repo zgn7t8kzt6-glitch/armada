@@ -212,15 +212,24 @@ async function editClient(id){
 }
 async function loadKipuChart(cid, reload){
   const card=$('kipuChartCard'); if(!card) return;
-  if(reload) $('kipuChartList').innerHTML='<div class="hint">Loading the full chart…</div>';
   card.style.display='';
+  await chartRender(cid, 'kipuChartList', 'kipuChartSub', reload);
+}
+async function loadJourneyChart(cid){
+  const btn=$('jChartBtn'); if(btn){ btn.disabled=true; btn.textContent='Loading…'; }
+  if($('jChartFilter')) $('jChartFilter').style.display='';
+  await chartRender(cid, 'jChartList', null, true);
+  if(btn) btn.style.display='none';
+}
+async function chartRender(cid, listId, subId, reload){
+  const listEl=$(listId); if(!listEl) return;
+  if(reload) listEl.innerHTML='<div class="hint">Loading the full chart…</div>';
   try{
     const d=await api('/clients/'+cid+'/chart');
-    if(!d.kipu){ card.style.display='none'; return; }
+    if(!d.kipu){ listEl.innerHTML='<div class="hint">This client isn\'t linked to Kipu yet (sync the roster).</div>'; return; }
     const extras=d.extras||[];
-    if(!d.evaluations.length && !extras.length){ $('kipuChartList').innerHTML='<div class="hint">No documents found in Kipu for this client.</div>'; return; }
-    $('kipuChartSub').textContent = `${d.evaluations.length} notes${extras.length?' + '+extras.length+' meds/vitals/labs/scales':''} on this chart — click any to read it.`;
-    // Extra clinical resources (meds, vitals, withdrawal scales, labs), grouped.
+    if(!d.evaluations.length && !extras.length){ listEl.innerHTML='<div class="hint">No documents found in Kipu for this client.</div>'; return; }
+    if(subId&&$(subId)) $(subId).textContent = `${d.evaluations.length} notes${extras.length?' + '+extras.length+' meds/vitals/labs/scales':''} on this chart — click any to read it.`;
     let extraHtml='';
     if(extras.length){
       const cats=[...new Set(extras.map(x=>x.category))];
@@ -229,17 +238,17 @@ async function loadKipuChart(cid, reload){
         return `<details class="chart-note"><summary><span class="chart-name">${esc(cat)}</span> <span class="hint">· ${items.length}</span></summary><div class="chart-body">${items.map(it=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong class="hint">${esc(it.date||'')}</strong>\n${esc(it.content)}</div>`).join('')}</div></details>`;
       }).join('');
     }
-    const notesHtml = d.evaluations.length ? '<div class="cmd-sub">Notes &amp; forms</div>'+d.evaluations.map(e=>`<details class="chart-note" data-name="${esc(e.name).toLowerCase()}"><summary><span class="chart-name">${esc(e.name)}</span>${e.date?` <span class="hint">· ${esc(e.date)}</span>`:''}</summary><div class="chart-body" data-cid="${cid}" data-eid="${esc(String(e.id))}" data-loaded="0">Loading…</div></details>`).join('') : '';
+    const notesHtml = d.evaluations.length ? '<div class="cmd-sub">Notes &amp; forms</div>'+d.evaluations.map(e=>`<details class="chart-note"><summary><span class="chart-name">${esc(e.name)}</span>${e.date?` <span class="hint">· ${esc(e.date)}</span>`:''}</summary><div class="chart-body" data-cid="${cid}" data-eid="${esc(String(e.id))}" data-loaded="0">Loading…</div></details>`).join('') : '';
     const diagHtml = (ME&&ME.role==='admin'&&d.diag&&d.diag.length) ? `<details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Source diagnostic</summary><div class="hint" style="white-space:pre-wrap">${d.diag.map(x=>`${x.cat}: ${x.count==null?'not available':x.count+' records'}`).join('\n')}</div></details>` : '';
-    $('kipuChartList').innerHTML = extraHtml + notesHtml + diagHtml;
-    document.querySelectorAll('#kipuChartList details').forEach(dt=>dt.addEventListener('toggle',function(){ if(this.open){ const b=this.querySelector('.chart-body[data-loaded="0"]'); if(b){ b.dataset.loaded='1'; openChartNote(b); } } }));
-  }catch(e){ $('kipuChartList').innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; }
+    listEl.innerHTML = extraHtml + notesHtml + diagHtml;
+    listEl.querySelectorAll('details').forEach(dt=>dt.addEventListener('toggle',function(){ if(this.open){ const b=this.querySelector('.chart-body[data-loaded="0"]'); if(b){ b.dataset.loaded='1'; openChartNote(b); } } }));
+  }catch(e){ listEl.innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; }
 }
 async function openChartNote(b){
   try{ const d=await api('/clients/'+b.dataset.cid+'/chart/'+encodeURIComponent(b.dataset.eid)); b.textContent = d.content || '(no readable content in this note)'; }
   catch(e){ b.textContent='Could not load this note.'; }
 }
-function filterChart(){ const q=($('kipuChartFilter').value||'').toLowerCase(); document.querySelectorAll('#kipuChartList details').forEach(dt=>{ const nm=(dt.querySelector('.chart-name')?.textContent||'').toLowerCase(); dt.style.display = (!q||nm.includes(q))?'':'none'; }); }
+function filterChartIn(listId){ const inp = listId==='jChartList'?$('jChartFilter'):$('kipuChartFilter'); const q=(inp?inp.value:'').toLowerCase(); ($(listId)||document).querySelectorAll('details').forEach(dt=>{ const el=dt.querySelector('.chart-name'); const nm=(el?el.textContent:'').toLowerCase(); dt.style.display=(!q||nm.includes(q))?'':'none'; }); }
 async function dischargeClient(){
   if(!currentId) return;
   const status=$('d_status').value;
@@ -1598,6 +1607,14 @@ async function loadJourney(){
       ${followHtml?sec('Aftercare', followHtml):''}
       ${sec('Support / family', c.support?`<div class="pc-note">${esc(c.support)}</div>`:'<div class="pc-note">—</div>')}
     </div>
+    ${c.kipu_id?`<div class="card no-print">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div><h3 style="margin:0">📋 Full chart from Kipu</h3><p class="sub sans" style="margin:2px 0 0" id="jChartSub">The complete record — every note, plus meds, vitals, withdrawal scales &amp; labs.</p></div>
+        <button class="btn btn-gold btn-sm sans" style="margin-left:auto" id="jChartBtn" onclick="loadJourneyChart(${c.id})">Open full chart</button>
+      </div>
+      <input id="jChartFilter" placeholder="Filter notes (nursing, group, progress, CIWA…)" oninput="filterChartIn('jChartList')" style="margin-top:12px;display:none"/>
+      <div id="jChartList" style="margin-top:10px"></div>
+    </div>`:''}
     <div class="card no-print">
       <h3>Documentation notes — red-flag scan</h3>
       <p class="sub sans">Drop in a note (or it arrives from the EMR). Claude flags anything that means they're unhappy or at risk, and raises it on Today.</p>

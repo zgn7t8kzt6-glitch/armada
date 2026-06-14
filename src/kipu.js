@@ -671,6 +671,42 @@ export async function kipuEvaluation(casefileId, evalId) {
   return { id: evalId, name: String(ev?.name || 'Note').trim(), date: String(ev?.created_at || ev?.evaluation_date || '').slice(0, 10), content: content.slice(0, 24000) };
 }
 
+// Rounds / observation forms are charted as evaluations. Match by name.
+const ROUNDS_RE = new RegExp(process.env.KIPU_ROUNDS_PATTERN ||
+  'round|q ?15|q ?30|q ?60|15 ?min|30 ?min|hourly|observation|safety ?check|bed ?check|whereabouts|precaution|loc(?:ation)? ?check|sleep ?check|visual ?check|monitor', 'i');
+
+// DIAGNOSTIC: dump the form names on a real (active) client so we can see what
+// the rounds form is actually called, and which names match the rounds pattern.
+export async function kipuFindRounds() {
+  const c = db.prepare(`SELECT kipu_id, pref, name FROM clients WHERE active = 1 AND source = 'kipu' AND kipu_id IS NOT NULL AND kipu_id != '' ORDER BY id LIMIT 1`).get();
+  if (!c) return { error: 'No active Kipu client in the app — sync the roster first.' };
+  const list = await evalListRaw(c.kipu_id, { all: false });
+  const names = [...new Set(list.map((e) => String(e.name || '').trim()).filter(Boolean))];
+  const counts = {};
+  for (const e of list) { const n = String(e.name || '').trim(); if (n) counts[n] = (counts[n] || 0) + 1; }
+  const matches = names.filter((n) => ROUNDS_RE.test(n));
+  return {
+    client: (String(c.pref || c.name || ' ')[0] || '?').toUpperCase() + '.', casefileId: c.kipu_id,
+    totalForms: list.length,
+    distinctNames: names.slice(0, 80),
+    roundMatches: matches,
+    topByCount: Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([n, k]) => `${k}× ${n}`),
+  };
+}
+
+// The latest rounds (observation evals) for a client, with real timestamps
+// (the list lacks dates on some accounts, so fetch detail for the newest few).
+export async function kipuClientRounds(casefileId, max = 6) {
+  const list = await evalListRaw(casefileId, { all: false });
+  const round = list.filter((e) => ROUNDS_RE.test(String(e.name || ''))).slice(0, max);
+  const out = await mapLimit(round, +(process.env.KIPU_CONCURRENCY || 6), async (e) => {
+    let ts = e.created_at || '', by = null;
+    if (!ts) { try { const ev = await fetchEvalDetail(casefileId, e.id); ts = ev?.created_at || ev?.evaluation_date || ev?.updated_at || ''; by = evalAuthor(e, ev); } catch { /* skip */ } }
+    return { eval_id: String(e.id), name: String(e.name || 'Round').trim(), ts, by };
+  });
+  return out.filter((r) => r.ts);
+}
+
 // The clinician who signed/created an evaluation — for care-team attribution.
 const AUTHOR_FIELDS = ['evaluation_signed_by', 'signed_by', 'created_by_name', 'created_by', 'completed_by', 'staff_name', 'provider_name', 'clinician_name', 'clinician', 'author', 'user_name', 'employee_name'];
 function evalAuthor(...objs) {

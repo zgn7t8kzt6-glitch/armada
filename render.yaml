@@ -6,9 +6,10 @@ services:
   - type: web
     name: armada-care
     runtime: node
-    plan: starter            # Starter ($7/mo) is needed for a persistent disk.
-                             # For a throwaway demo you can switch this to "free"
-                             # (data resets on each restart) and delete the disk block.
+    plan: standard           # Standard (~$25/mo): more RAM/CPU + no spin-down/cold
+                             # starts — needed for the Kipu sync + AI workload to
+                             # feel snappy in production. (starter works but is
+                             # underpowered for the per-client detail/notes pulls.)
     region: oregon
     branch: main
     buildCommand: npm install

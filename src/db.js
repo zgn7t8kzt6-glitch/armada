@@ -841,6 +841,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS obs_checks (
   ts TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_obs_client_ts ON obs_checks(client_id, ts);`);
+addColumn('obs_checks', 'kipu_eval_id', 'TEXT');   // source eval id, so Kipu-charted rounds dedupe
 
 // ---- Medical send-outs: ED/hospital trips (the "OTHER" section of the census).
 // A client physically sent out for medical care — still on our census until

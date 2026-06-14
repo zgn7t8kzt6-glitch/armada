@@ -594,6 +594,18 @@ async function kipuInspect(){ $('kipuResult').textContent='Inspecting Kipu field
   + (r.dischargeAnalysis ? '\n\n===== DISCHARGE PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.dischargeAnalysis,null,2) : '')
   + (r.photoProbe ? '\n\n===== PHOTO PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.photoProbe,null,2) : '')
   + (r.roundsProbe ? '\n\n===== ROUNDS PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.roundsProbe,null,2) : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+async function kipuFindRounds(){
+  $('kipuResult').textContent='Looking for the rounds/observation form on a live client…'; const el=$('kipuInspect'); el.style.display='none';
+  try{
+    const r=await api('/kipu/find-rounds',{method:'POST'});
+    if(r.error){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(r.error)+'</span>'; return; }
+    $('kipuResult').textContent=`Client ${r.client}: ${r.totalForms} forms · ${r.roundMatches.length} match the rounds pattern. Copy this to me:`;
+    el.style.display='block';
+    el.textContent='ROUNDS MATCHES (auto-detected):\n  '+(r.roundMatches.join('\n  ')||'(none matched — see all form names below to tell me which IS the rounds form)')+
+      '\n\nALL FORM NAMES (by frequency):\n  '+(r.topByCount.join('\n  '))+
+      '\n\n(distinct names: '+r.distinctNames.length+')';
+  }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function kipuReconcile(){
   $('kipuResult').textContent='Reconciling census vs app…'; const el=$('kipuInspect'); el.style.display='none';
   try{

@@ -9,7 +9,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -539,6 +539,18 @@ async function runAssessAll(user) {
       }
       const read = await runAndStoreAmaRead(c, user, '0.0.0.0', extra);
       assessJob[read.level === 'High' ? 'high' : read.level === 'Elevated' ? 'elevated' : 'low']++;
+      // Ingest Kipu-charted rounds (the auditable source of truth) into obs_checks.
+      if (c.kipu_id && kipuConfigured() && process.env.KIPU_ROUNDS_SYNC !== 'false') {
+        try {
+          const rounds = await kipuClientRounds(c.kipu_id);
+          const exists = db.prepare(`SELECT 1 FROM obs_checks WHERE kipu_eval_id = ?`);
+          const insR = db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name, source, kipu_eval_id, ts) VALUES (?, 'ok', ?, ?, 'kipu', ?, ?)`);
+          for (const r of rounds) {
+            if (!r.eval_id || exists.get(r.eval_id)) continue;
+            insR.run(c.id, r.name, r.by || 'Kipu', r.eval_id, String(r.ts).replace('T', ' ').slice(0, 19));
+          }
+        } catch { /* rounds optional */ }
+      }
       // Author the policy plans once, hands-off (regenerate anytime from the card).
       try { if (!c.welcome_plan) { const wp = await generateWelcomePlan(c); if (wp) db.prepare(`UPDATE clients SET welcome_plan = ? WHERE id = ?`).run(wp, c.id); } } catch { /* plan optional */ }
       try { if (!c.aftercare_plan && (c.next_loc || c.anticipated_dc)) { const ap = await generateAftercarePlan(c); if (ap) db.prepare(`UPDATE clients SET aftercare_plan = ? WHERE id = ?`).run(ap, c.id); } } catch { /* plan optional */ }
@@ -1218,6 +1230,9 @@ app.post('/api/kipu/inspect', requireAuth, requireAdmin, async (req, res) => {
 });
 app.post('/api/kipu/reconcile', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuReconcile()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/kipu/find-rounds', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await kipuFindRounds()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Data coverage: for every field the app uses, show how many clients have it
 // filled and where it comes from — so "is everything pulling?" is answerable.

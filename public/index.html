@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260613i" />
+<link rel="stylesheet" href="/styles.css?v=20260613j" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -749,7 +749,9 @@
           <div><label>☀ Welcome / first-72-hours plan (the arrival)</label>
             <div class="toolbar no-print" style="justify-content:flex-start;margin:0 0 6px"><button type="button" class="btn btn-gold btn-sm sans" id="welcomeBtn" onclick="genWelcomePlan()">✦ Generate from our policy</button><span id="welcomeMsg" class="hint" style="align-self:center"></span></div>
             <textarea id="f_welcome_plan" placeholder="Claude writes this from our Standard (the Intake Anchor & Quiet-AMA play) and this client's Care Card — click Generate."></textarea></div>
-          <div><label>🤝 Aftercare / continuity plan (the farewell)</label><textarea id="f_aftercare_plan" placeholder="Sober-living / outpatient, sponsor, meeting schedule, who follows up. Used when the client is discharged."></textarea></div>
+          <div><label>🤝 Aftercare / continuity plan (the farewell)</label>
+            <div class="toolbar no-print" style="justify-content:flex-start;margin:0 0 6px"><button type="button" class="btn btn-gold btn-sm sans" id="aftercareBtn" onclick="genAftercarePlan()">✦ Generate from our policy</button><span id="aftercareMsg" class="hint" style="align-self:center"></span></div>
+            <textarea id="f_aftercare_plan" placeholder="Claude drafts this from our Safe-Departure policy + the client's step-down / discharge plan — click Generate."></textarea></div>
         </div>
         <hr/>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -1030,6 +1032,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260613i"></script>
+<script src="/app.js?v=20260613j"></script>
 </body>
 </html>

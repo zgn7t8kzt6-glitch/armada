@@ -283,8 +283,8 @@ function fillForm(c){
   const fromKipu = !!c.kipu_id;
   // Identity + care team come from Kipu (therapist/CM are read from note authors) — locked here.
   ['name','room','program','admit','admit_time','therapist','case_manager'].forEach(f=>{ const el=$('f_'+f); if(el){ el.readOnly=fromKipu; el.classList.toggle('locked',fromKipu); el.title = fromKipu?'From Kipu — edit in the chart':''; } });
-  // Welcome plan is authored by Claude from policy, never free-typed.
-  if($('f_welcome_plan')){ $('f_welcome_plan').readOnly=true; $('f_welcome_plan').classList.add('locked'); }
+  // Welcome + aftercare plans are authored by Claude from policy, never free-typed.
+  ['welcome_plan','aftercare_plan'].forEach(f=>{ const el=$('f_'+f); if(el){ el.readOnly=true; el.classList.add('locked'); } });
   renderKipuDemo(c);
   renderPhotoCard(c);
   const tl = $('taskList'); tl.innerHTML='';
@@ -303,6 +303,13 @@ async function genWelcomePlan(){
   const btn=$('welcomeBtn'); btn.disabled=true; $('welcomeMsg').textContent='Writing from policy…';
   try{ const r=await api('/clients/'+currentId+'/welcome-plan',{method:'POST'}); $('f_welcome_plan').value=r.welcome_plan||''; $('welcomeMsg').textContent='✓ Generated'; }
   catch(e){ $('welcomeMsg').textContent='Error: '+(e.message||'failed'); }
+  finally{ btn.disabled=false; }
+}
+async function genAftercarePlan(){
+  if(!currentId){ alert('Save the Care Card first.'); return; }
+  const btn=$('aftercareBtn'); btn.disabled=true; $('aftercareMsg').textContent='Writing from policy…';
+  try{ const r=await api('/clients/'+currentId+'/aftercare-plan',{method:'POST'}); $('f_aftercare_plan').value=r.aftercare_plan||''; $('aftercareMsg').textContent='✓ Generated'; }
+  catch(e){ $('aftercareMsg').textContent='Error: '+(e.message||'failed'); }
   finally{ btn.disabled=false; }
 }
 async function uploadPhoto(input){

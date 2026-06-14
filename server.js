@@ -17,7 +17,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -311,6 +311,18 @@ app.post('/api/clients/:id/welcome-plan', requireAuth, async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message || 'Could not generate.' }); }
 });
 
+app.post('/api/clients/:id/aftercare-plan', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'AI is not configured.' });
+  const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  try {
+    const plan = await generateAftercarePlan(c);
+    db.prepare(`UPDATE clients SET aftercare_plan = ? WHERE id = ?`).run(plan, c.id);
+    audit({ user: req.user, action: 'AFTERCARE_PLAN', entity: 'client', entity_id: c.id, ip: req.ip });
+    res.json({ aftercare_plan: plan });
+  } catch (e) { res.status(502).json({ error: e.message || 'Could not generate.' }); }
+});
+
 /* ---------------- Claude: draft shift tasks from a Care Card ---------------- */
 // Takes the (possibly unsaved) Care Card fields, returns suggested tasks for the
 // user to review/edit before saving. Does not persist anything.
@@ -483,6 +495,9 @@ async function runAssessAll(user) {
       }
       const read = await runAndStoreAmaRead(c, user, '0.0.0.0', extra);
       assessJob[read.level === 'High' ? 'high' : read.level === 'Elevated' ? 'elevated' : 'low']++;
+      // Author the policy plans once, hands-off (regenerate anytime from the card).
+      try { if (!c.welcome_plan) { const wp = await generateWelcomePlan(c); if (wp) db.prepare(`UPDATE clients SET welcome_plan = ? WHERE id = ?`).run(wp, c.id); } } catch { /* plan optional */ }
+      try { if (!c.aftercare_plan && (c.next_loc || c.anticipated_dc)) { const ap = await generateAftercarePlan(c); if (ap) db.prepare(`UPDATE clients SET aftercare_plan = ? WHERE id = ?`).run(ap, c.id); } } catch { /* plan optional */ }
     } catch (e) { assessJob.errors++; assessJob.lastError = (e?.message || String(e)).slice(0, 200); }
     assessJob.done++;
   };

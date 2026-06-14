@@ -382,6 +382,42 @@ export async function generateWelcomePlan(careCard) {
   return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
 }
 
+// ---- AI Aftercare / continuity plan: the farewell, authored from policy ----
+const AFTERCARE_SYSTEM = `You are the case coordinator writing the AFTERCARE /
+continuity plan for a client at a residential addiction-detox center on the
+Ritz-Carlton / Horst Schulze model. Ground it in our Standard (above) and the
+Safe Departure (Warm AMA) standard — continuity of care is how recovery sticks.
+
+Using the client's Care Card and their documented step-down / discharge plan,
+write a concrete continuity plan THIS team can act on:
+- Next level of care / destination (use the documented next-LOC and anticipated
+  date if given) and what must be arranged for it (auth, bed, transport).
+- Warm handoff: who to call, appointments to set (outpatient/PHP/IOP, sponsor,
+  meetings), prescriptions/MAT continuity per protocol.
+- Naloxone + overdose education to go with them; food for the road; belongings
+  with dignity; "you are welcome back any time".
+- The follow-up call within 24-72 hours (and the second-Save if they leave AMA).
+- Anything still missing for a safe, dignified discharge.
+
+Rules: specific, person-first, no clinical fabrication or med dosing. 6-10 short
+bullets. Staff guidance.`;
+export async function generateAftercarePlan(careCard) {
+  const extra = [
+    careCard.next_loc ? `Planned next level of care: ${careCard.next_loc}` : '',
+    careCard.anticipated_dc ? `Anticipated discharge date: ${careCard.anticipated_dc}` : '',
+    careCard.aftercare_plan ? `Existing aftercare notes: ${scrub(careCard.aftercare_plan, [careCard.name, careCard.pref])}` : '',
+  ].filter(Boolean).join('\n');
+  const response = await callAI({
+    model: MODEL,
+    max_tokens: 1100,
+    system: G + AFTERCARE_SYSTEM,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: `Write the aftercare / continuity plan for this client.\n\n=== CARE CARD ===\n${careCardText(careCard)}\n${extra}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+}
+
 // ---- AI Referral insights: why people leave + BD relationship read ----
 const REFERRAL_SYSTEM = `You are an operations and business-development advisor for
 a residential addiction-treatment center, in the Horst Schulze / Ritz-Carlton

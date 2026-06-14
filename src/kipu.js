@@ -193,6 +193,41 @@ function deepFind(obj, keyRe, depth = 0) {
 const LOC_KEY_RE = /(level.*of.*care|levelofcare|^loc$|care.?level|^asam|asam.?level|program|treatment.?track|^level$|^track$)/i;
 const REF_KEY_RE = /(referr|marketing.?source|lead.?source|source.?of|referral)/i;
 // Fetch one patient's full record (the census omits LOC/program/referral).
+// Reconcile the live Kipu census (this location, active) against the app's
+// active roster — pinpoints exactly which clients differ and why. PHI-safe
+// (casefile id + initials only).
+export async function kipuReconcile() {
+  let path = process.env.KIPU_ROSTER_PATH || '/api/patients/census';
+  const locId = (process.env.KIPU_LOCATION_ID || '').trim();
+  if (locId && !/location_id=/.test(path)) path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
+  const data = await kipuGet(path);
+  const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
+  const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const wantLoc = (process.env.KIPU_LOCATION || '').trim().toLowerCase();
+  const matchesLoc = (p) => {
+    if (locId) { const id = pick(p, 'location_id', 'locationId', 'location'); return id != null && String(id) === locId; }
+    if (!wantLoc) return true;
+    return Object.values(p).some((v) => typeof v === 'string' && v.toLowerCase().includes(wantLoc));
+  };
+  const initials = (p) => ((String(p.first_name || ' ')[0]) + (String(p.last_name || ' ')[0])).toUpperCase();
+  const censusActive = [], censusDischarged = [];
+  let otherLoc = 0;
+  for (const p of list) {
+    const kid = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn');
+    if (!matchesLoc(p)) { otherLoc++; continue; }
+    const dischDate = pick(p, 'discharge_date', 'discharged_at'), dischStatus = pick(p, 'discharge_type', 'discharge_status');
+    const discharged = Boolean((dischDate && String(dischDate).trim()) || (dischStatus && !['active', 'admitted', 'current'].includes(String(dischStatus).toLowerCase())));
+    (discharged ? censusDischarged : censusActive).push({ kid: kid ? String(kid) : null, initials: initials(p) });
+  }
+  const appActive = db.prepare(`SELECT kipu_id, pref, name FROM clients WHERE active = 1 AND discharge_status IS NULL AND source = 'kipu'`).all();
+  const appKids = new Set(appActive.map((c) => c.kipu_id).filter(Boolean));
+  const censusKids = new Set(censusActive.map((c) => c.kid).filter(Boolean));
+  const byKipu = db.prepare(`SELECT active, discharge_status FROM clients WHERE kipu_id = ?`);
+  const missingFromApp = censusActive.filter((c) => c.kid && !appKids.has(c.kid)).map((c) => { const r = byKipu.get(c.kid); return { kid: c.kid, initials: c.initials, inApp: !!r, appActive: r ? r.active : null, appStatus: r ? r.discharge_status : null }; });
+  const staleInApp = appActive.filter((c) => c.kipu_id && !censusKids.has(c.kipu_id)).map((c) => ({ kid: c.kipu_id, initials: (String(c.pref || c.name || ' ')[0]).toUpperCase() }));
+  return { locationId: locId || '(none)', censusTotal: list.length, otherLocations: otherLoc, censusActiveAtLocation: censusActive.length, censusDischargedAtLocation: censusDischarged.length, appActive: appActive.length, missingFromApp, staleInApp };
+}
+
 // Kipu addresses the patient as {patient_master_id}:{casefile_id}: the PATH is
 // the numeric master (Integer-parsed) and the casefile UUID rides in the query.
 // phi_level is required (else 422); high returns the clinical fields we need.

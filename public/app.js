@@ -594,6 +594,20 @@ async function kipuInspect(){ $('kipuResult').textContent='Inspecting Kipu field
   + (r.dischargeAnalysis ? '\n\n===== DISCHARGE PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.dischargeAnalysis,null,2) : '')
   + (r.photoProbe ? '\n\n===== PHOTO PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.photoProbe,null,2) : '')
   + (r.roundsProbe ? '\n\n===== ROUNDS PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.roundsProbe,null,2) : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+async function kipuReconcile(){
+  $('kipuResult').textContent='Reconciling census vs app…'; const el=$('kipuInspect'); el.style.display='none';
+  try{
+    const r=await api('/kipu/reconcile',{method:'POST'});
+    $('kipuResult').textContent=`Kipu active @ location ${r.locationId}: ${r.censusActiveAtLocation} · App active: ${r.appActive}`;
+    el.style.display='block';
+    el.textContent =
+      `Census total returned: ${r.censusTotal}\nAt this location — active: ${r.censusActiveAtLocation}, discharged: ${r.censusDischargedAtLocation}\nOther locations in response: ${r.otherLocations}\nApp active: ${r.appActive}\n\n`+
+      `MISSING FROM APP (in Kipu active here, not active in app) — ${r.missingFromApp.length}:\n`+
+      (r.missingFromApp.map(m=>`  ${m.initials} ${m.kid} — inApp:${m.inApp} active:${m.appActive} status:${m.appStatus||'-'}`).join('\n')||'  (none)')+
+      `\n\nSTALE IN APP (active in app, not in Kipu census) — ${r.staleInApp.length}:\n`+
+      (r.staleInApp.map(s=>`  ${s.initials} ${s.kid}`).join('\n')||'  (none)');
+  }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function kipuCoverage(){
   $('kipuResult').textContent='Checking what each field is pulling…';
   $('kipuInspect').style.display='none'; const el=$('kipuCoverage'); el.style.display='none';

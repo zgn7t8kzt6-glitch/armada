@@ -9,7 +9,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -1215,6 +1215,9 @@ app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
 });
 app.post('/api/kipu/inspect', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuInspect()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/kipu/reconcile', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await kipuReconcile()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Data coverage: for every field the app uses, show how many clients have it
 // filled and where it comes from — so "is everything pulling?" is answerable.

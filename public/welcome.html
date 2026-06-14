@@ -54,7 +54,7 @@
   <header>
     <img class="logo" src="/logo.png" alt="Armada Recovery"/>
     <p class="eyebrow">Today we welcome</p>
-    <h1 id="welcomeLine">Welcome home</h1>
+    <h1 id="welcomeLine">Welcome to Armada Recovery</h1>
     <p class="sub">You belong here. Your care begins the moment you walk in.</p>
     <div class="rule"></div>
   </header>
@@ -66,6 +66,7 @@ async function refresh(){
     const r = await fetch('/api/arrivals/board', { credentials:'same-origin' });
     if(r.status===401){ document.getElementById('names').innerHTML='<div class="empty">Please sign in on this device first (open the app and log in), then reload this page.</div>'; return; }
     const d = await r.json();
+    if(d.facility) document.getElementById('welcomeLine').textContent = 'Welcome to ' + d.facility;
     const box = document.getElementById('names');
     if(!d.names || !d.names.length){ box.innerHTML='<div class="empty">No scheduled arrivals today.</div>'; return; }
     box.innerHTML = d.names.map(n=>`<div class="chip${n.arrived?' arrived':''}"><span class="dot"></span>${(n.name||'').replace(/[<>&]/g,'')}</div>`).join('');

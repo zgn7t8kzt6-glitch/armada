@@ -9,7 +9,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -1404,6 +1404,11 @@ app.post('/api/kipu/inspect', requireAuth, requireAdmin, async (req, res) => {
 });
 app.post('/api/kipu/reconcile', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuReconcile()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// One-time repair for discharge dates wrongly stamped "today" on a backfill.
+app.post('/api/kipu/fix-discharge-dates', requireAuth, requireAdmin, async (req, res) => {
+  try { const r = await kipuFixDischargeDates(); audit({ user: req.user, action: 'KIPU_FIX_DC', detail: `${r.fixed} fixed`, ip: req.ip }); res.json(r); }
+  catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/kipu/find-rounds', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuFindRounds(req.body?.client || req.query.client)); } catch (e) { res.status(502).json({ error: e.message }); }

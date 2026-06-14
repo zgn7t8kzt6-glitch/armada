@@ -727,6 +727,11 @@ async function kipuFindRounds(){
       '\n\nALL FORM NAMES (by frequency):\n  '+(r.topByCount.join('\n  '));
   }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
+async function kipuFixDc(){
+  $('kipuResult').textContent='Correcting discharge dates from Kipu…';
+  try{ const r=await api('/kipu/fix-discharge-dates',{method:'POST'}); $('kipuResult').textContent=`✓ Checked ${r.checked} discharges, corrected ${r.fixed} to their real dates, re-rolled ${r.daysRerolled} day(s). Reopen the Command Center to see the fixed counts.`; }
+  catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function kipuReconcile(){
   $('kipuResult').textContent='Reconciling census vs app…'; const el=$('kipuInspect'); el.style.display='none';
   try{

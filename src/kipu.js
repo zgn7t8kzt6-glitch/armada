@@ -443,6 +443,10 @@ export async function kipuSyncRoster() {
   // census returns them, so pull the recent window and import discharged
   // patients we don't already have, enriching each with its detail (type/reason).
   let importedDischarges = 0;
+  // Real discharge dates from the date-ranged feed, keyed by casefile id and by
+  // master id — so "gone from census" clients get their ACTUAL discharge date
+  // (not today's), which keeps the daily/period counts honest on a backfill.
+  const dischargeDateByKid = new Map();
   if (process.env.KIPU_DISCHARGE_SYNC !== 'false') {
     try {
       const dDays = +(process.env.KIPU_DISCHARGE_DAYS || 30);
@@ -461,6 +465,9 @@ export async function kipuSyncRoster() {
         if (!dRaw || !String(dRaw).trim()) continue;
         const kraw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'); if (!kraw) continue;
         const ks = String(kraw);
+        const dOnly = String(dRaw).slice(0, 10);
+        dischargeDateByKid.set(ks, dOnly);
+        dischargeDateByKid.set(ks.split(':')[0], dOnly);           // also by master id
         if (byKipu.get(ks)) continue;                              // already have this episode
         if (activeMasters.has(ks.split(':')[0])) continue;         // currently admitted under another casefile
         toImport.push({ p, kid: ks, dDate: String(dRaw).slice(0, 10) });
@@ -495,16 +502,24 @@ export async function kipuSyncRoster() {
   if (activeKids.length) {
     const ph = activeKids.map(() => '?').join(',');
     // Capture a discharge event for each one BEFORE we deactivate it.
-    const gone = db.prepare(`SELECT id, kipu_id, loc FROM clients
+    const gone = db.prepare(`SELECT id, kipu_id, loc, discharge_date FROM clients
       WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).all(...activeKids);
-    for (const g of gone) evt.run(g.id, g.kipu_id || null, 'discharge', g.loc || null, null, today, 'left census');
-    // Mark them discharged (date = now) so they flow into the discharge/outcomes
-    // analytics and get a "what could we have done better" debrief.
-    const r = db.prepare(`UPDATE clients SET active = 0,
+    // Use the real discharge date from the date-ranged feed when we have it;
+    // only fall back to today when Kipu gives us nothing (truly unknown).
+    const realDate = (g) => {
+      if (g.discharge_date && String(g.discharge_date).trim()) return String(g.discharge_date).slice(0, 10);
+      const k = g.kipu_id ? String(g.kipu_id) : '';
+      return dischargeDateByKid.get(k) || dischargeDateByKid.get(k.split(':')[0]) || today;
+    };
+    const setGone = db.prepare(`UPDATE clients SET active = 0,
       discharge_status = COALESCE(NULLIF(discharge_status,''), 'Discharged'),
-      discharge_date = COALESCE(NULLIF(discharge_date,''), date('now'))
-      WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).run(...activeKids);
-    deactivated = r.changes || 0;
+      discharge_date = COALESCE(NULLIF(discharge_date,''), ?) WHERE id = ?`);
+    for (const g of gone) {
+      const dd = realDate(g);
+      evt.run(g.id, g.kipu_id || null, 'discharge', g.loc || null, null, dd, 'left census');
+      setGone.run(dd, g.id);
+      deactivated++;
+    }
   }
   // Pull patient photos for face-matching — active clients missing one, in
   // parallel, best-effort. Once set they're skipped on later syncs.
@@ -957,4 +972,54 @@ export async function kipuInspect() {
     roundsProbe = { probes, roundEvalNames };
   }
   return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail, dischargeAnalysis, photoProbe, roundsProbe };
+}
+
+// One-time repair: a backfill sync stamped "today" as the discharge date for
+// clients that had simply dropped off the active census. This re-pulls the
+// date-ranged discharge feed, corrects each client's discharge_date (and the
+// matching flow_event) to the REAL date, and re-rolls the affected daily
+// metrics so the counts are honest. Safe to run repeatedly.
+export async function kipuFixDischargeDates() {
+  const phi = process.env.KIPU_PHI_LEVEL || 'high';
+  const dDays = +(process.env.KIPU_DISCHARGE_DAYS || 60);
+  const start = new Date(Date.now() - dDays * 864e5).toISOString().slice(0, 10);
+  const locId = (process.env.KIPU_LOCATION_ID || '').trim();
+  let dpath = `/api/patients/census?phi_level=${phi}&start_date=${start}&end_date=${appToday()}`;
+  if (locId) dpath += `&location_id=${encodeURIComponent(locId)}`;
+  const dd = await kipuGet(dpath);
+  const dlist = dd?.patients || dd?.census || (Array.isArray(dd) ? dd : []);
+  const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
+
+  // Real discharge dates keyed by casefile id and master id.
+  const map = new Map();
+  for (const p of dlist) {
+    const dRaw = pick(p, 'discharge_date', 'discharged_at'); if (!dRaw) continue;
+    const kraw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'); if (!kraw) continue;
+    const ks = String(kraw), d = String(dRaw).slice(0, 10);
+    map.set(ks, d); map.set(ks.split(':')[0], d);
+  }
+
+  const today = appToday();
+  const clients = db.prepare(`SELECT id, kipu_id, discharge_date FROM clients WHERE source='kipu' AND discharge_status IS NOT NULL AND kipu_id IS NOT NULL`).all();
+  const updC = db.prepare(`UPDATE clients SET discharge_date = ? WHERE id = ?`);
+  const updE = db.prepare(`UPDATE flow_events SET date = ? WHERE client_id = ? AND kind IN ('discharge','ama')`);
+  const affected = new Set();
+  let fixed = 0;
+  db.exec('BEGIN');
+  try {
+    for (const c of clients) {
+      const k = String(c.kipu_id);
+      const real = map.get(k) || map.get(k.split(':')[0]);
+      if (!real) continue;
+      const cur = (c.discharge_date || '').slice(0, 10);
+      if (cur === real) continue;
+      // Correct it when the stored date is the bogus "today" stamp (or differs).
+      updC.run(real, c.id); updE.run(real, c.id);
+      if (cur) affected.add(cur); affected.add(real); fixed++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  affected.add(today);
+  for (const d of affected) rollupDailyMetrics(d);
+  return { checked: clients.length, fixed, daysRerolled: affected.size };
 }

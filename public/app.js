@@ -104,17 +104,19 @@ const GROUPS=[
   {g:'clients',label:'Clients',first:'clients'},
   {g:'care',label:'Care',first:'report'},
   {g:'clinical',label:'Clinical',first:'casemgmt'},
-  {g:'frontdoor',label:'Front Door',first:'arrivals'},
+  {g:'frontdoor',label:'Growth',first:'admissions'},
   {g:'team',label:'Team',first:'mytasks'},
+  {g:'learn',label:'Learn',first:'library'},
   {g:'command',label:'Command',first:'command',admin:true},
 ];
 const GROUP_OF={
-  today:'today',lineup:'today',
+  today:'today',lineup:'today',arrivals:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',
   report:'care',concierge:'care',dignity:'care',rounds:'care',program:'care',
   casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',
-  arrivals:'frontdoor',admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
-  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',training:'team',library:'team',standard:'team',
+  admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
+  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',
+  training:'learn',library:'learn',standard:'learn',
   command:'command',compliance:'command',accountability:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 function renderGroups(){

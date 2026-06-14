@@ -16,7 +16,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -517,6 +517,46 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     staffing: { needed, scheduled, gaps, callOffsToday, pct: needed ? Math.round(scheduled / needed * 100) : null },
     checklist: { total: chk?.total || 0, done: chk?.done || 0 },
   });
+});
+
+// Trending issues: cluster what clients are raising across ALL notes + check-ins,
+// for the day and the week. Quantitative counts always; AI digest cached per day.
+app.get('/api/command/issues', requireAuth, requireAdmin, async (req, res) => {
+  const range = req.query.range === 'week' ? 'week' : 'day';
+  const noteSince = range === 'week' ? "datetime('now','-7 day')" : "datetime('now','-1 day')";
+  const pulseSince = range === 'week' ? "date('now','-7 day')" : "date('now','-1 day')";
+  const noteRows = db.prepare(`SELECT n.flag_summary, n.categories, n.flag_level, c.name, c.pref
+    FROM notes n JOIN clients c ON c.id = n.client_id
+    WHERE n.flagged = 1 AND n.created_at >= ${noteSince}`).all();
+  const pulseRows = db.prepare(`SELECT p.statements, p.triggers, p.note, p.concern, c.name, c.pref
+    FROM pulses p JOIN clients c ON c.id = p.client_id WHERE p.date >= ${pulseSince}`).all();
+
+  const counts = {};
+  const bump = (k) => { if (k == null) return; const s = String(k).trim(); if (s) counts[s] = (counts[s] || 0) + 1; };
+  const lines = [];
+  for (const n of noteRows) {
+    const names = [n.name, n.pref];
+    safeArr(n.categories).forEach(bump);
+    if (n.flag_summary) lines.push('- ' + scrub(n.flag_summary, names));
+  }
+  for (const p of pulseRows) {
+    const names = [p.name, p.pref];
+    safeArr(p.triggers).forEach(bump);
+    if (p.statements) lines.push('- "' + scrub(p.statements, names) + '"');
+    if (p.note) lines.push('- ' + scrub(p.note, names));
+  }
+  const countList = Object.entries(counts).map(([label, n]) => ({ label, n })).sort((a, b) => b.n - a.n).slice(0, 12);
+
+  let digest = { top_issues: [], summary: '' };
+  const cacheKey = 'issuecache_' + range, today = appToday(), refresh = req.query.refresh === '1';
+  if (claudeConfigured() && lines.length) {
+    try {
+      const cached = JSON.parse(getState(cacheKey) || 'null');
+      if (!refresh && cached && cached.day === today && cached.n === lines.length) digest = cached.data;
+      else { digest = await generateIssueDigest(lines.slice(0, 200), range === 'week' ? 'the last 7 days' : 'the last 24 hours'); setState(cacheKey, JSON.stringify({ day: today, n: lines.length, data: digest })); }
+    } catch (e) { /* counts are still returned */ }
+  }
+  res.json({ range, sampleSize: lines.length, counts: countList, digest, ai: claudeConfigured() });
 });
 
 // Director's Daily Review checklist — seeded from the standing template each day.

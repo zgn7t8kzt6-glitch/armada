@@ -434,6 +434,60 @@ export async function generateOutcomeInsights(contextText) {
   return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
 }
 
+// ---- Trending issues: cluster what clients are raising across all notes ----
+const ISSUE_SYSTEM = `You are the clinical-quality / experience director at a
+residential recovery center, in the Ritz-Carlton spirit. You are given a batch of
+DE-IDENTIFIED observations pulled from client notes and shift check-ins over a
+time window. Cluster them into the TOP recurring issues clients are raising —
+complaints, discomforts, unmet needs, environment/food/staff/process themes — the
+things "we keep hearing." For each issue: a short plain name, an approximate
+mention count, a severity, ONE representative paraphrased example (never a name or
+identifier), and ONE concrete operational fix in the Horst/Ritz spirit (fix the
+defect at the system level). Merge near-duplicates. Rank by how much it matters
+(frequency × severity). If there is little signal, return only what is real —
+do not invent issues.`;
+const ISSUE_SCHEMA = {
+  type: 'object',
+  properties: {
+    top_issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          issue: { type: 'string', description: 'Short theme name, e.g. "Smoke-break timing", "Food temperature", "Feeling unheard at night".' },
+          mentions: { type: 'integer', description: 'Approximate number of observations in this cluster.' },
+          severity: { type: 'string', enum: ['Low', 'Medium', 'High'] },
+          example: { type: 'string', description: 'One representative paraphrase, de-identified — no names.' },
+          fix: { type: 'string', description: 'One concrete operational fix the team can own.' },
+        },
+        required: ['issue', 'mentions', 'severity', 'example', 'fix'],
+        additionalProperties: false,
+      },
+    },
+    summary: { type: 'string', description: 'One or two sentences: the overall read for this window.' },
+  },
+  required: ['top_issues', 'summary'],
+  additionalProperties: false,
+};
+export async function generateIssueDigest(lines, label) {
+  if (!lines.length) return { top_issues: [], summary: '' };
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1400,
+    system: G + ISSUE_SYSTEM,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: ISSUE_SCHEMA } },
+    messages: [{ role: 'user', content: `Time window: ${label}\n\nDe-identified observations (one per line):\n${lines.join('\n')}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) return { top_issues: [], summary: '' };
+  const r = JSON.parse(t.text);
+  r.top_issues = (r.top_issues || []).filter((i) => i && i.issue);
+  r.summary = r.summary || '';
+  return r;
+}
+
 // ---- AI Shift Briefing: the daily lineup for the whole house ----
 const SHIFT_BRIEF_SYSTEM = `You are the care coordinator giving the shift-huddle
 briefing for a residential recovery center, in the Ritz-Carlton spirit. Given the

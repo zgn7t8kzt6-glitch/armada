@@ -1185,7 +1185,31 @@ async function loadCommand(){
 
   loadCommandTrends();
   loadCommandChecklist();
+  loadCommandIssues(ISSUE_RANGE);
   cmdAssessPoll();
+}
+let ISSUE_RANGE='day';
+function setIssueRange(r){ ISSUE_RANGE=r; $('issTabDay').classList.toggle('active',r==='day'); $('issTabWeek').classList.toggle('active',r==='week'); loadCommandIssues(r); }
+async function loadCommandIssues(range, refresh){
+  const box=$('cmdIssues'); if(!box) return;
+  box.innerHTML='<div class="hint">Reading the notes…</div>';
+  let d; try{ d=await api('/command/issues?range='+range+(refresh?'&refresh=1':'')); }catch(e){ box.innerHTML='<div class="hint">Could not load.</div>'; return; }
+  if(!d.sampleSize){ box.innerHTML='<div class="empty">Nothing flagged in this window yet. Run “✦ Read all notes” to scan the latest documentation, then check back.</div>'; return; }
+  const sev=s=>`<span class="risk ${s==='High'?'risk-high':s==='Medium'?'risk-elev':'risk-low'}">${esc(s)}</span>`;
+  const issues=(d.digest&&d.digest.top_issues)||[];
+  const issuesHtml = issues.length ? issues.map(i=>`
+    <div class="cmd-row" style="align-items:flex-start">
+      <div class="cmd-row-main">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><strong>${esc(i.issue)}</strong>${sev(i.severity)}<span class="hint">${i.mentions} mention${i.mentions==1?'':'s'}</span></div>
+        <div class="pc-note" style="font-style:italic;margin-top:4px">“${esc(i.example||'')}”</div>
+        <div class="note-act" style="margin-top:4px">→ ${esc(i.fix||'')}</div>
+      </div>
+    </div>`).join('') : (d.ai?'<div class="hint">No clear pattern yet — see raw signals below.</div>':'<div class="hint">AI clustering is off; showing raw signal counts.</div>');
+  const chips=(d.counts||[]).map(c=>`<span class="chip">${esc(c.label)} · ${c.n}</span>`).join(' ');
+  box.innerHTML =
+    (d.digest&&d.digest.summary?`<div class="pc-note" style="margin-bottom:10px">${esc(d.digest.summary)}</div>`:'')+
+    issuesHtml+
+    (chips?`<div class="cmd-sub">Signal counts (${range==='week'?'7 days':'24 hours'})</div><div>${chips}</div>`:'');
 }
 let cmdAssessTimer=null;
 async function cmdAssess(){

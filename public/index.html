@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260612m" />
+<link rel="stylesheet" href="/styles.css?v=20260612n" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -153,6 +153,19 @@
           <span id="cmdCutoff" class="hint"></span>
         </div>
         <div id="cmdDaily"></div>
+      </div>
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Trending issues</h3><p class="sub sans">What clients are raising across all the notes &amp; check-ins — the things we keep hearing, clustered for the day and the week.</p></div>
+          <div class="cmd-hero-actions">
+            <div class="itabs" style="margin:0;border:none;padding:0">
+              <button class="itab active" id="issTabDay" onclick="setIssueRange('day')">Today</button>
+              <button class="itab" id="issTabWeek" onclick="setIssueRange('week')">This week</button>
+            </div>
+            <button class="btn btn-ghost btn-sm sans" onclick="loadCommandIssues(ISSUE_RANGE,true)" title="Re-cluster now">↻</button>
+          </div>
+        </div>
+        <div id="cmdIssues"></div>
       </div>
       <div class="card">
         <h3>Census by level of care</h3>
@@ -962,6 +975,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260612m"></script>
+<script src="/app.js?v=20260612n"></script>
 </body>
 </html>

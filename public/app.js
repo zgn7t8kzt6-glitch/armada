@@ -103,27 +103,19 @@ const GROUPS=[
   {g:'today',label:'Today',first:'today'},
   {g:'clients',label:'Clients',first:'clients'},
   {g:'care',label:'Care',first:'report'},
-  {g:'clinical',label:'Clinical',first:'retention'},
+  {g:'clinical',label:'Clinical',first:'casemgmt'},
+  {g:'frontdoor',label:'Front Door',first:'arrivals'},
   {g:'team',label:'Team',first:'mytasks'},
-  {g:'growth',label:'Growth',first:'admissions'},
-  {g:'learn',label:'Learn',first:'training'},
-  {g:'ask',label:'Ask AI',first:'askai'},
   {g:'command',label:'Command',first:'command',admin:true},
-  {g:'insights',label:'Insights',first:'outcomes',admin:true},
-  {g:'admin',label:'Admin',first:'settings',admin:true},
 ];
 const GROUP_OF={
-  command:'command',compliance:'command',
-  today:'today',
+  today:'today',lineup:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',
-  report:'care',lineup:'care',concierge:'care',dignity:'care',rounds:'care',program:'care',
-  retention:'clinical',casemgmt:'clinical',surveys:'clinical',incidents:'clinical',
-  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',
-  arrivals:'growth',admissions:'growth',referrals:'growth',partners:'growth',alumni:'growth',
-  outcomes:'insights',analytics:'insights',scorecard:'insights','report-view':'insights',accountability:'insights',
-  training:'learn',library:'learn',standard:'learn',
-  askai:'ask',
-  settings:'admin',users:'admin',audit:'admin',
+  report:'care',concierge:'care',dignity:'care',rounds:'care',program:'care',
+  casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',
+  arrivals:'frontdoor',admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
+  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',training:'team',library:'team',standard:'team',
+  command:'command',compliance:'command',accountability:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 function renderGroups(){
   const isAdmin = ME && ME.role==='admin';
@@ -154,8 +146,8 @@ function show(v){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card'};
-  if($('topbarTitle')) $('topbarTitle').textContent = activeBtn ? (GROUP_OF[v]==='insights'?'Insights':activeBtn.textContent) : (noNavTitles[v]||$('topbarTitle').textContent);
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI'};
+  if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='today') loadToday();
   if(v==='command') loadCommand();

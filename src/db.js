@@ -827,6 +827,22 @@ export function rollupDailyMetrics(date) {
     .run(date, c('admit'), c('discharge') + ama, c('loc_change'), ama, census);
 }
 
+// ---- Dignity Kit: every client gets one; delivery must be confirmed by the
+// owner, and anyone who lets it go overdue is tracked. One kit per client. ----
+db.exec(`CREATE TABLE IF NOT EXISTS dignity_kits (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'needed',     -- needed | delivered | na
+  needed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  due_by TEXT,
+  assigned_role TEXT,
+  assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assigned_name TEXT,
+  delivered_by TEXT, delivered_at TEXT,
+  note TEXT,
+  UNIQUE(client_id)
+);`);
+
 // ---- Leadership: the Director's Daily Review (Brandon's recurring rounds) ----
 // One checklist instance per day, seeded from DIRECTOR_REVIEW on first open.
 db.exec(`CREATE TABLE IF NOT EXISTS command_checklist (

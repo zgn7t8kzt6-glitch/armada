@@ -375,6 +375,72 @@ app.post('/api/case-tasks/:id/done', requireAuth, (req, res) => {
 });
 app.delete('/api/case-tasks/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM case_tasks WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 
+// ---- Dignity Kit: every active client gets one; delivery must be confirmed by
+// the owner. Outstanding kits raise an alert; overdue ones are tracked. ----
+const DIGNITY_DUE_HOURS = +(process.env.DIGNITY_DUE_HOURS || 4);
+const DIGNITY_ROLE = process.env.DIGNITY_OWNER_ROLE || 'BHT / Tech';
+function ensureDignityKits() {
+  const need = db.prepare(`SELECT id, pref, name FROM clients
+    WHERE active = 1 AND discharge_status IS NULL AND id NOT IN (SELECT client_id FROM dignity_kits)`).all();
+  const ins = db.prepare(`INSERT OR IGNORE INTO dignity_kits (client_id, due_by, assigned_role) VALUES (?, datetime('now', ?), ?)`);
+  for (const c of need) {
+    ins.run(c.id, `+${DIGNITY_DUE_HOURS} hours`, DIGNITY_ROLE);
+    createAlert(c.id, 'dignity', 'Normal', `${c.pref || c.name} — deliver Dignity Kit and confirm`);
+  }
+  return need.length;
+}
+app.get('/api/dignity', requireAuth, (req, res) => {
+  ensureDignityKits();
+  const rows = db.prepare(`SELECT k.*, c.pref, c.name, c.room,
+      (k.status='needed' AND k.due_by IS NOT NULL AND k.due_by < datetime('now')) AS overdue
+    FROM dignity_kits k JOIN clients c ON c.id = k.client_id
+    WHERE c.active = 1 AND c.discharge_status IS NULL ORDER BY overdue DESC, k.due_by`).all();
+  const map = (r) => ({ id: r.id, client_id: r.client_id, name: r.pref || r.name, room: r.room, status: r.status,
+    due_by: r.due_by, assigned_role: r.assigned_role, assigned_name: r.assigned_name,
+    delivered_by: r.delivered_by, delivered_at: r.delivered_at, overdue: !!r.overdue,
+    late: r.status === 'delivered' && r.due_by && r.delivered_at && r.delivered_at > r.due_by });
+  const all = rows.map(map);
+  const outstanding = all.filter((r) => r.status === 'needed');
+  const delivered = all.filter((r) => r.status === 'delivered');
+  // Accountability: deliveries per person, and who currently owns overdue kits.
+  const byPerson = {};
+  for (const d of delivered) { const k = d.delivered_by || '—'; (byPerson[k] = byPerson[k] || { name: k, delivered: 0, late: 0 }).delivered++; if (d.late) byPerson[k].late++; }
+  res.json({
+    outstanding, delivered, overdueCount: outstanding.filter((o) => o.overdue).length,
+    deliveredToday: delivered.filter((d) => (d.delivered_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length,
+    accountability: Object.values(byPerson).sort((a, b) => b.delivered - a.delivered),
+    dueHours: DIGNITY_DUE_HOURS, ownerRole: DIGNITY_ROLE,
+  });
+});
+app.post('/api/dignity/:id/deliver', requireAuth, (req, res) => {
+  const k = db.prepare(`SELECT * FROM dignity_kits WHERE id = ?`).get(req.params.id);
+  if (!k) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE dignity_kits SET status='delivered', delivered_by=?, delivered_at=datetime('now'), note=COALESCE(?, note) WHERE id=?`)
+    .run(req.user.name, req.body?.note || null, k.id);
+  db.prepare(`UPDATE alerts SET status='Resolved' WHERE client_id=? AND kind='dignity' AND status='New'`).run(k.client_id);
+  audit({ user: req.user, action: 'DIGNITY_DELIVER', entity: 'client', entity_id: k.client_id, ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/dignity/:id/na', requireAuth, (req, res) => {
+  const k = db.prepare(`SELECT client_id FROM dignity_kits WHERE id = ?`).get(req.params.id);
+  if (!k) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE dignity_kits SET status='na', delivered_by=?, delivered_at=datetime('now'), note=COALESCE(?, note) WHERE id=?`)
+    .run(req.user.name, req.body?.note || 'not needed', req.params.id);
+  db.prepare(`UPDATE alerts SET status='Resolved' WHERE client_id=? AND kind='dignity' AND status='New'`).run(k.client_id);
+  res.json({ ok: true });
+});
+app.post('/api/dignity/:id/assign', requireAuth, requireAdmin, (req, res) => {
+  const u = req.body?.user_id ? db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(req.body.user_id) : null;
+  db.prepare(`UPDATE dignity_kits SET assigned_to=?, assigned_name=? WHERE id=?`).run(u?.id || null, u?.name || null, req.params.id);
+  res.json({ ok: true });
+});
+app.post('/api/dignity/:id/reopen', requireAuth, (req, res) => {
+  const k = db.prepare(`SELECT client_id FROM dignity_kits WHERE id = ?`).get(req.params.id);
+  if (!k) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE dignity_kits SET status='needed', delivered_by=NULL, delivered_at=NULL WHERE id=?`).run(req.params.id);
+  res.json({ ok: true });
+});
+
 // Detox Watch: active clients with moderate/severe withdrawal or med concerns.
 app.get('/api/detox-watch', requireAuth, (req, res) => {
   const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
@@ -940,6 +1006,7 @@ app.post('/api/kipu/reset', requireAuth, requireAdmin, async (req, res) => {
 // After a manual sync/rebuild, run the AI note-read in the background so the
 // snapshot / AMA risk / case needs populate without a separate click.
 function afterSyncAssess(user) {
+  try { ensureDignityKits(); } catch (e) { console.error('[dignity] ensure:', e.message); }
   if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
     runAssessAll({ id: user?.id ?? null, name: user?.name || 'Sync' }).catch((e) => console.error('[assess] after sync:', e.message));
   }
@@ -2286,6 +2353,7 @@ if (kipuConfigured()) {
       try {
         const r = await kipuSyncRoster();
         console.log(`[kipu] auto-sync: ${r.activeNow} active (${r.created} new, ${r.deactivated} discharged)`);
+        try { ensureDignityKits(); } catch (e) { /* non-fatal */ }
         // Re-assess the census automatically (clears stale alerts + refreshes every
         // client's clean read/snapshot). Disable with KIPU_AUTO_ASSESS=false.
         if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
@@ -2325,4 +2393,5 @@ function runDailyCutoff() {
 setTimeout(runDailyCutoff, msUntilLocalMidnight());
 
 const PORT = process.env.PORT || 3000;
+try { ensureDignityKits(); } catch (e) { /* dignity kits are best-effort at boot */ }
 app.listen(PORT, () => console.log(`Armada Care Standards running on http://localhost:${PORT}`));

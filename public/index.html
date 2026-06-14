@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260612o" />
+<link rel="stylesheet" href="/styles.css?v=20260612p" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -52,6 +52,7 @@
     <button data-view="lineup">Lineup</button>
     <button data-view="surveys">Surveys</button>
     <button data-view="concierge">Concierge</button>
+    <button data-view="dignity">Dignity Kits</button>
     <button data-view="program">Program</button>
     <button data-view="incidents">Incidents</button>
     <button data-view="casemgmt">Case Mgmt</button>
@@ -244,6 +245,18 @@
     </section>
 
     <!-- CASE MANAGEMENT -->
+    <!-- DIGNITY KITS -->
+    <section id="dignity" class="view">
+      <div class="card">
+        <h3>Dignity Kits</h3>
+        <p class="sub sans">Every client gets a Dignity Kit on arrival — hygiene, fresh clothes, comfort basics, delivered with respect. Confirm each one; overdue kits are flagged and accountability is tracked.</p>
+        <div id="dignityKpis" class="ret-cards"></div>
+      </div>
+      <div class="card"><h3>Needs delivery</h3><div id="dignityOutstanding"></div></div>
+      <div class="card"><h3>Recently delivered</h3><div id="dignityDelivered"></div></div>
+      <div class="card"><h3>Accountability</h3><p class="sub sans">Who delivered — and any late.</p><div id="dignityAccount"></div></div>
+    </section>
+
     <section id="casemgmt" class="view">
       <div class="card">
         <h3>Case Management</h3>
@@ -975,6 +988,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260612o"></script>
+<script src="/app.js?v=20260612p"></script>
 </body>
 </html>

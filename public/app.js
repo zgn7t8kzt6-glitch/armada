@@ -107,7 +107,7 @@ const GROUP_OF={
   command:'command',
   today:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',
-  report:'care',lineup:'care',concierge:'care',program:'care',
+  report:'care',lineup:'care',concierge:'care',dignity:'care',program:'care',
   retention:'clinical',casemgmt:'clinical',surveys:'clinical',incidents:'clinical',
   mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',
   admissions:'growth',referrals:'growth',partners:'growth',alumni:'growth',
@@ -167,6 +167,7 @@ function show(v){
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='casemgmt') loadCaseMgmt();
+  if(v==='dignity') loadDignity();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
   if(v==='surveys') loadSurveys();
@@ -1113,6 +1114,38 @@ async function loadCaseMgmt(){
 async function cmDone(id, done){ await api('/case-tasks/'+id+'/done',{method:'POST',body:JSON.stringify({done})}); loadCaseMgmt(); }
 async function cmDelete(id){ await api('/case-tasks/'+id,{method:'DELETE'}); loadCaseMgmt(); }
 async function cmAdd(cid){ const item=$('cmitem_'+cid).value.trim(); if(!item)return; await api('/case-tasks',{method:'POST',body:JSON.stringify({client_id:cid,category:$('cmcat_'+cid).value,item})}); loadCaseMgmt(); }
+
+/* ---- Dignity Kits ---- */
+async function loadDignity(){
+  const d = await api('/dignity');
+  $('dignityKpis').innerHTML = `
+    <div class="ret-card ${d.outstanding.length?'rc-warn':''}"><div class="n">${d.outstanding.length}</div><div class="l">Needs delivery</div></div>
+    <div class="ret-card ${d.overdueCount?'rc-high':''}"><div class="n">${d.overdueCount}</div><div class="l">Overdue</div></div>
+    <div class="ret-card"><div class="n">${d.deliveredToday}</div><div class="l">Delivered today</div></div>
+    <div class="ret-card"><div class="n">${d.dueHours}h</div><div class="l">Delivery window</div></div>`;
+  $('dignityOutstanding').innerHTML = d.outstanding.length ? d.outstanding.map(k=>`
+    <div class="cmd-row ${k.overdue?'cmd-row-flag':''}">
+      <div class="cmd-row-main"><strong>${esc(k.name)}</strong>${k.room?' <span class="hint">· Room '+esc(k.room)+'</span>':''}
+        <div class="hint">${k.assigned_name?'Owner: '+esc(k.assigned_name):'For: '+esc(k.assigned_role||'any staff')} · due ${esc((k.due_by||'').slice(5,16).replace('T',' '))}${k.overdue?' · <span style="color:var(--danger);font-weight:600">OVERDUE</span>':''}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-gold btn-sm sans" onclick="dignityDeliver(${k.id},'${esc(k.name).replace(/'/g,"\\'")}')">✓ Confirm delivered</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="dignityNa(${k.id})">N/A</button>
+      </div>
+    </div>`).join('') : '<div class="hint">All kits delivered. 🎉</div>';
+  $('dignityDelivered').innerHTML = d.delivered.length ? d.delivered.slice(0,40).map(k=>`
+    <div class="cmd-row"><div class="cmd-row-main"><strong>${esc(k.name)}</strong>${k.room?' <span class="hint">· '+esc(k.room)+'</span>':''}
+      <div class="hint">by ${esc(k.delivered_by||'—')} · ${esc((k.delivered_at||'').slice(5,16).replace('T',' '))}${k.late?' · <span style="color:var(--danger)">late</span>':''}</div></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="dignityReopen(${k.id})">Undo</button></div>`).join('') : '<div class="hint">None delivered yet.</div>';
+  $('dignityAccount').innerHTML = d.accountability.length ? d.accountability.map(p=>`
+    <div class="cmd-row"><div class="cmd-row-main"><strong>${esc(p.name)}</strong></div>
+      <span class="chip">${p.delivered} delivered${p.late?' · '+p.late+' late':''}</span></div>`).join('') : '<div class="hint">No deliveries logged yet.</div>';
+}
+async function dignityDeliver(id, name){
+  if(!confirm('Confirm you personally handed '+(name||'this client')+' their Dignity Kit?')) return;
+  await api('/dignity/'+id+'/deliver',{method:'POST',body:JSON.stringify({})}); loadDignity();
+}
+async function dignityNa(id){ const note=prompt('Mark not needed — reason? (e.g. client brought their own)'); if(note===null) return; await api('/dignity/'+id+'/na',{method:'POST',body:JSON.stringify({note})}); loadDignity(); }
+async function dignityReopen(id){ await api('/dignity/'+id+'/reopen',{method:'POST'}); loadDignity(); }
 
 /* ---- Leadership Command Center ---- */
 async function loadCommand(){

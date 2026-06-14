@@ -750,6 +750,27 @@ function seedAkronStandard() {
 }
 seedAkronStandard();
 
+// ---- Real document content (extracted from the uploaded Akron/Armada .docx
+// files) lives in library-content.json. Upsert it into the Library: update the
+// body of a matching Akron index placeholder if present, else insert fresh.
+// Only overwrites a placeholder body (one still containing the "not yet loaded"
+// marker) so hand-edited docs are never clobbered. ----
+function seedLibraryContent() {
+  let items = [];
+  try { items = JSON.parse(fs.readFileSync(path.join(__dirname, 'library-content.json'), 'utf8')); }
+  catch { return; }
+  const find = db.prepare(`SELECT id, body FROM docs WHERE title = ?`);
+  const upd = db.prepare(`UPDATE docs SET body = ?, category = ?, tags = ?, updated_by = 'Armada Standard', updated_at = datetime('now') WHERE id = ?`);
+  const ins = db.prepare(`INSERT INTO docs (title, category, body, tags, updated_by) VALUES (?, ?, ?, ?, 'Armada Standard')`);
+  for (const d of items) {
+    if (!d.title || !d.body) continue;
+    const ex = find.get(d.title);
+    if (ex) { if (/not yet loaded/i.test(ex.body || '')) upd.run(d.body, d.category, d.tags || null, ex.id); }
+    else ins.run(d.title, d.category || 'Policy', d.body, d.tags || null);
+  }
+}
+seedLibraryContent();
+
 // Lightweight migration: add columns to existing tables (older deployments).
 function addColumn(table, col, type) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);

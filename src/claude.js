@@ -179,6 +179,16 @@ Rules:
   and med problems are among the biggest early-AMA drivers.
 - Conversation approach: calm, non-confrontational, motivational. Never use
   shame, threats, or "you'll regret it."
+- WHAT WE COULD DO BETTER (the facility lens): separately capture "unmet" — what
+  the client raised that WE have not adequately addressed during this stay, read
+  across the note TIMELINE. The question is not "what is wrong in this person's
+  life" but "are we treating and responding to them well." A symptom or request
+  is only "unmet" if a later note shows it is STILL unresolved or recurring with
+  no documented response from us (e.g., came in with pain AND a later note still
+  reports uncontrolled pain = unmet; pain at intake that was medicated and
+  resolved = NOT unmet). Their intake circumstances and history (housing, legal,
+  employment, diagnosis, reasons for using) are NOT "unmet" — they are the
+  starting point we serve, not a defect in our care.
 - LEADERSHIP REVIEW: a Clinical Director also reviews this. From the notes only,
   capture the discharge / step-down plan (next level of care, destination,
   transportation, any anticipated date) and flag documentation that appears
@@ -212,6 +222,7 @@ const AMA_SCHEMA = {
       },
     },
     approach: { type: 'string', description: 'How to talk with this client right now.' },
+    unmet: { type: 'array', items: { type: 'string' }, description: 'WHAT WE COULD DO BETTER — needs, symptoms, or requests THIS client has raised that we have NOT yet adequately addressed during this stay, judged across the note TIMELINE. Each item should be about OUR responsiveness / their experience with us, e.g. "still reports uncontrolled pain in the latest nursing note — not re-medicated", "asked twice to call family, not yet arranged", "complained the room is cold, unresolved", "missed group with no follow-up". A condition present at INTAKE counts only if a LATER note shows it persisting or recurring without a documented response from us. EXCLUDE pure intake/history facts (homelessness, legal charges, unemployment, diagnosis, why they came, substance-use history) — those are their starting circumstances, not something we failed to do. Empty array if care looks responsive and nothing is outstanding.' },
     withdrawal_level: { type: 'string', enum: ['None', 'Mild', 'Moderate', 'Severe', 'Unknown'], description: 'Detox withdrawal severity from the notes (use CIWA-Ar / COWS scores if documented).' },
     withdrawal: { type: 'string', description: 'Brief note on withdrawal status — latest CIWA/COWS score, symptoms, and whether it is worsening.' },
     med_concerns: { type: 'array', items: { type: 'string' }, description: 'Medication issues from the notes: refusals, side effects, missed doses, or unmet comfort-med needs. Empty array if none.' },
@@ -236,7 +247,7 @@ const AMA_SCHEMA = {
       },
     },
   },
-  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'withdrawal_level', 'withdrawal', 'med_concerns', 'step_down', 'transport', 'anticipated_dc', 'discharge_plan', 'doc_flags', 'snapshot', 'likes', 'case_needs'],
+  required: ['level', 'summary', 'underlying', 'best_play', 'cared_for', 'triggers', 'actions', 'approach', 'unmet', 'withdrawal_level', 'withdrawal', 'med_concerns', 'step_down', 'transport', 'anticipated_dc', 'discharge_plan', 'doc_flags', 'snapshot', 'likes', 'case_needs'],
   additionalProperties: false,
 };
 
@@ -436,16 +447,32 @@ export async function generateOutcomeInsights(contextText) {
 
 // ---- Trending issues: cluster what clients are raising across all notes ----
 const ISSUE_SYSTEM = `You are the clinical-quality / experience director at a
-residential recovery center, in the Ritz-Carlton spirit. You are given a batch of
-DE-IDENTIFIED observations pulled from client notes and shift check-ins over a
-time window. Cluster them into the TOP recurring issues clients are raising —
-complaints, discomforts, unmet needs, environment/food/staff/process themes — the
-things "we keep hearing." For each issue: a short plain name, an approximate
-mention count, a severity, ONE representative paraphrased example (never a name or
-identifier), and ONE concrete operational fix in the Horst/Ritz spirit (fix the
-defect at the system level). Merge near-duplicates. Rank by how much it matters
-(frequency × severity). If there is little signal, return only what is real —
-do not invent issues.`;
+detox & residential recovery center, in the Ritz-Carlton spirit. You are given a
+batch of DE-IDENTIFIED, in-stay observations — things clients raised that we have
+NOT yet adequately addressed, plus staff check-ins.
+
+Your job is to find WHAT WE COULD DO BETTER AS A FACILITY — the themes in how we
+are caring for and responding to people RIGHT NOW. Think "are we treating them
+well, is their experience with us good," not "what problems did they arrive
+with."
+
+CRITICAL — what counts and what does not:
+- COUNT: unaddressed or recurring symptoms (e.g., pain still uncontrolled across
+  notes), ignored or slow requests, comfort/food/environment/staff-responsiveness
+  complaints, dignity and communication failures, anything that reflects on OUR
+  service and that we could fix.
+- DO NOT COUNT: a client's intake baseline or history — homelessness, legal
+  charges, unemployment, diagnosis, family estrangement, the reasons they use, why
+  they came. Those describe their starting circumstances, not a defect in our
+  care. A condition present at admission is only an issue if it PERSISTS without a
+  response from us.
+
+Cluster the real issues into the TOP themes. For each: a short plain name, an
+approximate mention count, a severity, ONE de-identified representative example,
+and ONE concrete operational fix the team can own (fix the system, Horst-style).
+Merge near-duplicates; rank by frequency × severity. If there is little signal,
+return only what is real — never invent issues, and never pad the list with
+intake circumstances.`;
 const ISSUE_SCHEMA = {
   type: 'object',
   properties: {
@@ -604,6 +631,7 @@ export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
   r.anticipated_dc = r.anticipated_dc || '';
   r.discharge_plan = r.discharge_plan || '';
   r.doc_flags = Array.isArray(r.doc_flags) ? r.doc_flags.filter((x) => x && String(x).trim()) : [];
+  r.unmet = Array.isArray(r.unmet) ? r.unmet.filter((x) => x && String(x).trim()) : [];
   return r;
 }
 

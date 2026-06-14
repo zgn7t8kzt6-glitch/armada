@@ -714,6 +714,7 @@ addColumn('ama_reads', 'transport', 'TEXT');           // Arranged | Needed | Un
 addColumn('ama_reads', 'anticipated_dc', 'TEXT');      // anticipated discharge date (free text)
 addColumn('ama_reads', 'discharge_plan', 'TEXT');      // 1-2 sentence step-down plan
 addColumn('ama_reads', 'doc_flags', 'TEXT');           // JSON array of missing/late documentation
+addColumn('ama_reads', 'unmet', 'TEXT');               // JSON array — in-stay needs we haven't addressed
 addColumn('clients', 'loc', 'TEXT');                   // current ASAM level of care (parsed code)
 addColumn('clients', 'referral_source', 'TEXT');       // who referred them in (for source→outcome trends)
 // Demographics pulled from the Kipu census (these fields ARE in the census).

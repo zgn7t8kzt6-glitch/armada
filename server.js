@@ -225,14 +225,14 @@ async function runAndStoreAmaRead(client, user, ip, extraNotes = []) {
   // extraNotes (e.g. Kipu documentation) are fed in as additional context.
   const read = await generateAmaRead(client, pulses, [...extraNotes, ...handoffs]);
   db.prepare(
-    `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, withdrawal_level, withdrawal_note, med_concerns, step_down, transport, anticipated_dc, discharge_plan, doc_flags, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO ama_reads (client_id, level, summary, triggers, actions, approach, underlying, cared_for, best_play, withdrawal_level, withdrawal_note, med_concerns, step_down, transport, anticipated_dc, discharge_plan, doc_flags, unmet, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(client.id, read.level, read.summary, JSON.stringify(read.triggers),
     JSON.stringify(read.actions), read.approach, read.underlying || null,
     JSON.stringify(read.cared_for || []), read.best_play || null,
     read.withdrawal_level || null, read.withdrawal || null, JSON.stringify(read.med_concerns || []),
     read.step_down || null, read.transport || null, read.anticipated_dc || null,
-    read.discharge_plan || null, JSON.stringify(read.doc_flags || []), user.id);
+    read.discharge_plan || null, JSON.stringify(read.doc_flags || []), JSON.stringify(read.unmet || []), user.id);
   if (read.snapshot && read.snapshot.trim())
     db.prepare(`UPDATE clients SET summary = ?, summary_at = datetime('now') WHERE id = ?`).run(read.snapshot.trim(), client.id);
   if (read.likes && read.likes.trim())
@@ -523,27 +523,27 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
 // for the day and the week. Quantitative counts always; AI digest cached per day.
 app.get('/api/command/issues', requireAuth, requireAdmin, async (req, res) => {
   const range = req.query.range === 'week' ? 'week' : 'day';
-  const noteSince = range === 'week' ? "datetime('now','-7 day')" : "datetime('now','-1 day')";
   const pulseSince = range === 'week' ? "date('now','-7 day')" : "date('now','-1 day')";
-  const noteRows = db.prepare(`SELECT n.flag_summary, n.categories, n.flag_level, c.name, c.pref
-    FROM notes n JOIN clients c ON c.id = n.client_id
-    WHERE n.flagged = 1 AND n.created_at >= ${noteSince}`).all();
-  const pulseRows = db.prepare(`SELECT p.statements, p.triggers, p.note, p.concern, c.name, c.pref
-    FROM pulses p JOIN clients c ON c.id = p.client_id WHERE p.date >= ${pulseSince}`).all();
-
   const counts = {};
   const bump = (k) => { if (k == null) return; const s = String(k).trim(); if (s) counts[s] = (counts[s] || 0) + 1; };
   const lines = [];
-  for (const n of noteRows) {
-    const names = [n.name, n.pref];
-    safeArr(n.categories).forEach(bump);
-    if (n.flag_summary) lines.push('- ' + scrub(n.flag_summary, names));
+  // PRIMARY SIGNAL: the per-client "unmet" items — things raised that we haven't
+  // addressed during the stay (timeline-aware; intake baseline already excluded
+  // by the read). This is what "we could do better," not what they arrived with.
+  const active = db.prepare(`SELECT id, name, pref FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  for (const c of active) {
+    const a = latestAmaRead(c.id);
+    if (!a) continue;
+    for (const item of safeArr(a.unmet)) { if (item && String(item).trim()) lines.push('- ' + scrub(String(item), [c.name, c.pref])); }
   }
+  // SECONDARY: dated staff check-ins in the window (in-stay experience signal).
+  const pulseRows = db.prepare(`SELECT p.date, p.statements, p.triggers, p.note, p.concern, c.name, c.pref
+    FROM pulses p JOIN clients c ON c.id = p.client_id WHERE p.date >= ${pulseSince}`).all();
   for (const p of pulseRows) {
     const names = [p.name, p.pref];
     safeArr(p.triggers).forEach(bump);
-    if (p.statements) lines.push('- "' + scrub(p.statements, names) + '"');
-    if (p.note) lines.push('- ' + scrub(p.note, names));
+    if (p.statements) lines.push(`- [${p.date}] "` + scrub(p.statements, names) + '"');
+    if (p.note) lines.push(`- [${p.date}] ` + scrub(p.note, names));
   }
   const countList = Object.entries(counts).map(([label, n]) => ({ label, n })).sort((a, b) => b.n - a.n).slice(0, 12);
 

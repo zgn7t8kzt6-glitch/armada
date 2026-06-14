@@ -278,7 +278,17 @@ export async function kipuSyncRoster() {
 
   // Pull a field from the many shapes Kipu can return.
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
-  const timeOf = (v) => { if (!v) return null; const m = String(v).match(/[T ](\d{2}:\d{2})/); return m ? m[1] : null; };
+  const timeOf = (v) => {
+    if (!v) return null;
+    const s = String(v);
+    let m = s.match(/[T ](\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?/) || s.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/);
+    if (!m) return null;
+    let h = +m[1]; const min = m[2]; const ap = (m[3] || '').toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    if (h > 23 || +min > 59) return null;
+    return String(h).padStart(2, '0') + ':' + min;
+  };
   const activeKids = [];   // census patients who are currently active (no discharge)
 
   // Location scoping. Prefer KIPU_LOCATION_ID (exact); fall back to a
@@ -327,7 +337,7 @@ export async function kipuSyncRoster() {
     const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
     const admit = admitRaw ? String(admitRaw).slice(0, 10) : null;
     if (admitCutoff && admit && admit < admitCutoff) continue;   // opt-in recency filter
-    const admitTime = timeOf(admitRaw);
+    let admitTime = timeOf(admitRaw);
     let therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
     let caseMgr = pick(p, 'case_manager', 'casemanager');
     let room = pick(p, 'bed_name', 'room', 'bed', 'bed_name_full');
@@ -370,6 +380,9 @@ export async function kipuSyncRoster() {
           // Kipu prefixes the utilization-review level (e.g. "UR LOC: IOP") — strip it.
           const clean = (v) => v == null ? null : String(v).replace(/^\s*UR\s*LOC\s*:?\s*/i, '').trim() || null;
           if (programRaw == null) programRaw = clean(d('level_of_care', 'program'));
+          // Admission time: the census date is usually date-only; the detail
+          // record carries the fuller timestamp. Also probe dedicated time fields.
+          if (!admitTime) admitTime = timeOf(d('admission_date', 'admitted_at', 'admission_datetime', 'admission_date_time', 'admission_time', 'intake_datetime', 'intake_time', 'created_at'));
           nextLoc = clean(d('next_level_of_care'));
           anticipatedDc = d('anticipated_discharge_date');
           if (refSrcRaw == null) refSrcRaw = d('referrer_name', 'first_contact_name');

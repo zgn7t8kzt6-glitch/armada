@@ -1457,6 +1457,7 @@ app.get('/api/kipu/coverage', requireAuth, requireAdmin, (req, res) => {
   const fields = [
     F('Name', 'Census', 'name'),
     F('Admit date', 'Census', 'admit'),
+    F('Admit time', 'Census/detail', 'admit_time'),
     F('Date of birth', 'Census', 'dob'),
     F('Diagnosis', 'Census', 'diagnosis'),
     F('Insurance', 'Census', 'insurance'),

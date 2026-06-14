@@ -624,6 +624,12 @@ async function testSf(){
   try{ const r=await api('/salesforce/test',{method:'POST'}); $('sf_msg').innerHTML='✓ Connected — Salesforce reachable.'; }
   catch(e){ $('sf_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
 }
+async function sfSyncNow(){
+  $('sf_msg').textContent='Pulling Leads and matching to admitted clients…';
+  try{ const r=await api('/salesforce/sync',{method:'POST'});
+    $('sf_msg').innerHTML=`✓ ${r.leads} leads · <strong>${r.matched}</strong> matched to admitted clients · referral source filled. ${r.partnerRefs} partner referrals.`; }
+  catch(e){ $('sf_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
+}
 async function sfAutomap(){
   const box=$('sf_discover'); if(!box) return;
   box.innerHTML='Scanning your objects for referral + patient fields… (this takes ~10s)';
@@ -1289,7 +1295,7 @@ async function logInbound(){
 }
 async function syncSalesforce(){
   $('pt_msg').textContent='Syncing Salesforce…';
-  try{ const r=await api('/salesforce/sync',{method:'POST'}); $('pt_msg').textContent=`✓ Synced ${r.created} inbound referrals.`; loadPartners(); }
+  try{ const r=await api('/salesforce/sync',{method:'POST'}); $('pt_msg').textContent=`✓ ${r.leads} leads pulled · ${r.matched} matched to admitted clients · referral source filled. ${r.partnerRefs} partner referrals.`; loadPartners(); }
   catch(e){ $('pt_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 

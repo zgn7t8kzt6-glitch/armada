@@ -66,6 +66,21 @@ async function sfQuery(soql) {
   return data;
 }
 
+// Like sfQuery but follows pagination (nextRecordsUrl) and returns all records.
+async function sfQueryAll(soql, cap = 5000) {
+  const token = await sfToken();
+  let url = `${sfBase()}/services/data/${sfVersion()}/query?q=${encodeURIComponent(soql)}`;
+  const out = [];
+  while (url && out.length < cap) {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`Salesforce query ${r.status}: ${JSON.stringify(data).slice(0, 200)}`);
+    out.push(...(data.records || []));
+    url = data.done ? null : (data.nextRecordsUrl ? sfBase() + data.nextRecordsUrl : null);
+  }
+  return out;
+}
+
 // Connectivity check used by Settings before any sync.
 export async function sfTest() {
   const data = await sfQuery('SELECT Id FROM Account LIMIT 1');
@@ -156,27 +171,101 @@ export async function sfAutomap() {
   return { scanned: candidates.length, best: results[0]?.object || null, results };
 }
 
-// Pull inbound referrals grouped by source account and upsert into
-// inbound_referrals. The SOQL is overridable per-org via SF_INBOUND_SOQL; it
-// must return columns aliased as: source_name, ref_date, outcome, sf_id.
+// --- Referral-source sync ---------------------------------------------------
+// Salesforce Leads are the inbound referral record (who sent us each patient).
+// Kipu is the source of truth for who actually *admitted*. So we pull Leads,
+// then match them to the clients we already pulled from Kipu (by Patient_ID /
+// MRN, else name + DOB). Only matched people came through detox, which is
+// exactly the "scheduled or admitted only" rule. We fill clients.referral_source
+// (and backfill DOB/insurance when missing) so the Command Center can show
+// referral source -> retention. Partner-level reciprocity is also kept in
+// inbound_referrals for the Partners page.
+
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+// Best referral-source label for a Lead: the referring org/person wins, then
+// the marketing channel, then the web "how did you hear" answer.
+function leadSource(rec) {
+  return (rec.Referring_Organization__r && rec.Referring_Organization__r.Name)
+    || (rec.Referring_Contact__r && rec.Referring_Contact__r.Name)
+    || rec.LeadSource
+    || rec.Web_Form_How_did_you_hear_about_us__c
+    || null;
+}
+
 export async function sfSyncInbound(db) {
-  const soql = process.env.SF_INBOUND_SOQL ||
-    `SELECT Id sf_id, ReferralSource__r.Name source_name, CreatedDate ref_date, Status__c outcome
-     FROM Referral__c WHERE CreatedDate = LAST_N_DAYS:180`;
-  const data = await sfQuery(soql);
-  const records = data.records || [];
+  const soql = process.env.SF_INBOUND_SOQL || `
+    SELECT Id, FirstName, LastName, Preferred_Name__c, DOB__c, Patient_ID__c,
+           LeadSource, Status, IsConverted, ConvertedDate, Date_Looking_to_Admit__c, CreatedDate,
+           Insurance_Company__c, Plan_Type__c, Member_ID__c,
+           Referring_Organization__c, Referring_Organization__r.Name,
+           Referring_Contact__c, Referring_Contact__r.Name,
+           Web_Form_How_did_you_hear_about_us__c
+    FROM Lead WHERE CreatedDate = LAST_N_DAYS:365 AND (IsConverted = true OR Patient_ID__c != null)`;
+  const records = await sfQueryAll(soql);
+
+  // Load the clients we know about (from Kipu) for matching.
+  const clients = db.prepare(`SELECT id, name, dob, mrn, referral_source, insurance FROM clients`).all();
+  const byMrn = new Map();
+  const byName = new Map(); // normalized "first last" -> [clients]
+  for (const c of clients) {
+    if (c.mrn) byMrn.set(String(c.mrn).trim(), c);
+    const n = norm(c.name);
+    if (n) { if (!byName.has(n)) byName.set(n, []); byName.get(n).push(c); }
+  }
+  const matchClient = (rec) => {
+    const pid = (rec.Patient_ID__c || '').trim();
+    if (pid && byMrn.has(pid)) return byMrn.get(pid);
+    const full = norm(`${rec.FirstName || ''} ${rec.LastName || ''}`);
+    let cands = byName.get(full) || [];
+    if (!cands.length) {
+      // looser: client name contains both first and last
+      const f = norm(rec.FirstName), l = norm(rec.LastName);
+      if (f && l) cands = clients.filter(c => { const cn = norm(c.name); return cn.includes(f) && cn.includes(l); });
+    }
+    const dob = (rec.DOB__c || '').slice(0, 10);
+    if (dob && cands.length > 1) { const exact = cands.filter(c => (c.dob || '').slice(0, 10) === dob); if (exact.length) cands = exact; }
+    // If DOB is present on both and disagrees, it's a different person.
+    if (dob) cands = cands.filter(c => !c.dob || (c.dob || '').slice(0, 10) === dob);
+    return cands[0] || null;
+  };
+
+  const updClient = db.prepare(`UPDATE clients SET referral_source = COALESCE(NULLIF(referral_source,''), ?),
+      dob = COALESCE(NULLIF(dob,''), ?), insurance = COALESCE(NULLIF(insurance,''), ?) WHERE id = ?`);
+  const setSource = db.prepare(`UPDATE clients SET referral_source = ? WHERE id = ?`);
+
+  // Partner reciprocity bookkeeping.
   const findFac = db.prepare(`SELECT id FROM facilities WHERE name = ? COLLATE NOCASE`);
   const insFac = db.prepare(`INSERT INTO facilities (name, salesforce_id) VALUES (?, NULL)`);
   const exists = db.prepare(`SELECT id FROM inbound_referrals WHERE salesforce_id = ?`);
-  const ins = db.prepare(`INSERT INTO inbound_referrals (ref_date, facility_id, facility_name, outcome, salesforce_id) VALUES (?,?,?,?,?)`);
-  let created = 0, skipped = 0;
-  for (const rec of records) {
-    const name = rec.source_name || 'Unknown source';
-    if (rec.sf_id && exists.get(rec.sf_id)) { skipped++; continue; }
-    let fac = findFac.get(name);
-    const facId = fac ? fac.id : insFac.run(name).lastInsertRowid;
-    ins.run((rec.ref_date || '').slice(0, 10) || null, facId, name, (rec.outcome || '').toLowerCase() || 'pending', rec.sf_id || null);
-    created++;
-  }
-  return { total: records.length, created, skipped };
+  const insRef = db.prepare(`INSERT INTO inbound_referrals (ref_date, facility_id, facility_name, outcome, salesforce_id) VALUES (?,?,?,?,?)`);
+
+  let leads = records.length, matched = 0, updated = 0, partnerRefs = 0;
+  db.exec('BEGIN');
+  try {
+    for (const rec of records) {
+      const src = leadSource(rec);
+      // 1) Enrich the matched Kipu client with referral source + demographics.
+      const c = matchClient(rec);
+      if (c) {
+        matched++;
+        const dob = (rec.DOB__c || '').slice(0, 10) || null;
+        updClient.run(src || null, dob, rec.Insurance_Company__c || null, c.id);
+        // If the client's source is still blank/Unspecified, force the SF value.
+        if (src && (!c.referral_source || /^unspecified$/i.test(c.referral_source))) setSource.run(src, c.id);
+        updated++;
+      }
+      // 2) Track partner-level reciprocity for org referrals.
+      const orgName = rec.Referring_Organization__r && rec.Referring_Organization__r.Name;
+      if (orgName && rec.Id && !exists.get(rec.Id)) {
+        const fac = findFac.get(orgName);
+        const facId = fac ? fac.id : insFac.run(orgName).lastInsertRowid;
+        const refDate = (rec.ConvertedDate || rec.CreatedDate || '').slice(0, 10) || null;
+        const outcome = rec.IsConverted ? 'admitted' : ((rec.Status || '').toLowerCase() || 'pending');
+        insRef.run(refDate, facId, orgName, outcome, rec.Id);
+        partnerRefs++;
+      }
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { leads, matched, updated, partnerRefs };
 }

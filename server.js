@@ -1972,7 +1972,7 @@ app.post('/api/salesforce/test', requireAuth, requireAdmin, async (req, res) => 
   try { res.json(await sfTest()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/salesforce/sync', requireAuth, requireAdmin, async (req, res) => {
-  try { const r = await sfSyncInbound(db); audit({ user: req.user, action: 'SF_SYNC', detail: `${r.created} inbound`, ip: req.ip }); res.json(r); }
+  try { const r = await sfSyncInbound(db); audit({ user: req.user, action: 'SF_SYNC', detail: `${r.leads} leads, ${r.matched} matched`, ip: req.ip }); res.json(r); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Schema discovery — list candidate objects, then describe one's fields.

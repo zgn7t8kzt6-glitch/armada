@@ -2298,6 +2298,8 @@ app.get('/api/arrivals', requireAuth, (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
   reconcileArrivals(); // keep it live without waiting on a sync
   const day = db.prepare(`SELECT * FROM expected_arrivals WHERE scheduled_date = ? ORDER BY status, last_name, first_name`).all(date);
+  // Upcoming (future scheduled, still expected) — the Salesforce-driven pipeline.
+  const upcoming = db.prepare(`SELECT * FROM expected_arrivals WHERE scheduled_date > ? AND scheduled_date <= date(?, '+21 day') AND status = 'expected' ORDER BY scheduled_date, last_name`).all(date, date);
   // Outstanding no-shows from the last 14 days for the follow-up queue.
   const followUps = db.prepare(`SELECT * FROM expected_arrivals WHERE status='no_show' AND scheduled_date >= date('now','-14 day') ORDER BY scheduled_date DESC`).all();
   const counts = { expected: 0, arrived: 0, no_show: 0, cancelled: 0 };
@@ -2308,7 +2310,7 @@ app.get('/api/arrivals', requireAuth, (req, res) => {
   const schedNames = new Set(db.prepare(`SELECT first_name, last_name FROM expected_arrivals WHERE scheduled_date >= date(?, '-3 day')`).all(date).map((a) => normName(`${a.first_name || ''} ${a.last_name || ''}`)));
   const unscheduled = admitsToday.filter((c) => !matchedIds.has(c.id) && !schedNames.has(normName(c.name)))
     .map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (c.program || ''), referral: c.referral_source || '' }));
-  res.json({ date, arrivals: day, counts, followUps, unscheduled, configured: sfConfigured() });
+  res.json({ date, arrivals: day, counts, upcoming, followUps, unscheduled, configured: sfConfigured() });
 });
 // Front-desk action: arrived / no_show / cancelled (+ optional follow-up note).
 app.post('/api/arrivals/:id/status', requireAuth, (req, res) => {

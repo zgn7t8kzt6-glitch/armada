@@ -1358,6 +1358,15 @@ async function loadArrivals(){
     $('arrivalsList').innerHTML = rows
       ? `<table class="tbl"><tr><th>Guest</th><th>Status</th><th></th></tr>${rows}</table>`
       : (d.configured?'<div class="hint">No one scheduled to admit today.</div>':'<div class="hint">Connect Salesforce in Settings, then click “Pull from Salesforce.”</div>');
+    const up=(d.upcoming||[]);
+    if($('arrivalsUpcomingCard')){
+      $('arrivalsUpcomingCard').style.display = up.length?'block':'none';
+      $('arrivalsUpcoming').innerHTML = up.map(a=>{
+        const greet=esc((a.preferred_name||a.first_name||'')+' '+(a.last_name||''));
+        const when=a.scheduled_date||'';
+        return `<div class="pc-note"><strong>${greet}</strong> <span class="hint">· ${esc(when)}</span>${a.referral_source?' <span class="hint">· via '+esc(a.referral_source)+'</span>':''}</div>`;
+      }).join('');
+    }
     const uns=(d.unscheduled||[]);
     if($('arrivalsUnschedCard')){
       $('arrivalsUnschedCard').style.display = uns.length?'block':'none';

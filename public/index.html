@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260614y" />
+<link rel="stylesheet" href="/styles.css?v=20260614z" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -312,7 +312,8 @@
         <div id="arrivalsKpis" class="ret-cards"></div>
         <span id="arrivals_msg" class="hint"></span>
       </div>
-      <div class="card"><h3>Expected today</h3><div id="arrivalsList"></div></div>
+      <div class="card"><h3>Expected today <span class="hint" style="font-weight:400">— from Salesforce. Admits in Kipu → flips to Arrived.</span></h3><div id="arrivalsList"></div></div>
+      <div class="card" id="arrivalsUpcomingCard" style="display:none"><h3>Upcoming — scheduled to arrive <span class="hint" style="font-weight:400">— next 3 weeks, from Salesforce</span></h3><div id="arrivalsUpcoming"></div></div>
       <div class="card" id="arrivalsUnschedCard" style="display:none;border-left:4px solid var(--danger)"><h3>Admitted today — not on the schedule <span class="hint" style="font-weight:400">— a front-door gap: set their admit date in Salesforce so the warm welcome is ready next time</span></h3><div id="arrivalsUnsched"></div></div>
       <div class="card"><h3>No-show follow-up <span class="hint" style="font-weight:400">— scheduled but never admitted in Kipu</span></h3><div id="arrivalsFollow"></div></div>
     </section>
@@ -1207,6 +1208,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260614y"></script>
+<script src="/app.js?v=20260614z"></script>
 </body>
 </html>

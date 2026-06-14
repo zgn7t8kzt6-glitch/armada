@@ -36,6 +36,29 @@ async function kipuGet(path) {
   try { return JSON.parse(text); } catch (e) { return text; }
 }
 
+// Fetch ONE evaluation's detail, robust to addressing. A patient (master) can
+// have several casefiles (re-admissions); a note may belong to a different
+// casefile than the current stay, so try master-scoped addressing first (works
+// across stays), then casefile-scoped. Throws the last error if all fail.
+async function fetchEvalDetail(casefileId, evalId) {
+  const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+  const phi = process.env.KIPU_PHI_LEVEL || 'high';
+  const e = encodeURIComponent;
+  const cands = [
+    `/api/patients/${master}/patient_evaluations/${evalId}?phi_level=${phi}&patient_master_id=${e(uuid)}`,
+    `/api/patient_evaluations/${evalId}?patient_master_id=${e(uuid)}&phi_level=${phi}`,
+    `/api/patient_evaluations/${evalId}?patient_id=${s}`,
+    `/api/patient_evaluations/${evalId}?patient_id=${master}&phi_level=${phi}`,
+    `/api/patient_evaluations/${evalId}`,
+  ];
+  let lastErr = 'detail fetch failed';
+  for (const url of cands) {
+    try { const d = await kipuGet(url); const ev = d?.patient_evaluation || d?.evaluation || d; if (ev && typeof ev === 'object') return ev; }
+    catch (err) { lastErr = String(err.message || err).slice(0, 160); }
+  }
+  throw new Error(lastErr);
+}
+
 // Quick connectivity check.
 export async function kipuTest() {
   const path = process.env.KIPU_TEST_PATH || '/api/patients/census';
@@ -358,8 +381,7 @@ export async function kipuPatientNotes(casefileId) {
     budget--; debug.fetched++;
     let content = '', evDate = e.created_at || '';
     try {
-      const d = await kipuGet(`/api/patient_evaluations/${e.id}?patient_id=${casefileId}`);
-      const ev = d?.patient_evaluation || d?.evaluation || d;
+      const ev = await fetchEvalDetail(casefileId, e.id);
       evDate = evDate || ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '';
       const items = extractItems(ev);                                    // finds the items array wherever it lives
       const body = extractText(ev?.evaluation_content);                  // the rendered note paragraph
@@ -416,7 +438,7 @@ const EXTRA_RESOURCES = [
   { cat: 'Withdrawal — CIWA', paths: ['ciwa_ars', 'ciwa_bs', 'ciwa'] },
   { cat: 'Withdrawal — COWS', paths: ['cows'] },
   { cat: 'Glucose', paths: ['glucose_logs', 'glucose'] },
-  { cat: 'Labs / drug screens', paths: ['lab_results', 'labs', 'orders_labs', 'drug_screens', 'toxicology'] },
+  { cat: 'Labs / drug screens', paths: ['patient_lab_results', 'lab_results', 'laboratory_results', 'lab_orders', 'labs', 'drug_screens', 'urine_drug_screens', 'toxicology'] },
   { cat: 'Groups', paths: ['patient_group_sessions', 'group_sessions', 'groups'] },
 ];
 function firstArray(d) {
@@ -469,8 +491,7 @@ export async function kipuPatientExtras(casefileId) {
 // One evaluation, fully readable — for the human chart viewer. Falls back to a
 // broad extract (more inclusive than the AI pull) so nothing is hidden.
 export async function kipuEvaluation(casefileId, evalId) {
-  const d = await kipuGet(`/api/patient_evaluations/${evalId}?patient_id=${casefileId}`);
-  const ev = d?.patient_evaluation || d?.evaluation || d;
+  const ev = await fetchEvalDetail(casefileId, evalId);
   const items = extractItems(ev);
   const body = extractText(ev?.evaluation_content);
   const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';

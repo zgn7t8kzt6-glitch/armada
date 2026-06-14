@@ -246,7 +246,7 @@ async function chartRender(cid, listId, subId, reload){
 }
 async function openChartNote(b){
   try{ const d=await api('/clients/'+b.dataset.cid+'/chart/'+encodeURIComponent(b.dataset.eid)); b.textContent = d.content || '(no readable content in this note)'; }
-  catch(e){ b.textContent='Could not load this note.'; }
+  catch(e){ b.textContent='Could not load this note — '+(e.message||'error'); }
 }
 function filterChartIn(listId){ const inp = listId==='jChartList'?$('jChartFilter'):$('kipuChartFilter'); const q=(inp?inp.value:'').toLowerCase(); ($(listId)||document).querySelectorAll('details').forEach(dt=>{ const el=dt.querySelector('.chart-name'); const nm=(el?el.textContent:'').toLowerCase(); dt.style.display=(!q||nm.includes(q))?'':'none'; }); }
 async function dischargeClient(){

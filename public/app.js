@@ -1338,12 +1338,14 @@ async function loadRounds(){
       </div></div>`;
   }).join('');
   $('roundsAccount').innerHTML = (d.byPerson||[]).length ? d.byPerson.map(p=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(p.k)}</strong></div><span class="chip">${p.n} checks</span></div>`).join('') : '<div class="hint">No checks logged today yet.</div>';
+  if(ME&&ME.role==='admin'){ try{ const es=await api('/rounds/escalation'); $('roundsEscalateRow').innerHTML=`<label class="trg" style="display:inline-flex"><input type="checkbox" ${es.on?'checked':''} onchange="setRoundsEscalation(this.checked)"/> Text the on-call leader when a client goes overdue ${es.smsReady?'':'<span class="hint">(connect Texting first)</span>'}</label>`; }catch(e){} }
   // Live: refresh every 45s so the clocks stay honest.
   if($('rounds').classList.contains('active')) roundsTimer=setTimeout(loadRounds, 45000);
 }
 async function roundCheck(id, status){ await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:status||'ok'})}); loadRounds(); }
 async function roundConcern(id){ const note=prompt('What did you observe? (logs a safety concern)'); if(note===null) return; await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:'concern',note})}); loadRounds(); }
 async function roundsSweep(){ if(!confirm('Log a completed safety check for EVERY client right now?')) return; await api('/rounds/sweep',{method:'POST'}); loadRounds(); }
+async function setRoundsEscalation(on){ await api('/rounds/escalation',{method:'POST',body:JSON.stringify({on})}); }
 
 /* ---- Dignity Kits ---- */
 async function loadDignity(){
@@ -1394,6 +1396,19 @@ async function loadCompliance(){
       ${od.length?`<details><summary class="hint" style="cursor:pointer">${od.length} overdue — show</summary>${od.map(o=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main"><strong>${esc(o.name)}</strong>${o.room?' <span class="hint">· '+esc(o.room)+'</span>':''}<div class="hint">${o.mins==null?'admit time unknown':Math.floor(o.mins/60)+'h since admit'} · still missing</div></div><button class="btn btn-ghost btn-sm sans" onclick="openJourney(${o.id})">Open</button></div>`).join('')}</details>`:'<div class="hint">All current clients complete (or within the window). ✓</div>'}
     </div>`;
   }).join('');
+  loadOwnerAccountability();
+}
+async function loadOwnerAccountability(){
+  const host=$('compFields'); if(!host) return;
+  let d; try{ d=await api('/accountability/owners'); }catch(e){ return; }
+  const tbl=(rows,who)=>rows.length?`<table class="tbl"><thead><tr><th>${who}</th><th style="text-align:right">Caseload</th><th style="text-align:right">Chart complete</th><th style="text-align:right">Care cards</th><th style="text-align:right">AMA</th><th style="text-align:right">Avg stay</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.owner)}</td><td style="text-align:right">${r.caseload}</td><td style="text-align:right"><span class="risk ${r.chartPct>=90?'risk-low':r.chartPct>=60?'risk-elev':'risk-high'}">${r.chartPct}%</span></td><td style="text-align:right">${r.ccPct}%</td><td style="text-align:right">${r.amaRate==null?'—':r.amaRate+'%'}</td><td style="text-align:right">${r.avgLos==null?'—':r.avgLos+'d'}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No assigned owners yet (they come from Kipu note authors after a Read).</div>';
+  const card=document.createElement('div'); card.className='card';
+  card.innerHTML=`<h3>By owner — accountability</h3>
+    <p class="sub sans">Chart completeness &amp; outcomes per therapist / case manager (their active caseload; AMA + avg stay from the last 90 days).</p>
+    ${(d.unassignedTherapist||d.unassignedCM)?`<div class="pc-note">⚠ ${d.unassignedTherapist} client(s) with no therapist · ${d.unassignedCM} with no case manager assigned in Kipu.</div>`:''}
+    <div class="cmd-sub">Therapists</div>${tbl(d.byTherapist,'Therapist')}
+    <div class="cmd-sub">Case managers</div>${tbl(d.byCaseManager,'Case manager')}`;
+  host.appendChild(card);
 }
 
 /* ---- Leadership Command Center ---- */

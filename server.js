@@ -176,6 +176,27 @@ app.put('/api/clients/:id/obs-interval', requireAuth, (req, res) => {
   db.prepare(`UPDATE clients SET obs_interval = ? WHERE id = ?`).run(v && v > 0 ? v : null, req.params.id);
   res.json({ ok: true });
 });
+app.get('/api/rounds/escalation', requireAuth, requireAdmin, (req, res) => res.json({ on: getState('rounds_escalation') === 'on', smsReady: smsConfigured() }));
+app.post('/api/rounds/escalation', requireAuth, requireAdmin, (req, res) => { setState('rounds_escalation', req.body?.on ? 'on' : 'off'); res.json({ ok: true }); });
+
+// Owner-level accountability: per therapist / case manager — caseload, chart
+// completeness, care-card completion, and outcomes (AMA rate, avg LOS).
+app.get('/api/accountability/owners', requireAuth, requireAdmin, (req, res) => {
+  const active = db.prepare(`SELECT id, therapist, case_manager, loc, diagnosis, insurance, touch, prefs, anchor_why, doc_forms FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const chartComplete = (c) => { let f = {}; try { f = c.doc_forms ? JSON.parse(c.doc_forms) : {}; } catch { f = {}; } return !!(c.loc && c.loc !== 'Unspecified') && !!c.diagnosis && !!c.insurance && !!f.biopsych && !!f.tx_plan; };
+  const ccComplete = (c) => !!(c.touch && c.prefs && c.anchor_why);
+  const agg = (field) => {
+    const m = {};
+    for (const c of active) { const who = (c[field] || '').trim(); if (!who) continue; const e = m[who] || (m[who] = { owner: who, caseload: 0, chart: 0, cc: 0 }); e.caseload++; if (chartComplete(c)) e.chart++; if (ccComplete(c)) e.cc++; }
+    return Object.values(m).map((e) => ({ ...e, chartPct: Math.round(e.chart / e.caseload * 100), ccPct: Math.round(e.cc / e.caseload * 100) })).sort((a, b) => a.chartPct - b.chartPct);
+  };
+  const a = buildAnalytics(90);
+  const oT = {}, oC = {};
+  for (const t of a.byTherapist) oT[t.key] = t;
+  for (const t of a.byCaseManager) oC[t.key] = t;
+  const merge = (rows, outc) => rows.map((e) => ({ ...e, amaRate: outc[e.owner]?.amaRate ?? null, avgLos: outc[e.owner]?.avgLos ?? null, discharges: outc[e.owner]?.n ?? 0 }));
+  res.json({ caseload: active.length, unassignedTherapist: active.filter((c) => !c.therapist).length, unassignedCM: active.filter((c) => !c.case_manager).length, byTherapist: merge(agg('therapist'), oT), byCaseManager: merge(agg('case_manager'), oC) });
+});
 
 // ---- Care Card completion: the hospitality layer ON TOP of the Kipu chart.
 // Every new admit must have it filled within the first hour so we can care for
@@ -2779,6 +2800,33 @@ function runDailyCutoff() {
   setTimeout(runDailyCutoff, msUntilLocalMidnight());  // re-arm for the next midnight
 }
 setTimeout(runDailyCutoff, msUntilLocalMidnight());
+
+// ---- Overdue-rounds escalation: when a client is past their check window
+// (+grace), text the on-call leader. Opt-in (Rounds → escalation toggle), and
+// de-duped so it texts at most hourly per client. ----
+const roundsEscalated = new Map();   // client_id -> last escalation ms
+function roundsEscalationSweep() {
+  try {
+    if (getState('rounds_escalation') === 'on' && (smsConfigured() || emailConfigured())) {
+      const grace = +(process.env.ROUNDS_ESCALATE_GRACE || 20);
+      const now = Date.now();
+      const rows = db.prepare(`SELECT c.id, c.pref, c.name, c.room, c.obs_interval, (SELECT ts FROM obs_checks o WHERE o.client_id = c.id ORDER BY o.id DESC LIMIT 1) last FROM clients c WHERE c.active = 1 AND c.discharge_status IS NULL`).all();
+      for (const c of rows) {
+        const limit = (c.obs_interval || OBS_DEFAULT_MIN) + grace;
+        const t = c.last ? Date.parse(String(c.last).replace(' ', 'T') + 'Z') : null;
+        const mins = t ? Math.floor((now - t) / 60000) : 9999;
+        if (mins <= limit) { roundsEscalated.delete(c.id); continue; }
+        if (now - (roundsEscalated.get(c.id) || 0) < 60 * 60000) continue;   // at most hourly
+        roundsEscalated.set(c.id, now);
+        const name = c.pref || c.name;
+        createAlert(c.id, 'rounds', 'High', `${name}${c.room ? ' (' + c.room + ')' : ''} — safety round OVERDUE (${mins}m since last check)`);
+        notifyOnCall(`OVERDUE safety round: ${name}${c.room ? ' · Room ' + c.room : ''} — last checked ${mins} min ago. Go lay eyes on the client now.`);
+      }
+    }
+  } catch (e) { console.error('[rounds-escalate]', e.message); }
+  setTimeout(roundsEscalationSweep, (+(process.env.ROUNDS_ESCALATE_MIN || 15)) * 60000);
+}
+setTimeout(roundsEscalationSweep, 90000);
 
 const PORT = process.env.PORT || 3000;
 try { ensureDignityKits(); } catch (e) { /* dignity kits are best-effort at boot */ }

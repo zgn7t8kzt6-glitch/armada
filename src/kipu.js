@@ -901,6 +901,14 @@ export async function kipuInspect() {
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     locations = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: l.location_name ?? l.name ?? l.enabled_location_name ?? JSON.stringify(l).slice(0, 80) }));
   } catch { /* locations endpoint optional */ }
+  // Admit-time reality check: dump admission_date + created_at across many
+  // patients, so we can SEE whether admission_date carries a real time-of-day
+  // (varies) or is always midnight (date-only, so created_at is the real time).
+  const admitTimeSamples = list.slice(0, 15).map((p) => ({
+    admission_date: p.admission_date ?? null,
+    created_at: p.created_at ?? null,
+    last_updated_at: p.last_updated_at ?? null,
+  }));
   // The census has no level-of-care field — probe one patient's DETAIL and dump
   // its structure so we can SEE exactly where the LOC/program/referral live.
   let patientDetail = null;
@@ -1029,7 +1037,7 @@ export async function kipuInspect() {
     if (cf) { try { const ev = await evalListRaw(cf, { all: true }); roundEvalNames = [...new Set(ev.map((x) => x.name).filter((n) => /round|q15|q ?15|observation|safety check|bed ?check/i.test(n || '')))].slice(0, 8); } catch { /* ignore */ } }
     roundsProbe = { probes, roundEvalNames };
   }
-  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail, dischargeAnalysis, photoProbe, roundsProbe };
+  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, admitTimeSamples, patientDetail, dischargeAnalysis, photoProbe, roundsProbe };
 }
 
 // One-time repair: a backfill sync stamped "today" as the discharge date for

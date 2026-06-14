@@ -350,6 +350,38 @@ export async function generateCareBrief(contextText) {
   return r;
 }
 
+// ---- AI Welcome / first-72-hour plan: generated from OUR policy, not typed ----
+const WELCOME_SYSTEM = `You are the care coordinator writing the WELCOME / first-72-hour
+plan for a brand-new admit at a residential addiction-detox center that runs the
+Ritz-Carlton / Horst Schulze service model. Ground everything in our Standard
+(above) and especially the Intake Anchor & Quiet AMA play.
+
+The first 72 hours are the highest-risk window for leaving. Write a concrete,
+warm, step-by-step arrival plan THIS team can execute, personalized to this
+client from their Care Card. Cover:
+- The greeting & first moments (by name, warm welcome gesture, orient them).
+- Comfort & dignity right away (food/drink they like, smoking/NRT, blanket,
+  belongings, dignity kit, phone call home if appropriate).
+- Set the Intake Anchor: capture/repeat WHY they came in their own words; pre-brief
+  "the wave" (motivation dips by morning); the clinician's "give it 24-72 hours".
+- Withdrawal comfort & safety per protocol; who checks on them and when.
+- Peer buddy / connection; easing first-night anxiety.
+- The Quiet-AMA watch: what to do if "I feel fine, I'll finish at home" comes.
+
+Rules: specific and actionable, person-first, no clinical fabrication, no meds
+dosing. 6-10 short bullets or two tight paragraphs. This is staff guidance.`;
+export async function generateWelcomePlan(careCard) {
+  const response = await callAI({
+    model: MODEL,
+    max_tokens: 1100,
+    system: G + WELCOME_SYSTEM,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: `Write the welcome / first-72-hour plan for this new admit.\n\n=== CARE CARD ===\n${careCardText(careCard)}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+}
+
 // ---- AI Referral insights: why people leave + BD relationship read ----
 const REFERRAL_SYSTEM = `You are an operations and business-development advisor for
 a residential addiction-treatment center, in the Horst Schulze / Ritz-Carlton

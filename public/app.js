@@ -281,7 +281,10 @@ function fillForm(c){
   // Identity comes from Kipu (single source of truth) — lock those fields; staff
   // edit the hospitality/preferences fields only.
   const fromKipu = !!c.kipu_id;
-  ['name','room','program','admit','admit_time'].forEach(f=>{ const el=$('f_'+f); if(el){ el.readOnly=fromKipu; el.classList.toggle('locked',fromKipu); el.title = fromKipu?'From Kipu — edit in the chart':''; } });
+  // Identity + care team come from Kipu (therapist/CM are read from note authors) — locked here.
+  ['name','room','program','admit','admit_time','therapist','case_manager'].forEach(f=>{ const el=$('f_'+f); if(el){ el.readOnly=fromKipu; el.classList.toggle('locked',fromKipu); el.title = fromKipu?'From Kipu — edit in the chart':''; } });
+  // Welcome plan is authored by Claude from policy, never free-typed.
+  if($('f_welcome_plan')){ $('f_welcome_plan').readOnly=true; $('f_welcome_plan').classList.add('locked'); }
   renderKipuDemo(c);
   renderPhotoCard(c);
   const tl = $('taskList'); tl.innerHTML='';
@@ -294,6 +297,13 @@ function renderPhotoCard(c){
   card.style.display='';
   $('photoThumb').innerHTML = c.photo ? `<img src="${esc(c.photo)}" class="client-photo lg" alt=""/>` : `<span class="avatar" style="width:72px;height:72px;font-size:26px">${initials(c.name||c.pref)}</span>`;
   $('photoClearBtn').style.display = c.photo ? 'inline-block' : 'none';
+}
+async function genWelcomePlan(){
+  if(!currentId){ alert('Save the Care Card first.'); return; }
+  const btn=$('welcomeBtn'); btn.disabled=true; $('welcomeMsg').textContent='Writing from policy…';
+  try{ const r=await api('/clients/'+currentId+'/welcome-plan',{method:'POST'}); $('f_welcome_plan').value=r.welcome_plan||''; $('welcomeMsg').textContent='✓ Generated'; }
+  catch(e){ $('welcomeMsg').textContent='Error: '+(e.message||'failed'); }
+  finally{ btn.disabled=false; }
 }
 async function uploadPhoto(input){
   const file=input.files && input.files[0]; if(!file) return;

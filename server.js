@@ -17,7 +17,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -295,6 +295,20 @@ app.post('/api/clients/:id/photo', requireAuth, (req, res) => {
   db.prepare(`UPDATE clients SET photo = ? WHERE id = ?`).run(photo || null, req.params.id);
   audit({ user: req.user, action: photo ? 'PHOTO_SET' : 'PHOTO_CLEAR', entity: 'client', entity_id: +req.params.id, ip: req.ip });
   res.json({ ok: true });
+});
+
+// Generate the first-72-hour Welcome plan from OUR policy + the Care Card, and
+// save it. Not a free-text field — it's authored by Claude from the Standard.
+app.post('/api/clients/:id/welcome-plan', requireAuth, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'AI is not configured.' });
+  const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  try {
+    const plan = await generateWelcomePlan(c);
+    db.prepare(`UPDATE clients SET welcome_plan = ? WHERE id = ?`).run(plan, c.id);
+    audit({ user: req.user, action: 'WELCOME_PLAN', entity: 'client', entity_id: c.id, ip: req.ip });
+    res.json({ welcome_plan: plan });
+  } catch (e) { res.status(502).json({ error: e.message || 'Could not generate.' }); }
 });
 
 /* ---------------- Claude: draft shift tasks from a Care Card ---------------- */

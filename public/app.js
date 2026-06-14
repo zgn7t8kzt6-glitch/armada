@@ -2156,45 +2156,76 @@ async function careBrief(clientId){
 }
 
 /* ---- today command center ---- */
-async function loadTodayCareCards(){
-  const card=$('todayCareCards'); if(!card) return;
-  let d; try{ d=await api('/carecards'); }catch(e){ return; }
+function renderCareCardsList(d){
+  if(!$('todayCcList')) return;
   const inc=d.incomplete||[];
-  if(!inc.length){ card.style.display='none'; return; }
-  card.style.display='block';
   $('todayCcCount').textContent = inc.length+(d.overdue?' · '+d.overdue+' overdue':'');
-  $('todayCcList').innerHTML = inc.map(c=>{
+  $('todayCcList').innerHTML = inc.length ? inc.map(c=>{
     const m=c.minsSinceAdmit;
     const clock = m==null?'':(m<60?m+'m':Math.floor(m/60)+'h '+(m%60)+'m')+' since admit';
     return `<div class="cmd-row ${c.overdue?'cmd-row-flag':''}">
       <div class="cmd-row-main"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}
         <div class="hint">${c.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}${clock} · missing: ${c.missing.map(esc).join(', ')}</div></div>
       <button class="btn btn-gold btn-sm sans" onclick="openJourney(${c.id})">Fill</button></div>`;
-  }).join('');
+  }).join('') : '<div class="pc-note">✓ Every care card is complete.</div>';
+}
+// One detail panel open at a time; tiles drive it. nav: jumps to another view.
+function todayPanel(key){
+  if(String(key).startsWith('nav:')){ show(key.slice(4)); return; }
+  const map={alerts:'alertsCard',carecards:'todayCareCards',attention:'attentionCard'};
+  const id=map[key]; if(!id||!$(id)) return;
+  const isOpen = $(id).style.display!=='none';
+  document.querySelectorAll('#today .today-panel').forEach(p=>p.style.display='none');
+  document.querySelectorAll('#todayActionTiles .ret-card').forEach(t=>t.classList.remove('tile-active'));
+  if(!isOpen){ $(id).style.display='block'; const tile=document.querySelector(`#todayActionTiles [data-tile="${key}"]`); if(tile) tile.classList.add('tile-active'); $(id).scrollIntoView({behavior:'smooth',block:'nearest'}); }
+}
+function renderAttentionList(t){
+  const icon={risk:'⚠',welcome:'☀',call:'🤝',request:'🛎'};
+  $('todayAttention').innerHTML = (t.attention||[]).length ? t.attention.map(a=>`<div class="todo">
+      <div class="txt">${icon[a.kind]||'•'} ${esc(a.text)}</div>
+      ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}</div>`).join('') : '<div class="pc-note">✓ All clear. Touch every client, deliver every personal touch.</div>';
 }
 async function loadToday(){
-  const t = await api('/today');
-  $('todayDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'});
-  loadTodayCareCards();
+  const [t, alertsData, cc] = await Promise.all([
+    api('/today'),
+    api('/alerts').catch(()=>({alerts:[],newCount:0})),
+    api('/carecards').catch(()=>({incomplete:[],overdue:0})),
+  ]);
   if(META.kioskCode) $('kioskCodeHint').innerHTML = 'kiosk code: <strong>'+esc(META.kioskCode)+'</strong>';
   if(t.claude) $('todayBriefBtn').style.display='inline-block';
   const m=t.metrics;
-  $('todayKpis').innerHTML = `
-    <div class="ret-card ${m.highRisk?'rc-high':''}"><div class="n">${m.highRisk}</div><div class="l">At risk</div></div>
+  // Populate the (collapsed) detail panels
+  renderAlertsList(alertsData);
+  renderCareCardsList(cc);
+  renderAttentionList(t);
+  // ACTION TILES — red/amber when outstanding, click to expand
+  const alertN=alertsData.newCount||0, ccInc=(cc.incomplete||[]).length, ccOver=cc.overdue||0, attN=(t.attention||[]).length, incN=m.openIncidents||0;
+  const tiles=[
+    {k:'alerts', n:alertN, label:'Proactive alerts', sev:alertN?'high':'ok'},
+    {k:'carecards', n:ccInc, label:'Care cards to fill', sev:ccOver?'high':(ccInc?'warn':'ok'), sub:ccOver?ccOver+' overdue':''},
+    {k:'attention', n:attN, label:'Needs attention', sev:attN?'warn':'ok'},
+    {k:'incidents', n:incN, label:'Open incidents', sev:incN?'high':'ok', nav:'incidents'},
+  ];
+  $('todayActionTiles').innerHTML = tiles.map(x=>{
+    const cls=x.sev==='high'?'rc-high':x.sev==='warn'?'rc-warn':'';
+    const clickable=x.n>0;
+    const target=x.nav?('nav:'+x.nav):x.k;
+    return `<div class="ret-card ${cls}" data-tile="${x.k}" ${clickable?`style="cursor:pointer" onclick="todayPanel('${target}')"`:''}>
+      <div class="n">${x.n}</div><div class="l">${x.label}${x.sub?'<br><span class="hint">'+esc(x.sub)+'</span>':''}${clickable?' <span class="hint">›</span>':' <span style="color:var(--good)">✓</span>'}</div></div>`;
+  }).join('');
+  $('todayAllClear').style.display = tiles.some(x=>x.n>0) ? 'none':'block';
+  // INFO TILES — glance only
+  $('todayInfoTiles').innerHTML = `
     <div class="ret-card"><div class="n">${m.active}</div><div class="l">Active clients</div></div>
-    <div class="ret-card ${m.callsDue?'rc-warn':''}"><div class="n">${m.callsDue}</div><div class="l">Aftercare calls due</div></div>
-    <div class="ret-card ${m.openRequests?'rc-warn':''}"><div class="n">${m.openRequests}</div><div class="l">Open requests</div></div>
-    <div class="ret-card ${m.openConcerns?'rc-warn':''}"><div class="n">${m.openConcerns}</div><div class="l">Open concerns</div></div>
-    <div class="ret-card ${m.openIncidents?'rc-high':''}"><div class="n">${m.openIncidents}</div><div class="l">Open incidents</div></div>
+    <div class="ret-card"><div class="n">${m.highRisk}</div><div class="l">At risk</div></div>
+    <div class="ret-card"><div class="n">${m.callsDue}</div><div class="l">Aftercare calls due</div></div>
+    <div class="ret-card"><div class="n">${m.openRequests}</div><div class="l">Open requests</div></div>
+    <div class="ret-card"><div class="n">${m.openConcerns}</div><div class="l">Open concerns</div></div>
     <div class="ret-card"><div class="n">${m.surveysDue}</div><div class="l">Surveys due</div></div>
-    <div class="ret-card ${m.refreshersDue?'rc-warn':''}"><div class="n">${m.refreshersDue}</div><div class="l">Refreshers due</div></div>
+    <div class="ret-card"><div class="n">${m.refreshersDue}</div><div class="l">Refreshers due</div></div>
     <div class="ret-card"><div class="n">${m.visitsToday}</div><div class="l">Visits today</div></div>
     <div class="ret-card"><div class="n">${m.bedsOpen}</div><div class="l">Open beds</div></div>
     <div class="ret-card"><div class="n">${m.pipeline}</div><div class="l">In pipeline</div></div>`;
-  const icon={risk:'⚠',welcome:'☀',call:'🤝',request:'🛎'};
-  $('todayAttention').innerHTML = t.attention.length ? t.attention.map(a=>`<div class="todo">
-      <div class="txt">${icon[a.kind]||'•'} ${esc(a.text)}</div>
-      ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}</div>`).join('') : '<div class="pc-note">All clear. Touch every client, deliver every personal touch.</div>';
   $('todaySchedule').innerHTML = t.schedule.length ? t.schedule.map(s=>`<div class="pc-note">${s.time?'<strong>'+esc(s.time)+'</strong> · ':''}<span class="chip">${esc(s.type)}</span> ${esc(s.title)}${s.pref?' · '+esc(s.pref):''}</div>`).join('') : '<div class="pc-note">Nothing scheduled. Build the day in Program.</div>';
   const wins=[...t.wins.wows.map(w=>'👏 '+w.text+(w.pref?' ('+w.pref+')':'')),...t.wins.delights.map(d=>'♥ '+d.text+(d.pref?' ('+d.pref+')':''))];
   $('todayWins').innerHTML = wins.length ? wins.map(w=>`<div class="pc-note">${esc(w)}</div>`).join('') : '<div class="pc-note">Log a Wow Story or a delight to celebrate the team.</div>';
@@ -2211,7 +2242,6 @@ async function loadToday(){
   (t.dischargesToday||[]).forEach(c=>ad.push(`<div class="pc-note">🤝 <strong>Discharge (${esc(c.discharge_status)}):</strong> ${esc(c.pref||c.name)}${c.discharge_reason?' — '+esc(c.discharge_reason):''}</div>`));
   if($('todayAdmitsDischarges')) $('todayAdmitsDischarges').innerHTML = ad.length ? ad.join('') : '<div class="pc-note">No admits or discharges logged today.</div>';
   $('todayDate').innerHTML = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'}) + (t.myTaskCount?` · <a href="#" onclick="show('mytasks');return false" style="color:var(--gold)">You have ${t.myTaskCount} task${t.myTaskCount===1?'':'s'} →</a>`:'');
-  loadAlerts();
 }
 async function joinFocus(){
   const note = prompt("Optional: a quick win or result you'll aim for today:")||'';
@@ -2230,16 +2260,15 @@ async function setFocus(){
   await api('/focus/set',{method:'POST',body:JSON.stringify({t,g})});
   loadToday();
 }
-async function loadAlerts(){
-  const { alerts, newCount } = await api('/alerts');
-  $('alertsCard').style.display = newCount ? 'block' : 'none';
-  $('alertCount').textContent = newCount || '';
-  $('alertsList').innerHTML = alerts.map(a=>`<div class="todo">
+function renderAlertsList(d){
+  if(!$('alertsList')) return;
+  $('alertCount').textContent = d.newCount || '';
+  $('alertsList').innerHTML = (d.alerts||[]).length ? d.alerts.map(a=>`<div class="todo">
       <div class="txt">⚡ ${esc(a.message)} <span class="hint">· ${esc(a.created_at)}</span></div>
       ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}
-      <button class="btn btn-ghost btn-sm sans" onclick="ackAlert(${a.id})">Got it</button></div>`).join('');
+      <button class="btn btn-ghost btn-sm sans" onclick="ackAlert(${a.id})">Got it ✓</button></div>`).join('') : '<div class="pc-note">✓ No open alerts.</div>';
 }
-async function ackAlert(id){ await api('/alerts/'+id+'/ack',{method:'POST'}); loadAlerts(); }
+async function ackAlert(id){ await api('/alerts/'+id+'/ack',{method:'POST'}); await loadToday(); todayPanel('alerts'); }
 
 /* ---- alumni ---- */
 async function loadAlumni(){

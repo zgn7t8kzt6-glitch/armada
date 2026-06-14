@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260614q" />
+<link rel="stylesheet" href="/styles.css?v=20260614r" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -109,36 +109,53 @@
         <div id="todayBrief"></div>
       </div>
       <div class="card" id="focusCard" style="border-left:4px solid var(--gold);background:#faf6ee"></div>
-      <div class="card" id="alertsCard" style="display:none;border-left:4px solid var(--danger)">
+
+      <!-- ACTION TILES: outstanding work, red when it needs doing. Click to expand. -->
+      <div class="card">
+        <h3 style="margin:0 0 2px">Needs action</h3>
+        <p class="sub sans" style="margin:0 0 10px">Anything red is outstanding. Click a tile to see the list and clear it.</p>
+        <div id="todayActionTiles" class="ret-cards"></div>
+        <div id="todayAllClear" class="pc-note" style="display:none">✓ All clear — nothing outstanding right now.</div>
+      </div>
+
+      <!-- Expandable detail panels (hidden until a tile is clicked) -->
+      <div class="card today-panel" id="alertsCard" style="display:none;border-left:4px solid var(--danger)">
         <h3>⚡ Proactive alerts <span id="alertCount" class="badge"></span></h3>
-        <p class="sub sans">The moment a client's signals turn — surfaced here without anyone having to look.</p>
+        <p class="sub sans">The moment a client's signals turn — surfaced here without anyone having to look. Click “Got it” to clear each.</p>
         <div id="alertsList"></div>
       </div>
-      <div class="card" id="todayCareCards" style="display:none;border-left:4px solid var(--aqua)">
+      <div class="card today-panel" id="todayCareCards" style="display:none;border-left:4px solid var(--aqua)">
         <h3>★ Care Cards to complete <span id="todayCcCount" class="badge"></span></h3>
         <p class="sub sans">New admits we don't fully know yet — fill these in the first hour so we can care for them by name and need.</p>
         <div id="todayCcList"></div>
       </div>
-      <div class="card"><div id="todayKpis" class="ret-cards"></div>
+      <div class="card today-panel" id="attentionCard" style="display:none;border-left:4px solid var(--gold)">
+        <h3>Needs attention today</h3>
+        <p class="sub sans">Clients to touch, calls to make, welcomes to land.</p>
+        <div id="todayAttention"></div>
+      </div>
+
+      <!-- At-a-glance (informational only) -->
+      <div class="card">
+        <h3 style="margin:0 0 8px">At a glance</h3>
+        <div id="todayInfoTiles" class="ret-cards"></div>
         <div class="toolbar" style="margin-top:10px"><a class="btn btn-ghost btn-sm sans" href="/kiosk.html" target="_blank">Open client kiosk ↗</a><span id="kioskCodeHint" class="hint" style="align-self:center"></span></div>
       </div>
-      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
-        <div class="card" style="flex:2;min-width:320px">
-          <h3>Needs attention today</h3>
-          <div id="todayAttention"></div>
+
+      <!-- Everything else, collapsed by default -->
+      <details class="card">
+        <summary style="cursor:pointer;font-weight:600">More — program, wins, admits &amp; discharges, ask</summary>
+        <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:12px">
+          <div style="flex:1;min-width:280px"><h3>Today's program</h3><div id="todaySchedule"></div></div>
+          <div style="flex:1;min-width:280px"><h3>Recent wins</h3><div id="todayWins"></div></div>
         </div>
-        <div class="card" style="flex:1;min-width:240px">
-          <h3>Ask Armada</h3>
-          <p class="sub sans">Ask anything about the house.</p>
+        <div style="margin-top:12px"><h3>Today's admits &amp; discharges</h3><div id="todayAdmitsDischarges"></div></div>
+        <div style="margin-top:12px"><h3>Ask Armada</h3>
           <div class="handoff-add"><input id="today_ask" placeholder="e.g. Who needs extra care tonight?"/><button type="button" class="mic" onclick="dictateInto(this)" title="Dictate">🎤</button><button class="btn btn-gold btn-sm sans" onclick="askFromToday()">Ask</button></div>
           <div id="todayAskOut" class="brief-body"></div>
         </div>
-      </div>
-      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
-        <div class="card" style="flex:1;min-width:280px"><h3>Today's program</h3><div id="todaySchedule"></div></div>
-        <div class="card" style="flex:1;min-width:280px"><h3>Recent wins</h3><div id="todayWins"></div></div>
-      </div>
-      <div class="card"><h3>Today's admits &amp; discharges</h3><div id="todayAdmitsDischarges"></div></div>
+      </details>
+      <div id="todayKpis" style="display:none"></div>
     </section>
 
     <!-- LEADERSHIP COMMAND CENTER (admin only) -->
@@ -1182,6 +1199,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260614q"></script>
+<script src="/app.js?v=20260614r"></script>
 </body>
 </html>

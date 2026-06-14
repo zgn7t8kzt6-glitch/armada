@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260614u" />
+<link rel="stylesheet" href="/styles.css?v=20260614v" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -42,6 +42,7 @@
     </div>
     <div class="side-groups sans" id="groupbar"></div>
     <nav class="side-nav sans" id="nav">
+    <button data-view="dashboard">My Shift</button>
     <button data-view="today">Today</button>
     <button data-view="command" data-admin>Command Center</button>
     <button data-view="compliance" data-admin>Documentation</button>
@@ -98,6 +99,17 @@
       <button class="iconbtn" onclick="show('askai')" title="Ask AI" style="margin-left:auto">✦ Ask AI</button>
     </header>
   <main>
+    <!-- MY SHIFT — role-tailored employee dashboard -->
+    <section id="dashboard" class="view">
+      <div class="card" style="border-left:4px solid var(--gold)">
+        <h3 id="dashGreeting" style="margin:0">My Shift</h3>
+        <p class="sub sans" id="dashSubtitle" style="margin:4px 0 0"></p>
+      </div>
+      <div id="dashNorthStar"></div>
+      <div id="dashTiles" class="ret-cards"></div>
+      <div id="dashSections"></div>
+    </section>
+
     <!-- TODAY (command center) -->
     <section id="today" class="view">
       <div class="card" style="border-left:4px solid var(--gold)">
@@ -1190,6 +1202,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260614u"></script>
+<script src="/app.js?v=20260614v"></script>
 </body>
 </html>

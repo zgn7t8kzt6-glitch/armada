@@ -83,8 +83,7 @@ async function boot(){
   $('r_date').value = today(); $('a_date').value = today();
   renderGroups();
   // Role-based landing: everyone opens already where they work.
-  const landing = ME.role==='admin' ? 'command'
-    : ({ 'Nurse':'retention', 'Therapist':'casemgmt', 'BHT / Tech':'report', 'Kitchen':'concierge' }[ME.job_role] || 'today');
+  const landing = ME.role==='admin' ? 'command' : 'dashboard';
   show(landing);
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
@@ -100,7 +99,7 @@ function kipuWebLink(kipuId){
 
 /* ---- grouped nav (role-aware: everyday up top; leadership & admin tucked away) ---- */
 const GROUPS=[
-  {g:'today',label:'Today',first:'today'},
+  {g:'today',label:'Today',first:'dashboard'},
   {g:'clients',label:'Clients',first:'clients'},
   {g:'care',label:'Care',first:'report'},
   {g:'clinical',label:'Clinical',first:'casemgmt'},
@@ -110,7 +109,7 @@ const GROUPS=[
   {g:'command',label:'Command',first:'command',admin:true},
 ];
 const GROUP_OF={
-  today:'today',lineup:'today',arrivals:'today',
+  dashboard:'today',today:'today',lineup:'today',arrivals:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',
   report:'care',concierge:'care',dignity:'care',rounds:'care',program:'care',
   casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',
@@ -151,6 +150,7 @@ function show(v){
   const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
+  if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
   if(v==='compliance') loadCompliance();
@@ -2218,6 +2218,29 @@ function renderAttentionList(t){
   $('todayAttention').innerHTML = (t.attention||[]).length ? t.attention.map(a=>`<div class="todo">
       <div class="txt">${icon[a.kind]||'•'} ${esc(a.text)}</div>
       ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}</div>`).join('') : '<div class="pc-note">✓ All clear. Touch every client, deliver every personal touch.</div>';
+}
+/* ---- My Shift: role-tailored employee dashboard ---- */
+function dashScrollTo(key){ const el=$('dash-'+key); if(!el) return; el.scrollIntoView({behavior:'smooth',block:'start'}); el.style.transition='box-shadow .3s'; el.style.boxShadow='0 0 0 2px var(--gold)'; setTimeout(()=>{el.style.boxShadow='';},1300); }
+async function loadDashboard(){
+  let d; try{ d=await api('/dashboard'); }catch(e){ $('dashSections').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  $('dashGreeting').textContent = `${d.greeting} · ${d.jobRole}`;
+  $('dashSubtitle').textContent = d.subtitle||'';
+  const ns=d.northStar;
+  $('dashNorthStar').innerHTML = ns ? `<div class="card" style="text-align:center;border-left:4px solid var(--gold)">
+    <div class="hint" style="text-transform:uppercase;letter-spacing:.6px">${esc(ns.label)}</div>
+    <div style="font-size:42px;font-weight:700;line-height:1.1;color:${ns.sev==='high'?'var(--danger)':ns.sev==='warn'?'#9a6a1f':'var(--good)'}">${esc(String(ns.value))}</div></div>` : '';
+  $('dashTiles').innerHTML = (d.tiles||[]).map(t=>{
+    const cls=t.sev==='high'?'rc-high':t.sev==='warn'?'rc-warn':'';
+    const onclick = t.view?`onclick="show('${t.view}')"`:`onclick="dashScrollTo('${t.key}')"`;
+    return `<div class="ret-card ${cls}" style="cursor:pointer" ${onclick}><div class="n">${t.n}</div><div class="l">${esc(t.label)} ›</div></div>`;
+  }).join('');
+  $('dashSections').innerHTML = (d.sections||[]).map(s=>{
+    const items = (s.items&&s.items.length) ? s.items.map(it=>`<div class="todo" ${it.id?`onclick="openJourney(${it.id})" style="cursor:pointer"`:''}>
+        <div class="txt">${it.badge?`<span class="risk ${/high|ama|allergy|no-show|out/i.test(it.badge)?'risk-high':'risk-elev'}">${esc(it.badge)}</span> `:''}<strong>${esc(it.name)}</strong>${it.room?' <span class="hint">· '+esc(it.room)+'</span>':''}${it.sub?'<div class="hint">'+esc(it.sub)+'</div>':''}</div>
+        ${it.id?'<span class="hint">›</span>':''}</div>`).join('') : '<div class="pc-note">✓ Nothing here right now.</div>';
+    const cta = s.cta?`<div class="toolbar" style="margin-top:8px;justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="show('${s.cta.view}')">${esc(s.cta.label)}</button></div>`:'';
+    return `<div class="card" id="dash-${esc(s.key)}"><h3>${esc(s.title)}</h3>${items}${cta}</div>`;
+  }).join('');
 }
 async function loadToday(){
   const [t, alertsData, cc] = await Promise.all([

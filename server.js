@@ -60,7 +60,7 @@ app.use((req, res, next) => {
 });
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['BHT / Tech', 'Nurse', 'Therapist', 'Kitchen'];
+const JOB_ROLES = ['BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen'];
 const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nurse / Medical (comfort, not feeling well)', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
@@ -1799,6 +1799,144 @@ function surveysDueCount() {
   if (dis) n += db.prepare(`SELECT COUNT(*) n FROM clients c WHERE c.discharge_status IS NOT NULL AND c.discharge_status!='Transferred' AND c.discharge_date >= date('now','-30 day') AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id=? AND r.client_id=c.id)`).get(dis.id).n;
   return n;
 }
+// ---- Role-tailored employee dashboard: each title opens to exactly what they
+// do this shift, framed around the three steps of service (welcome / anticipate
+// / farewell). Reuses the live client data; no new tables. ----
+function localHour() {
+  return +new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, hour: '2-digit', hour12: false }).format(new Date()).replace(/\D/g, '');
+}
+function nameMatches(field, userName) {
+  if (!field || !userName) return false;
+  const f = String(field).toLowerCase(), u = String(userName).toLowerCase().trim();
+  if (!u) return false;
+  if (f.includes(u)) return true;
+  const last = u.split(/\s+/).pop();
+  return last && last.length > 2 && f.includes(last);
+}
+app.get('/api/dashboard', requireAuth, (req, res) => {
+  const today = appToday();
+  const h = localHour();
+  const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  const first = (req.user.name || '').split(/\s+/)[0] || 'there';
+  const jr = req.user.job_role || '';
+  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const dischToday = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, anticipated_dc, next_loc, medications, allergies FROM clients WHERE substr(discharge_date,1,10) = ? OR (anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= date('now','+1 day'))`).all(today);
+  const item = (c, sub, badge) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', sub: sub || '', badge: badge || '' });
+  const isNew = (c) => (c.admit || '').slice(0, 10) === today;
+  const riskOf = (c) => { const a = latestAmaRead(c.id); return a && a.level ? a.level : null; };
+  const ccIncomplete = (c) => !careCardStatus(c).complete;
+
+  // Per-client observation overdue (for BHT/Nurse rounds).
+  const obsDefault = +(process.env.OBS_DEFAULT_MIN || 60);
+  const lastObs = db.prepare(`SELECT client_id, MAX(ts) ts FROM obs_checks GROUP BY client_id`).all().reduce((a, r) => (a[r.client_id] = r.ts, a), {});
+  const obsOverdue = (c) => { const iv = c.obs_interval || obsDefault; const t = lastObs[c.id] ? Date.parse(String(lastObs[c.id]).replace(' ', 'T') + 'Z') : null; const m = t ? Math.floor((Date.now() - t) / 60000) : null; return m == null || m >= iv; };
+
+  const sections = []; let tiles = []; let northStar = null; let subtitle = '';
+
+  // Shared building blocks
+  const newAdmits = active.filter(isNew);
+  const atRisk = active.map((c) => ({ c, lvl: riskOf(c) })).filter((x) => x.lvl === 'High' || x.lvl === 'Elevated');
+  const personalTouches = active.filter((c) => (c.touch && c.touch.trim()) || (c.prefs && c.prefs.trim()));
+
+  if (jr === 'Nurse') {
+    subtitle = 'Medical watch — withdrawal, meds, and the safety of every client.';
+    const detox = active.filter((c) => isDetoxProgram(c.program) || /3\.?7|3\.?2|wm/i.test(c.loc || ''));
+    const sendouts = db.prepare(`SELECT client_name name, destination, reason FROM medical_sendouts WHERE status = 'out' ORDER BY sent_at DESC`).all();
+    const overdue = active.filter(obsOverdue);
+    northStar = { label: 'Safety checks current', value: active.length ? Math.round((active.length - overdue.length) / active.length * 100) + '%' : '—', sev: overdue.length ? 'warn' : 'ok' };
+    tiles = [
+      { key: 'newadmits', label: 'New — need nursing assessment', n: newAdmits.length, sev: newAdmits.length ? 'warn' : 'ok' },
+      { key: 'withdrawal', label: 'Withdrawal watch', n: detox.length, sev: detox.length ? 'warn' : 'ok' },
+      { key: 'checks', label: 'Safety checks due', n: overdue.length, sev: overdue.length ? 'high' : 'ok' },
+      { key: 'sendouts', label: 'Out (ED / hospital)', n: sendouts.length, sev: sendouts.length ? 'high' : 'ok' },
+    ];
+    sections.push({ key: 'newadmits', title: 'Welcome — new admits needing assessment', items: newAdmits.map((c) => item(c, c.program || '', 'NEW')) });
+    sections.push({ key: 'withdrawal', title: 'Anticipate — withdrawal watch (detox)', items: detox.map((c) => item(c, c.loc || c.program || '', riskOf(c) || '')) });
+    sections.push({ key: 'checks', title: 'Safety checks due', items: active.filter(obsOverdue).map((c) => item(c, 'overdue for a check')) });
+    sections.push({ key: 'sendouts', title: 'Medical send-outs (currently out)', items: sendouts.map((s) => ({ name: s.name, sub: (s.destination || '') + (s.reason ? ' · ' + s.reason : ''), badge: 'OUT' })) });
+    sections.push({ key: 'farewell', title: 'Send-off today — meds & naloxone', items: dischToday.map((c) => item(c, c.discharge_status || 'planned')) });
+  } else if (jr === 'Therapist') {
+    subtitle = 'Your caseload — sessions, notes, and catching the quiet AMA.';
+    const mine = active.filter((c) => nameMatches(c.therapist, req.user.name));
+    const caseload = mine.length ? mine : active;   // fallback: whole house if names don't match yet
+    const docDue = caseload.filter((c) => { let f = {}; try { f = JSON.parse(c.doc_forms || '{}'); } catch { } return !f.biopsych || !f.tx_plan; });
+    const risk = caseload.map((c) => ({ c, lvl: riskOf(c) })).filter((x) => x.lvl === 'High' || x.lvl === 'Elevated');
+    const planning = caseload.filter((c) => c.anticipated_dc || c.next_loc);
+    northStar = { label: 'Caseload documented', value: caseload.length ? Math.round((caseload.length - docDue.length) / caseload.length * 100) + '%' : '—', sev: docDue.length ? 'warn' : 'ok' };
+    tiles = [
+      { key: 'caseload', label: 'My clients', n: caseload.length, sev: 'ok' },
+      { key: 'docs', label: 'Notes / plans due', n: docDue.length, sev: docDue.length ? 'high' : 'ok' },
+      { key: 'risk', label: 'At risk — run the Save', n: risk.length, sev: risk.length ? 'high' : 'ok' },
+      { key: 'planning', label: 'Aftercare to plan', n: planning.length, sev: planning.length ? 'warn' : 'ok' },
+    ];
+    if (!mine.length) subtitle += ' (Showing the whole house — assign therapists in Kipu to see just yours.)';
+    sections.push({ key: 'risk', title: 'Anticipate — at risk of leaving (the Save)', items: risk.map((x) => item(x.c, x.c.anchor_why ? 'anchor: ' + x.c.anchor_why : '', x.lvl)) });
+    sections.push({ key: 'docs', title: 'Documentation due — biopsychosocial / treatment plan', items: docDue.map((c) => item(c, c.program || '')) });
+    sections.push({ key: 'planning', title: 'Send-off — aftercare to plan', items: planning.map((c) => item(c, (c.next_loc ? '→ ' + c.next_loc : '') + (c.anticipated_dc ? ' · by ' + String(c.anticipated_dc).slice(0, 10) : ''))) });
+    sections.push({ key: 'caseload', title: 'My caseload', items: caseload.map((c) => item(c, c.program || '', riskOf(c) || '')) });
+  } else if (jr === 'Case Manager') {
+    subtitle = 'Coordination — case tasks, aftercare, and follow-ups.';
+    const mine = active.filter((c) => nameMatches(c.case_manager, req.user.name));
+    const caseload = mine.length ? mine : active;
+    const tasks = db.prepare(`SELECT t.id, t.text, t.category, c.id cid, c.pref, c.name FROM case_tasks t JOIN clients c ON c.id = t.client_id WHERE t.status = 'open' AND c.active = 1 AND c.discharge_status IS NULL ORDER BY t.id DESC`).all();
+    const myTasks = mine.length ? tasks.filter((t) => caseload.some((c) => c.id === t.cid)) : tasks;
+    const followups = db.prepare(`SELECT f.id, f.due_date, c.id cid, c.pref, c.name FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' ORDER BY f.due_date`).all();
+    const planning = caseload.filter((c) => c.anticipated_dc || c.next_loc);
+    northStar = { label: 'Open case tasks', value: myTasks.length, sev: myTasks.length ? 'warn' : 'ok' };
+    tiles = [
+      { key: 'caseload', label: 'My clients', n: caseload.length, sev: 'ok' },
+      { key: 'tasks', label: 'Open case tasks', n: myTasks.length, sev: myTasks.length ? 'warn' : 'ok' },
+      { key: 'planning', label: 'Aftercare to plan', n: planning.length, sev: planning.length ? 'warn' : 'ok' },
+      { key: 'followups', label: 'Follow-ups due', n: followups.length, sev: followups.length ? 'high' : 'ok' },
+    ];
+    sections.push({ key: 'tasks', title: 'Open case tasks', items: myTasks.map((t) => ({ id: t.cid, name: t.pref || t.name, sub: (t.category ? '[' + t.category + '] ' : '') + t.text })) });
+    sections.push({ key: 'planning', title: 'Send-off — aftercare to plan', items: planning.map((c) => item(c, (c.next_loc ? '→ ' + c.next_loc : '') + (c.anticipated_dc ? ' · by ' + String(c.anticipated_dc).slice(0, 10) : ''))) });
+    sections.push({ key: 'followups', title: 'Follow-up calls due', items: followups.map((f) => ({ id: f.cid, name: f.pref || f.name, sub: 'due ' + (f.due_date || '') })) });
+    sections.push({ key: 'caseload', title: 'My caseload', items: caseload.map((c) => item(c, c.program || '')) });
+  } else if (jr === 'Front Desk') {
+    subtitle = 'The warm welcome — greet every arrival by name.';
+    const arr = db.prepare(`SELECT preferred_name, first_name, last_name, status, referral_source FROM expected_arrivals WHERE scheduled_date = ? ORDER BY status`).all(today);
+    const waiting = arr.filter((a) => a.status === 'expected'); const arrived = arr.filter((a) => a.status === 'arrived'); const noshow = arr.filter((a) => a.status === 'no_show');
+    northStar = { label: 'Arriving today', value: arr.length, sev: waiting.length ? 'warn' : 'ok' };
+    tiles = [
+      { key: 'arrivals', label: 'Still expected', n: waiting.length, sev: waiting.length ? 'warn' : 'ok', view: 'arrivals' },
+      { key: 'arrived', label: 'Arrived', n: arrived.length, sev: 'ok', view: 'arrivals' },
+      { key: 'noshow', label: 'No-show follow-up', n: noshow.length, sev: noshow.length ? 'high' : 'ok', view: 'arrivals' },
+    ];
+    const arrItem = (a) => ({ name: ((a.preferred_name || a.first_name || '') + ' ' + (a.last_name || '')).trim(), sub: a.referral_source ? 'via ' + a.referral_source : '', badge: a.status === 'no_show' ? 'NO-SHOW' : a.status === 'arrived' ? 'ARRIVED' : '' });
+    sections.push({ key: 'arrivals', title: 'Welcome — expected today', items: waiting.map(arrItem), cta: { label: 'Open Front Desk →', view: 'arrivals' } });
+    sections.push({ key: 'board', title: 'Already arrived', items: arrived.map(arrItem) });
+  } else if (jr === 'Kitchen') {
+    subtitle = 'The Table — no one here is ever hungry. Honor every diet.';
+    const diets = active.filter((c) => (c.allergies && c.allergies.trim()) || /diabet|allerg|gluten|vegan|vegetarian|kosher|halal|renal|puree/i.test((c.diagnosis || '') + ' ' + (c.prefs || '')));
+    northStar = { label: 'Clients on the unit', value: active.length, sev: 'ok' };
+    tiles = [
+      { key: 'diets', label: 'Special diets / allergies', n: diets.length, sev: diets.length ? 'warn' : 'ok' },
+      { key: 'clients', label: 'Mouths to feed', n: active.length, sev: 'ok' },
+      { key: 'new', label: 'New today', n: newAdmits.length, sev: newAdmits.length ? 'warn' : 'ok' },
+    ];
+    sections.push({ key: 'diets', title: 'Dietary needs & allergies — honor these', items: diets.map((c) => item(c, [c.allergies, c.prefs].filter(Boolean).join(' · '), c.allergies ? 'ALLERGY' : '')) });
+    sections.push({ key: 'new', title: 'New today — make their first meal land', items: newAdmits.map((c) => item(c)) });
+  } else {
+    // BHT / Tech (default) — the heartbeat of the house
+    subtitle = 'The heartbeat of the house — welcome, watch, and the personal touches.';
+    const overdue = active.filter(obsOverdue);
+    const toWelcome = newAdmits.filter(ccIncomplete);
+    northStar = { label: 'Safety checks current', value: active.length ? Math.round((active.length - overdue.length) / active.length * 100) + '%' : '—', sev: overdue.length ? 'high' : 'ok' };
+    tiles = [
+      { key: 'welcome', label: 'New — welcome & fill card', n: toWelcome.length, sev: toWelcome.length ? 'high' : 'ok' },
+      { key: 'rounds', label: 'Safety checks due', n: overdue.length, sev: overdue.length ? 'high' : 'ok', view: 'rounds' },
+      { key: 'watch', label: 'Watch tonight (at risk)', n: atRisk.length, sev: atRisk.length ? 'high' : 'ok' },
+      { key: 'touches', label: 'Personal touches to deliver', n: personalTouches.length, sev: personalTouches.length ? 'warn' : 'ok' },
+    ];
+    sections.push({ key: 'welcome', title: 'Welcome — new arrivals (fill the Care Card, greet by name)', items: toWelcome.map((c) => item(c, c.program || '', 'NEW')) });
+    sections.push({ key: 'watch', title: 'Watch tonight — at risk of leaving (run the Save)', items: atRisk.map((x) => item(x.c, x.c.anchor_why ? 'why they came: ' + x.c.anchor_why : '', x.lvl)) });
+    sections.push({ key: 'touches', title: "Anticipate — personal touches to deliver", items: personalTouches.map((c) => item(c, c.touch || c.prefs || '')) });
+    sections.push({ key: 'rounds', title: 'Safety checks due', items: overdue.map((c) => item(c, 'overdue for a check')), cta: { label: 'Open Rounds →', view: 'rounds' } });
+  }
+
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections });
+});
 app.get('/api/today', requireAuth, (req, res) => {
   const today = appToday();
   const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();

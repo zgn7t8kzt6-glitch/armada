@@ -6,7 +6,28 @@
 // version; this implements the documented v3 pattern and is verified on first
 // connect via /api/kipu/test before any sync.
 import crypto from 'node:crypto';
-import { db, parseLoc, rollupDailyMetrics, appToday, addDays } from './db.js';
+import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './db.js';
+
+// Kipu timestamps are UTC; admit time-of-day only makes sense in local time.
+// Convert an ISO/timestamp to local HH:MM (24h). Module-level so both the sync
+// and the repair backfill can use it.
+function localHHMM(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) { const m = String(v).match(/[T ](\d{1,2}):(\d{2})/); return m ? String(+m[1]).padStart(2, '0') + ':' + m[2] : null; }
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, hour: '2-digit', minute: '2-digit', hour12: false })
+    .formatToParts(d).reduce((a, x) => (a[x.type] = x.value, a), {});
+  const h = p.hour === '24' ? '00' : p.hour;
+  return String(h).padStart(2, '0') + ':' + p.minute;
+}
+// admission_date is stored at local midnight (date only); the real arrival time
+// is created_at (chart opened at intake). A non-midnight admit timestamp wins.
+function admitTimeFrom(admitVal, createdVal) {
+  const a = localHHMM(admitVal);
+  if (a && a !== '00:00') return a;
+  const c = localHHMM(createdVal);
+  return (c && c !== '00:00') ? c : null;
+}
 
 export function kipuConfigured() {
   return Boolean(process.env.KIPU_ACCESS_ID && process.env.KIPU_SECRET_KEY && process.env.KIPU_APP_ID);
@@ -337,7 +358,9 @@ export async function kipuSyncRoster() {
     const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
     const admit = admitRaw ? String(admitRaw).slice(0, 10) : null;
     if (admitCutoff && admit && admit < admitCutoff) continue;   // opt-in recency filter
-    let admitTime = timeOf(admitRaw);
+    // admission_date is stored at local midnight (date only); the real arrival
+    // time is created_at (chart opened at intake). Both converted to local TZ.
+    let admitTime = admitTimeFrom(admitRaw, pick(p, 'created_at', 'created_date'));
     let therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
     let caseMgr = pick(p, 'case_manager', 'casemanager');
     let room = pick(p, 'bed_name', 'room', 'bed', 'bed_name_full');
@@ -380,9 +403,10 @@ export async function kipuSyncRoster() {
           // Kipu prefixes the utilization-review level (e.g. "UR LOC: IOP") — strip it.
           const clean = (v) => v == null ? null : String(v).replace(/^\s*UR\s*LOC\s*:?\s*/i, '').trim() || null;
           if (programRaw == null) programRaw = clean(d('level_of_care', 'program'));
-          // Admission time: the census date is usually date-only; the detail
-          // record carries the fuller timestamp. Also probe dedicated time fields.
-          if (!admitTime) admitTime = timeOf(d('admission_date', 'admitted_at', 'admission_datetime', 'admission_date_time', 'admission_time', 'intake_datetime', 'intake_time', 'created_at'));
+          // Admission time-of-day: admission_date is date-only (local midnight),
+          // so use the chart's created_at (intake) as the real arrival time,
+          // converted to local TZ. A non-midnight admission timestamp still wins.
+          if (!admitTime) admitTime = admitTimeFrom(d('admission_date', 'admitted_at', 'admission_datetime', 'admission_time'), d('created_at', 'created_date'));
           nextLoc = clean(d('next_level_of_care'));
           anticipatedDc = d('anticipated_discharge_date');
           if (refSrcRaw == null) refSrcRaw = d('referrer_name', 'first_contact_name');
@@ -497,8 +521,9 @@ export async function kipuSyncRoster() {
         const g = (...keys) => { if (!det) return null; for (const k of keys) { const v = det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.join(', ') : String(v); } return null; };
         const cleanLoc = (v) => v == null ? null : String(v).replace(/^\s*UR\s*LOC\s*:?\s*/i, '').trim() || null;
         const admit = (pick(p, 'admission_date', 'admit_date') || g('admission_date') || '').slice(0, 10) || null;
+        const admitTimeD = admitTimeFrom(pick(p, 'admission_date', 'admit_date', 'admitted_at') || g('admission_date'), pick(p, 'created_at', 'created_date') || g('created_at'));
         const program = cleanLoc(g('level_of_care', 'program'));
-        const info = ins.run(name, p.first_name || name, g('bed_name', 'room_name', 'building_name'), program, realLoc(program), admit, null, null, null,
+        const info = ins.run(name, p.first_name || name, g('bed_name', 'room_name', 'building_name'), program, realLoc(program), admit, admitTimeD, null, null,
           g('referrer_name', 'first_contact_name'), flat2(pick(p, 'dob', 'date_of_birth')), flat2(pick(p, 'diagnosis_codes')),
           flat2(pick(p, 'insurance_company')), flat2(pick(p, 'phone')), flat2(pick(p, 'pronouns')), flat2(pick(p, 'preferred_language')),
           flat2(pick(p, 'mr_number')), null, null, null, kid);
@@ -1028,7 +1053,18 @@ export async function kipuFixDischargeDates() {
   const dlist = dd?.patients || dd?.census || (Array.isArray(dd) ? dd : []);
   const dateMap = new Map();
   const put = (key, d) => { if (key && d && !dateMap.has(key)) dateMap.set(key, d); };
+  // Admit time-of-day, keyed the same ways, derived from created_at (local TZ).
+  const admitMap = new Map();
+  const putAT = (key, t) => { if (key && t && !admitMap.has(key)) admitMap.set(key, t); };
+  const addAdmit = (p) => {
+    const t = admitTimeFrom(pick(p, 'admission_date', 'admit_date', 'admitted_at'), pick(p, 'created_at', 'created_date'));
+    if (!t) return;
+    const kraw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn');
+    if (kraw) { const ks = String(kraw); putAT(ks, t); putAT(ks.split(':')[0], t); }
+    putAT('name:' + norm(nameOf(p)), t);
+  };
   for (const p of dlist) {
+    addAdmit(p);
     const dRaw = pick(p, 'discharge_date', 'discharged_at'); if (!dRaw) continue;
     const d = String(dRaw).slice(0, 10);
     const kraw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn');
@@ -1045,6 +1081,7 @@ export async function kipuFixDischargeDates() {
     const ad = await kipuGet(apath);
     const alist = ad?.patients || ad?.census || (Array.isArray(ad) ? ad : []);
     for (const p of alist) {
+      addAdmit(p);   // active rows carry created_at too
       const dRaw = pick(p, 'discharge_date', 'discharged_at'); if (dRaw && String(dRaw).trim()) continue;
       const k = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn');
       if (k) { const ks = String(k); activeIds.add(ks); activeIds.add(ks.split(':')[0]); }
@@ -1053,19 +1090,26 @@ export async function kipuFixDischargeDates() {
   } catch { /* if this fails we still do the date fix */ }
 
   const today = appToday();
-  const clients = db.prepare(`SELECT id, name, pref, kipu_id, discharge_date FROM clients WHERE source='kipu' AND discharge_status IS NOT NULL`).all();
+  const clients = db.prepare(`SELECT id, name, pref, kipu_id, discharge_status, discharge_date, admit_time FROM clients WHERE source='kipu'`).all();
   const updC = db.prepare(`UPDATE clients SET discharge_date = ? WHERE id = ?`);
   const updE = db.prepare(`UPDATE flow_events SET date = ? WHERE client_id = ? AND kind IN ('discharge','ama')`);
+  const updAT = db.prepare(`UPDATE clients SET admit_time = ? WHERE id = ?`);
   const reactivate = db.prepare(`UPDATE clients SET active = 1, discharge_status = NULL, discharge_date = NULL, discharge_reason = NULL, discharge_destination = NULL WHERE id = ?`);
   const delEvt = db.prepare(`DELETE FROM flow_events WHERE client_id = ? AND kind IN ('discharge','ama')`);
   const affected = new Set([today]);
-  let fixed = 0, reactivated = 0;
+  let fixed = 0, reactivated = 0, admitTimes = 0;
   db.exec('BEGIN');
   try {
     for (const c of clients) {
       const k = c.kipu_id ? String(c.kipu_id) : '';
       const km = k.split(':')[0];
       const nm = norm(c.name);
+      // Backfill admit time-of-day (all clients) when it's blank.
+      if (!(c.admit_time || '').trim()) {
+        const at = admitMap.get(k) || admitMap.get(km) || admitMap.get('name:' + nm);
+        if (at) { updAT.run(at, c.id); admitTimes++; }
+      }
+      if (!c.discharge_status) continue;   // the rest is discharge-only
       // Still active in Kipu → was wrongly discharged. Restore and drop the event.
       if ((k && activeIds.has(k)) || (km && activeIds.has(km)) || (nm && activeNames.has(nm))) {
         reactivate.run(c.id); delEvt.run(c.id); reactivated++;
@@ -1079,5 +1123,5 @@ export async function kipuFixDischargeDates() {
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   for (const d of affected) rollupDailyMetrics(d);
-  return { checked: clients.length, fixed, reactivated, daysRerolled: affected.size };
+  return { checked: clients.length, fixed, reactivated, admitTimes, daysRerolled: affected.size };
 }

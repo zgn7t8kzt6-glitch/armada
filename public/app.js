@@ -761,7 +761,7 @@ async function kipuDischargeCleanup(){
 }
 async function kipuFixDc(){
   $('kipuResult').textContent='Correcting discharge dates from Kipu…';
-  try{ const r=await api('/kipu/fix-discharge-dates',{method:'POST'}); $('kipuResult').textContent=`✓ Checked ${r.checked} discharges — corrected ${r.fixed} to real dates, restored ${r.reactivated||0} still-active client(s), re-rolled ${r.daysRerolled} day(s). Reopen the Command Center to see the fixed counts.`; }
+  try{ const r=await api('/kipu/fix-discharge-dates',{method:'POST'}); $('kipuResult').textContent=`✓ Checked ${r.checked} clients — corrected ${r.fixed} discharge dates, restored ${r.reactivated||0} still-active, filled ${r.admitTimes||0} admit times, re-rolled ${r.daysRerolled} day(s). Reopen the Command Center.`; }
   catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function kipuReconcile(){

@@ -179,7 +179,6 @@ export async function kipuSyncRoster() {
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
   const timeOf = (v) => { if (!v) return null; const m = String(v).match(/[T ](\d{2}:\d{2})/); return m ? m[1] : null; };
   const activeKids = [];   // census patients who are currently active (no discharge)
-  const newDischarges = [];   // census rows for recently-discharged patients we don't have yet
 
   // Location scoping. Prefer KIPU_LOCATION_ID (exact); fall back to a
   // KIPU_LOCATION name match. Belt-and-suspenders on top of the API filter.
@@ -336,33 +335,57 @@ export async function kipuSyncRoster() {
       // census, which would inflate past days with a one-time spike.
       if (admit && admit >= yest) evt.run(info.lastInsertRowid, kid || null, 'admit', null, newLoc, admit, null);
       created++;
-    } else if (kid && dischDate) {
-      // NEW + discharged: the census includes recent discharges. Defer creating
-      // them until after the loop (so we know who's currently active) to capture
-      // discharges that would otherwise never enter the app.
-      newDischarges.push({ name, first: p.first_name, room, program, newLoc, admit, admitTime, therapist, caseMgr, refSource,
-        dob, diagnosis, insurance, phone, pronouns, language, mrn, paymentMethod, nextLoc, anticipatedDc, kid,
-        dischStatus, dischDate: String(dischDate).slice(0, 10), dischDest, dischReason });
     }
   }
 
-  // Import recent discharges from the census (keyed by casefile, recent window,
-  // and skipping anyone currently admitted under another casefile) so discharges
-  // show up even after a Rebuild / on first run.
+  // Discharges are NOT in the plain census (it's active-only). The DATE-RANGED
+  // census returns them, so pull the recent window and import discharged
+  // patients we don't already have, enriching each with its detail (type/reason).
   let importedDischarges = 0;
-  {
-    const dischCutoff = new Date(Date.now() - (+(process.env.KIPU_DISCHARGE_DAYS || 30)) * 864e5).toISOString().slice(0, 10);
-    const activeMasters = new Set(activeKids.map((k) => String(k).split(':')[0]));
-    for (const r of newDischarges) {
-      if (!r.dischDate || r.dischDate < dischCutoff) continue;
-      if (byKipu.get(r.kid)) continue;                              // already have this episode
-      if (activeMasters.has(String(r.kid).split(':')[0])) continue; // currently admitted elsewhere
-      const info = ins.run(r.name, r.first || r.name, r.room, r.program, r.newLoc, r.admit, r.admitTime, r.therapist, r.caseMgr, r.refSource,
-        r.dob, r.diagnosis, r.insurance, r.phone, r.pronouns, r.language, r.mrn, r.paymentMethod, r.nextLoc, r.anticipatedDc, r.kid);
-      db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, discharge_reason = ? WHERE id = ?`)
-        .run(r.dischStatus ? String(r.dischStatus) : 'Discharged', r.dischDate, r.dischDest || null, r.dischReason || null, info.lastInsertRowid);
-      importedDischarges++;
-    }
+  if (process.env.KIPU_DISCHARGE_SYNC !== 'false') {
+    try {
+      const dDays = +(process.env.KIPU_DISCHARGE_DAYS || 30);
+      const start = new Date(Date.now() - dDays * 864e5).toISOString().slice(0, 10);
+      const phi = process.env.KIPU_PHI_LEVEL || 'high';
+      let dpath = `/api/patients/census?phi_level=${phi}&start_date=${start}&end_date=${appToday()}`;
+      if (locId) dpath += `&location_id=${encodeURIComponent(locId)}`;
+      const dd = await kipuGet(dpath);
+      const dlist = dd?.patients || dd?.census || (Array.isArray(dd) ? dd : []);
+      const activeMasters = new Set(activeKids.map((k) => String(k).split(':')[0]));
+      const flat2 = (v) => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v != null ? String(v) : null);
+      const toImport = [];
+      for (const p of dlist) {
+        if (!matchesLoc(p)) continue;
+        const dRaw = pick(p, 'discharge_date', 'discharged_at');
+        if (!dRaw || !String(dRaw).trim()) continue;
+        const kraw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'); if (!kraw) continue;
+        const ks = String(kraw);
+        if (byKipu.get(ks)) continue;                              // already have this episode
+        if (activeMasters.has(ks.split(':')[0])) continue;         // currently admitted under another casefile
+        toImport.push({ p, kid: ks, dDate: String(dRaw).slice(0, 10) });
+      }
+      const enriched = await mapLimit(toImport, +(process.env.KIPU_CONCURRENCY || 6), async (x) => {
+        let det = null; try { det = await kipuPatientDetail(x.kid); } catch { /* best-effort */ }
+        return { ...x, det };
+      });
+      const seenNow = new Set();
+      for (const { p, kid, dDate, det } of enriched) {
+        if (seenNow.has(kid) || byKipu.get(kid)) continue; seenNow.add(kid);
+        const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name;
+        if (!name) continue;
+        const g = (...keys) => { if (!det) return null; for (const k of keys) { const v = det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.join(', ') : String(v); } return null; };
+        const cleanLoc = (v) => v == null ? null : String(v).replace(/^\s*UR\s*LOC\s*:?\s*/i, '').trim() || null;
+        const admit = (pick(p, 'admission_date', 'admit_date') || g('admission_date') || '').slice(0, 10) || null;
+        const program = cleanLoc(g('level_of_care', 'program'));
+        const info = ins.run(name, p.first_name || name, g('bed_name', 'room_name', 'building_name'), program, realLoc(program), admit, null, null, null,
+          g('referrer_name', 'first_contact_name'), flat2(pick(p, 'dob', 'date_of_birth')), flat2(pick(p, 'diagnosis_codes')),
+          flat2(pick(p, 'insurance_company')), flat2(pick(p, 'phone')), flat2(pick(p, 'pronouns')), flat2(pick(p, 'preferred_language')),
+          flat2(pick(p, 'mr_number')), null, null, null, kid);
+        db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, discharge_reason = ? WHERE id = ?`)
+          .run(g('discharge_type', 'discharge_type_code', 'discharge_or_transition_name') || 'Discharged', dDate, g('discharge_or_transition_name'), g('discharge_reason'), info.lastInsertRowid);
+        importedDischarges++;
+      }
+    } catch (e) { /* discharge feed optional */ }
   }
 
   // Authoritative roster: any Kipu-sourced client NOT in the current active

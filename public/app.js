@@ -1185,6 +1185,30 @@ async function loadCommand(){
 
   loadCommandTrends();
   loadCommandChecklist();
+  cmdAssessPoll();
+}
+let cmdAssessTimer=null;
+async function cmdAssess(){
+  const btn=$('cmdAssessBtn');
+  try{ const r=await api('/assess-all',{method:'POST'});
+    if(r.started===false && !r.already){ $('cmdAssessMsg').textContent='Could not start — AI may not be configured.'; return; }
+    if(btn) btn.disabled=true; cmdAssessPoll();
+  }catch(e){ $('cmdAssessMsg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function cmdAssessPoll(){
+  clearTimeout(cmdAssessTimer); const msg=$('cmdAssessMsg'); if(!msg) return;
+  try{ const s=await api('/assess-all/status');
+    const btn=$('cmdAssessBtn');
+    if(s.running){
+      if(btn) btn.disabled=true;
+      msg.innerHTML=`Reading notes… <strong>${s.done}/${s.total}</strong> · ${s.high} high · ${s.elevated} elevated${s.current?' · '+esc(s.current):''}`;
+      cmdAssessTimer=setTimeout(cmdAssessPoll, 2500);
+    } else {
+      if(btn) btn.disabled=false;
+      if(s.total && s.finishedAt){ msg.innerHTML=`✓ Read ${s.done} clients — <strong>${s.high} high</strong>, ${s.elevated} elevated, ${s.low} low${s.flagged?' · '+s.flagged+' flagged':''}${s.errors?` · <span style="color:var(--danger)">${s.errors} errors</span>`:''}. <a href="#" onclick="loadCommand();return false">Refresh ↻</a>`; }
+      else { msg.textContent=''; }
+    }
+  }catch(e){ /* silent */ }
 }
 async function loadCommandTrends(){
   const range = $('cmdTrendRange') ? $('cmdTrendRange').value : '365';

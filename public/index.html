@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260612l" />
+<link rel="stylesheet" href="/styles.css?v=20260612m" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -139,9 +139,11 @@
             <p class="sub sans">The daily clinical-director review, made live — flow, the detox step-down clock, discharge planning, documentation, and staffing in one place. Pulled straight from Kipu where we have it.</p>
           </div>
           <div class="cmd-hero-actions">
+            <button class="btn btn-gold btn-sm sans" id="cmdAssessBtn" onclick="cmdAssess()" title="Read every client's Kipu notes and refresh snapshots, risk, care team & case needs">✦ Read all notes</button>
             <button class="btn btn-ghost btn-sm sans" onclick="loadCommand()" title="Refresh">↻ Refresh</button>
             <span id="cmdAsOf" class="hint"></span>
           </div>
+          <div id="cmdAssessMsg" class="hint" style="width:100%;margin-top:8px"></div>
         </div>
       </div>
       <div id="cmdFlow" class="ret-cards"></div>
@@ -960,6 +962,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260612l"></script>
+<script src="/app.js?v=20260612m"></script>
 </body>
 </html>

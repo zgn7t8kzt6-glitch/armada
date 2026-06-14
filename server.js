@@ -221,19 +221,21 @@ const DOC_REQS = [
   { key: 'therapist', label: 'Primary therapist', slaHrs: 24, has: (c) => !!c.therapist },
   { key: 'case_manager', label: 'Case manager', slaHrs: 24, has: (c) => !!c.case_manager },
   { key: 'referral_source', label: 'Referral source', slaHrs: 24, has: (c) => !!c.referral_source },
-  { key: 'biopsych', label: 'Biopsychosocial', slaHrs: 24, flag: /biopsych|bio-psycho|psychosocial/i },
-  { key: 'tx_plan', label: 'Treatment plan / ASAM', slaHrs: 72, flag: /treatment plan|tx plan|\basam\b|tx-plan/i },
-  { key: 'cm_note', label: 'Case-management note', slaHrs: 24, flag: /case.?manage|cm note/i },
+  // These are verified by the ACTUAL Kipu chart form (doc_forms), not inferred.
+  { key: 'biopsych', label: 'Biopsychosocial', slaHrs: 24, form: 'biopsych' },
+  { key: 'tx_plan', label: 'Treatment plan', slaHrs: 72, form: 'tx_plan' },
+  { key: 'asam', label: 'ASAM / level-of-care assessment', slaHrs: 72, form: 'asam' },
+  { key: 'cm_note', label: 'Case-management note', slaHrs: 24, form: 'cm_note' },
 ];
 app.get('/api/compliance', requireAuth, requireAdmin, (req, res) => {
-  const clients = db.prepare(`SELECT id, pref, name, room, admit, admit_time, loc, diagnosis, insurance, therapist, case_manager, referral_source FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
-  const flagsByClient = {};
-  for (const c of clients) { const a = latestAmaRead(c.id); flagsByClient[c.id] = a ? safeArr(a.doc_flags) : null; }
+  const clients = db.prepare(`SELECT id, pref, name, room, admit, admit_time, loc, diagnosis, insurance, therapist, case_manager, referral_source, doc_forms FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const formsByClient = {};
+  for (const c of clients) { try { formsByClient[c.id] = c.doc_forms ? JSON.parse(c.doc_forms) : null; } catch { formsByClient[c.id] = null; } }
   const out = DOC_REQS.map((rq) => {
     let complete = 0, applicable = 0; const overdue = [], missing = [];
     for (const c of clients) {
       let ok;
-      if (rq.flag) { const f = flagsByClient[c.id]; if (f == null) continue; applicable++; ok = !f.some((x) => rq.flag.test(x)); }
+      if (rq.form) { const f = formsByClient[c.id]; if (f == null) continue; applicable++; ok = !!f[rq.form]; }   // chart-verified
       else { applicable++; ok = !!rq.has(c); }
       if (ok) { complete++; continue; }
       const m = careCardMinsSinceAdmit(c);
@@ -556,6 +558,7 @@ async function runAssessAll(user) {
           const txt = np.text;
           if (np.therapist && !c.therapist) db.prepare(`UPDATE clients SET therapist = ? WHERE id = ?`).run(np.therapist, c.id);
           if (np.case_manager && !c.case_manager) db.prepare(`UPDATE clients SET case_manager = ? WHERE id = ?`).run(np.case_manager, c.id);
+          if (np.forms) db.prepare(`UPDATE clients SET doc_forms = ? WHERE id = ?`).run(JSON.stringify(np.forms), c.id);
           if (txt && txt.trim()) {
             extra = [{ note: 'Kipu documentation:\n' + txt }];
             try {

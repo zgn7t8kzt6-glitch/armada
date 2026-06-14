@@ -537,9 +537,25 @@ const extractText = (v) => {
 // The list endpoint returns each note's name + a template tag in
 // evaluation_content (e.g. "standard"); the WRITTEN text lives in the
 // evaluation detail's patient_evaluation_items. So fetch detail per recent note.
+// Which key chart forms (by name) exist for this client — authoritative from
+// Kipu, not inferred. Used for documentation compliance.
+const FORM_PATTERNS = {
+  biopsych: /biopsych|bio-psycho|psychosocial/i,
+  tx_plan: /treatment plan|tx plan|master treatment|individualized (treatment|service)|service plan/i,
+  asam: /\basam\b|level of care assessment|continued (service|stay)/i,
+  cm_note: /case ?manage|cm note|discharge plan/i,
+  nursing: /nursing (assessment|admission|eval)/i,
+  hp: /history (and|&) physical|\bh ?& ?p\b|physical exam/i,
+};
+function formsPresent(names) {
+  const out = {};
+  for (const [k, re] of Object.entries(FORM_PATTERNS)) out[k] = names.some((n) => re.test(n));
+  return out;
+}
 export async function kipuPatientNotes(casefileId) {
   // CURRENT STAY: scope the evaluation list to this casefile (master sub-resource).
   let list = await evalListRaw(casefileId, { all: false });
+  const forms = formsPresent(list.map((e) => String(e.name || '')));
   // CURRENT STAY ONLY: keep notes from the recent window so a re-admit's old
   // chart doesn't leak in — but ONLY when the list actually carries dates. Some
   // Kipu accounts return list rows with no created_at (just id/name/status); in
@@ -583,7 +599,7 @@ export async function kipuPatientNotes(casefileId) {
     }
     if (r.content && r.content.length > 10 && texts.length < want) { debug.withContent++; texts.push(`[${r.date ? r.date + ' · ' : ''}${nm.trim() || 'Note'}]\n${r.content}`); }
   }
-  return { text: texts.join('\n\n').slice(0, 18000), therapist, case_manager: caseMgrName, debug };
+  return { text: texts.join('\n\n').slice(0, 18000), therapist, case_manager: caseMgrName, forms, debug };
 }
 
 // FULL CHART: list EVERY evaluation/form on a client (all pages), light rows for

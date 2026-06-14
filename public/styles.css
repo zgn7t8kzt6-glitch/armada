@@ -119,6 +119,13 @@ hr{border:none;border-top:1px solid var(--line);margin:22px 0}
 .huddle h2{font-size:15px;letter-spacing:2px;text-transform:uppercase;color:#9fc6c2;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:6px;margin:22px 0 8px}
 .huddle .hitem{font-size:19px;margin:8px 0;line-height:1.4}
 .huddle-actions{position:fixed;bottom:24px;right:6vw;display:flex;gap:10px}
+.huddle h3{font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:#cfe;opacity:.85;margin:14px 0 4px}
+.huddle-step-k{font-family:sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#9fc6c2;margin-bottom:14px}
+.huddle-cta{margin-top:22px}
+.huddle-nav{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:40px;max-width:760px}
+.hdots{display:flex;gap:9px}
+.hdot{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.28)}
+.hdot.on{background:var(--gold);box-shadow:0 0 0 3px rgba(210,154,94,.25)}
 .only-print{display:none}
 @media print{.only-print{display:inline}}
 main{max-width:1160px;margin:0;padding:34px 40px 100px;width:100%}

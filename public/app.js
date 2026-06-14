@@ -806,25 +806,46 @@ async function whCols(){ $('whResult').textContent='Reading census columns…'; 
 async function saveKioskCode(){ await api('/settings/kiosk-code',{method:'POST',body:JSON.stringify({code:$('kc_code').value})}); alert('Kiosk/display code saved.'); }
 async function testAlert(){ const r=await api('/settings/test-alert',{method:'POST'}); alert(`Test sent. Email ${r.emailReady?'attempted':'not configured'}, SMS ${r.smsReady?'attempted':'not configured'}.`); }
 
-/* ---- huddle mode (full-screen daily lineup) ---- */
+/* ---- huddle mode: the start-of-shift lineup as a paced, stepped ritual ---- */
+let HUDDLE_STEPS=[], HUDDLE_I=0;
 async function startHuddle(){
   const [t, line, conc] = await Promise.all([api('/today'), api('/lineup'), api('/concerns').catch(()=>({concerns:[]}))]);
   const atRisk = (t.attention||[]).filter(a=>a.kind==='risk');
   const welcome = (t.attention||[]).filter(a=>a.kind==='welcome');
+  const leaving = (t.dischargesToday||[]);
   const wow = (line.wows||[])[0];
   const openConcern = (conc.concerns||[]).find(c=>c.status==='Open');
   const dt = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
-  $('huddleBody').innerHTML = `
-    <h1>Daily Lineup</h1><div class="hint" style="color:#cfe">${dt} · ${esc($('r_shift')?.value||'')} shift</div>
-    <h2>Today's value</h2><div class="hv">${esc(line.value||'')}</div>
-    <h2>The house</h2>
-    <div class="hitem">${t.metrics.active} active clients · ${t.metrics.highRisk} at risk · ${t.metrics.openConcerns} open concerns · ${t.metrics.callsDue} aftercare calls due</div>
-    ${welcome.length?`<h2>New arrivals — deliver the welcome</h2>${welcome.map(w=>`<div class="hitem">☀ ${esc(w.text)}</div>`).join('')}`:''}
-    <h2>Needs extra care today</h2>${atRisk.length?atRisk.map(a=>`<div class="hitem">⚠ ${esc(a.text)}</div>`).join(''):'<div class="hitem">All steady — touch every client, deliver every personal touch.</div>'}
-    <h2>Recognition</h2><div class="hitem">${wow?'👏 '+esc(wow.text)+(wow.by_name?' — '+esc(wow.by_name):''):'Catch someone doing something great today and name it.'}</div>
-    <h2>One defect to own</h2><div class="hitem">${openConcern?'⚑ '+esc(openConcern.pref||'')+': '+esc(openConcern.text)+' — who owns the fix?':'No open concerns. 🎉'}</div>
-    <h2>Today's focus</h2><div class="hitem">${esc(t.focus?.t||'')} — ${esc(t.focus?.g||'')}</div>`;
+  const shift = $('r_shift')?.value||'Day';
+  const credo = 'We are here to restore dignity and save lives — Ladies and Gentlemen serving Ladies and Gentlemen.';
+  HUDDLE_STEPS = [
+    {k:'Why we’re here', html:`<h1>Daily Lineup</h1><div class="hint" style="color:#cfe">${dt} · ${esc(shift)} shift</div><div class="hv" style="margin-top:18px">${esc(credo)}</div>`},
+    {k:'Today’s Standard', html:`<h2>Today’s Standard — say it aloud</h2><div class="hv">${esc(line.value||'')}</div>${t.focus?.t?`<div class="hitem" style="margin-top:16px">⭐ <strong>${esc(t.focus.t)}</strong>${t.focus.g?' — '+esc(t.focus.g):''}</div>`:''}`},
+    {k:'The house right now', html:`<h2>The house right now</h2><div class="hitem">${t.metrics.active} active · ${t.metrics.highRisk} at risk · ${t.metrics.callsDue} aftercare calls due</div>`+
+      (welcome.length?`<h3 style="margin-top:16px">Welcome today ☀</h3>`+welcome.map(w=>`<div class="hitem">${esc(w.text)}</div>`).join(''):'')+
+      `<h3 style="margin-top:16px">Needs extra care ⚠</h3>`+(atRisk.length?atRisk.map(a=>`<div class="hitem">${esc(a.text)}</div>`).join(''):'<div class="hitem">All steady — touch every client, deliver every personal touch.</div>')+
+      (leaving.length?`<h3 style="margin-top:16px">Leaving today — a fond farewell 🤝</h3>`+leaving.map(d=>`<div class="hitem">${esc(d.pref||d.name)}${d.discharge_status?' ('+esc(d.discharge_status)+')':''}</div>`).join(''):'')},
+    {k:'Recognition', html:`<h2>Recognition — catch someone great</h2><div class="hitem">${wow?'👏 '+esc(wow.text)+(wow.by_name?' — '+esc(wow.by_name):''):'No Wow logged yet — name one now.'}</div><div class="huddle-cta"><button class="btn btn-gold sans" onclick="logWow()">✨ Name a Wow</button></div>`},
+    {k:'Own one defect', html:`<h2>One defect to own</h2><div class="hitem">${openConcern?'⚑ '+esc((openConcern.pref?openConcern.pref+': ':''))+esc(openConcern.text)+' — who owns the fix?':'No open concerns. 🎉 Keep it that way.'}</div>`},
+    {k:'Commit', html:`<h2>We’re aligned</h2><div class="hitem">Everyone present commits to today’s Standard. Tap below — it logs you into the lineup and counts toward your streak.</div><div class="huddle-cta"><button class="btn btn-gold sans" id="huddleCommit" onclick="huddleCommit()">✋ I’m on it</button> <span id="huddleCommitMsg" class="hint" style="color:#cfe;align-self:center"></span></div>`},
+  ];
+  HUDDLE_I=0; renderHuddleStep();
   $('huddle').style.display='block'; window.scrollTo(0,0);
+}
+function renderHuddleStep(){
+  const s=HUDDLE_STEPS[HUDDLE_I]; if(!s) return;
+  const dots = HUDDLE_STEPS.map((x,i)=>`<span class="hdot${i===HUDDLE_I?' on':''}"></span>`).join('');
+  const next = HUDDLE_I<HUDDLE_STEPS.length-1 ? `<button class="btn btn-gold sans" onclick="huddleNav(1)">Next →</button>` : `<button class="btn btn-gold sans" onclick="closeHuddle()">Done ✓</button>`;
+  const nav = `<div class="huddle-nav"><button class="btn btn-ghost sans" onclick="huddleNav(-1)" ${HUDDLE_I===0?'disabled':''}>← Back</button><div class="hdots">${dots}</div>${next}</div>`;
+  $('huddleBody').innerHTML = `<div class="huddle-step-k">${HUDDLE_I+1} / ${HUDDLE_STEPS.length} · ${esc(s.k)}</div>${s.html}${nav}`;
+}
+function huddleNav(d){ HUDDLE_I=Math.max(0,Math.min(HUDDLE_STEPS.length-1,HUDDLE_I+d)); renderHuddleStep(); }
+async function huddleCommit(){
+  try{ await api('/lineup-log',{method:'POST',body:JSON.stringify({shift:$('r_shift')?.value||'Day'})});
+    await api('/focus',{method:'POST',body:JSON.stringify({})});
+    const f=await api('/focus'); $('huddleCommitMsg').textContent=`✓ ${f.participants} on it today`;
+    const b=$('huddleCommit'); if(b){ b.textContent='✓ On it'; b.disabled=true; } }
+  catch(e){ $('huddleCommitMsg').textContent=e.message; }
 }
 function closeHuddle(){ $('huddle').style.display='none'; }
 async function lineupDone(){ await api('/lineup-log',{method:'POST',body:JSON.stringify({shift:$('r_shift')?.value||'Day'})}); closeHuddle(); alert('Lineup logged ✓ (counts toward Scorecard compliance).'); }
@@ -2270,7 +2291,7 @@ async function loadDashboard(){
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <div style="flex:1;min-width:220px"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Today's Standard — the whole house stresses this</div>
           <h3 style="margin:2px 0 0">${esc(fc.topic)}</h3>${fc.goal?`<p class="sub sans" style="margin:4px 0 0">${esc(fc.goal)}</p>`:''}</div>
-        <button class="btn btn-gold btn-sm sans" onclick="dashJoinFocus(this)">I'm on it ✋</button>
+        <div class="toolbar" style="gap:8px"><button class="btn btn-ghost btn-sm sans" onclick="startHuddle()">▶ Run the lineup</button><button class="btn btn-gold btn-sm sans" onclick="dashJoinFocus(this)">I'm on it ✋</button></div>
       </div></div>` : '';
   // Your week — healthy pride
   const st=d.stats||{};

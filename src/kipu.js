@@ -179,6 +179,7 @@ export async function kipuSyncRoster() {
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
   const timeOf = (v) => { if (!v) return null; const m = String(v).match(/[T ](\d{2}:\d{2})/); return m ? m[1] : null; };
   const activeKids = [];   // census patients who are currently active (no discharge)
+  const newDischarges = [];   // census rows for recently-discharged patients we don't have yet
 
   // Location scoping. Prefer KIPU_LOCATION_ID (exact); fall back to a
   // KIPU_LOCATION name match. Belt-and-suspenders on top of the API filter.
@@ -335,6 +336,32 @@ export async function kipuSyncRoster() {
       // census, which would inflate past days with a one-time spike.
       if (admit && admit >= yest) evt.run(info.lastInsertRowid, kid || null, 'admit', null, newLoc, admit, null);
       created++;
+    } else if (kid && dischDate) {
+      // NEW + discharged: the census includes recent discharges. Defer creating
+      // them until after the loop (so we know who's currently active) to capture
+      // discharges that would otherwise never enter the app.
+      newDischarges.push({ name, first: p.first_name, room, program, newLoc, admit, admitTime, therapist, caseMgr, refSource,
+        dob, diagnosis, insurance, phone, pronouns, language, mrn, paymentMethod, nextLoc, anticipatedDc, kid,
+        dischStatus, dischDate: String(dischDate).slice(0, 10), dischDest, dischReason });
+    }
+  }
+
+  // Import recent discharges from the census (keyed by casefile, recent window,
+  // and skipping anyone currently admitted under another casefile) so discharges
+  // show up even after a Rebuild / on first run.
+  let importedDischarges = 0;
+  {
+    const dischCutoff = new Date(Date.now() - (+(process.env.KIPU_DISCHARGE_DAYS || 30)) * 864e5).toISOString().slice(0, 10);
+    const activeMasters = new Set(activeKids.map((k) => String(k).split(':')[0]));
+    for (const r of newDischarges) {
+      if (!r.dischDate || r.dischDate < dischCutoff) continue;
+      if (byKipu.get(r.kid)) continue;                              // already have this episode
+      if (activeMasters.has(String(r.kid).split(':')[0])) continue; // currently admitted elsewhere
+      const info = ins.run(r.name, r.first || r.name, r.room, r.program, r.newLoc, r.admit, r.admitTime, r.therapist, r.caseMgr, r.refSource,
+        r.dob, r.diagnosis, r.insurance, r.phone, r.pronouns, r.language, r.mrn, r.paymentMethod, r.nextLoc, r.anticipatedDc, r.kid);
+      db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, discharge_reason = ? WHERE id = ?`)
+        .run(r.dischStatus ? String(r.dischStatus) : 'Discharged', r.dischDate, r.dischDest || null, r.dischReason || null, info.lastInsertRowid);
+      importedDischarges++;
     }
   }
 
@@ -356,7 +383,7 @@ export async function kipuSyncRoster() {
     deactivated = r.changes || 0;
   }
   rollupDailyMetrics(today);   // refresh today's intake/discharge/LOC-change/AMA snapshot
-  return { total: list.length, created, matched, deactivated, activeNow: activeKids.length };
+  return { total: list.length, created, matched, deactivated, importedDischarges, activeNow: activeKids.length };
 }
 
 // Pull a single patient's recent clinical documentation (evaluations/notes) and

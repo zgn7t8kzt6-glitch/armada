@@ -1125,7 +1125,10 @@ app.post('/api/kipu/notes-preview', requireAuth, requireAdmin, async (req, res) 
 // (use after test-syncs left stale/duplicate clients).
 app.post('/api/kipu/reset', requireAuth, requireAdmin, async (req, res) => {
   try {
-    db.prepare(`DELETE FROM clients`).run();
+    // Clear ACTIVE clients to refresh the live census, but PRESERVE recent
+    // discharge history (only purge discharges older than 90 days) — a Rebuild
+    // must not erase the discharge record.
+    db.prepare(`DELETE FROM clients WHERE active = 1 OR (discharge_date IS NOT NULL AND discharge_date < date('now','-90 day'))`).run();
     const r = await kipuSyncRoster();
     audit({ user: req.user, action: 'KIPU_RESET', detail: `rebuilt: ${r.created} active`, ip: req.ip });
     afterSyncAssess(req.user);

@@ -104,7 +104,7 @@ const GROUPS=[
   {g:'admin',label:'Admin',first:'settings',admin:true},
 ];
 const GROUP_OF={
-  command:'command',
+  command:'command',compliance:'command',
   today:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',
   report:'care',lineup:'care',concierge:'care',dignity:'care',rounds:'care',program:'care',
@@ -150,6 +150,7 @@ function show(v){
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
+  if(v==='compliance') loadCompliance();
   if(v==='askai') loadAskAI();
   if(v==='incidents') loadIncidents();
   if(v==='alumni') loadAlumni();
@@ -1321,6 +1322,25 @@ async function dignityDeliver(id, name){
 }
 async function dignityNa(id){ const note=prompt('Mark not needed — reason? (e.g. client brought their own)'); if(note===null) return; await api('/dignity/'+id+'/na',{method:'POST',body:JSON.stringify({note})}); loadDignity(); }
 async function dignityReopen(id){ await api('/dignity/'+id+'/reopen',{method:'POST'}); loadDignity(); }
+
+/* ---- Documentation compliance ---- */
+async function loadCompliance(){
+  let d; try{ d=await api('/compliance'); }catch(e){ $('compFields').innerHTML='<div class="card"><div class="empty">Available to leadership.</div></div>'; return; }
+  $('compScore').textContent = (d.score==null?'—':d.score+'%')+' complete · '+d.clients+' clients';
+  $('compFields').innerHTML = (d.fields||[]).map(f=>{
+    const pct=f.pct==null?0:f.pct;
+    const col=f.pct==null?'var(--muted)':pct>=90?'var(--good)':pct>=60?'var(--gold)':'var(--danger)';
+    const od=f.overdue||[];
+    return `<div class="card">
+      <div class="cmd-hero-row">
+        <div><strong>${esc(f.label)}</strong> <span class="hint">· due within ${f.slaHrs}h of admit</span></div>
+        <div><span class="risk ${pct>=90?'risk-low':pct>=60?'risk-elev':'risk-high'}">${f.pct==null?'—':pct+'%'}</span> <span class="hint">${f.complete}/${f.total}${f.overdueCount?' · '+f.overdueCount+' overdue':''}</span></div>
+      </div>
+      <div class="trbar-track" style="margin:8px 0"><div class="trbar-fill" style="width:${pct}%;background:${col}"></div></div>
+      ${od.length?`<details><summary class="hint" style="cursor:pointer">${od.length} overdue — show</summary>${od.map(o=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main"><strong>${esc(o.name)}</strong>${o.room?' <span class="hint">· '+esc(o.room)+'</span>':''}<div class="hint">${o.mins==null?'admit time unknown':Math.floor(o.mins/60)+'h since admit'} · still missing</div></div><button class="btn btn-ghost btn-sm sans" onclick="openJourney(${o.id})">Open</button></div>`).join('')}</details>`:'<div class="hint">All current clients complete (or within the window). ✓</div>'}
+    </div>`;
+  }).join('');
+}
 
 /* ---- Leadership Command Center ---- */
 async function loadCommand(){

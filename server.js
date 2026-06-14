@@ -212,6 +212,41 @@ app.get('/api/carecards', requireAuth, (req, res) => {
   });
 });
 
+// ---- Documentation compliance: % of required Kipu fields completed, per SLA,
+// with the overdue clients named. Turns "is the chart complete?" into a score. ----
+const DOC_REQS = [
+  { key: 'loc', label: 'Level of care (ASAM)', slaHrs: 1, has: (c) => c.loc && c.loc !== 'Unspecified' },
+  { key: 'diagnosis', label: 'Diagnosis', slaHrs: 24, has: (c) => !!c.diagnosis },
+  { key: 'insurance', label: 'Insurance', slaHrs: 24, has: (c) => !!c.insurance },
+  { key: 'therapist', label: 'Primary therapist', slaHrs: 24, has: (c) => !!c.therapist },
+  { key: 'case_manager', label: 'Case manager', slaHrs: 24, has: (c) => !!c.case_manager },
+  { key: 'referral_source', label: 'Referral source', slaHrs: 24, has: (c) => !!c.referral_source },
+  { key: 'biopsych', label: 'Biopsychosocial', slaHrs: 24, flag: /biopsych|bio-psycho|psychosocial/i },
+  { key: 'tx_plan', label: 'Treatment plan / ASAM', slaHrs: 72, flag: /treatment plan|tx plan|\basam\b|tx-plan/i },
+  { key: 'cm_note', label: 'Case-management note', slaHrs: 24, flag: /case.?manage|cm note/i },
+];
+app.get('/api/compliance', requireAuth, requireAdmin, (req, res) => {
+  const clients = db.prepare(`SELECT id, pref, name, room, admit, admit_time, loc, diagnosis, insurance, therapist, case_manager, referral_source FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const flagsByClient = {};
+  for (const c of clients) { const a = latestAmaRead(c.id); flagsByClient[c.id] = a ? safeArr(a.doc_flags) : null; }
+  const out = DOC_REQS.map((rq) => {
+    let complete = 0, applicable = 0; const overdue = [], missing = [];
+    for (const c of clients) {
+      let ok;
+      if (rq.flag) { const f = flagsByClient[c.id]; if (f == null) continue; applicable++; ok = !f.some((x) => rq.flag.test(x)); }
+      else { applicable++; ok = !!rq.has(c); }
+      if (ok) { complete++; continue; }
+      const m = careCardMinsSinceAdmit(c);
+      const row = { id: c.id, name: c.pref || c.name, room: c.room, mins: m };
+      missing.push(row);
+      if (m == null || m > rq.slaHrs * 60) overdue.push(row);
+    }
+    return { key: rq.key, label: rq.label, slaHrs: rq.slaHrs, complete, total: applicable, pct: applicable ? Math.round(complete / applicable * 100) : null, overdueCount: overdue.length, overdue: overdue.slice(0, 30), missing: missing.slice(0, 30) };
+  });
+  const totC = out.reduce((s, r) => s + r.complete, 0), totT = out.reduce((s, r) => s + r.total, 0);
+  res.json({ clients: clients.length, score: totT ? Math.round(totC / totT * 100) : null, fields: out });
+});
+
 // Build the nightly census (the in-app equal of the manual email) as HTML+text.
 function buildCensusReport() {
   const today = appToday();

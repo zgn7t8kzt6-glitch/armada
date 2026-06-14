@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260613o" />
+<link rel="stylesheet" href="/styles.css?v=20260613p" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -44,6 +44,7 @@
     <nav class="side-nav sans" id="nav">
     <button data-view="today">Today</button>
     <button data-view="command" data-admin>Command Center</button>
+    <button data-view="compliance" data-admin>Documentation</button>
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
     <button data-view="outcomes">Insights</button>
@@ -229,6 +230,17 @@
         </div>
         <div id="cmdChecklist"></div>
       </div>
+    </section>
+
+    <!-- DOCUMENTATION COMPLIANCE (admin) -->
+    <section id="compliance" class="view">
+      <div class="card cmd-hero">
+        <div class="cmd-hero-row">
+          <div><h3>Documentation Compliance</h3><p class="sub sans">Are we collecting everything Kipu needs, on time? Each field has a deadline from admission; anything past its window still missing is flagged and named to the client.</p></div>
+          <div class="cmd-hero-actions"><span id="compScore" class="badge"></span><button class="btn btn-ghost btn-sm sans" onclick="loadCompliance()">↻ Refresh</button></div>
+        </div>
+      </div>
+      <div id="compFields"></div>
     </section>
 
     <!-- ASK AI -->
@@ -1046,6 +1058,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260613o"></script>
+<script src="/app.js?v=20260613p"></script>
 </body>
 </html>

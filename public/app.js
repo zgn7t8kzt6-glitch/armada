@@ -1534,16 +1534,18 @@ async function loadCommandPeriod(){
     `<div class="ret-card ${dc.amaRate>=20?'rc-high':(p.ama&&p.ama.count?'rc-warn':'')}"><div class="n">${(p.ama&&p.ama.count)||0}</div><div class="l">AMA · ${dc.amaRate||0}%</div></div>`+
     `<div class="ret-card"><div class="n">${dc.avgLos!=null?dc.avgLos:'—'}</div><div class="l">Avg LOS (days)</div></div>`;
   const sb=Object.entries(dc.byStatus||{}).map(([k,n])=>`<span class="risk ${/ama/i.test(k)?'risk-warn':'risk-low'}" style="margin-right:6px">${esc(k)}: ${n}</span>`).join('');
-  const amaRows=((p.ama&&p.ama.list)||[]).map(a=>`<tr onclick="editClient(${a.id})" style="cursor:pointer">`+
+  const row=(a)=>`<tr onclick="editClient(${a.id})" style="cursor:pointer" title="Open full chart">`+
     `<td><strong>${esc(a.name)}</strong>${a.therapist?`<div class="hint">${esc(a.therapist)}</div>`:''}</td>`+
+    `<td>${/ama/i.test(a.status)?'<span class="risk risk-warn">AMA</span>':esc(a.status||'')}</td>`+
     `<td>${esc(a.date||'')}</td><td>${a.los!=null?a.los+'d':'—'}</td>`+
-    `<td>${esc(a.reason||a.improve||'')||'<span class=hint>—</span>'}</td>`+
-    `<td>${a.hasRead?'<span class="risk risk-low">read ✓</span>':'<span class="hint">no read</span>'}</td></tr>`).join('');
+    `<td>${esc(a.reason||'')||'<span class=hint>—</span>'}</td>`+
+    `<td>${a.hasRead?'<span class="risk risk-low">read ✓</span>':'<span class="hint">›</span>'}</td></tr>`;
+  const dlist=(dc.list||[]);
   $('periodDetail').innerHTML =
     (sb?`<div style="margin:10px 0">${sb}</div>`:'')+
-    (amaRows?`<div class="cmd-sub">AMA discharges — why they left (click a row to open the chart)</div>`+
-      `<table class="tbl"><tr><th>Client</th><th>Left</th><th>LOS</th><th>Reason / what we'd improve</th><th></th></tr>${amaRows}</table>`
-      :'<div class="hint" style="margin-top:8px">No AMA discharges in this period. 🎉</div>');
+    (dlist.length?`<div class="cmd-sub">All discharges — click any patient to open the full chart and review the notes</div>`+
+      `<table class="tbl"><tr><th>Client</th><th>Type</th><th>Left</th><th>LOS</th><th>Reason / what we'd improve</th><th></th></tr>${dlist.map(row).join('')}</table>`
+      :'<div class="hint" style="margin-top:8px">No discharges in this period.</div>');
 }
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
@@ -1570,9 +1572,10 @@ async function loadCommand(){
     const dcs=(f.dischargesTodayList||[]);
     const dcRecent=(f.dischargesRecentList||[]);
     const sendouts=(f.sendouts||[]);
+    const dcLine=(x,extra='')=>`<div class="pc-note"${x.id?` onclick="editClient(${x.id})" style="cursor:pointer" title="Open chart"`:''}>↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)}${extra}${x.reason?' · '+esc(x.reason):''}${x.id?' <span class="hint">›</span>':''}</div>`;
     const dcBlock = dcs.length
-      ? dcs.map(x=>`<div class="pc-note">↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)}${x.reason?' · '+esc(x.reason):''}</div>`).join('')
-      : '<div class="pc-note">ZERO today</div>'+(dcRecent.length?`<div class="hint" style="margin-top:4px">Recent (72h):</div>`+dcRecent.map(x=>`<div class="pc-note">↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)} <span class="hint">${esc(x.date||'')}</span>${x.reason?' · '+esc(x.reason):''}</div>`).join(''):'');
+      ? dcs.map(x=>dcLine(x)).join('')
+      : '<div class="pc-note">ZERO today</div>'+(dcRecent.length?`<div class="hint" style="margin-top:4px">Recent (72h):</div>`+dcRecent.map(x=>dcLine(x,` <span class="hint">${esc(x.date||'')}</span>`)).join(''):'');
     const sendoutBlock = sendouts.length?sendouts.map(s=>`<div class="pc-note">🏥 <strong>${esc(s.client_name)}</strong> — ${esc(s.destination||'sent out')}${s.reason?': '+esc(s.reason):''}</div>`).join(''):'<div class="hint">None out right now.</div>';
     const sched=(d.scheduled&&d.scheduled.list)||[];
     const schedBlock = sched.length

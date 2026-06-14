@@ -863,12 +863,12 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const admitsTodayList = active.filter((c) => (c.admit || '').slice(0, 10) === today).map((c) => ({ name: c.pref || c.name, loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (parseLoc(c.program) || '') }));
   const discharges7d = db.prepare(`SELECT COUNT(*) n FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-7 day')`).get().n;
   const dischargesToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
-  const dischargesTodayList = db.prepare(`SELECT pref, name, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today)
-    .map((c) => ({ name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
+  const dischargesTodayList = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today)
+    .map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
   // Recent discharges (3 days) so a just-after-midnight view still shows them.
-  const dischargesRecentList = db.prepare(`SELECT pref, name, discharge_status, discharge_reason, substr(discharge_date,1,10) d
+  const dischargesRecentList = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, substr(discharge_date,1,10) d
     FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-3 day') ORDER BY discharge_date DESC`).all()
-    .map((c) => ({ name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '', date: c.d }));
+    .map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '', date: c.d }));
   const sendoutsActive = db.prepare(`SELECT client_name, destination, reason FROM medical_sendouts WHERE status = 'out' ORDER BY sent_at DESC`).all();
 
   // Per-client latest read, computed once.
@@ -1024,12 +1024,19 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   const amaCount = amaList.length;
   const losVals = dischRows.map((d) => losOf(d.admit, d.discharge_date)).filter((n) => n != null);
   const avgLos = losVals.length ? +(losVals.reduce((a, b) => a + b, 0) / losVals.length).toFixed(1) : null;
+  // Every discharge in the period, clickable through to the chart.
+  const dischList = dischRows.map((d) => ({
+    id: d.id, name: d.pref || d.name, date: (d.discharge_date || '').slice(0, 10),
+    status: d.discharge_status || 'Discharged', los: losOf(d.admit, d.discharge_date),
+    reason: d.discharge_reason || d.discharge_improve || '', therapist: d.therapist || '',
+    hasRead: !!latestAmaRead(d.id),
+  }));
 
   res.json({
     since,
     scheduled: { total: schedTotal, arrived: schedMap.arrived || 0, noShow: schedMap.no_show || 0, expected: schedMap.expected || 0 },
     admitted,
-    discharged: { total: dischRows.length, byStatus, avgLos, amaRate: dischRows.length ? Math.round(amaCount / dischRows.length * 100) : 0 },
+    discharged: { total: dischRows.length, byStatus, avgLos, amaRate: dischRows.length ? Math.round(amaCount / dischRows.length * 100) : 0, list: dischList },
     ama: { count: amaCount, list: amaList },
   });
 });

@@ -88,6 +88,15 @@ async function boot(){
   show(landing);
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
+// Build a deep link to a patient's Kipu chart from the configured URL pattern.
+// Tokens: {id} full kipu_id, {master} numeric master id, {casefile} UUID.
+function kipuWebLink(kipuId){
+  const tpl = META && META.kipuWeb; if(!tpl || !kipuId) return '';
+  const id = String(kipuId); const parts = id.split(':');
+  return tpl.replace(/\{id\}/g, encodeURIComponent(id))
+            .replace(/\{master\}/g, encodeURIComponent(parts[0]||''))
+            .replace(/\{casefile\}/g, encodeURIComponent(parts[1]||''));
+}
 
 /* ---- grouped nav (role-aware: everyday up top; leadership & admin tucked away) ---- */
 const GROUPS=[
@@ -288,6 +297,9 @@ function fillForm(c){
   ['name','room','program','admit','admit_time','therapist','case_manager'].forEach(f=>{ const el=$('f_'+f); if(el){ el.readOnly=fromKipu; el.classList.toggle('locked',fromKipu); el.title = fromKipu?'From Kipu — edit in the chart':''; } });
   // Welcome + aftercare plans are authored by Claude from policy, never free-typed.
   ['welcome_plan','aftercare_plan'].forEach(f=>{ const el=$('f_'+f); if(el){ el.readOnly=true; el.classList.add('locked'); } });
+  // Deep link to this patient's Kipu chart (opens out of the app).
+  const kl=$('kipuOpenLink');
+  if(kl){ const url=kipuWebLink(c.kipu_id); if(url){ kl.href=url; kl.style.display=''; } else kl.style.display='none'; }
   renderKipuDemo(c);
   renderPhotoCard(c);
   const tl = $('taskList'); tl.innerHTML='';
@@ -671,8 +683,14 @@ async function sfDescribe(obj){
       (r.sample&&r.sample.length?`<details style="margin-top:6px"><summary>Sample rows (${r.sample.length})</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(r.sample,null,2))}</pre></details>`:'');
   }catch(e){ box.innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
 }
+async function saveKipuWeb(){
+  $('kipuWebMsg').textContent='Saving…';
+  try{ const r=await api('/settings/kipu-web',{method:'POST',body:JSON.stringify({url:$('kipuWebUrl').value})}); META.kipuWeb=r.kipuWeb; $('kipuWebMsg').textContent='✓ Saved — "Open in Kipu" now shows on each Care Card.'; }
+  catch(e){ $('kipuWebMsg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function loadSettings(){
   loadEmailConfig(); loadSmsConfig(); loadSfConfig();
+  if($('kipuWebUrl')) $('kipuWebUrl').value = (META && META.kipuWeb) || '';
   const st = await api('/settings');
   const dot=(ok)=>ok?'<span class="risk risk-low">ready</span>':'<span class="risk risk-warn">not set</span>';
   const prov = st.aiProvider==='bedrock'?'AWS Bedrock':'Anthropic API';

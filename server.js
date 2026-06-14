@@ -1309,7 +1309,12 @@ app.get('/api/ai/health', requireAuth, requireAdmin, async (req, res) => {
   catch (e) { res.status(500).json({ ok: false, error: e.message, provider: aiProvider() }); }
 });
 
-app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), kipu: kipuConfigured(), amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined, deidentify: DEID }));
+app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), kipu: kipuConfigured(), kipuWeb: getState('kipu_web') || process.env.KIPU_WEB_URL || '', amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined, deidentify: DEID }));
+app.post('/api/settings/kipu-web', requireAuth, requireAdmin, (req, res) => {
+  setState('kipu_web', (req.body?.url || '').trim());
+  audit({ user: req.user, action: 'KIPU_WEB_SET', ip: req.ip });
+  res.json({ ok: true, kipuWeb: getState('kipu_web') || '' });
+});
 
 // Change my own password.
 app.post('/api/change-password', requireAuth, (req, res) => {

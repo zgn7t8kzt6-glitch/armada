@@ -841,5 +841,27 @@ export async function kipuInspect() {
     ];
     photoProbe = await mapLimit(paths, 4, (p) => kipuRawProbe(p));
   }
-  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail, dischargeAnalysis, photoProbe };
+  // Rounds probe: find where Kipu serves hourly/observation rounds. Try patient-
+  // scoped and facility date-ranged shapes; also see if rounds are charted as
+  // evaluations (count eval names containing "round").
+  let roundsProbe = null;
+  {
+    const phi = process.env.KIPU_PHI_LEVEL || 'high', e = encodeURIComponent;
+    const m = cf ? cf.split(':')[0] : '', u = cf && cf.includes(':') ? cf.slice(cf.indexOf(':') + 1) : cf;
+    const start = startStr, today = todayStr;
+    const cands = [
+      `/api/rounds?start_date=${start}&end_date=${today}`,
+      `/api/patient_rounds?start_date=${start}&end_date=${today}`,
+      `/api/rounds?phi_level=${phi}&start_date=${start}&end_date=${today}`,
+      `/api/scheduler/rounds?start_date=${start}&end_date=${today}`,
+      cf ? `/api/patients/${m}/rounds?phi_level=${phi}&patient_master_id=${e(u)}` : null,
+      cf ? `/api/patients/${m}/patient_rounds?phi_level=${phi}&patient_master_id=${e(u)}` : null,
+    ].filter(Boolean);
+    const probes = await mapLimit(cands, 4, (p) => kipuRawProbe(p));
+    // Are rounds charted as evaluations? (the facet/name approach)
+    let roundEvalNames = null;
+    if (cf) { try { const ev = await evalListRaw(cf, { all: true }); roundEvalNames = [...new Set(ev.map((x) => x.name).filter((n) => /round|q15|q ?15|observation|safety check|bed ?check/i.test(n || '')))].slice(0, 8); } catch { /* ignore */ } }
+    roundsProbe = { probes, roundEvalNames };
+  }
+  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail, dischargeAnalysis, photoProbe, roundsProbe };
 }

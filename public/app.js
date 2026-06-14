@@ -591,7 +591,8 @@ async function kipuInspect(){ $('kipuResult').textContent='Inspecting Kipu field
   + '\n\nFACETS:\n'+Object.entries(r.facets).map(([k,v])=>'  '+k+': '+v.join(' | ')).join('\n')
   + (r.patientDetail ? '\n\n===== PATIENT DETAIL PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.patientDetail,null,2) : '')
   + (r.dischargeAnalysis ? '\n\n===== DISCHARGE PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.dischargeAnalysis,null,2) : '')
-  + (r.photoProbe ? '\n\n===== PHOTO PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.photoProbe,null,2) : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+  + (r.photoProbe ? '\n\n===== PHOTO PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.photoProbe,null,2) : '')
+  + (r.roundsProbe ? '\n\n===== ROUNDS PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.roundsProbe,null,2) : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuCoverage(){
   $('kipuResult').textContent='Checking what each field is pulling…';
   $('kipuInspect').style.display='none'; const el=$('kipuCoverage'); el.style.display='none';

@@ -8,7 +8,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -88,6 +88,25 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
   c.tasks = db.prepare(`SELECT * FROM tasks WHERE client_id = ? ORDER BY sort, id`).all(c.id);
   audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: c.id, detail: c.name, ip: req.ip });
   res.json({ client: c });
+});
+
+// FULL KIPU CHART: list every documented evaluation/form on a client, and read
+// any single one on demand. This is the whole chart, not the AI's sample.
+app.get('/api/clients/:id/chart', requireAuth, async (req, res) => {
+  const c = db.prepare(`SELECT kipu_id FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  if (!c.kipu_id || !kipuConfigured()) return res.json({ evaluations: [], kipu: false });
+  try { res.json({ evaluations: await kipuPatientChart(c.kipu_id), kipu: true }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/clients/:id/chart/:evalId', requireAuth, async (req, res) => {
+  const c = db.prepare(`SELECT kipu_id FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c?.kipu_id) return res.status(404).json({ error: 'No chart' });
+  try {
+    const ev = await kipuEvaluation(c.kipu_id, req.params.evalId);
+    audit({ user: req.user, action: 'CHART_VIEW', entity: 'client', entity_id: +req.params.id, detail: ev.name, ip: req.ip });
+    res.json(ev);
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'admit_time', 'sober', 'therapist', 'case_manager', 'referral_source', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'anchor_why', 'welcome_plan', 'aftercare_plan'];

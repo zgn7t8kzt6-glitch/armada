@@ -200,7 +200,7 @@ async function renderClients(){
   });
 }
 
-function newClient(){ currentId=null; fillForm({}); $('editorTitle').textContent='New Care Card'; $('deleteBtn').style.display='none'; $('dischargeBox').style.display='none'; show('editor'); }
+function newClient(){ currentId=null; fillForm({}); $('editorTitle').textContent='New Care Card'; $('deleteBtn').style.display='none'; $('dischargeBox').style.display='none'; if($('kipuChartCard'))$('kipuChartCard').style.display='none'; show('editor'); }
 async function editClient(id){
   const { client } = await api('/clients/'+id);
   currentId = id; fillForm(client);
@@ -208,7 +208,26 @@ async function editClient(id){
   $('deleteBtn').style.display = ME.role==='admin' ? 'inline-block':'none';
   $('dischargeBox').style.display='block'; $('d_date').value = today();
   show('editor');
+  if(client.kipu_id) loadKipuChart(id); else if($('kipuChartCard')) $('kipuChartCard').style.display='none';
 }
+async function loadKipuChart(cid, reload){
+  const card=$('kipuChartCard'); if(!card) return;
+  if(reload) $('kipuChartList').innerHTML='<div class="hint">Loading the full chart…</div>';
+  card.style.display='';
+  try{
+    const d=await api('/clients/'+cid+'/chart');
+    if(!d.kipu){ card.style.display='none'; return; }
+    if(!d.evaluations.length){ $('kipuChartList').innerHTML='<div class="hint">No documents found in Kipu for this client.</div>'; return; }
+    $('kipuChartSub').textContent = d.evaluations.length+' documents on this chart — click any to read it.';
+    $('kipuChartList').innerHTML = d.evaluations.map(e=>`<details class="chart-note"><summary><span class="chart-name">${esc(e.name)}</span>${e.date?` <span class="hint">· ${esc(e.date)}</span>`:''}</summary><div class="chart-body" data-cid="${cid}" data-eid="${esc(String(e.id))}" data-loaded="0">Loading…</div></details>`).join('');
+    document.querySelectorAll('#kipuChartList details').forEach(dt=>dt.addEventListener('toggle',function(){ if(this.open){ const b=this.querySelector('.chart-body'); if(b&&b.dataset.loaded==='0'){ b.dataset.loaded='1'; openChartNote(b); } } }));
+  }catch(e){ $('kipuChartList').innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; }
+}
+async function openChartNote(b){
+  try{ const d=await api('/clients/'+b.dataset.cid+'/chart/'+encodeURIComponent(b.dataset.eid)); b.textContent = d.content || '(no readable content in this note)'; }
+  catch(e){ b.textContent='Could not load this note.'; }
+}
+function filterChart(){ const q=($('kipuChartFilter').value||'').toLowerCase(); document.querySelectorAll('#kipuChartList details').forEach(dt=>{ const nm=(dt.querySelector('.chart-name')?.textContent||'').toLowerCase(); dt.style.display = (!q||nm.includes(q))?'':'none'; }); }
 async function dischargeClient(){
   if(!currentId) return;
   const status=$('d_status').value;

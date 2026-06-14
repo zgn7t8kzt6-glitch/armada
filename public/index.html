@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260612q" />
+<link rel="stylesheet" href="/styles.css?v=20260612r" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -673,6 +673,14 @@
         <h3 style="margin:0 0 8px">From Kipu <span class="hint" style="font-weight:400">· kept in sync, read-only</span></h3>
         <div id="kipuDemoBody" class="kdemo"></div>
       </div>
+      <div id="kipuChartCard" class="card" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div><h3 style="margin:0">Full chart from Kipu</h3><p class="sub sans" style="margin:2px 0 0" id="kipuChartSub">Every documented note &amp; form on this client — click any to read it.</p></div>
+          <button class="btn btn-ghost btn-sm sans" style="margin-left:auto" onclick="loadKipuChart(currentId,true)">↻ Reload</button>
+        </div>
+        <input id="kipuChartFilter" placeholder="Filter notes (e.g. nursing, group, progress)…" oninput="filterChart()" style="margin-top:12px"/>
+        <div id="kipuChartList" style="margin-top:10px"></div>
+      </div>
       <div class="card">
         <h3 id="editorTitle">New Care Card</h3>
         <p class="sub sans">Fill this out once per client. It becomes the source of every staff member's shift instructions.</p>
@@ -988,6 +996,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260612q"></script>
+<script src="/app.js?v=20260612r"></script>
 </body>
 </html>

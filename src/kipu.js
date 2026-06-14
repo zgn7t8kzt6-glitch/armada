@@ -379,6 +379,43 @@ export async function kipuPatientNotes(casefileId) {
   return { text: texts.join('\n\n').slice(0, 18000), therapist, case_manager: caseMgrName, debug };
 }
 
+// FULL CHART: list EVERY evaluation/form on a client (all pages), light rows for
+// a chart viewer. Detail is fetched on demand via kipuEvaluation.
+export async function kipuPatientChart(casefileId) {
+  const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
+  const base = tmpl.replace('{id}', casefileId);
+  const first = await kipuGet(base);
+  let list = first?.patient_evaluations || first?.evaluations || (Array.isArray(first) ? first : []);
+  const pag = first?.pagination || {};
+  const per = +(pag.per_page || pag.records_per_page || pag.per || 100) || 100;
+  const total = +(pag.total_records || pag.total_count || pag.total || pag.count || 0) || 0;
+  let pages = +(pag.total_pages || pag.total_page || pag.last_page || pag.pages || 0) || (total ? Math.ceil(total / per) : (list.length >= per ? 2 : 1));
+  pages = Math.min(pages, 40);   // safety cap (~4000 evaluations)
+  for (let pg = 2; pg <= pages; pg++) {
+    try { const d = await kipuGet(base + (base.includes('?') ? '&' : '?') + 'page=' + pg); list = list.concat(d?.patient_evaluations || d?.evaluations || []); }
+    catch { /* stop on a bad page */ }
+  }
+  const seen = new Set();
+  list = list.filter((e) => { const k = e.id ?? e.evaluation_id; if (k == null || seen.has(k)) return false; seen.add(k); return true; });
+  const want_cf = String(casefileId), want_pref = want_cf.split(':')[0];
+  list = list.filter((e) => { const cf = e.patient_casefile_id ?? e.casefile_id ?? e.patient_id; if (cf == null || cf === '') return true; const s = String(cf); return s === want_cf || s.split(':')[0] === want_pref; });
+  list.sort((a, b) => { const ad = a.created_at || '', bd = b.created_at || ''; if (ad || bd) return String(bd).localeCompare(String(ad)); return (+b.id || 0) - (+a.id || 0); });
+  return list.map((e) => ({ id: e.id ?? e.evaluation_id, name: String(e.name || 'Note').trim(), date: String(e.created_at || e.evaluation_date || e.date || '').slice(0, 10), status: e.status || '' }));
+}
+
+// One evaluation, fully readable — for the human chart viewer. Falls back to a
+// broad extract (more inclusive than the AI pull) so nothing is hidden.
+export async function kipuEvaluation(casefileId, evalId) {
+  const d = await kipuGet(`/api/patient_evaluations/${evalId}?patient_id=${casefileId}`);
+  const ev = d?.patient_evaluation || d?.evaluation || d;
+  const items = extractItems(ev);
+  const body = extractText(ev?.evaluation_content);
+  const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';
+  let content = [bodyClean, items].filter(Boolean).join('\n').trim();
+  if (content.length < 40) { const raw = extractText(ev); if (raw && raw.length > content.length) content = raw; }  // show everything readable
+  return { id: evalId, name: String(ev?.name || 'Note').trim(), date: String(ev?.created_at || ev?.evaluation_date || '').slice(0, 10), content: content.slice(0, 24000) };
+}
+
 // The clinician who signed/created an evaluation — for care-team attribution.
 const AUTHOR_FIELDS = ['evaluation_signed_by', 'signed_by', 'created_by_name', 'created_by', 'completed_by', 'staff_name', 'provider_name', 'clinician_name', 'clinician', 'author', 'user_name', 'employee_name'];
 function evalAuthor(...objs) {

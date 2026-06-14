@@ -49,6 +49,24 @@ async function getClient() {
 
 export function aiProvider() { return PROVIDER; }
 
+// Call the model with retry + backoff on throttling / transient errors — the
+// batch assessment runs many in parallel and Bedrock rate-limits aggressively.
+async function callAI(params, tries = 4) {
+  const client = await getClient();
+  let wait = 1200;
+  for (let i = 0; i < tries; i++) {
+    try { return await client.messages.create(params); }
+    catch (e) {
+      const status = e?.status || e?.statusCode;
+      const msg = String(e?.message || e);
+      const throttled = status === 429 || status === 529 || (status >= 500 && status < 600) || /throttl|rate.?limit|too many|timeout|ECONNRESET|503|overloaded/i.test(msg);
+      if (!throttled || i === tries - 1) throw e;
+      await new Promise((r) => setTimeout(r, wait + Math.random() * 600));
+      wait *= 2;
+    }
+  }
+}
+
 // De-identification: on by default. No client names/identifiers are sent to
 // Claude. Set AI_DEIDENTIFY=false only with a signed BAA covering the AI
 // (the AWS BAA when AI_PROVIDER=bedrock, or an Anthropic BAA on the direct path).
@@ -569,10 +587,9 @@ const NOTE_SCHEMA = {
   additionalProperties: false,
 };
 export async function scanNote(text, clientName) {
-  const client = await getClient();
-  const response = await client.messages.create({
+  const response = await callAI({
     model: MODEL,
-    max_tokens: 700,
+    max_tokens: 900,
     system: G + NOTE_SYSTEM,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: NOTE_SCHEMA } },
     messages: [{ role: 'user', content: `Client: ${DEID ? 'the client (name withheld)' : (clientName || 'unknown')}\n\nNOTE:\n${scrub(text, [clientName])}` }],
@@ -585,15 +602,14 @@ export async function scanNote(text, clientName) {
 }
 
 export async function generateAmaRead(careCard, pulses = [], handoffs = []) {
-  const client = await getClient();
   const names = [careCard.name, careCard.pref];
   const handoffText = handoffs.length
     ? handoffs.map((h) => `- ${scrub(h.note, names)}`).join('\n')
     : 'None.';
 
-  const response = await client.messages.create({
+  const response = await callAI({
     model: MODEL,
-    max_tokens: 1500,
+    max_tokens: 4000,   // the schema is large (snapshot + several arrays + unmet); 1500 truncated the JSON
     system: G + AMA_SYSTEM,
     output_config: {
       effort: 'low',

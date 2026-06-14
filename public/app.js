@@ -1353,7 +1353,7 @@ async function cmdAssessPoll(){
       cmdAssessTimer=setTimeout(cmdAssessPoll, 2500);
     } else {
       if(btn) btn.disabled=false;
-      if(s.total && s.finishedAt){ msg.innerHTML=`✓ Read ${s.done} clients — <strong>${s.high} high</strong>, ${s.elevated} elevated, ${s.low} low${s.flagged?' · '+s.flagged+' flagged':''}${s.errors?` · <span style="color:var(--danger)">${s.errors} errors</span>`:''}. <a href="#" onclick="loadCommand();return false">Refresh ↻</a>`; }
+      if(s.total && s.finishedAt){ msg.innerHTML=`✓ Read ${s.done} clients — <strong>${s.high} high</strong>, ${s.elevated} elevated, ${s.low} low${s.flagged?' · '+s.flagged+' flagged':''}${s.errors?` · <span style="color:var(--danger)">${s.errors} errors</span>`:''}. <a href="#" onclick="loadCommand();return false">Refresh ↻</a>`+(s.errors&&s.lastError?`<div class="hint" style="color:var(--danger)">Last error: ${esc(s.lastError)}</div>`:''); }
       else { msg.textContent=''; }
     }
   }catch(e){ /* silent */ }

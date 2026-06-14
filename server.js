@@ -381,13 +381,13 @@ app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
 
 // ---- Batch risk assessment: read every active client's Kipu documentation and
 // score their AMA risk, in the background, with live progress. ----
-let assessJob = { running: false, total: 0, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
+let assessJob = { running: false, total: 0, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, lastError: null, current: null, startedAt: null, finishedAt: null };
 async function runAssessAll(user) {
   const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
   // Clear stale auto-generated risk/concern alerts so a re-run refreshes rather
   // than piling up duplicates.
   db.prepare(`DELETE FROM alerts WHERE kind IN ('risk', 'concern') AND status = 'New'`).run();
-  assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
+  assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, lastError: null, current: null, startedAt: Date.now(), finishedAt: null };
   const assessOne = async (c) => {
     assessJob.current = c.pref || c.name;
     try {
@@ -416,11 +416,11 @@ async function runAssessAll(user) {
       }
       const read = await runAndStoreAmaRead(c, user, '0.0.0.0', extra);
       assessJob[read.level === 'High' ? 'high' : read.level === 'Elevated' ? 'elevated' : 'low']++;
-    } catch { assessJob.errors++; }
+    } catch (e) { assessJob.errors++; assessJob.lastError = (e?.message || String(e)).slice(0, 200); }
     assessJob.done++;
   };
   // Assess several clients CONCURRENTLY (each does Kipu + AI). AI_CONCURRENCY tunes it.
-  const limit = Math.max(1, +(process.env.AI_CONCURRENCY || 4));
+  const limit = Math.max(1, +(process.env.AI_CONCURRENCY || 2));
   let idx = 0;
   await Promise.all(Array.from({ length: Math.min(limit, clients.length) }, async () => {
     while (idx < clients.length) { const c = clients[idx++]; await assessOne(c); }
@@ -437,11 +437,11 @@ app.get('/api/assess-all/status', requireAuth, requireAdmin, (req, res) => res.j
 
 // ---- Discharge debriefs: read every recent discharge's notes and learn what we
 // could have done better (esp. AMA). Fills discharge type/reason/improve. ----
-let debriefJob = { running: false, total: 0, done: 0, ama: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
+let debriefJob = { running: false, total: 0, done: 0, ama: 0, errors: 0, lastError: null, current: null, startedAt: null, finishedAt: null };
 async function runDischargeDebriefs(user) {
   const clients = db.prepare(`SELECT * FROM clients WHERE source = 'kipu' AND discharge_status IS NOT NULL
     AND discharge_date >= date('now','-21 day') AND (discharge_improve IS NULL OR discharge_improve = '')`).all();
-  debriefJob = { running: true, total: clients.length, done: 0, ama: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
+  debriefJob = { running: true, total: clients.length, done: 0, ama: 0, errors: 0, lastError: null, current: null, startedAt: Date.now(), finishedAt: null };
   for (const c of clients) {
     debriefJob.current = c.pref || c.name;
     try {

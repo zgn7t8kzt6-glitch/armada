@@ -839,7 +839,11 @@ export function addDays(dateStr, n) {
 }
 // Recompute a day's metrics from its flow events (idempotent upsert).
 export function rollupDailyMetrics(date) {
-  const c = (k) => db.prepare(`SELECT COUNT(*) n FROM flow_events WHERE date = ? AND kind = ?`).get(date, k).n;
+  // Only count events still tied to a live client — events orphaned by a
+  // Rebuild (client_id set NULL or pointing at a deleted row) must not inflate
+  // the daily intake/discharge/AMA counts.
+  const c = (k) => db.prepare(`SELECT COUNT(*) n FROM flow_events
+    WHERE date = ? AND kind = ? AND client_id IN (SELECT id FROM clients)`).get(date, k).n;
   const ama = c('ama');
   const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n;
   db.prepare(`INSERT INTO daily_metrics (date, intakes, discharges, loc_changes, ama, census, updated_at)

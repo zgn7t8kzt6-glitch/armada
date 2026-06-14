@@ -1062,7 +1062,7 @@ app.get('/api/command/discharge-debug', requireAuth, requireAdmin, (req, res) =>
 app.post('/api/command/discharge-cleanup', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
   const orphans = db.prepare(`DELETE FROM flow_events WHERE kind IN ('discharge','ama')
-    AND client_id NOT IN (SELECT id FROM clients)`).run().changes;
+    AND (client_id IS NULL OR client_id NOT IN (SELECT id FROM clients))`).run().changes;
   const stale = db.prepare(`DELETE FROM flow_events WHERE kind IN ('discharge','ama')
     AND client_id IN (SELECT id FROM clients WHERE discharge_status IS NULL)`).run().changes;
   rollupDailyMetrics(today);

@@ -527,7 +527,8 @@ async function kipuInspect(){ $('kipuResult').textContent='Inspecting Kipu field
   + '\n\nFIELDS: '+r.fields.join(', ')
   + '\n\nFACETS:\n'+Object.entries(r.facets).map(([k,v])=>'  '+k+': '+v.join(' | ')).join('\n')
   + (r.patientDetail ? '\n\n===== PATIENT DETAIL PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.patientDetail,null,2) : '')
-  + (r.dischargeAnalysis ? '\n\n===== DISCHARGE PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.dischargeAnalysis,null,2) : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+  + (r.dischargeAnalysis ? '\n\n===== DISCHARGE PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.dischargeAnalysis,null,2) : '')
+  + (r.photoProbe ? '\n\n===== PHOTO PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.photoProbe,null,2) : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuCoverage(){
   $('kipuResult').textContent='Checking what each field is pulling…';
   $('kipuInspect').style.display='none'; const el=$('kipuCoverage'); el.style.display='none';
@@ -1761,9 +1762,26 @@ async function careBrief(clientId){
 }
 
 /* ---- today command center ---- */
+async function loadTodayCareCards(){
+  const card=$('todayCareCards'); if(!card) return;
+  let d; try{ d=await api('/carecards'); }catch(e){ return; }
+  const inc=d.incomplete||[];
+  if(!inc.length){ card.style.display='none'; return; }
+  card.style.display='block';
+  $('todayCcCount').textContent = inc.length+(d.overdue?' · '+d.overdue+' overdue':'');
+  $('todayCcList').innerHTML = inc.map(c=>{
+    const m=c.minsSinceAdmit;
+    const clock = m==null?'':(m<60?m+'m':Math.floor(m/60)+'h '+(m%60)+'m')+' since admit';
+    return `<div class="cmd-row ${c.overdue?'cmd-row-flag':''}">
+      <div class="cmd-row-main"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}
+        <div class="hint">${c.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}${clock} · missing: ${c.missing.map(esc).join(', ')}</div></div>
+      <button class="btn btn-gold btn-sm sans" onclick="openJourney(${c.id})">Fill</button></div>`;
+  }).join('');
+}
 async function loadToday(){
   const t = await api('/today');
   $('todayDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  loadTodayCareCards();
   if(META.kioskCode) $('kioskCodeHint').innerHTML = 'kiosk code: <strong>'+esc(META.kioskCode)+'</strong>';
   if(t.claude) $('todayBriefBtn').style.display='inline-block';
   const m=t.metrics;

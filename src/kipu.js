@@ -47,6 +47,23 @@ async function kipuGet(path) {
   try { return JSON.parse(text); } catch (e) { return text; }
 }
 
+// Raw probe: report status/content-type/size for a path (to find binary endpoints).
+async function kipuRawProbe(path) {
+  const base = process.env.KIPU_BASE_URL || 'https://api.kipuapi.com';
+  const uri = path + (path.includes('?') ? '&' : '?') + 'app_id=' + encodeURIComponent(process.env.KIPU_APP_ID);
+  const contentType = 'application/vnd.kipusystems+json; version=3';
+  const date = new Date().toUTCString();
+  const contentMd5 = crypto.createHash('md5').update('').digest('base64');
+  const canonical = [contentType, contentMd5, uri, date].join(',');
+  const sig = crypto.createHmac('sha1', process.env.KIPU_SECRET_KEY).update(canonical).digest('base64');
+  try {
+    const r = await fetch(base + uri, { headers: { Accept: contentType, 'Content-Type': contentType, 'Content-MD5': contentMd5, Date: date, Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}` } });
+    const ct = r.headers.get('content-type') || '';
+    const buf = Buffer.from(await r.arrayBuffer());
+    return { path: path.split('?')[0], status: r.status, contentType: ct, bytes: buf.length, sample: buf.length < 400 ? buf.toString('utf8').slice(0, 220) : '(binary)' };
+  } catch (e) { return { path: path.split('?')[0], error: String(e.message).slice(0, 120) }; }
+}
+
 // Fetch a path that may return an image (or JSON with base64) → a data URL.
 async function kipuGetBinary(path) {
   if (!kipuConfigured()) return null;
@@ -788,8 +805,19 @@ export async function kipuInspect() {
       dischargeAnalysis.probes.push({ path: c, ok: true, rows: Array.isArray(arr) ? arr.length : null, withDischargeDate: Array.isArray(arr) ? arr.filter(hasDc).length : null });
     } catch (e) { dischargeAnalysis.probes.push({ path: c, ok: false, error: String(e.message).slice(0, 100) }); }
   }
-  // Photo probe: did we get a patient picture for the first census patient?
+  // Photo probe: try several picture endpoint shapes and report what each returns.
   let photoProbe = null;
-  if (cf) { try { const ph = await kipuPatientPhoto(cf); photoProbe = { found: !!ph, bytes: ph ? ph.length : 0 }; } catch (e) { photoProbe = { error: String(e.message).slice(0, 100) }; } }
+  if (cf) {
+    const m = cf.split(':')[0], u = cf.includes(':') ? cf.slice(cf.indexOf(':') + 1) : cf, phi = process.env.KIPU_PHI_LEVEL || 'high', e = encodeURIComponent;
+    const paths = [
+      `/api/patients/${m}/patient_picture?phi_level=${phi}&patient_master_id=${e(u)}`,
+      `/api/patients/${m}/picture?phi_level=${phi}&patient_master_id=${e(u)}`,
+      `/api/patients/${m}/photo?phi_level=${phi}&patient_master_id=${e(u)}`,
+      `/api/patients/${m}/patient_picture`,
+      `/api/patients/${e(u)}/patient_picture?phi_level=${phi}&patient_master_id=${m}`,
+      `/api/patients/${e(cf)}/patient_picture?phi_level=${phi}`,
+    ];
+    photoProbe = await mapLimit(paths, 4, (p) => kipuRawProbe(p));
+  }
   return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail, dischargeAnalysis, photoProbe };
 }

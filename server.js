@@ -1813,6 +1813,33 @@ function nameMatches(field, userName) {
   const last = u.split(/\s+/).pop();
   return last && last.length > 2 && f.includes(last);
 }
+// Anticipation engine: turn each Care Card's preferences into timely, specific
+// actions to deliver WITHOUT being asked. Deterministic keyword reads of the
+// prefs/likes/touch fields, framed by time of day. The Ritz "unexpressed need."
+function anticipationNudges(clients, hour) {
+  const out = [];
+  const evening = hour >= 17 || hour < 6;
+  const morning = hour >= 6 && hour < 11;
+  for (const c of clients) {
+    const blob = [c.prefs, c.likes, c.touch, c.support, c.goals].filter(Boolean).join(' ').toLowerCase();
+    const name = c.pref || c.name;
+    const seen = new Set();
+    const push = (text, key) => { if (seen.has(key)) return; seen.add(key); out.push({ id: c.id, name, text, key }); };
+    if (blob) {
+      if (/coffee/.test(blob) && morning) push(`Bring ${name} their morning coffee.`, 'coffee');
+      else if (/\btea\b/.test(blob)) push(`Offer ${name} a tea.`, 'tea');
+      if (/(family|phone call|call home|daughter|son|wife|husband|\bmom\b|\bdad\b|mother|father|kids|grandkid|spouse)/.test(blob) && evening) push(`Offer ${name} a call to their family this evening — it anchors them.`, 'family');
+      if (/(nicotine|smoke|cigarette|vape|tobacco)/.test(blob)) push(`${name} values their smoke break — offer it on schedule (per protocol).`, 'nicotine');
+      if (/music/.test(blob)) push(`Put on ${name}'s music.`, 'music');
+      if (/(blanket|cold|chilly|extra layer)/.test(blob)) push(`Offer ${name} an extra blanket.`, 'blanket');
+      if (/(walk|fresh air|outside|outdoors|fresh-air)/.test(blob)) push(`Offer ${name} a few minutes of fresh air.`, 'air');
+      if (/(prayer|church|faith|bible|\bgod\b|spiritual|quran|temple|synagogue)/.test(blob)) push(`Ask ${name} if they'd like quiet time for prayer.`, 'faith');
+      if (/(anxious|anxiety|panic|nervous|overwhelm)/.test(blob)) push(`Check in with ${name} — they run anxious; a calm word helps.`, 'anxiety');
+    }
+    if (!seen.size && c.touch && c.touch.trim()) push(`Deliver ${name}'s personal touch: ${c.touch.trim()}`, 'touch');
+  }
+  return out.slice(0, 12);
+}
 app.get('/api/dashboard', requireAuth, (req, res) => {
   const today = appToday();
   const h = localHour();
@@ -1966,7 +1993,9 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const focus = focusForDate(today);
   const wins = db.prepare(`SELECT w.text, w.by_name, c.pref FROM wows w LEFT JOIN clients c ON c.id = w.client_id ORDER BY w.id DESC LIMIT 5`).all()
     .map((w) => ({ text: w.text, by: w.by_name || '', client: w.pref || '' }));
-  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, focus: { topic: focus.t, goal: focus.g }, wins });
+  // Anticipation nudges for the care-facing roles (the unexpressed-need engine).
+  const nudges = (jr === 'Nurse' || jr === 'BHT / Tech' || jr === '' || jr === 'Team') ? anticipationNudges(active, h) : [];
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, focus: { topic: focus.t, goal: focus.g }, wins });
 });
 app.get('/api/today', requireAuth, (req, res) => {
   const today = appToday();

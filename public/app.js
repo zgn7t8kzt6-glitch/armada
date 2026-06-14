@@ -2256,6 +2256,12 @@ async function loadDashboard(){
           <h3 style="margin:2px 0 0">${esc(fc.topic)}</h3>${fc.goal?`<p class="sub sans" style="margin:4px 0 0">${esc(fc.goal)}</p>`:''}</div>
         <button class="btn btn-gold btn-sm sans" onclick="dashJoinFocus(this)">I'm on it ✋</button>
       </div></div>` : '';
+  // Anticipation — deliver these without being asked (the unexpressed need)
+  const nudges=(d.nudges||[]);
+  $('dashNudges').innerHTML = nudges.length ? `<div class="card" style="border-left:4px solid var(--aqua);background:#f4fafb">
+      <div class="cmd-hero-row"><div><h3 style="margin:0">Anticipate now <span class="hint" style="font-weight:400">— deliver these without being asked</span></h3></div></div>
+      ${nudges.map((n,i)=>`<div class="todo"><div class="txt">✨ ${esc(n.text)}</div><button class="btn btn-gold btn-sm sans" onclick="markDelivered(${n.id}, ${JSON.stringify(n.text).replace(/"/g,'&quot;')}, this)">✓ Delivered</button></div>`).join('')}
+    </div>` : '';
   $('dashSections').innerHTML = (d.sections||[]).map(s=>{
     const items = (s.items&&s.items.length) ? s.items.map(it=>`<div class="todo" ${it.id?`onclick="openJourney(${it.id})" style="cursor:pointer"`:''}>
         <div class="txt">${it.badge?`<span class="risk ${/high|ama|allergy|no-show|out/i.test(it.badge)?'risk-high':'risk-elev'}">${esc(it.badge)}</span> `:''}<strong>${esc(it.name)}</strong>${it.room?' <span class="hint">· '+esc(it.room)+'</span>':''}${it.sub?'<div class="hint">'+esc(it.sub)+'</div>':''}</div>
@@ -2270,6 +2276,11 @@ async function loadDashboard(){
 }
 async function dashJoinFocus(btn){
   try{ await api('/focus',{method:'POST',body:JSON.stringify({})}); if(btn){ btn.textContent='✓ On it'; btn.disabled=true; } }catch(e){ alert(e.message); }
+}
+async function markDelivered(id, text, btn){
+  try{ await api('/delights',{method:'POST',body:JSON.stringify({client_id:id, text})});
+    if(btn){ btn.textContent='✓ Done'; btn.disabled=true; const row=btn.closest('.todo'); if(row) row.style.opacity='.5'; } }
+  catch(e){ alert(e.message); }
 }
 async function logWow(){
   const text = prompt('What did you do? A personal touch you delivered, a problem you solved on the spot, or a teammate worth recognizing:');

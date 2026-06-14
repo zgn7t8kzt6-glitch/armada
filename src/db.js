@@ -692,6 +692,64 @@ function seedLearning() {
 }
 seedLearning();
 
+// ---- The Akron Standard: the 32-document operating system, loaded as an
+// organized, read-ordered index in the Library. Each entry carries its
+// section, read number, type, and source file; the body holds the summary now
+// and is where the full document text gets pasted. Titles/categories are
+// number-prefixed so they sort in the intended reading order. ----
+function seedAkronStandard() {
+  const SECTIONS = [
+    '1 · Foundation & Culture',
+    '2 · The Patient Journey',
+    '3 · The People System',
+    '4 · Structure & Operations',
+    '5 · Safeguards & Measurement',
+    '6 · Operating Documents',
+  ];
+  // [readNo, sectionIndex, title, fileName, type, whatItIs]
+  const DOCS = [
+    [1, 0, 'The Akron Standard — Operating Doctrine', 'Akron_Standard_Operating_Doctrine.docx', 'Doctrine', 'The master document: purpose, creed, the three moments of care, the non-negotiables, and the language dictionary.'],
+    [2, 0, 'Ritz & Horst Principles Crosswalk', 'Akron_Ritz_Horst_Principles_Crosswalk.xlsx', 'Reference', 'Every Ritz/Horst principle mapped to how it applies to Armada and where it lives in the system.'],
+    [3, 0, 'The Non-Negotiables Card', 'Akron_NonNegotiables_Card.pdf', 'Card', 'The double-sided badge card of the core standards staff carry.'],
+    [4, 0, 'The Founding Deck', 'Akron_Standard_Founding_Deck.pptx', 'Deck', 'The all-staff slide deck that launches the Standard.'],
+    [5, 0, 'Every Task Has a Purpose', 'Akron_Every_Task_Has_A_Purpose.docx', 'Manual', "Each role's tasks mapped to their purpose — function to intent."],
+    [6, 1, 'The Continuum', 'Akron_The_Continuum.docx', 'Standard', 'The relationship before, around, and after the stay: front door, family, alumni/aftercare.'],
+    [7, 1, 'The Intake Comfort SOP', 'Akron_Intake_SOP.pdf', 'SOP', 'Comfort within 15 minutes of arrival.'],
+    [8, 1, 'The Patient Day', 'Akron_The_Patient_Day.docx', 'Standard', 'Excellence in the middle of the stay: daily rhythm, the milieu, managing the social field.'],
+    [9, 1, 'The Environment Standard', 'Akron_The_Environment_Standard.docx', 'Standard', 'The physical stage: the senses, space by space, cleanliness, and safety.'],
+    [10, 1, 'The Save — Training', 'Akron_The_Save_Training.docx', 'Training', 'Facilitator guide + manual for the AMA-Save (the PAUSE model).'],
+    [11, 1, 'The Save — Deck', 'Akron_The_Save_Deck.pptx', 'Deck', 'The delivery deck for The Save training.'],
+    [12, 1, 'The Send-Off — Discharge SOP', 'Akron_The_SendOff_Discharge_SOP.docx', 'SOP', 'The universal discharge standard, warm handoff, and follow-up calls.'],
+    [13, 1, 'The Nourishment System', 'Akron_The_Nourishment_System.docx', 'System', 'Food: spend, measure, and decide — with the decision engine and surveys.'],
+    [14, 2, 'The Selection System', 'Akron_The_Selection_System.docx', 'System', "Select, don't hire: the five core traits and the selection philosophy."],
+    [15, 2, 'The Hiring Process', 'Akron_The_Hiring_Process.docx', 'Process', 'The candidate journey: assessments, who they meet, what we ask.'],
+    [16, 2, 'The Hiring Scorecard', 'Akron_Hiring_Scorecard.pdf', 'Tool', 'The behavioral interview scoring instrument.'],
+    [17, 2, 'Onboarding & Orientation', 'Akron_Onboarding_And_Orientation.docx', 'Program', 'The first 90 days; orientation as a significant emotional event.'],
+    [18, 2, 'Training & Certification Program', 'Akron_Training_And_Certification_Program.docx', 'Program', 'The gated curriculum, competency sign-offs, and the certification gate — no solo floor work until certified.'],
+    [19, 2, 'Training Record (& roster)', 'Akron_Training_Record.xlsx', 'Tool', 'The per-employee competency checklist and certification roster — the documented-competency record.'],
+    [20, 2, 'The Certification Certificate', 'Akron_Certification_Certificate.docx', 'Certificate', 'The printable certificate issued at certification.'],
+    [21, 2, 'Leading the Team', 'Akron_Leading_The_Team.docx', 'Playbook', 'Recognition, coaching, accountability, and the empowerment policy.'],
+    [22, 2, 'The Armada Fleet — Uniform Standard', 'Akron_Armada_Fleet_Uniform_Standard.docx', 'Standard', 'The role-by-role uniform system and the pants & shoe program.'],
+    [23, 2, 'Role Playbooks', 'Akron_Role_Playbooks.docx', 'Playbook', 'One page per position — purpose, standard, moments, training, uniform, and how each role is measured.'],
+    [24, 3, 'Org & Accountability Structure', 'Akron_Org_And_Accountability.docx', 'Structure', 'Who runs what and who answers to whom — the operator layer, the reports-to map, and one owner per function.'],
+    [25, 3, 'Staffing & Scheduling Standard', 'Akron_Staffing_And_Scheduling.docx', 'Standard', 'Coverage ratios, the nights/weekends parity model, and the hard staffing floor.'],
+    [26, 3, 'The Handoff Standard', 'Akron_The_Handoff_Standard.docx', 'Standard', 'Structured, documented, warm handoffs (SBAR) so nothing drops at the seams between roles and shifts.'],
+    [27, 4, 'The Safeguards', 'Akron_The_Safeguards.docx', 'Protocol', 'Communications & privacy, the AMA cluster/contagion protocol, and incident review.'],
+    [28, 4, 'Clinical Excellence Framework', 'Akron_Clinical_Excellence_Framework.docx', 'Framework', 'The scaffold for clinical leadership — the nine clinical-core areas the Medical Director & DON own and fill.'],
+    [29, 4, 'The Listening System', 'Akron_The_Listening_System.docx', 'System', 'Every survey — patient, staff, referral, family — with cadence and questions.'],
+    [30, 4, 'Monthly Excellence Scorecard', 'Akron_Monthly_Excellence_Scorecard.xlsx', 'Tool', 'Every KPI on one page — the dashboard the monthly review runs on.'],
+    [31, 5, 'The First 30 Days', 'Akron_The_First_30_Days.docx', 'Plan', "The CEO's founding-month implementation plan — sequenced, with owners."],
+    [32, 5, 'The Daily Lineup', 'Akron_The_Daily_Lineup.docx', 'Playbook', 'The ten-minute every-shift ritual that keeps the whole system alive.'],
+  ];
+  const pad = (n) => String(n).padStart(2, '0');
+  for (const [no, sec, title, file, type, what] of DOCS) {
+    const fullTitle = `${pad(no)} · ${title}`;
+    const body = `${what}\n\n— The Akron Standard · ${SECTIONS[sec].replace(/^\d+ · /, '')} · Read #${no}\nType: ${type} · Source file: ${file}\n\n[Full document not yet loaded. Edit this entry and paste the document text here when ready.]`;
+    ensureDoc(SECTIONS[sec], fullTitle, body, `akron standard, ${type.toLowerCase()}`);
+  }
+}
+seedAkronStandard();
+
 // Lightweight migration: add columns to existing tables (older deployments).
 function addColumn(table, col, type) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);

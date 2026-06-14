@@ -413,6 +413,7 @@ export async function kipuEvaluation(casefileId, evalId) {
   const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';
   let content = [bodyClean, items].filter(Boolean).join('\n').trim();
   if (content.length < 40) { const raw = extractText(ev); if (raw && raw.length > content.length) content = raw; }  // show everything readable
+  content = content.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();   // tidy for reading
   return { id: evalId, name: String(ev?.name || 'Note').trim(), date: String(ev?.created_at || ev?.evaluation_date || '').slice(0, 10), content: content.slice(0, 24000) };
 }
 

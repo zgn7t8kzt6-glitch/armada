@@ -116,10 +116,14 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-export function changePassword(userId, current, next) {
+export function changePassword(userId, current, next, keepToken = null) {
   const u = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId);
   if (!u || !bcrypt.compareSync(current, u.password_hash)) return false;
   db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hashPassword(next), userId);
+  // Invalidate every OTHER session for this user (a changed password should log
+  // out anyone holding an old/stolen token); keep the caller's current session.
+  if (keepToken) db.prepare(`DELETE FROM sessions WHERE user_id = ? AND token != ?`).run(userId, keepToken);
+  else db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
   return true;
 }
 

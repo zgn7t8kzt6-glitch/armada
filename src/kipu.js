@@ -55,6 +55,7 @@ async function fetchEvalDetail(casefileId, evalId) {
   const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
   const phi = process.env.KIPU_PHI_LEVEL || 'high';
   const e = encodeURIComponent;
+  evalId = e(String(evalId));   // never let an id inject extra path/query segments
   const cands = [
     `/api/patients/${master}/patient_evaluations/${evalId}?phi_level=${phi}&patient_master_id=${e(uuid)}`,
     `/api/patient_evaluations/${evalId}?patient_master_id=${e(uuid)}&phi_level=${phi}`,

@@ -1,6 +1,7 @@
 // Armada Care Standards — multi-user server
 import express from 'express';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
@@ -39,6 +40,20 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+
+// CSRF defense: reject state-changing requests whose Origin (or Referer) is a
+// DIFFERENT host than ours. Same-origin XHR sends a matching Origin; cross-site
+// form/fetch attacks send the attacker's. Requests with no Origin/Referer
+// (server-to-server, curl) are allowed — they aren't browser CSRF.
+app.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const origin = req.get('origin') || req.get('referer');
+  if (!origin) return next();
+  try {
+    if (new URL(origin).host !== req.get('host')) return res.status(403).json({ error: 'Cross-origin request blocked' });
+  } catch { return res.status(403).json({ error: 'Bad origin' }); }
   next();
 });
 
@@ -96,6 +111,7 @@ const chartCache = new Map();   // kipu_id|all -> { at, data }; 90s TTL
 app.get('/api/clients/:id/chart', requireAuth, async (req, res) => {
   const c = db.prepare(`SELECT kipu_id FROM clients WHERE id = ?`).get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Not found' });
+  audit({ user: req.user, action: 'CHART_LIST', entity: 'client', entity_id: +req.params.id, ip: req.ip });
   if (!c.kipu_id || !kipuConfigured()) return res.json({ evaluations: [], extras: [], kipu: false });
   const all = req.query.all === '1';
   const cacheKey = c.kipu_id + '|' + all;
@@ -113,6 +129,7 @@ app.get('/api/clients/:id/chart', requireAuth, async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/clients/:id/chart/:evalId', requireAuth, async (req, res) => {
+  if (!/^\d+$/.test(req.params.evalId)) return res.status(400).json({ error: 'Bad evaluation id' });
   const c = db.prepare(`SELECT kipu_id FROM clients WHERE id = ?`).get(req.params.id);
   if (!c?.kipu_id) return res.status(404).json({ error: 'No chart' });
   try {
@@ -350,7 +367,7 @@ async function runAssessAll(user) {
 app.post('/api/assess-all', requireAuth, requireAdmin, (req, res) => {
   if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured.' });
   if (assessJob.running) return res.json({ started: false, already: true });
-  runAssessAll(req.user);                 // fire-and-forget; poll status
+  runAssessAll(req.user).catch((e) => { assessJob.running = false; console.error('[assess]', e.message); });   // fire-and-forget; poll status
   res.json({ started: true });
 });
 app.get('/api/assess-all/status', requireAuth, requireAdmin, (req, res) => res.json(assessJob));
@@ -381,7 +398,7 @@ async function runDischargeDebriefs(user) {
 app.post('/api/debrief-discharges', requireAuth, requireAdmin, (req, res) => {
   if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured.' });
   if (debriefJob.running) return res.json({ started: false, already: true });
-  runDischargeDebriefs(req.user);
+  runDischargeDebriefs(req.user).catch((e) => { debriefJob.running = false; console.error('[debrief]', e.message); });
   res.json({ started: true });
 });
 app.get('/api/debrief-discharges/status', requireAuth, requireAdmin, (req, res) => res.json(debriefJob));
@@ -522,7 +539,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
 
   // Flow
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
-  const discharges7d = db.prepare(`SELECT COUNT(*) n FROM clients WHERE discharge_date >= date('now','-7 day')`).get().n;
+  const discharges7d = db.prepare(`SELECT COUNT(*) n FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-7 day')`).get().n;
   const dischargesToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
 
   // Per-client latest read, computed once.
@@ -711,7 +728,7 @@ app.post('/api/clients/:id/plan-to-tasks', requireAuth, (req, res) => {
 // Retention dashboard: every client's current risk, pulse status, and which
 // warning signs are trending across the center.
 app.get('/api/retention', requireAuth, (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   const clients = db.prepare(`SELECT id, name, pref, room, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
   const out = clients.map((c) => {
     const ama = latestAmaRead(c.id);
@@ -869,7 +886,7 @@ app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRo
 app.post('/api/change-password', requireAuth, (req, res) => {
   const { current, next } = req.body || {};
   if (!next || String(next).length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters.' });
-  if (!changePassword(req.user.id, current || '', next)) return res.status(400).json({ error: 'Current password is incorrect.' });
+  if (!changePassword(req.user.id, current || '', next, req.cookies?.armada_sid)) return res.status(400).json({ error: 'Current password is incorrect.' });
   audit({ user: req.user, action: 'PASSWORD_CHANGE', ip: req.ip });
   res.json({ ok: true });
 });
@@ -1229,7 +1246,8 @@ app.post('/api/goals/:id/status', requireAuth, (req, res) => {
 app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
   const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Not found' });
-  const today = new Date().toISOString().slice(0, 10);
+  audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: +req.params.id, detail: 'journey', ip: req.ip });
+  const today = appToday();
   c.tasks = db.prepare(`SELECT * FROM tasks WHERE client_id = ? ORDER BY sort, id`).all(c.id);
   audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: c.id, detail: 'journey', ip: req.ip });
   res.json({ journey: {
@@ -1332,7 +1350,7 @@ function surveysDueCount() {
   return n;
 }
 app.get('/api/today', requireAuth, (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
   const attention = [];
   for (const c of clients) {
@@ -1518,7 +1536,7 @@ app.get('/api/referrals/summary', requireAuth, (req, res) => {
   const days = ({ '7': 7, '30': 30, '90': 90, '365': 365 })[String(req.query.range)] || 30;
   const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
   const cnt = (sql, ...a) => db.prepare(sql).get(...a)?.n ?? 0;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   const week = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
   const month = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
 
@@ -1782,7 +1800,7 @@ app.post('/api/duties', requireAuth, (req, res) => {
 app.get('/api/workforce/summary', requireAuth, (req, res) => {
   const days = ({ '30': 30, '90': 90 })[String(req.query.range)] || 30;
   const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   const onNow = db.prepare(`SELECT user_name, clock_in FROM time_entries WHERE clock_out IS NULL ORDER BY clock_in`).all();
   // Today coverage roll-up.
   const slotsToday = db.prepare(`SELECT s.id, s.needed,
@@ -1887,7 +1905,7 @@ app.get('/api/staff', requireAuth, (req, res) => {
   res.json({ staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all() });
 });
 app.get('/api/team', requireAuth, (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   res.json({
     kudos: db.prepare(`SELECT * FROM kudos ORDER BY id DESC LIMIT 30`).all(),
     trainedToday: !!db.prepare(`SELECT 1 FROM training_ack WHERE user_id = ? AND date = ?`).get(req.user.id, today),
@@ -1905,7 +1923,7 @@ app.post('/api/kudos', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 app.post('/api/training-ack', requireAuth, (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   if (!db.prepare(`SELECT 1 FROM training_ack WHERE user_id = ? AND date = ?`).get(req.user.id, today))
     db.prepare(`INSERT INTO training_ack (user_id, user_name, value_text, date) VALUES (?, ?, ?, ?)`).run(req.user.id, req.user.name, req.body?.value_text || null, today);
   res.json({ ok: true });
@@ -2064,7 +2082,7 @@ app.get('/api/accountability', requireAuth, requireAdmin, (req, res) => {
     }
   }
   // Assigned shifts → covered / missed
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   for (const a of db.prepare(`SELECT a.user_id uid, s.date d FROM assignments a JOIN shifts s ON s.id = a.shift_id WHERE s.date >= ? AND s.date < ?`).all(start, end)) {
     if (!stat[a.uid] || a.d > today) continue;
     stat[a.uid].assigned++;
@@ -2118,13 +2136,19 @@ app.post('/api/alumni/:id/notes', requireAuth, (req, res) => {
 
 /* ---------------- Client-facing kiosk (no staff login; guarded by a code) ---------------- */
 function kioskCode() { return getState('kiosk_code') || process.env.KIOSK_CODE || 'armada'; }
-function kioskOk(req) { return (req.query.code || req.body?.code) === kioskCode(); }
+function kioskOk(req) {
+  const got = String(req.query.code || req.body?.code || ''), want = String(kioskCode());
+  if (!got || got.length !== want.length) return false;
+  try { return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want)); } catch { return false; }
+}
 app.get('/api/kiosk/data', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
   const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 AND key IN ('experience','meals') ORDER BY sort`).all();
   for (const s of surveys) s.questions = db.prepare(`SELECT id, category, text, type FROM survey_questions WHERE survey_id = ? ORDER BY sort, id`).all(s.id);
   res.json({
-    clients: db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all(),
+    // The kiosk is on the unit and only weakly authenticated — expose preferred
+    // name + room only, never the full legal name.
+    clients: db.prepare(`SELECT id, pref, room FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, pref`).all(),
     departments: DEPARTMENTS, surveys,
   });
 });
@@ -2230,13 +2254,13 @@ function focusForDate(dateStr) {
   return FOCUS_TOPICS[idx];
 }
 app.get('/api/focus', requireAuth, (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   const f = focusForDate(today);
   const logs = db.prepare(`SELECT user_name, note FROM focus_logs WHERE date = ? ORDER BY id DESC`).all(today);
   res.json({ topic: f.t, goal: f.g, participants: logs.length, logs, joined: !!db.prepare(`SELECT 1 FROM focus_logs WHERE date = ? AND user_id = ?`).get(today, req.user.id), options: FOCUS_TOPICS });
 });
 app.post('/api/focus', requireAuth, (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appToday();
   db.prepare(`INSERT INTO focus_logs (date, topic, user_id, user_name, note) VALUES (?, ?, ?, ?, ?)`).run(today, focusForDate(today).t, req.user.id, req.user.name, req.body?.note || null);
   res.json({ ok: true });
 });
@@ -2274,6 +2298,7 @@ app.post('/api/notes', requireAuth, async (req, res) => {
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/clients/:id/notes', requireAuth, (req, res) => {
+  audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: +req.params.id, detail: 'notes', ip: req.ip });
   res.json({ notes: db.prepare(`SELECT * FROM notes WHERE client_id = ? ORDER BY id DESC LIMIT 30`).all(req.params.id).map((n) => ({ ...n, categories: safeArr(n.categories) })) });
 });
 app.get('/api/notes/flagged', requireAuth, (req, res) => {
@@ -2400,7 +2425,7 @@ if (kipuConfigured()) {
           await runAssessAll({ id: null, name: 'Auto-sync' });
         }
         // Anyone newly discharged gets an automatic "what could we do better" debrief.
-        if (claudeConfigured() && !debriefJob.running) runDischargeDebriefs({ id: null, name: 'Auto-sync' });
+        if (claudeConfigured() && !debriefJob.running) runDischargeDebriefs({ id: null, name: 'Auto-sync' }).catch((e) => { debriefJob.running = false; console.error('[debrief]', e.message); });
       } catch (e) { console.error('[kipu] auto-sync failed:', e.message); }
     };
     setTimeout(autoSync, 30000);                 // first run shortly after boot

@@ -1,6 +1,7 @@
 // Seeding helpers. Used two ways:
 //   1. Automatically on server boot (ensureAdmin) so a fresh deploy is usable.
 //   2. Manually via `npm run seed` for local setup / sample data.
+import crypto from 'node:crypto';
 import { db } from './db.js';
 import { createUser } from './auth.js';
 
@@ -8,16 +9,18 @@ import { createUser } from './auth.js';
 // Reads ADMIN_USER / ADMIN_PASS from the environment (set these in Render).
 export function ensureAdmin({ quiet = false } = {}) {
   const adminUser = (process.env.ADMIN_USER || 'admin').toLowerCase().trim();
-  const adminPass = process.env.ADMIN_PASS || 'changeme123';
   const hasAnyAdmin = db.prepare(`SELECT id FROM users WHERE role = 'admin' AND active = 1 LIMIT 1`).get();
   if (hasAnyAdmin) return;
   const existing = db.prepare(`SELECT id FROM users WHERE username = ?`).get(adminUser);
   if (existing) return;
+  // No known-default password: if ADMIN_PASS is unset, generate a random one and
+  // print it once so a fresh deploy is usable without baking a guessable secret in.
+  const generated = !process.env.ADMIN_PASS;
+  const adminPass = process.env.ADMIN_PASS || crypto.randomBytes(12).toString('base64url');
   createUser({ name: 'Administrator', username: adminUser, password: adminPass, role: 'admin', job_role: 'Nurse' });
   if (!quiet) {
-    const usingDefault = !process.env.ADMIN_PASS;
     console.log(`Created admin user "${adminUser}".` +
-      (usingDefault ? ' WARNING: using default password "changeme123" — set ADMIN_PASS and change it.' : ''));
+      (generated ? ` IMPORTANT: ADMIN_PASS was not set — temporary password is: ${adminPass}  (set ADMIN_PASS and change it now).` : ''));
   }
 }
 

@@ -145,7 +145,8 @@ function show(v){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  if(activeBtn && $('topbarTitle')) $('topbarTitle').textContent = (GROUP_OF[v]==='insights'?'Insights':activeBtn.textContent);
+  const noNavTitles={journey:'Client 360',editor:'Care Card'};
+  if($('topbarTitle')) $('topbarTitle').textContent = activeBtn ? (GROUP_OF[v]==='insights'?'Insights':activeBtn.textContent) : (noNavTitles[v]||$('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
@@ -1931,8 +1932,7 @@ function startDue(surveyId, clientId){
   $('surveyArea').scrollIntoView({behavior:'smooth'});
 }
 async function gotoSurvey(key, clientId){
-  document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id==='surveys'));
-  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view==='surveys'));
+  show('surveys');                       // route through the group router (fixes sidebar highlight/visibility)
   await loadSurveys();
   const sv = SURVEYS.find(s=>s.key===key); if(!sv) return;
   $('sv_select').value = sv.id; if(clientId) $('sv_client').value = clientId;

@@ -23,7 +23,7 @@ services:
       - key: ARMADA_DB
         value: /var/data/armada.db   # store the SQLite file on the persistent disk
       - key: SEED_SAMPLE
-        value: "true"                # load the demo client/staff on first boot
+        value: "false"               # NEVER seed demo staff/clients in production (known passwords)
       - key: ADMIN_USER
         value: admin
       - key: ADMIN_PASS

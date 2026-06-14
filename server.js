@@ -154,8 +154,9 @@ function buildCensusReport() {
   return { subject: `Midnight Census — ${today} (${active.length})`, html, text, total: active.length };
 }
 async function sendCensusEmail() {
-  const to = (getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '').trim();
-  if (!to || !emailConfigured()) return { sent: false, reason: !to ? 'no recipients set' : 'email not configured' };
+  const to = (getState('census_email_to') || process.env.CENSUS_EMAIL_TO || process.env.REPORT_TO || '').trim();
+  if (!process.env.RESEND_API_KEY) return { sent: false, reason: 'email not configured — set RESEND_API_KEY in Render' };
+  if (!to) return { sent: false, reason: 'no recipients set — add them under Recipients…' };
   const r = buildCensusReport();
   await sendEmail({ to, subject: r.subject, html: r.html });
   return { sent: true, to };
@@ -163,7 +164,7 @@ async function sendCensusEmail() {
 app.post('/api/command/census/email', requireAuth, requireAdmin, async (req, res) => {
   try { const r = await sendCensusEmail(); res.json(r); } catch (e) { res.status(502).json({ error: e.message }); }
 });
-app.get('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => res.json({ to: getState('census_email_to') || '', emailReady: emailConfigured() }));
+app.get('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => res.json({ to: getState('census_email_to') || '', emailReady: !!process.env.RESEND_API_KEY }));
 app.post('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => { setState('census_email_to', (req.body?.to || '').trim()); res.json({ ok: true }); });
 
 // FULL KIPU CHART: list every documented evaluation/form on a client, and read

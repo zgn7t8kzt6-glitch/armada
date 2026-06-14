@@ -558,7 +558,7 @@ async function saveOncall(){ await api('/settings/oncall',{method:'POST',body:JS
 function emailProviderUI(){ const p=$('em_provider').value; if($('em_smtp'))$('em_smtp').style.display=(p==='smtp')?'':'none'; if($('em_resend'))$('em_resend').style.display=(p==='resend')?'':'none'; }
 async function loadEmailConfig(){
   try{ const c=await api('/email/config');
-    if($('em_provider')){ $('em_provider').value = c.provider||'smtp'; }
+    if($('em_provider')){ $('em_provider').value = c.provider||'resend'; }
     if($('em_from')) $('em_from').value=c.from||'';
     if($('em_smtp_host')) $('em_smtp_host').value=c.smtpHost||'';
     if($('em_smtp_port')) $('em_smtp_port').value=c.smtpPort||'587';

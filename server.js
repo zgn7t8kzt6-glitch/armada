@@ -1961,7 +1961,12 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'rounds', title: 'Safety checks due', items: overdue.map((c) => item(c, 'overdue for a check')), cta: { label: 'Open Rounds →', view: 'rounds' } });
   }
 
-  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections });
+  // The Horst layer, on every role's dashboard: today's Standard (the lineup
+  // ritual) and recent recognition (catch people doing it right).
+  const focus = focusForDate(today);
+  const wins = db.prepare(`SELECT w.text, w.by_name, c.pref FROM wows w LEFT JOIN clients c ON c.id = w.client_id ORDER BY w.id DESC LIMIT 5`).all()
+    .map((w) => ({ text: w.text, by: w.by_name || '', client: w.pref || '' }));
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, focus: { topic: focus.t, goal: focus.g }, wins });
 });
 app.get('/api/today', requireAuth, (req, res) => {
   const today = appToday();

@@ -2239,6 +2239,14 @@ async function loadDashboard(){
     const onclick = t.view?`onclick="show('${t.view}')"`:`onclick="dashScrollTo('${t.key}')"`;
     return `<div class="ret-card ${cls}" style="cursor:pointer" ${onclick}><div class="n">${t.n}</div><div class="l">${esc(t.label)} ›</div></div>`;
   }).join('');
+  // Today's Standard — the lineup ritual, on every dashboard
+  const fc=d.focus;
+  $('dashStandard').innerHTML = (fc&&fc.topic) ? `<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Today's Standard — the whole house stresses this</div>
+          <h3 style="margin:2px 0 0">${esc(fc.topic)}</h3>${fc.goal?`<p class="sub sans" style="margin:4px 0 0">${esc(fc.goal)}</p>`:''}</div>
+        <button class="btn btn-gold btn-sm sans" onclick="dashJoinFocus(this)">I'm on it ✋</button>
+      </div></div>` : '';
   $('dashSections').innerHTML = (d.sections||[]).map(s=>{
     const items = (s.items&&s.items.length) ? s.items.map(it=>`<div class="todo" ${it.id?`onclick="openJourney(${it.id})" style="cursor:pointer"`:''}>
         <div class="txt">${it.badge?`<span class="risk ${/high|ama|allergy|no-show|out/i.test(it.badge)?'risk-high':'risk-elev'}">${esc(it.badge)}</span> `:''}<strong>${esc(it.name)}</strong>${it.room?' <span class="hint">· '+esc(it.room)+'</span>':''}${it.sub?'<div class="hint">'+esc(it.sub)+'</div>':''}</div>
@@ -2246,6 +2254,19 @@ async function loadDashboard(){
     const cta = s.cta?`<div class="toolbar" style="margin-top:8px;justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="show('${s.cta.view}')">${esc(s.cta.label)}</button></div>`:'';
     return `<div class="card" id="dash-${esc(s.key)}"><h3>${esc(s.title)}</h3>${items}${cta}</div>`;
   }).join('');
+  // Recognition — catch people doing it right
+  const wins=(d.wins||[]);
+  $('dashWins').innerHTML = `<div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Recent Wows 👏</h3><button class="btn btn-ghost btn-sm sans" onclick="logWow()">✨ Log a Wow</button></div>`+
+    (wins.length?wins.map(w=>`<div class="pc-note">👏 ${esc(w.text)}${w.by?' <span class="hint">— '+esc(w.by)+'</span>':''}${w.client?' <span class="hint">('+esc(w.client)+')</span>':''}</div>`).join(''):'<div class="pc-note">Be the first today — when you deliver something special or solve it on the spot, log it.</div>')+`</div>`;
+}
+async function dashJoinFocus(btn){
+  try{ await api('/focus',{method:'POST',body:JSON.stringify({})}); if(btn){ btn.textContent='✓ On it'; btn.disabled=true; } }catch(e){ alert(e.message); }
+}
+async function logWow(){
+  const text = prompt('What did you do? A personal touch you delivered, a problem you solved on the spot, or a teammate worth recognizing:');
+  if(!text||!text.trim()) return;
+  try{ await api('/wows',{method:'POST',body:JSON.stringify({text:text.trim(),recognize:1})}); if($('dashboard')&&$('dashboard').classList.contains('active')) loadDashboard(); else alert('✓ Logged. Thank you.'); }
+  catch(e){ alert(e.message); }
 }
 async function loadToday(){
   const [t, alertsData, cc] = await Promise.all([

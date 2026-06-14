@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260614x" />
+<link rel="stylesheet" href="/styles.css?v=20260614y" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -102,12 +102,16 @@
     <!-- MY SHIFT — role-tailored employee dashboard -->
     <section id="dashboard" class="view">
       <div class="card" style="border-left:4px solid var(--gold)">
-        <h3 id="dashGreeting" style="margin:0">My Shift</h3>
-        <p class="sub sans" id="dashSubtitle" style="margin:4px 0 0"></p>
+        <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><h3 id="dashGreeting" style="margin:0">My Shift</h3><p class="sub sans" id="dashSubtitle" style="margin:4px 0 0"></p></div>
+          <button class="btn btn-gold sans" onclick="logWow()" title="You delivered something special, or solved a problem on the spot">✨ Log a Wow</button>
+        </div>
       </div>
+      <div id="dashStandard"></div>
       <div id="dashNorthStar"></div>
       <div id="dashTiles" class="ret-cards"></div>
       <div id="dashSections"></div>
+      <div id="dashWins"></div>
     </section>
 
     <!-- TODAY (command center) -->
@@ -1203,6 +1207,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260614x"></script>
+<script src="/app.js?v=20260614y"></script>
 </body>
 </html>

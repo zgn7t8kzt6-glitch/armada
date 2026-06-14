@@ -981,45 +981,70 @@ export async function kipuInspect() {
 // metrics so the counts are honest. Safe to run repeatedly.
 export async function kipuFixDischargeDates() {
   const phi = process.env.KIPU_PHI_LEVEL || 'high';
-  const dDays = +(process.env.KIPU_DISCHARGE_DAYS || 60);
+  const dDays = +(process.env.KIPU_DISCHARGE_DAYS || 90);
   const start = new Date(Date.now() - dDays * 864e5).toISOString().slice(0, 10);
   const locId = (process.env.KIPU_LOCATION_ID || '').trim();
+  const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+  const nameOf = (p) => [pick(p, 'first_name'), pick(p, 'last_name')].filter(Boolean).join(' ').trim() || pick(p, 'name', 'full_name') || '';
+
+  // 1) Date-ranged feed → real discharge dates, keyed by id, master id, AND name.
   let dpath = `/api/patients/census?phi_level=${phi}&start_date=${start}&end_date=${appToday()}`;
   if (locId) dpath += `&location_id=${encodeURIComponent(locId)}`;
   const dd = await kipuGet(dpath);
   const dlist = dd?.patients || dd?.census || (Array.isArray(dd) ? dd : []);
-  const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
-
-  // Real discharge dates keyed by casefile id and master id.
-  const map = new Map();
+  const dateMap = new Map();
+  const put = (key, d) => { if (key && d && !dateMap.has(key)) dateMap.set(key, d); };
   for (const p of dlist) {
     const dRaw = pick(p, 'discharge_date', 'discharged_at'); if (!dRaw) continue;
-    const kraw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'); if (!kraw) continue;
-    const ks = String(kraw), d = String(dRaw).slice(0, 10);
-    map.set(ks, d); map.set(ks.split(':')[0], d);
+    const d = String(dRaw).slice(0, 10);
+    const kraw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn');
+    if (kraw) { const ks = String(kraw); put(ks, d); put(ks.split(':')[0], d); }
+    put('name:' + norm(nameOf(p)), d);
   }
 
+  // 2) Live active census → who is ACTUALLY still here (so we can un-discharge
+  // anyone a prior sync wrongly swept off as "gone").
+  let apath = process.env.KIPU_ROSTER_PATH || '/api/patients/census';
+  if (locId && !/location_id=/.test(apath)) apath += (apath.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
+  const activeIds = new Set(), activeNames = new Set();
+  try {
+    const ad = await kipuGet(apath);
+    const alist = ad?.patients || ad?.census || (Array.isArray(ad) ? ad : []);
+    for (const p of alist) {
+      const dRaw = pick(p, 'discharge_date', 'discharged_at'); if (dRaw && String(dRaw).trim()) continue;
+      const k = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn');
+      if (k) { const ks = String(k); activeIds.add(ks); activeIds.add(ks.split(':')[0]); }
+      activeNames.add(norm(nameOf(p)));
+    }
+  } catch { /* if this fails we still do the date fix */ }
+
   const today = appToday();
-  const clients = db.prepare(`SELECT id, kipu_id, discharge_date FROM clients WHERE source='kipu' AND discharge_status IS NOT NULL AND kipu_id IS NOT NULL`).all();
+  const clients = db.prepare(`SELECT id, name, pref, kipu_id, discharge_date FROM clients WHERE source='kipu' AND discharge_status IS NOT NULL`).all();
   const updC = db.prepare(`UPDATE clients SET discharge_date = ? WHERE id = ?`);
   const updE = db.prepare(`UPDATE flow_events SET date = ? WHERE client_id = ? AND kind IN ('discharge','ama')`);
-  const affected = new Set();
-  let fixed = 0;
+  const reactivate = db.prepare(`UPDATE clients SET active = 1, discharge_status = NULL, discharge_date = NULL, discharge_reason = NULL, discharge_destination = NULL WHERE id = ?`);
+  const delEvt = db.prepare(`DELETE FROM flow_events WHERE client_id = ? AND kind IN ('discharge','ama')`);
+  const affected = new Set([today]);
+  let fixed = 0, reactivated = 0;
   db.exec('BEGIN');
   try {
     for (const c of clients) {
-      const k = String(c.kipu_id);
-      const real = map.get(k) || map.get(k.split(':')[0]);
-      if (!real) continue;
+      const k = c.kipu_id ? String(c.kipu_id) : '';
+      const km = k.split(':')[0];
+      const nm = norm(c.name);
+      // Still active in Kipu → was wrongly discharged. Restore and drop the event.
+      if ((k && activeIds.has(k)) || (km && activeIds.has(km)) || (nm && activeNames.has(nm))) {
+        reactivate.run(c.id); delEvt.run(c.id); reactivated++;
+        if (c.discharge_date) affected.add(String(c.discharge_date).slice(0, 10));
+        continue;
+      }
+      const real = dateMap.get(k) || dateMap.get(km) || dateMap.get('name:' + nm);
       const cur = (c.discharge_date || '').slice(0, 10);
-      if (cur === real) continue;
-      // Correct it when the stored date is the bogus "today" stamp (or differs).
-      updC.run(real, c.id); updE.run(real, c.id);
-      if (cur) affected.add(cur); affected.add(real); fixed++;
+      if (real && real !== cur) { updC.run(real, c.id); updE.run(real, c.id); if (cur) affected.add(cur); affected.add(real); fixed++; }
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
-  affected.add(today);
   for (const d of affected) rollupDailyMetrics(d);
-  return { checked: clients.length, fixed, daysRerolled: affected.size };
+  return { checked: clients.length, fixed, reactivated, daysRerolled: affected.size };
 }

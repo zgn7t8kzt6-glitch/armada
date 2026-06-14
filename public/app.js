@@ -729,7 +729,7 @@ async function kipuFindRounds(){
 }
 async function kipuFixDc(){
   $('kipuResult').textContent='Correcting discharge dates from Kipu…';
-  try{ const r=await api('/kipu/fix-discharge-dates',{method:'POST'}); $('kipuResult').textContent=`✓ Checked ${r.checked} discharges, corrected ${r.fixed} to their real dates, re-rolled ${r.daysRerolled} day(s). Reopen the Command Center to see the fixed counts.`; }
+  try{ const r=await api('/kipu/fix-discharge-dates',{method:'POST'}); $('kipuResult').textContent=`✓ Checked ${r.checked} discharges — corrected ${r.fixed} to real dates, restored ${r.reactivated||0} still-active client(s), re-rolled ${r.daysRerolled} day(s). Reopen the Command Center to see the fixed counts.`; }
   catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function kipuReconcile(){

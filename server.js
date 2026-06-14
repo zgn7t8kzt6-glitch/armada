@@ -33,7 +33,7 @@ try { db.prepare(`DELETE FROM alerts WHERE kind IN ('risk', 'concern') AND statu
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '1mb' }));   // 1mb headroom for client-resized photo uploads
 app.use(cookies);
 
 // Basic security headers
@@ -279,6 +279,21 @@ app.put('/api/clients/:id', requireAuth, (req, res) => {
 app.delete('/api/clients/:id', requireAuth, requireAdmin, (req, res) => {
   db.prepare(`UPDATE clients SET active = 0 WHERE id = ?`).run(req.params.id);
   audit({ user: req.user, action: 'DELETE', entity: 'client', entity_id: +req.params.id, ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Set / clear a client's photo (staff-uploaded, for face-matching). Stored as a
+// small data URL on the profile. Reliable regardless of whether Kipu has photos.
+app.post('/api/clients/:id/photo', requireAuth, (req, res) => {
+  const photo = req.body?.photo;
+  if (photo) {
+    if (!/^data:image\/(jpeg|png|webp);base64,/.test(photo)) return res.status(400).json({ error: 'Expected a JPEG/PNG/WebP image.' });
+    if (photo.length > 600000) return res.status(400).json({ error: 'Image too large — please use a smaller photo.' });
+  }
+  const c = db.prepare(`SELECT id FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE clients SET photo = ? WHERE id = ?`).run(photo || null, req.params.id);
+  audit({ user: req.user, action: photo ? 'PHOTO_SET' : 'PHOTO_CLEAR', entity: 'client', entity_id: +req.params.id, ip: req.ip });
   res.json({ ok: true });
 });
 

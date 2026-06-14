@@ -206,7 +206,12 @@ async function renderClients(){
   });
 }
 
-function newClient(){ currentId=null; fillForm({}); $('editorTitle').textContent='New Care Card'; $('deleteBtn').style.display='none'; $('dischargeBox').style.display='none'; if($('kipuChartCard'))$('kipuChartCard').style.display='none'; show('editor'); }
+function newClient(){
+  // Single source of truth: clients are admitted in Kipu (via Salesforce) and
+  // sync in automatically — never created here by hand.
+  if(META&&META.kipu){ alert('Clients are admitted in Kipu (created in Salesforce → sent to Kipu). Once admitted, they appear here automatically — there is no manual add.'); show('clients'); return; }
+  currentId=null; fillForm({}); $('editorTitle').textContent='New Care Card'; $('deleteBtn').style.display='none'; $('dischargeBox').style.display='none'; if($('kipuChartCard'))$('kipuChartCard').style.display='none'; if($('photoCard'))$('photoCard').style.display='none'; show('editor');
+}
 async function editClient(id){
   const { client } = await api('/clients/'+id);
   currentId = id; fillForm(client);
@@ -278,9 +283,50 @@ function fillForm(c){
   const fromKipu = !!c.kipu_id;
   ['name','room','program','admit','admit_time'].forEach(f=>{ const el=$('f_'+f); if(el){ el.readOnly=fromKipu; el.classList.toggle('locked',fromKipu); el.title = fromKipu?'From Kipu — edit in the chart':''; } });
   renderKipuDemo(c);
+  renderPhotoCard(c);
   const tl = $('taskList'); tl.innerHTML='';
   (c.tasks||[]).forEach(t=>addTaskRow(t));
   if(!(c.tasks||[]).length) addTaskRow();
+}
+function renderPhotoCard(c){
+  const card=$('photoCard'); if(!card) return;
+  if(!currentId){ card.style.display='none'; return; }   // only for saved clients
+  card.style.display='';
+  $('photoThumb').innerHTML = c.photo ? `<img src="${esc(c.photo)}" class="client-photo lg" alt=""/>` : `<span class="avatar" style="width:72px;height:72px;font-size:26px">${initials(c.name||c.pref)}</span>`;
+  $('photoClearBtn').style.display = c.photo ? 'inline-block' : 'none';
+}
+async function uploadPhoto(input){
+  const file=input.files && input.files[0]; if(!file) return;
+  $('photoMsg').textContent='Processing…';
+  try{
+    const dataUrl = await resizeImage(file, 360, 0.82);
+    await api('/clients/'+currentId+'/photo',{method:'POST',body:JSON.stringify({photo:dataUrl})});
+    $('photoMsg').textContent='✓ Saved';
+    $('photoThumb').innerHTML = `<img src="${dataUrl}" class="client-photo lg" alt=""/>`;
+    $('photoClearBtn').style.display='inline-block';
+  }catch(e){ $('photoMsg').textContent='Could not save: '+(e.message||'error'); }
+  input.value='';
+}
+async function clearPhoto(){
+  if(!confirm('Remove this client\'s photo?')) return;
+  await api('/clients/'+currentId+'/photo',{method:'POST',body:JSON.stringify({photo:null})});
+  renderPhotoCard({name:$('f_name').value,pref:$('f_pref').value});
+  $('photoMsg').textContent='Removed';
+}
+// Downscale + compress an image file to a small JPEG data URL (client-side).
+function resizeImage(file, max, quality){
+  return new Promise((resolve,reject)=>{
+    const img=new Image(); const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      let {width:w,height:h}=img; if(w>h && w>max){ h=Math.round(h*max/w); w=max; } else if(h>max){ w=Math.round(w*max/h); h=max; }
+      const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+      cv.getContext('2d').drawImage(img,0,0,w,h);
+      resolve(cv.toDataURL('image/jpeg',quality||0.82));
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error('Could not read image')); };
+    img.src=url;
+  });
 }
 function ageFrom(dob){ if(!dob) return null; const d=new Date(dob); if(isNaN(d)) return null; const t=new Date(); let a=t.getFullYear()-d.getFullYear(); if(t.getMonth()<d.getMonth()||(t.getMonth()===d.getMonth()&&t.getDate()<d.getDate())) a--; return (a>=0&&a<120)?a:null; }
 function renderKipuDemo(c){

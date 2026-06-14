@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260613l" />
+<link rel="stylesheet" href="/styles.css?v=20260613m" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -53,6 +53,7 @@
     <button data-view="surveys">Surveys</button>
     <button data-view="concierge">Concierge</button>
     <button data-view="dignity">Dignity Kits</button>
+    <button data-view="rounds">Rounds</button>
     <button data-view="program">Program</button>
     <button data-view="incidents">Incidents</button>
     <button data-view="casemgmt">Case Mgmt</button>
@@ -244,6 +245,19 @@
         <div id="aiAnswer" class="brief-body"></div>
         <div id="aiHint" class="hint"></div>
       </div>
+    </section>
+
+    <!-- OBSERVATION ROUNDS -->
+    <section id="rounds" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Observation &amp; safety rounds</h3><p class="sub sans">Every client checked on cadence — provable compliance. The clock turns red when a client is overdue. Tap ✓ when you lay eyes on them.</p></div>
+          <button class="btn btn-gold sans" onclick="roundsSweep()">✓ I walked the whole unit</button>
+        </div>
+        <div id="roundsKpis" class="ret-cards"></div>
+      </div>
+      <div class="card"><div id="roundsBoard"></div></div>
+      <div class="card"><h3>Checks logged today</h3><div id="roundsAccount"></div></div>
     </section>
 
     <!-- INCIDENTS -->
@@ -1032,6 +1046,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260613l"></script>
+<script src="/app.js?v=20260613m"></script>
 </body>
 </html>

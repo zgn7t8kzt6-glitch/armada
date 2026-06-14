@@ -133,6 +133,50 @@ app.post('/api/sendouts/:id/close', requireAuth, (req, res) => {
 });
 app.delete('/api/sendouts/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM medical_sendouts WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 
+// ---- Observation / safety rounds: prove every client is being checked ----
+const OBS_DEFAULT_MIN = +(process.env.OBS_DEFAULT_MIN || 60);
+const OBS_STATUSES = ['ok', 'asleep', 'concern', 'refused', 'off-unit'];
+app.get('/api/rounds/board', requireAuth, (req, res) => {
+  const active = db.prepare(`SELECT id, pref, name, room, loc, photo, obs_interval FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const lastChk = db.prepare(`SELECT ts, by_name, status FROM obs_checks WHERE client_id = ? ORDER BY id DESC LIMIT 1`);
+  const now = Date.now();
+  const rows = active.map((c) => {
+    const l = lastChk.get(c.id);
+    const interval = c.obs_interval || OBS_DEFAULT_MIN;
+    const lastTs = l ? Date.parse(String(l.ts).replace(' ', 'T') + 'Z') : null;
+    const mins = lastTs ? Math.floor((now - lastTs) / 60000) : null;
+    return { id: c.id, name: c.pref || c.name, room: c.room, photo: c.photo || null, interval,
+      lastBy: l?.by_name || null, lastStatus: l?.status || null, minsSince: mins, overdue: mins == null || mins >= interval };
+  });
+  const overdue = rows.filter((r) => r.overdue).length;
+  // Accountability: checks logged today, by person.
+  const byPerson = db.prepare(`SELECT COALESCE(by_name,'—') k, COUNT(*) n FROM obs_checks WHERE date(ts) = date('now') GROUP BY by_name ORDER BY n DESC`).all();
+  res.json({ rows, total: rows.length, onTime: rows.length - overdue, overdue, defaultMin: OBS_DEFAULT_MIN, statuses: OBS_STATUSES, byPerson });
+});
+app.post('/api/rounds/check', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.client_id) return res.status(400).json({ error: 'client_id required' });
+  const status = OBS_STATUSES.includes(b.status) ? b.status : 'ok';
+  db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name) VALUES (?,?,?,?)`).run(+b.client_id, status, (b.note || '').trim() || null, req.user.name);
+  if (status === 'concern') createAlert(+b.client_id, 'concern', 'Elevated', `Safety-round concern logged by ${req.user.name}`);
+  res.json({ ok: true });
+});
+// "I walked the whole unit" — log a check for every active client at once.
+app.post('/api/rounds/sweep', requireAuth, (req, res) => {
+  const active = db.prepare(`SELECT id FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const ins = db.prepare(`INSERT INTO obs_checks (client_id, status, by_name) VALUES (?, 'ok', ?)`);
+  db.exec('BEGIN');
+  try { for (const c of active) ins.run(c.id, req.user.name); db.exec('COMMIT'); }
+  catch (e) { db.exec('ROLLBACK'); return res.status(500).json({ error: e.message }); }
+  audit({ user: req.user, action: 'ROUNDS_SWEEP', detail: `${active.length} clients`, ip: req.ip });
+  res.json({ ok: true, checked: active.length });
+});
+app.put('/api/clients/:id/obs-interval', requireAuth, (req, res) => {
+  const v = +req.body?.minutes || null;
+  db.prepare(`UPDATE clients SET obs_interval = ? WHERE id = ?`).run(v && v > 0 ? v : null, req.params.id);
+  res.json({ ok: true });
+});
+
 // ---- Care Card completion: the hospitality layer ON TOP of the Kipu chart.
 // Every new admit must have it filled within the first hour so we can care for
 // them by their preferences right away. (Identity comes from Kipu — single
@@ -784,6 +828,13 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   for (const c of ccRows) { const st = careCardStatus(c); if (st.complete) ccComplete++; else { const m = careCardMinsSinceAdmit(c); if (m != null && m > CARECARD_DUE_MIN) ccOverdue++; } }
   const careCards = { total: ccRows.length, complete: ccComplete, incomplete: ccRows.length - ccComplete, overdue: ccOverdue, dueMin: CARECARD_DUE_MIN };
 
+  // Observation-rounds compliance: how many clients are within their check window.
+  const obsRows = db.prepare(`SELECT c.obs_interval, (SELECT ts FROM obs_checks o WHERE o.client_id = c.id ORDER BY o.id DESC LIMIT 1) last FROM clients c WHERE c.active = 1 AND c.discharge_status IS NULL`).all();
+  const nowMs = Date.now();
+  let obsOverdue = 0;
+  for (const r of obsRows) { const iv = r.obs_interval || OBS_DEFAULT_MIN; const t = r.last ? Date.parse(String(r.last).replace(' ', 'T') + 'Z') : null; const m = t ? Math.floor((nowMs - t) / 60000) : null; if (m == null || m >= iv) obsOverdue++; }
+  const rounds = { total: obsRows.length, overdue: obsOverdue, onTime: obsRows.length - obsOverdue, pct: obsRows.length ? Math.round((obsRows.length - obsOverdue) / obsRows.length * 100) : null };
+
   // Checklist progress for today
   const chk = db.prepare(`SELECT COUNT(*) total, SUM(status='done') done FROM command_checklist WHERE date = ?`).get(today);
 
@@ -799,6 +850,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     documentation: { gaps: docGaps, clean: docClean, total: enriched.length },
     staffing: { needed, scheduled, gaps, callOffsToday, pct: needed ? Math.round(scheduled / needed * 100) : null },
     careCards,
+    rounds,
     checklist: { total: chk?.total || 0, done: chk?.done || 0 },
   });
 });

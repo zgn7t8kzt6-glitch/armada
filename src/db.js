@@ -729,6 +729,7 @@ addColumn('clients', 'payment_method', 'TEXT');
 addColumn('clients', 'next_loc', 'TEXT');              // Kipu next_level_of_care (planned step-down)
 addColumn('clients', 'anticipated_dc', 'TEXT');        // Kipu anticipated_discharge_date
 addColumn('clients', 'photo', 'TEXT');                 // patient photo (data URL) from Kipu, for face-matching
+addColumn('clients', 'obs_interval', 'INTEGER');       // per-client observation cadence (minutes); null = default
 addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapshot (kept fresh)
 addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
 addColumn('clients', 'likes', 'TEXT');                 // what the client likes/enjoys (AI, kept fresh)
@@ -827,6 +828,19 @@ export function rollupDailyMetrics(date) {
       loc_changes=excluded.loc_changes, ama=excluded.ama, census=excluded.census, updated_at=datetime('now')`)
     .run(date, c('admit'), c('discharge') + ama, c('loc_change'), ama, census);
 }
+
+// ---- Observation / safety rounds: every client checked on a cadence, logged
+// with who + when, so compliance is provable even when no one is watching. ----
+db.exec(`CREATE TABLE IF NOT EXISTS obs_checks (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'ok',     -- ok | asleep | concern | refused | off-unit
+  note TEXT,
+  by_name TEXT,
+  source TEXT NOT NULL DEFAULT 'app',     -- app | kipu
+  ts TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_obs_client_ts ON obs_checks(client_id, ts);`);
 
 // ---- Medical send-outs: ED/hospital trips (the "OTHER" section of the census).
 // A client physically sent out for medical care — still on our census until

@@ -107,7 +107,7 @@ const GROUP_OF={
   command:'command',
   today:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',
-  report:'care',lineup:'care',concierge:'care',dignity:'care',program:'care',
+  report:'care',lineup:'care',concierge:'care',dignity:'care',rounds:'care',program:'care',
   retention:'clinical',casemgmt:'clinical',surveys:'clinical',incidents:'clinical',
   mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',
   admissions:'growth',referrals:'growth',partners:'growth',alumni:'growth',
@@ -169,6 +169,7 @@ function show(v){
   if(v==='retention') loadRetention();
   if(v==='casemgmt') loadCaseMgmt();
   if(v==='dignity') loadDignity();
+  if(v==='rounds') loadRounds();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
   if(v==='surveys') loadSurveys();
@@ -1232,6 +1233,37 @@ async function cmDone(id, done){ await api('/case-tasks/'+id+'/done',{method:'PO
 async function cmDelete(id){ await api('/case-tasks/'+id,{method:'DELETE'}); loadCaseMgmt(); }
 async function cmAdd(cid){ const item=$('cmitem_'+cid).value.trim(); if(!item)return; await api('/case-tasks',{method:'POST',body:JSON.stringify({client_id:cid,category:$('cmcat_'+cid).value,item})}); loadCaseMgmt(); }
 
+/* ---- Observation / safety rounds ---- */
+let roundsTimer=null;
+async function loadRounds(){
+  clearTimeout(roundsTimer);
+  const board=$('roundsBoard'); if(!board) return;
+  let d; try{ d=await api('/rounds/board'); }catch(e){ board.innerHTML='<div class="hint">Could not load.</div>'; return; }
+  $('roundsKpis').innerHTML = `
+    <div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.overdue}</div><div class="l">Overdue now</div></div>
+    <div class="ret-card"><div class="n">${d.onTime}</div><div class="l">On time</div></div>
+    <div class="ret-card"><div class="n">${d.total}</div><div class="l">Clients</div></div>
+    <div class="ret-card"><div class="n">q${d.defaultMin}</div><div class="l">Default cadence</div></div>`;
+  const rows=[...d.rows].sort((a,b)=>(b.overdue-a.overdue)||((b.minsSince??1e9)-(a.minsSince??1e9)));
+  board.innerHTML = rows.map(r=>{
+    const when = r.minsSince==null?'never checked':(r.minsSince+'m ago'+(r.lastBy?' · '+esc(r.lastBy):''));
+    return `<div class="cmd-row ${r.overdue?'cmd-row-flag':''}">
+      ${r.photo?`<img src="${esc(r.photo)}" class="client-photo sm" alt=""/>`:''}
+      <div class="cmd-row-main"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''}
+        <div class="hint">${r.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}last: ${when}${r.lastStatus&&r.lastStatus!=='ok'?' · '+esc(r.lastStatus):''} · q${r.interval}</div></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-gold btn-sm sans" onclick="roundCheck(${r.id},'ok')">✓ Check</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="roundConcern(${r.id})" title="Log a concern">⚑</button>
+      </div></div>`;
+  }).join('');
+  $('roundsAccount').innerHTML = (d.byPerson||[]).length ? d.byPerson.map(p=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(p.k)}</strong></div><span class="chip">${p.n} checks</span></div>`).join('') : '<div class="hint">No checks logged today yet.</div>';
+  // Live: refresh every 45s so the clocks stay honest.
+  if($('rounds').classList.contains('active')) roundsTimer=setTimeout(loadRounds, 45000);
+}
+async function roundCheck(id, status){ await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:status||'ok'})}); loadRounds(); }
+async function roundConcern(id){ const note=prompt('What did you observe? (logs a safety concern)'); if(note===null) return; await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:'concern',note})}); loadRounds(); }
+async function roundsSweep(){ if(!confirm('Log a completed safety check for EVERY client right now?')) return; await api('/rounds/sweep',{method:'POST'}); loadRounds(); }
+
 /* ---- Dignity Kits ---- */
 async function loadDignity(){
   const d = await api('/dignity');
@@ -1275,7 +1307,9 @@ async function loadCommand(){
     <div class="ret-card"><div class="n">${f.dischargesToday}</div><div class="l">Discharges today</div></div>
     <div class="ret-card"><div class="n">${f.discharges7d}</div><div class="l">Discharges · 7d</div></div>
     <div class="ret-card ${d.staffing.gaps.length?'rc-high':''}"><div class="n">${d.staffing.pct!=null?d.staffing.pct+'%':'—'}</div><div class="l">Covered today</div></div>
-    <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}"><div class="n">${d.documentation.gaps.length}</div><div class="l">Doc gaps</div></div>`;
+    <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}"><div class="n">${d.documentation.gaps.length}</div><div class="l">Doc gaps</div></div>
+    ${d.rounds?`<div class="ret-card ${d.rounds.overdue?'rc-high':''}"><div class="n">${d.rounds.overdue}</div><div class="l">Rounds overdue</div></div>`:''}
+    ${d.careCards?`<div class="ret-card ${d.careCards.overdue?'rc-high':(d.careCards.incomplete?'rc-warn':'')}"><div class="n">${d.careCards.incomplete}</div><div class="l">Care cards to fill</div></div>`:''}`;
 
   // Midnight Census — mirrors the nightly census email
   if($('cmdCensus')){

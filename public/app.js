@@ -683,7 +683,7 @@ async function loadPlaybook(){
     const handoffHtml = (c.handoffs||[]).map(h=>`<div class="handoff">${esc(h.note)}<div class="by">— shift note</div></div>`).join('');
     body.insertAdjacentHTML('beforeend', `
       <div class="playbook-client">
-        <div class="pc-head"><span class="avatar">${initials(c.name||c.pref)}</span>
+        <div class="pc-head">${c.photo?`<img src="${esc(c.photo)}" class="client-photo" alt=""/>`:`<span class="avatar">${initials(c.name||c.pref)}</span>`}
           <h3>${esc(c.pref||c.name)} ${c.pref&&c.name?`<span style="font-weight:400;color:var(--gold-soft);font-size:13px">(${esc(c.name)})</span>`:''}</h3>
           <span class="room">${c.room?'Room '+esc(c.room):''}${c.program?' · '+esc(c.program):''}</span></div>
         <div class="pc-body">

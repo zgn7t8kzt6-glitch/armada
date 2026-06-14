@@ -49,8 +49,21 @@ services:
         sync: false                  # Bedrock path, e.g. us.anthropic.claude-...-v1:0
       - key: AI_DEIDENTIFY
         sync: false                  # "false" only with a signed BAA (Bedrock=AWS, or Anthropic)
+      # ── Email: send from YOUR mailbox over SMTP (preferred), or via Resend ──
+      - key: SMTP_HOST
+        sync: false                  # e.g. smtp.office365.com (Microsoft 365) or smtp.gmail.com (Google)
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false                  # your full email address (the From / login)
+      - key: SMTP_PASS
+        sync: false                  # an APP PASSWORD for that mailbox (never your real password)
+      - key: SMTP_FROM
+        sync: false                  # optional display From, e.g. "Armada Census <shlomo@armadarecovery.com>"
+      - key: CENSUS_EMAIL_TO
+        sync: false                  # who gets the nightly census (comma-separated)
       - key: RESEND_API_KEY
-        sync: false                  # optional: enables the weekly leadership email (key from resend.com)
+        sync: false                  # alternative to SMTP: a Resend.com API key
       - key: REPORT_TO
         sync: false                  # optional: who gets the weekly report (comma-separated emails)
       - key: TWILIO_SID

@@ -4,8 +4,11 @@ import { db } from './db.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+export function smtpConfigured() {
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+}
 export function emailConfigured() {
-  return Boolean(process.env.RESEND_API_KEY && process.env.REPORT_TO);
+  return Boolean(smtpConfigured() || (process.env.RESEND_API_KEY && process.env.REPORT_TO));
 }
 
 // Headline survey scores (averages) over the last `days` days.
@@ -133,14 +136,28 @@ export function renderReportHtml(d) {
 }
 
 export async function sendEmail({ subject, html, to }) {
+  const dest = (to || process.env.REPORT_TO || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!dest.length) throw new Error('No recipient address.');
+  // Preferred: send from your OWN mailbox over SMTP (e.g. Microsoft 365 / Google).
+  if (smtpConfigured()) {
+    const nodemailer = (await import('nodemailer')).default;
+    const port = +(process.env.SMTP_PORT || 587);
+    const transport = nodemailer.createTransport({
+      host: process.env.SMTP_HOST, port, secure: port === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+    const from = process.env.SMTP_FROM || process.env.REPORT_FROM || process.env.SMTP_USER;
+    await transport.sendMail({ from, to: dest, subject, html });
+    return;
+  }
+  // Fallback: Resend API.
   const key = process.env.RESEND_API_KEY;
-  const dest = to || process.env.REPORT_TO;
-  if (!key || !dest) throw new Error('Email not configured. Set RESEND_API_KEY and REPORT_TO.');
+  if (!key) throw new Error('Email not configured. Set SMTP_HOST/SMTP_USER/SMTP_PASS (your mailbox) or RESEND_API_KEY.');
   const from = process.env.REPORT_FROM || 'Armada Care <onboarding@resend.dev>';
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: dest.split(',').map((s) => s.trim()), subject, html }),
+    body: JSON.stringify({ from, to: dest, subject, html }),
   });
   if (!r.ok) throw new Error('Email send failed: ' + (await r.text()).slice(0, 200));
 }

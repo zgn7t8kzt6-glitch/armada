@@ -2045,6 +2045,17 @@ async function loadUsers(){
     users.map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.username)}</td><td>${esc(u.job_role)}</td>
       <td><span class="badge ${u.role==='admin'?'admin':''}">${u.role}</span></td></tr>`).join('')}</table>`;
 }
+async function makeDemoStaff(){
+  $('demoStaffMsg').textContent='Creating…';
+  try{ const r=await api('/demo-staff',{method:'POST'});
+    $('demoStaffMsg').textContent='✓ Done.';
+    $('demoStaffOut').innerHTML = `<div class="card" style="background:#faf6ee;margin-top:10px"><h3 style="margin:0 0 6px">Demo logins — password for all: <code>${esc(r.password)}</code></h3>`+
+      `<table class="tbl"><tr><th>Role</th><th>Username</th><th>Status</th></tr>`+
+      r.users.map(u=>`<tr><td>${esc(u.job_role)}</td><td><code>${esc(u.username)}</code></td><td>${u.status==='created'?'<span class="risk risk-low">created</span>':u.status==='exists'?'<span class="hint">already exists</span>':'<span class="risk risk-high">error</span>'}</td></tr>`).join('')+
+      `</table><p class="hint" style="margin-top:8px">Sign out and log in as any of these to see that role's dashboard. Delete them before go-live.</p></div>`;
+    loadUsers();
+  }catch(e){ $('demoStaffMsg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function addUser(){
   try{
     await api('/users',{method:'POST',body:JSON.stringify({

@@ -1296,6 +1296,19 @@ app.post('/api/users', requireAuth, requireAdmin, (req, res) => {
     res.status(400).json({ error: 'Username already exists' });
   }
 });
+// One demo login per role, so leadership can walk through every dashboard.
+app.post('/api/demo-staff', requireAuth, requireAdmin, (req, res) => {
+  const password = 'ArmadaDemo1!';
+  const users = [];
+  for (const jr of JOB_ROLES) {
+    const username = 'demo.' + jr.toLowerCase().replace(/[^a-z]+/g, '');
+    if (db.prepare(`SELECT id FROM users WHERE username = ?`).get(username)) { users.push({ name: 'Demo ' + jr, username, job_role: jr, status: 'exists' }); continue; }
+    try { createUser({ name: 'Demo ' + jr, username, password, role: 'staff', job_role: jr }); users.push({ name: 'Demo ' + jr, username, job_role: jr, status: 'created' }); }
+    catch { users.push({ name: 'Demo ' + jr, username, job_role: jr, status: 'error' }); }
+  }
+  audit({ user: req.user, action: 'DEMO_STAFF', detail: `${users.filter((u) => u.status === 'created').length} created`, ip: req.ip });
+  res.json({ password, users });
+});
 
 /* ---------------- audit log (admin) ---------------- */
 app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {

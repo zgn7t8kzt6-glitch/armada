@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615d" />
+<link rel="stylesheet" href="/styles.css?v=20260615e" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1159,6 +1159,8 @@
       <div class="card">
         <h3>Staff</h3>
         <p class="sub sans">Add team members and set their role. Each person logs in with their own account, and everything they do is tracked for accountability and recognition.</p>
+        <div class="toolbar no-print" style="justify-content:flex-start"><button class="btn btn-ghost sans" onclick="makeDemoStaff()">⚡ Create demo logins (one per role)</button><span id="demoStaffMsg" class="hint" style="align-self:center"></span></div>
+        <div id="demoStaffOut"></div>
       </div>
       <div class="card">
         <h3>Add Staff Member</h3>
@@ -1215,6 +1217,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615d"></script>
+<script src="/app.js?v=20260615e"></script>
 </body>
 </html>

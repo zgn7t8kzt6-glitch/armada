@@ -727,6 +727,26 @@ async function kipuFindRounds(){
       '\n\nALL FORM NAMES (by frequency):\n  '+(r.topByCount.join('\n  '));
   }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
+async function kipuDischargeDebug(){
+  const el=$('kipuInspect'); el.style.display='block'; el.textContent='Loading discharge diagnostic…';
+  try{
+    const d=await api('/command/discharge-debug');
+    const src=Object.entries(d.bySource||{}).map(([k,n])=>`${k}: ${n}`).join(', ');
+    const rows=(d.flowEvents||[]).map(r=>`${r.kind.toUpperCase()} · ${esc(r.name||'⟨deleted client #'+r.client_id+'⟩')} · src=${esc(r.source||'—')} · active=${r.active} · dc_date=${esc(r.discharge_date||'—')} · kipu=${esc(r.kipu_id||'—')}`).join('\n');
+    el.innerHTML=`<div style="white-space:pre-wrap;font-family:monospace;font-size:12px">`+
+      `TODAY = ${d.today}\n`+
+      `Discharge/AMA flow-events dated today: ${d.flowEventCount} (orphaned: ${d.orphanFlowEvents})\n`+
+      `Clients with discharge_date=today: ${d.dischargeDateTodayCount}  [${esc(src)}]\n\n`+
+      esc(rows)+`</div>`+
+      `<div class="toolbar" style="justify-content:flex-start;margin-top:10px">`+
+      `<button class="btn btn-danger btn-sm sans" onclick="kipuDischargeCleanup()">Delete orphaned / stale discharge events</button></div>`;
+  }catch(e){ el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function kipuDischargeCleanup(){
+  if(!confirm('Delete discharge events that point to deleted clients or to clients that are no longer discharged?'))return;
+  try{ const r=await api('/command/discharge-cleanup',{method:'POST'}); $('kipuResult').textContent=`✓ Removed ${r.orphansDeleted} orphaned and ${r.staleDeleted} stale discharge events. Reopen the Command Center.`; kipuDischargeDebug(); }
+  catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function kipuFixDc(){
   $('kipuResult').textContent='Correcting discharge dates from Kipu…';
   try{ const r=await api('/kipu/fix-discharge-dates',{method:'POST'}); $('kipuResult').textContent=`✓ Checked ${r.checked} discharges — corrected ${r.fixed} to real dates, restored ${r.reactivated||0} still-active client(s), re-rolled ${r.daysRerolled} day(s). Reopen the Command Center to see the fixed counts.`; }

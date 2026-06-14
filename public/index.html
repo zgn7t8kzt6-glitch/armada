@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260614h" />
+<link rel="stylesheet" href="/styles.css?v=20260614i" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -500,7 +500,7 @@
         <h3>Kipu EMR integration</h3>
         <p class="sub sans">Pull the client roster and let every Kipu note flow into the red-flag scanner. Set <code>KIPU_ACCESS_ID</code>, <code>KIPU_SECRET_KEY</code>, <code>KIPU_APP_ID</code> on your host.</p>
         <div id="kipuStatus" class="hint"></div>
-        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost sans" onclick="kipuTest()">Test connection</button><button class="btn btn-ghost sans" onclick="kipuInspect()">Inspect fields</button><button class="btn btn-ghost sans" onclick="kipuDocInspect()">Inspect notes/docs</button><button class="btn btn-ghost sans" onclick="kipuNotesPreview()">Preview a client's notes</button><button class="btn btn-ghost sans" onclick="kipuCoverage()">Data coverage</button><button class="btn btn-ghost sans" onclick="kipuReconcile()">Reconcile census</button><button class="btn btn-ghost sans" onclick="kipuFixDc()">Fix discharge dates</button><button class="btn btn-ghost sans" onclick="kipuFindRounds()">Find rounds form</button><button class="btn btn-gold sans" onclick="kipuSync()">Sync roster</button><button class="btn btn-danger sans" onclick="kipuReset()">Rebuild roster from Kipu</button></div>
+        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost sans" onclick="kipuTest()">Test connection</button><button class="btn btn-ghost sans" onclick="kipuInspect()">Inspect fields</button><button class="btn btn-ghost sans" onclick="kipuDocInspect()">Inspect notes/docs</button><button class="btn btn-ghost sans" onclick="kipuNotesPreview()">Preview a client's notes</button><button class="btn btn-ghost sans" onclick="kipuCoverage()">Data coverage</button><button class="btn btn-ghost sans" onclick="kipuReconcile()">Reconcile census</button><button class="btn btn-ghost sans" onclick="kipuFixDc()">Fix discharge dates</button><button class="btn btn-ghost sans" onclick="kipuDischargeDebug()">Diagnose discharges</button><button class="btn btn-ghost sans" onclick="kipuFindRounds()">Find rounds form</button><button class="btn btn-gold sans" onclick="kipuSync()">Sync roster</button><button class="btn btn-danger sans" onclick="kipuReset()">Rebuild roster from Kipu</button></div>
         <div id="kipuResult" class="hint"></div>
         <pre id="kipuInspect" class="hint" style="white-space:pre-wrap;max-height:280px;overflow:auto;background:#fbfaf7;border:1px solid var(--line);border-radius:8px;padding:10px;display:none"></pre>
         <div id="kipuCoverage" style="display:none;margin-top:12px"></div>
@@ -1164,6 +1164,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260614h"></script>
+<script src="/app.js?v=20260614i"></script>
 </body>
 </html>

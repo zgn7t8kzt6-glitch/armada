@@ -1041,6 +1041,35 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+// Diagnostic: show exactly what is being counted as "discharges today" —
+// the flow-events for today and the clients whose discharge_date is today,
+// with source/active/kipu_id so we can see what they actually are.
+app.get('/api/command/discharge-debug', requireAuth, requireAdmin, (req, res) => {
+  const today = appToday();
+  const flowEvents = db.prepare(`SELECT f.id feid, f.kind, f.date, f.detail, f.client_id,
+      c.name, c.source, c.kipu_id, c.active, c.discharge_status, c.discharge_date, c.admit, c.created_at
+    FROM flow_events f LEFT JOIN clients c ON c.id = f.client_id
+    WHERE f.date = ? AND f.kind IN ('discharge','ama') ORDER BY c.name`).all(today);
+  const orphans = flowEvents.filter((r) => r.name == null).length;
+  const dischargeDateToday = db.prepare(`SELECT id, name, source, kipu_id, active, discharge_status, discharge_date, admit, created_at
+    FROM clients WHERE substr(discharge_date,1,10) = ? ORDER BY name`).all(today);
+  const bySource = {};
+  for (const c of dischargeDateToday) { const s = c.source || 'null'; bySource[s] = (bySource[s] || 0) + 1; }
+  res.json({ today, flowEventCount: flowEvents.length, orphanFlowEvents: orphans, flowEvents, dischargeDateTodayCount: dischargeDateToday.length, bySource, clients: dischargeDateToday });
+});
+// Cleanup: delete orphaned flow-events (whose client no longer exists) and any
+// discharge flow-events whose client is no longer discharged. Re-rolls today.
+app.post('/api/command/discharge-cleanup', requireAuth, requireAdmin, (req, res) => {
+  const today = appToday();
+  const orphans = db.prepare(`DELETE FROM flow_events WHERE kind IN ('discharge','ama')
+    AND client_id NOT IN (SELECT id FROM clients)`).run().changes;
+  const stale = db.prepare(`DELETE FROM flow_events WHERE kind IN ('discharge','ama')
+    AND client_id IN (SELECT id FROM clients WHERE discharge_status IS NULL)`).run().changes;
+  rollupDailyMetrics(today);
+  audit({ user: req.user, action: 'DISCHARGE_CLEANUP', detail: `${orphans} orphan, ${stale} stale`, ip: req.ip });
+  res.json({ orphansDeleted: orphans, staleDeleted: stale });
+});
+
 // Trending issues: cluster what clients are raising across ALL notes + check-ins,
 // for the day and the week. Quantitative counts always; AI digest cached per day.
 app.get('/api/command/issues', requireAuth, requireAdmin, async (req, res) => {

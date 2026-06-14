@@ -60,7 +60,7 @@ app.use((req, res, next) => {
 });
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen'];
+const JOB_ROLES = ['BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping'];
 const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nurse / Medical (comfort, not feeling well)', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
@@ -1906,6 +1906,32 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const arrItem = (a) => ({ name: ((a.preferred_name || a.first_name || '') + ' ' + (a.last_name || '')).trim(), sub: a.referral_source ? 'via ' + a.referral_source : '', badge: a.status === 'no_show' ? 'NO-SHOW' : a.status === 'arrived' ? 'ARRIVED' : '' });
     sections.push({ key: 'arrivals', title: 'Welcome — expected today', items: waiting.map(arrItem), cta: { label: 'Open Front Desk →', view: 'arrivals' } });
     sections.push({ key: 'board', title: 'Already arrived', items: arrived.map(arrItem) });
+  } else if (jr === 'Housekeeping') {
+    subtitle = 'The Environment Standard — the physical stage is spotless, calm, and ready for the next guest.';
+    const beds = db.prepare(`SELECT room, label, unit, status FROM beds`).all();
+    const cleaning = beds.filter((b) => /clean/i.test(b.status || ''));
+    const hold = beds.filter((b) => /hold/i.test(b.status || ''));
+    const openB = beds.filter((b) => /open/i.test(b.status || ''));
+    const freedToday = db.prepare(`SELECT pref, name, room, discharge_status FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
+    const arrivals = db.prepare(`SELECT preferred_name, first_name, last_name FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).all(today);
+    const turnover = cleaning.length + freedToday.length;
+    northStar = { label: 'Beds ready', value: openB.length || '—', sev: (arrivals.length > openB.length) ? 'warn' : 'ok' };
+    tiles = [
+      { key: 'turnover', label: 'Rooms to turn over', n: turnover, sev: turnover ? 'high' : 'ok' },
+      { key: 'prep', label: 'Arrivals to prep for', n: arrivals.length, sev: arrivals.length ? 'warn' : 'ok' },
+      { key: 'ready', label: 'Beds ready', n: openB.length, sev: 'ok' },
+      { key: 'hold', label: 'On hold', n: hold.length, sev: hold.length ? 'warn' : 'ok' },
+    ];
+    sections.push({ key: 'turnover', title: 'Turn over — discharged today (refresh the room with care)', items: freedToday.map((c) => ({ name: c.pref || c.name, room: c.room || '', sub: c.discharge_status || 'discharged', badge: 'TURN OVER' })) });
+    if (cleaning.length) sections.push({ key: 'cleaning', title: 'Beds marked Cleaning', items: cleaning.map((b) => ({ name: (b.room || '') + (b.label ? ' · ' + b.label : ''), sub: b.unit || '', badge: 'CLEANING' })) });
+    sections.push({ key: 'prep', title: 'Prep — guests arriving today (ready a warm, spotless room)', items: arrivals.map((a) => ({ name: ((a.preferred_name || a.first_name || '') + ' ' + (a.last_name || '')).trim() })), cta: { label: 'See arrivals →', view: 'arrivals' } });
+    if (hold.length) sections.push({ key: 'hold', title: 'On hold', items: hold.map((b) => ({ name: b.room || '', sub: b.unit || '' })) });
+    sections.push({ key: 'standard', title: 'The senses — every space, every shift', items: [
+      { name: 'Sight', sub: 'No clutter, no trash, surfaces clear, beds made tight.' },
+      { name: 'Smell', sub: 'Fresh and clean — never bleach-harsh, never stale.' },
+      { name: 'Touch', sub: 'Fresh linens, stocked supplies, nothing broken or sticky.' },
+      { name: 'Calm', sub: 'Quiet, ordered, dignified — a place that says “you matter.”' },
+    ] });
   } else if (jr === 'Kitchen') {
     subtitle = 'The Table — no one here is ever hungry. Honor every diet.';
     const diets = active.filter((c) => (c.allergies && c.allergies.trim()) || /diabet|allerg|gluten|vegan|vegetarian|kosher|halal|renal|puree/i.test((c.diagnosis || '') + ' ' + (c.prefs || '')));

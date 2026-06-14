@@ -657,6 +657,8 @@ async function runAssessAll(user, opts = {}) {
       }
       const read = await runAndStoreAmaRead(c, user, '0.0.0.0', extra);
       assessJob[read.level === 'High' ? 'high' : read.level === 'Elevated' ? 'elevated' : 'low']++;
+      // Proactive alert: a client whose read turns High surfaces without anyone looking.
+      if (read.level === 'High') createAlert(c.id, 'risk', 'High', `${c.pref || c.name} — high risk of leaving. ${read.best_play || read.summary || 'Run the Save.'}`);
       // Ingest Kipu-charted rounds (the auditable source of truth) into obs_checks.
       if (c.kipu_id && kipuConfigured() && process.env.KIPU_ROUNDS_SYNC !== 'false') {
         try {
@@ -1523,10 +1525,62 @@ app.post('/api/kipu/reset', requireAuth, requireAdmin, async (req, res) => {
 });
 // After a manual sync/rebuild, run the AI note-read in the background so the
 // snapshot / AMA risk / case needs populate without a separate click.
+// Automations that fire on every Kipu sync. All idempotent — createAlert
+// dedupes, and inserts are guarded — so re-running never piles up duplicates.
+//  • Discharge → fond-farewell loop: Dignity Kit + 48h aftercare follow-up on
+//    every discharge, plus a Save debrief alert for AMAs.
+//  • New admit → welcome guardrail: Care Card overdue alert, and an intake
+//    nudge when someone admitted without a scheduled record.
+function runFlowAutomations() {
+  const today = appToday();
+  const recentDisch = db.prepare(`SELECT id, pref, name, discharge_status FROM clients
+    WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-2 day')`).all();
+  const insKit = db.prepare(`INSERT OR IGNORE INTO dignity_kits (client_id, due_by, assigned_role) VALUES (?, datetime('now', ?), ?)`);
+  const hasKit = db.prepare(`SELECT 1 FROM dignity_kits WHERE client_id = ?`);
+  const hasFollow = db.prepare(`SELECT 1 FROM followups WHERE client_id = ? AND type = ?`);
+  const insFollow = db.prepare(`INSERT INTO followups (client_id, type, due_date) VALUES (?, ?, ?)`);
+  let kits = 0, follows = 0;
+  for (const c of recentDisch) {
+    if (!hasKit.get(c.id)) { insKit.run(c.id, `+${DIGNITY_DUE_HOURS} hours`, DIGNITY_ROLE); createAlert(c.id, 'dignity', 'Normal', `${c.pref || c.name} — Dignity Kit for a safe departure`); kits++; }
+    if (!hasFollow.get(c.id, '48h')) { insFollow.run(c.id, '48h', addDays(today, 2)); follows++; }
+    if (/ama|against medical/i.test(c.discharge_status || '')) createAlert(c.id, 'concern', 'Elevated', `${c.pref || c.name} left AMA — run the Save debrief: what could we have done better?`);
+  }
+  const newAdmits = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) = ?`).all(today);
+  for (const c of newAdmits) {
+    if (!careCardStatus(c).complete) {
+      const mins = careCardMinsSinceAdmit(c);
+      if (mins != null && mins > CARECARD_DUE_MIN) createAlert(c.id, 'carecard', 'Elevated', `${c.pref || c.name} — Care Card not complete (${Math.floor(mins / 60)}h ${mins % 60}m since admit). Fill it within the hour.`);
+    }
+  }
+  try {
+    const matchedIds = new Set(db.prepare(`SELECT client_id FROM expected_arrivals WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
+    const schedNames = new Set(db.prepare(`SELECT first_name, last_name FROM expected_arrivals WHERE scheduled_date >= date('now','-3 day')`).all().map((a) => normName(`${a.first_name || ''} ${a.last_name || ''}`)));
+    for (const c of newAdmits) {
+      if (!matchedIds.has(c.id) && !schedNames.has(normName(c.name))) createAlert(c.id, 'unscheduled', 'Normal', `${c.pref || c.name} admitted without a scheduled record — set their admit date in Salesforce.`);
+    }
+  } catch { /* arrivals optional */ }
+  return { kits, follows };
+}
+// New admit → welcome ready: draft the welcome/first-72h plan from policy for
+// fresh admits that don't have one yet. Capped per run and fails fast on the AI
+// daily limit so it never blows the token budget. Disable with WELCOME_AUTO=false.
+async function autoWelcomePlans() {
+  if (!claudeConfigured() || process.env.WELCOME_AUTO === 'false') return;
+  const cap = +(process.env.WELCOME_AUTO_MAX || 3);
+  const need = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL
+    AND (welcome_plan IS NULL OR welcome_plan = '') AND substr(admit,1,10) >= date('now','-2 day')
+    ORDER BY admit DESC LIMIT ?`).all(cap);
+  for (const c of need) {
+    try { const plan = await generateWelcomePlan(c); db.prepare(`UPDATE clients SET welcome_plan = ? WHERE id = ?`).run(plan, c.id); }
+    catch (e) { if (e.dailyLimit) break; console.error('[welcome-plan auto]', c.id, e.message); }
+  }
+}
 function afterSyncAssess(user) {
   try { chartCache.clear(); } catch { /* cache may not be ready */ }
   try { ensureDignityKits(); } catch (e) { console.error('[dignity] ensure:', e.message); }
   try { reconcileArrivals(); } catch (e) { console.error('[arrivals] reconcile:', e.message); } // new admits auto-arrive
+  try { runFlowAutomations(); } catch (e) { console.error('[automations]:', e.message); }
+  try { autoWelcomePlans(user); } catch (e) { console.error('[welcome-plan auto]:', e.message); }
   if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
     runAssessAll({ id: user?.id ?? null, name: user?.name || 'Sync' }, { incremental: true }).catch((e) => console.error('[assess] after sync:', e.message));
   }
@@ -3251,6 +3305,7 @@ function runDailyCutoff() {
     db.prepare(`DELETE FROM command_checklist WHERE date < date(?, '-14 day')`).run(today); // tidy old checklists
     const noShows = markNoShows();   // scheduled-but-never-admitted -> follow-up queue
     if (noShows) console.log(`[cutoff] ${noShows} no-show(s) flagged for follow-up`);
+    try { ensureDignityKits(); runFlowAutomations(); } catch (e) { console.error('[cutoff] automations:', e.message); }
     // Refresh tomorrow's expected arrivals from Salesforce for the front-desk board.
     if (sfConfigured()) sfSyncArrivals(db).then(() => reconcileArrivals()).catch((e) => console.error('[cutoff] arrivals sync:', e.message));
     console.log(`[cutoff] daily report finalized for ${yesterday} (${APP_TZ})`);

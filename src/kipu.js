@@ -12,6 +12,17 @@ export function kipuConfigured() {
   return Boolean(process.env.KIPU_ACCESS_ID && process.env.KIPU_SECRET_KEY && process.env.KIPU_APP_ID);
 }
 
+// Run an async fn over items with bounded concurrency (keeps order).
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const n = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: n }, async () => {
+    while (i < items.length) { const idx = i++; try { out[idx] = await fn(items[idx], idx); } catch { out[idx] = undefined; } }
+  }));
+  return out;
+}
+
 async function kipuGet(path) {
   if (!kipuConfigured()) throw new Error('Kipu not configured. Set KIPU_ACCESS_ID, KIPU_SECRET_KEY, and KIPU_APP_ID.');
   const base = process.env.KIPU_BASE_URL || 'https://api.kipuapi.com';
@@ -191,7 +202,20 @@ export async function kipuSyncRoster() {
   // The census has no level-of-care/program field, so fetch each active
   // patient's detail to find it. On by default; KIPU_PATIENT_DETAIL=false to skip.
   const useDetail = process.env.KIPU_PATIENT_DETAIL !== 'false';
-  let detailBudget = +(process.env.KIPU_DETAIL_MAX || 80);
+  // Prefetch every matched patient's detail IN PARALLEL — the census lacks the
+  // clinical fields, and fetching these one-by-one was the slow part of a sync.
+  const detailMap = new Map();
+  if (useDetail) {
+    const kids = [];
+    for (const p of list) {
+      if (!matchesLoc(p)) continue;
+      const raw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn');
+      if (raw) kids.push(String(raw));
+    }
+    const uniq = [...new Set(kids)].slice(0, +(process.env.KIPU_DETAIL_MAX || 400));
+    const fetched = await mapLimit(uniq, +(process.env.KIPU_CONCURRENCY || 6), async (kid) => [kid, await kipuPatientDetail(kid).catch(() => null)]);
+    for (const f of fetched) if (f && f[1]) detailMap.set(f[0], f[1]);
+  }
 
   for (const p of list) {
     const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name;
@@ -236,10 +260,9 @@ export async function kipuSyncRoster() {
     // referral, discharge type, and the step-down plan). Read it for active
     // clients and for anyone discharging right now; bounded + best-effort.
     let nextLoc = null, anticipatedDc = null;
-    if (useDetail && kid && detailBudget > 0 && (!discharged || existing?.active === 1)) {
-      detailBudget--;
+    if (useDetail && kid && detailMap.has(kid)) {
       try {
-        const det = await kipuPatientDetail(kid);
+        const det = detailMap.get(kid);
         if (det) {
           const d = (...keys) => { for (const k of keys) { const v = det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.join(', ') : String(v); } return null; };
           // Kipu prefixes the utilization-review level (e.g. "UR LOC: IOP") — strip it.
@@ -375,32 +398,29 @@ export async function kipuPatientNotes(casefileId) {
     return (+b.id || 0) - (+a.id || 0);
   });
   const want = +(process.env.KIPU_NOTES_MAX || 12);
-  let budget = 30;                 // bound detail fetches per patient
-  const texts = [];
-  let therapist = null, caseMgrName = null;   // inferred from note authors
-  const debug = { candidates: list.length, anyDated, fetched: 0, withContent: 0, sampleNames: [...new Set(list.map((e) => e.name).filter(Boolean))].slice(0, 8) };
-  for (const e of list) {
-    if (texts.length >= want || budget <= 0) break;
-    if (!e.id) continue;
-    budget--; debug.fetched++;
-    let content = '', evDate = e.created_at || '';
+  const candidates = list.filter((e) => e.id).slice(0, want + 4);   // a few extra in case some are empty
+  const debug = { candidates: list.length, anyDated, fetched: candidates.length, withContent: 0, sampleNames: [...new Set(list.map((e) => e.name).filter(Boolean))].slice(0, 8) };
+  // Fetch the note details CONCURRENTLY (big speed-up vs. one-by-one).
+  const results = await mapLimit(candidates, +(process.env.KIPU_CONCURRENCY || 6), async (e) => {
     try {
       const ev = await fetchEvalDetail(casefileId, e.id);
-      evDate = evDate || ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '';
-      const items = extractItems(ev);                                    // finds the items array wherever it lives
-      const body = extractText(ev?.evaluation_content);                  // the rendered note paragraph
+      const evDate = e.created_at || ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '';
+      const body = extractText(ev?.evaluation_content);
       const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';
-      content = [bodyClean, items].filter(Boolean).join('\n').trim();    // narrative first, then answered fields
-      // Care team: a progress/individual note's author is the therapist; a case
-      // management note's author is the case manager. Take the most recent of each.
-      const nm = e.name || '';
-      const au = evalAuthor(e, ev);
-      if (au) {
-        if (!therapist && /individual|progress|counsel|psychotherapy|\btherap|clinical note|bio.?psycho|treatment plan/i.test(nm)) therapist = au;
-        if (!caseMgrName && /case ?manage|case ?mgmt|\bcm\b|discharge plan/i.test(nm)) caseMgrName = au;
-      }
-    } catch { /* skip this note */ }
-    if (content && content.length > 10) { debug.withContent++; const dt = String(evDate).slice(0, 10); texts.push(`[${dt ? dt + ' · ' : ''}${(e.name || 'Note').trim()}]\n${content}`); }
+      const content = [bodyClean, extractItems(ev)].filter(Boolean).join('\n').trim();
+      return { e, content, date: String(evDate).slice(0, 10), author: evalAuthor(e, ev) };
+    } catch { return null; }
+  });
+  const texts = [];
+  let therapist = null, caseMgrName = null;
+  for (const r of results) {
+    if (!r) continue;
+    const nm = r.e.name || '';
+    if (r.author) {
+      if (!therapist && /individual|progress|counsel|psychotherapy|\btherap|clinical note|bio.?psycho|treatment plan/i.test(nm)) therapist = r.author;
+      if (!caseMgrName && /case ?manage|case ?mgmt|\bcm\b|discharge plan/i.test(nm)) caseMgrName = r.author;
+    }
+    if (r.content && r.content.length > 10 && texts.length < want) { debug.withContent++; texts.push(`[${r.date ? r.date + ' · ' : ''}${nm.trim() || 'Note'}]\n${r.content}`); }
   }
   return { text: texts.join('\n\n').slice(0, 18000), therapist, case_manager: caseMgrName, debug };
 }
@@ -460,9 +480,13 @@ export async function kipuPatientExtras(casefileId) {
     return null;
   };
   const entries = [], diag = [];
-  for (const r of EXTRA_RESOURCES) {
+  // Probe all resource types CONCURRENTLY rather than one after another.
+  const found = await mapLimit(EXTRA_RESOURCES, 5, async (r) => {
     let arr = null, used = null;
     for (const p of r.paths) { arr = await tryPath(p); if (arr) { used = p; break; } }
+    return { r, arr, used };
+  });
+  for (const { r, arr, used } of found) {
     diag.push({ cat: r.cat, path: used || r.paths[0], count: arr ? arr.length : null });
     if (!arr) continue;
     arr.slice(0, 80).forEach((it, i) => {

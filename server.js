@@ -90,18 +90,26 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
   res.json({ client: c });
 });
 
+const chartCache = new Map();   // kipu_id|all -> { at, data }; 90s TTL
 // FULL KIPU CHART: list every documented evaluation/form on a client, and read
 // any single one on demand. This is the whole chart, not the AI's sample.
 app.get('/api/clients/:id/chart', requireAuth, async (req, res) => {
   const c = db.prepare(`SELECT kipu_id FROM clients WHERE id = ?`).get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Not found' });
   if (!c.kipu_id || !kipuConfigured()) return res.json({ evaluations: [], extras: [], kipu: false });
+  const all = req.query.all === '1';
+  const cacheKey = c.kipu_id + '|' + all;
+  const hit = chartCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < 90000) return res.json(hit.data);
   try {
-    const all = req.query.all === '1';
-    const evaluations = await kipuPatientChart(c.kipu_id, { all });
-    let extras = [], diag = [];
-    try { const ex = await kipuPatientExtras(c.kipu_id); extras = ex.entries; diag = ex.diag; } catch { /* extras best-effort */ }
-    res.json({ evaluations, extras, diag, all, kipu: true });
+    // Chart list + extra resources fetched in PARALLEL.
+    const [evaluations, ex] = await Promise.all([
+      kipuPatientChart(c.kipu_id, { all }),
+      kipuPatientExtras(c.kipu_id).catch(() => ({ entries: [], diag: [] })),
+    ]);
+    const data = { evaluations, extras: ex.entries, diag: ex.diag, all, kipu: true };
+    chartCache.set(cacheKey, { at: Date.now(), data });
+    res.json(data);
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/clients/:id/chart/:evalId', requireAuth, async (req, res) => {
@@ -300,7 +308,7 @@ async function runAssessAll(user) {
   // than piling up duplicates.
   db.prepare(`DELETE FROM alerts WHERE kind IN ('risk', 'concern') AND status = 'New'`).run();
   assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
-  for (const c of clients) {
+  const assessOne = async (c) => {
     assessJob.current = c.pref || c.name;
     try {
       let extra = [];
@@ -308,13 +316,10 @@ async function runAssessAll(user) {
         try {
           const np = await kipuPatientNotes(c.kipu_id);
           const txt = np.text;
-          // Care team isn't on the Kipu patient record — infer it from note authors.
           if (np.therapist && !c.therapist) db.prepare(`UPDATE clients SET therapist = ? WHERE id = ?`).run(np.therapist, c.id);
           if (np.case_manager && !c.case_manager) db.prepare(`UPDATE clients SET case_manager = ? WHERE id = ?`).run(np.case_manager, c.id);
           if (txt && txt.trim()) {
             extra = [{ note: 'Kipu documentation:\n' + txt }];
-            // Red-flag scan of the documentation: surfaces complaints, med issues,
-            // withdrawal discomfort, unmet requests. Refreshed each run (idempotent).
             try {
               const scan = await scanNote(txt, c.pref || c.name);
               db.prepare(`DELETE FROM notes WHERE client_id = ? AND source = 'Kipu (auto)'`).run(c.id);
@@ -333,7 +338,13 @@ async function runAssessAll(user) {
       assessJob[read.level === 'High' ? 'high' : read.level === 'Elevated' ? 'elevated' : 'low']++;
     } catch { assessJob.errors++; }
     assessJob.done++;
-  }
+  };
+  // Assess several clients CONCURRENTLY (each does Kipu + AI). AI_CONCURRENCY tunes it.
+  const limit = Math.max(1, +(process.env.AI_CONCURRENCY || 4));
+  let idx = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, clients.length) }, async () => {
+    while (idx < clients.length) { const c = clients[idx++]; await assessOne(c); }
+  }));
   assessJob.running = false; assessJob.current = null; assessJob.finishedAt = Date.now();
 }
 app.post('/api/assess-all', requireAuth, requireAdmin, (req, res) => {
@@ -1034,6 +1045,7 @@ app.post('/api/kipu/reset', requireAuth, requireAdmin, async (req, res) => {
 // After a manual sync/rebuild, run the AI note-read in the background so the
 // snapshot / AMA risk / case needs populate without a separate click.
 function afterSyncAssess(user) {
+  try { chartCache.clear(); } catch { /* cache may not be ready */ }
   try { ensureDignityKits(); } catch (e) { console.error('[dignity] ensure:', e.message); }
   if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
     runAssessAll({ id: user?.id ?? null, name: user?.name || 'Sync' }).catch((e) => console.error('[assess] after sync:', e.message));

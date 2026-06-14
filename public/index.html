@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260614s" />
+<link rel="stylesheet" href="/styles.css?v=20260614t" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -176,85 +176,20 @@
       </div>
       <div id="cmdFlow" class="ret-cards"></div>
       <div id="cmdFlowDetail" class="card" style="display:none"></div>
+      <!-- Period summary: KPIs open, the discharge detail collapsed -->
       <div class="card" id="periodCard">
         <div class="cmd-hero-row">
-          <div><h3>Period summary</h3><p class="sub sans">Scheduled, admitted, discharged and AMA since a start date — straight from Kipu &amp; Salesforce. Click an AMA to read why.</p></div>
+          <div><h3>Period summary</h3><p class="sub sans">Scheduled, admitted, discharged and AMA since a start date. Click an AMA to read why.</p></div>
           <div class="toolbar" style="justify-content:flex-end">
             <label class="hint" style="align-self:center">Since</label>
             <input type="date" id="periodSince" value="2026-06-01" onchange="loadCommandPeriod()"/>
           </div>
         </div>
         <div id="periodKpis" class="ret-cards"></div>
-        <div id="periodDetail"></div>
+        <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600;color:var(--navy)">Discharge detail — every discharge, click any to open the chart</summary><div id="periodDetail" style="margin-top:8px"></div></details>
       </div>
-      <div class="card" id="censusCard">
-        <div class="cmd-hero-row">
-          <div><h3>Midnight Census</h3><p class="sub sans">The live equivalent of your nightly census email — level-of-care breakdown, intakes, and discharges.</p></div>
-          <span id="censusAsOf" class="hint"></span>
-        </div>
-        <div id="cmdCensus"></div>
-      </div>
-      <div class="card">
-        <div class="cmd-hero-row">
-          <div><h3>Care Cards — known within the first hour</h3><p class="sub sans">Every new admit needs their Care Card (preferences) filled fast, so staff can care for them by name and need right away. Identity is from Kipu; staff add the human details.</p></div>
-          <span id="ccProgress" class="badge"></span>
-        </div>
-        <div id="cmdCareCards"></div>
-      </div>
-      <div class="card">
-        <div class="cmd-hero-row">
-          <div><h3>Daily snapshot</h3><p class="sub sans">Today's movement, cut off at midnight — a fixed daily record kept from here on.</p></div>
-          <span id="cmdCutoff" class="hint"></span>
-        </div>
-        <div id="cmdDaily"></div>
-      </div>
-      <div class="card">
-        <div class="cmd-hero-row">
-          <div><h3>Trending issues</h3><p class="sub sans">What clients are raising across all the notes &amp; check-ins — the things we keep hearing, clustered for the day and the week.</p></div>
-          <div class="cmd-hero-actions">
-            <div class="itabs" style="margin:0;border:none;padding:0">
-              <button class="itab active" id="issTabDay" onclick="setIssueRange('day')">Today</button>
-              <button class="itab" id="issTabWeek" onclick="setIssueRange('week')">This week</button>
-            </div>
-            <button class="btn btn-ghost btn-sm sans" onclick="loadCommandIssues(ISSUE_RANGE,true)" title="Re-cluster now">↻</button>
-          </div>
-        </div>
-        <div id="cmdIssues"></div>
-      </div>
-      <div class="card">
-        <h3>Census by level of care</h3>
-        <p class="sub sans">Every ASAM level on the unit — how many clients, average length of stay, and where people have stepped down (last 30 days).</p>
-        <div id="cmdLevels"></div>
-      </div>
-      <div class="card">
-        <div class="cmd-hero-row">
-          <div><h3>Patterns &amp; trends</h3><p class="sub sans">What the data says about retention — which admit days and times hold clients vs. lose them, and which referral sources convert. Builds as discharges accumulate.</p></div>
-          <select id="cmdTrendRange" onchange="loadCommandTrends()" style="width:auto"><option value="365">Last year</option><option value="180">Last 6 months</option><option value="90">Last 90 days</option><option value="730">Last 2 years</option></select>
-        </div>
-        <div id="cmdTrends"></div>
-      </div>
-      <div class="cmd-grid">
-        <div class="card">
-          <h3>Detox step-down clock</h3>
-          <p class="sub sans">3.2-WM clients should move to residential within 4 days. Anyone over is flagged.</p>
-          <div id="cmdDetox"></div>
-        </div>
-        <div class="card">
-          <h3>Discharge planning</h3>
-          <p class="sub sans">Where each client is going next, transportation, and anticipated dates — read from the notes.</p>
-          <div id="cmdPlanning"></div>
-        </div>
-        <div class="card">
-          <h3>Documentation compliance</h3>
-          <p class="sub sans">Gaps the notes suggest are missing or late. Verify in Kipu before acting.</p>
-          <div id="cmdDocs"></div>
-        </div>
-        <div class="card">
-          <h3>Staffing — today</h3>
-          <p class="sub sans">Coverage against need, plus any call-offs to backfill.</p>
-          <div id="cmdStaffing"></div>
-        </div>
-      </div>
+
+      <!-- Director's Daily Review: the action checklist, kept open -->
       <div class="card">
         <div class="cmd-hero-row">
           <div><h3>Director's Daily Review</h3><p class="sub sans">Your standing rounds, made trackable. Check it off — it logs who and when, and resets fresh each day.</p></div>
@@ -262,6 +197,49 @@
         </div>
         <div id="cmdChecklist"></div>
       </div>
+
+      <!-- Everything else: collapsed sections, open what you need -->
+      <details class="card" id="censusCard">
+        <summary>Midnight Census <span class="hint" id="censusAsOf"></span></summary>
+        <div id="cmdCensus"></div>
+      </details>
+      <details class="card">
+        <summary>Care Cards — known within the first hour <span class="badge" id="ccProgress"></span></summary>
+        <div id="cmdCareCards"></div>
+      </details>
+      <details class="card">
+        <summary>Daily snapshot <span class="hint" id="cmdCutoff"></span></summary>
+        <div id="cmdDaily"></div>
+      </details>
+      <details class="card">
+        <summary>Trending issues <span class="hint">— what clients keep raising</span></summary>
+        <div class="cmd-hero-actions" style="margin:8px 0">
+          <div class="itabs" style="margin:0;border:none;padding:0">
+            <button class="itab active" id="issTabDay" onclick="setIssueRange('day')">Today</button>
+            <button class="itab" id="issTabWeek" onclick="setIssueRange('week')">This week</button>
+          </div>
+          <button class="btn btn-ghost btn-sm sans" onclick="loadCommandIssues(ISSUE_RANGE,true)" title="Re-cluster now">↻</button>
+        </div>
+        <div id="cmdIssues"></div>
+      </details>
+      <details class="card">
+        <summary>Census by level of care <span class="hint">— counts, avg LOS, step-downs</span></summary>
+        <div id="cmdLevels" style="margin-top:8px"></div>
+      </details>
+      <details class="card">
+        <summary>Patterns &amp; trends <span class="hint">— which admit days/times &amp; referral sources hold clients</span></summary>
+        <div class="toolbar" style="justify-content:flex-end;margin:8px 0"><select id="cmdTrendRange" onchange="loadCommandTrends()" style="width:auto"><option value="365">Last year</option><option value="180">Last 6 months</option><option value="90">Last 90 days</option><option value="730">Last 2 years</option></select></div>
+        <div id="cmdTrends"></div>
+      </details>
+      <details class="card">
+        <summary>Unit detail — detox clock, discharge planning, documentation, staffing</summary>
+        <div class="cmd-grid" style="margin-top:10px">
+          <div><h4 style="margin:0 0 4px">Detox step-down clock</h4><p class="sub sans" style="margin:0 0 8px">3.2-WM clients should move to residential within 4 days.</p><div id="cmdDetox"></div></div>
+          <div><h4 style="margin:0 0 4px">Discharge planning</h4><p class="sub sans" style="margin:0 0 8px">Where each client is going next, transport, anticipated dates.</p><div id="cmdPlanning"></div></div>
+          <div><h4 style="margin:0 0 4px">Documentation compliance</h4><p class="sub sans" style="margin:0 0 8px">Gaps the notes suggest are missing or late — verify in Kipu.</p><div id="cmdDocs"></div></div>
+          <div><h4 style="margin:0 0 4px">Staffing — today</h4><p class="sub sans" style="margin:0 0 8px">Coverage against need, plus call-offs to backfill.</p><div id="cmdStaffing"></div></div>
+        </div>
+      </details>
     </section>
 
     <!-- DOCUMENTATION COMPLIANCE (admin) -->
@@ -1200,6 +1178,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260614s"></script>
+<script src="/app.js?v=20260614t"></script>
 </body>
 </html>

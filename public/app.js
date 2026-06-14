@@ -1586,21 +1586,30 @@ async function loadCommandPeriod(){
       :'<div class="hint" style="margin-top:8px">No discharges in this period.</div>');
 }
 let COMMAND_DATA=null;
-function cmdFlowPanel(key){
+async function cmdFlowPanel(key){
   const d=COMMAND_DATA; if(!d) return;
   const host=$('cmdFlowDetail'); if(!host) return;
   // toggle off if same tile re-clicked
   if(host.getAttribute('data-key')===key && host.style.display!=='none'){ host.style.display='none'; host.removeAttribute('data-key'); document.querySelectorAll('#cmdFlow .ret-card').forEach(t=>t.classList.remove('tile-active')); return; }
   const row=(x)=>`<div class="pc-note" ${x.id?`onclick="editClient(${x.id})" style="cursor:pointer" title="Open chart"`:''}>↗ <strong>${esc(x.name)}</strong> — ${esc(x.status||'')}${x.date?' <span class="hint">'+esc(x.date)+'</span>':''}${x.reason?' · '+esc(x.reason):''}${x.id?' <span class="hint">›</span>':''}</div>`;
+  const mark=(t)=>{ host.style.display='block'; host.setAttribute('data-key',key); document.querySelectorAll('#cmdFlow .ret-card').forEach(x=>x.classList.toggle('tile-active', x.getAttribute('data-cmd')===key)); host.scrollIntoView({behavior:'smooth',block:'nearest'}); };
   let html='';
   if(key==='census'){ const lv=(d.levels&&d.levels.census)||[]; html=`<h3>Census by level of care — ${d.flow.census}</h3>`+(lv.length?lv.map(l=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(l.code||l.label)}</strong> <span class="hint">${esc(l.label||'')}</span></div><span class="risk risk-low">${l.count}</span></div>`).join(''):'<div class="hint">No level-of-care data — run a Kipu sync.</div>'); }
   else if(key==='scheduled'){ const a=(d.scheduled&&d.scheduled.list)||[]; html=`<div class="cmd-hero-row"><h3 style="margin:0">Scheduled to arrive today</h3><button class="btn btn-ghost btn-sm sans" onclick="show('arrivals')">Open Front Desk ↗</button></div>`+(a.length?a.map(s=>`<div class="pc-note">${s.status==='arrived'?'✓':s.status==='no_show'?'✕':'•'} <strong>${esc(s.name)}</strong> <span class="hint">${esc(s.status==='no_show'?'no-show':s.status)}</span></div>`).join(''):'<div class="hint">None scheduled today.</div>'); }
   else if(key==='admits'){ const a=d.flow.admitsTodayList||[]; html=`<h3>Admits today (${a.length})</h3>`+(a.length?a.map(x=>`<div class="pc-note">☀ <strong>${esc(x.name)}</strong>${x.loc?' · '+esc(x.loc):''}</div>`).join(''):'<div class="hint">No admits today.</div>'); }
   else if(key==='dcToday'){ const a=d.flow.dischargesTodayList||[]; html=`<h3>Discharges today (${a.length}) — click to open the chart</h3>`+(a.length?a.map(row).join(''):'<div class="hint">No discharges today.</div>'); }
   else if(key==='dc7d'){ const a=d.flow.dischargesRecentList||[]; html=`<h3>Recent discharges (${a.length}) — click to open the chart</h3>`+(a.length?a.map(row).join(''):'<div class="hint">No recent discharges.</div>'); }
-  host.innerHTML=html; host.style.display='block'; host.setAttribute('data-key',key);
-  document.querySelectorAll('#cmdFlow .ret-card').forEach(t=>t.classList.toggle('tile-active', t.getAttribute('data-cmd')===key));
-  host.scrollIntoView({behavior:'smooth',block:'nearest'});
+  else if(key==='carecards'){
+    host.innerHTML='<div class="hint">Loading care cards…</div>'; mark();
+    let cc; try{ cc=await api('/carecards'); }catch(e){ host.innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; return; }
+    const inc=cc.incomplete||[];
+    host.innerHTML=`<h3>Care cards to fill (${inc.length}${cc.overdue?` · ${cc.overdue} overdue`:''}) — click Fill</h3>`+(inc.length?inc.map(c=>{
+      const m=c.minsSinceAdmit; const clock=m==null?'':(m<60?m+'m':Math.floor(m/60)+'h '+(m%60)+'m')+' since admit';
+      return `<div class="cmd-row ${c.overdue?'cmd-row-flag':''}"><div class="cmd-row-main"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}<div class="hint">${c.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}${clock} · missing: ${(c.missing||[]).map(esc).join(', ')}</div></div><button class="btn btn-gold btn-sm sans" onclick="openJourney(${c.id})">Fill</button></div>`;
+    }).join(''):'<div class="hint">✓ Every care card is complete.</div>');
+    return;
+  }
+  host.innerHTML=html; mark();
 }
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
@@ -1619,7 +1628,7 @@ async function loadCommand(){
     <div class="ret-card ${d.staffing.gaps.length?'rc-high':''}" onclick="show('schedule')" style="cursor:pointer"><div class="n">${d.staffing.pct!=null?d.staffing.pct+'%':'—'}</div><div class="l">Covered today ›</div></div>
     <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}" onclick="show('compliance')" style="cursor:pointer"><div class="n">${d.documentation.gaps.length}</div><div class="l">Doc gaps ›</div></div>
     ${d.rounds?`<div class="ret-card ${d.rounds.overdue?'rc-high':''}" onclick="show('rounds')" style="cursor:pointer"><div class="n">${d.rounds.overdue}</div><div class="l">Rounds overdue ›</div></div>`:''}
-    ${d.careCards?`<div class="ret-card ${d.careCards.overdue?'rc-high':(d.careCards.incomplete?'rc-warn':'')}"><div class="n">${d.careCards.incomplete}</div><div class="l">Care cards to fill</div></div>`:''}`;
+    ${d.careCards?`<div class="ret-card ${d.careCards.overdue?'rc-high':(d.careCards.incomplete?'rc-warn':'')}" ${clk('carecards')}><div class="n">${d.careCards.incomplete}</div><div class="l">Care cards to fill ›</div></div>`:''}`;
 
   // Midnight Census — mirrors the nightly census email
   if($('cmdCensus')){

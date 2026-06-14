@@ -121,6 +121,41 @@ export async function sfDescribe(objectName) {
   return { object: name, fieldCount: fields.length, fields, sample };
 }
 
+// Auto-map: scan the likely referral/patient objects and score each on whether
+// it carries (a) a referral source, (b) a patient name, (c) an MRN/Kipu id,
+// (d) a status/stage. Returns a ranked guess so we don't have to hand-pick.
+const MAP_PATTERNS = {
+  referral: /referr|source|sender|partner|marketer|rep\b|bd\b/i,
+  patient:  /first.?name|last.?name|patient|client|full.?name|^name$/i,
+  mrn:      /\bmrn\b|chart|record.?num|kipu|patient.?id|medical.?record/i,
+  status:   /status|stage|outcome|disposition|admit|schedul/i,
+  date:     /admit|schedul|created|intake.?date|adm.?date/i,
+  insurance:/insur|payer|payor|plan/i,
+};
+export async function sfAutomap() {
+  const all = await sfDiscover();
+  const skip = /^rh2__|__mdt$|__hd$/i;
+  const wanted = new Set(['Lead', 'Opportunity', 'Contact']);
+  const candidates = all.objects
+    .filter(o => (o.custom && !skip.test(o.name)) || wanted.has(o.name))
+    .map(o => o.name);
+  const results = [];
+  for (const name of candidates) {
+    let d; try { d = await sfDescribe(name); } catch (e) { results.push({ object: name, error: e.message }); continue; }
+    const hits = {};
+    for (const [k, re] of Object.entries(MAP_PATTERNS)) {
+      hits[k] = d.fields.filter(f => re.test(f.name) || re.test(f.label || '')).map(f => f.name);
+    }
+    // Score: referral + patient are the must-haves; everything else is bonus.
+    const score = (hits.referral.length ? 3 : 0) + (hits.patient.length ? 3 : 0)
+      + (hits.mrn.length ? 2 : 0) + (hits.status.length ? 1 : 0)
+      + (hits.date.length ? 1 : 0) + (hits.insurance.length ? 1 : 0);
+    results.push({ object: name, fieldCount: d.fieldCount, score, hits, hasSample: !!(d.sample && d.sample.length) });
+  }
+  results.sort((a, b) => (b.score || 0) - (a.score || 0));
+  return { scanned: candidates.length, best: results[0]?.object || null, results };
+}
+
 // Pull inbound referrals grouped by source account and upsert into
 // inbound_referrals. The SOQL is overridable per-org via SF_INBOUND_SOQL; it
 // must return columns aliased as: source_name, ref_date, outcome, sf_id.

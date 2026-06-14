@@ -10,7 +10,7 @@ import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds } from './src/kipu.js';
-import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe } from './src/salesforce.js';
+import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
@@ -1981,6 +1981,9 @@ app.get('/api/salesforce/discover', requireAuth, requireAdmin, async (req, res) 
 });
 app.get('/api/salesforce/describe', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await sfDescribe(req.query.object)); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/salesforce/automap', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await sfAutomap()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 /* ---------------- Risk & outcome analytics ---------------- */

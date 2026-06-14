@@ -624,6 +624,24 @@ async function testSf(){
   try{ const r=await api('/salesforce/test',{method:'POST'}); $('sf_msg').innerHTML='✓ Connected — Salesforce reachable.'; }
   catch(e){ $('sf_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
 }
+async function sfAutomap(){
+  const box=$('sf_discover'); if(!box) return;
+  box.innerHTML='Scanning your objects for referral + patient fields… (this takes ~10s)';
+  try{
+    const r=await api('/salesforce/automap');
+    const rows=(r.results||[]).map(o=>{
+      if(o.error) return `<tr><td>${esc(o.object)}</td><td colspan="6" style="color:var(--danger)">${esc(o.error)}</td></tr>`;
+      const cell=(arr)=> arr&&arr.length?`<span title="${esc(arr.join(', '))}">${arr.length} ✓</span>`:'—';
+      const best=o.object===r.best?' style="background:rgba(212,175,55,.15);font-weight:600"':'';
+      return `<tr${best}><td><a href="#" onclick="sfDescribe('${esc(o.object)}');return false">${esc(o.object)}</a></td>`+
+        `<td>${o.score||0}</td><td>${cell(o.hits&&o.hits.referral)}</td><td>${cell(o.hits&&o.hits.patient)}</td>`+
+        `<td>${cell(o.hits&&o.hits.mrn)}</td><td>${cell(o.hits&&o.hits.status)}</td><td>${cell(o.hits&&o.hits.insurance)}</td></tr>`;
+    }).join('');
+    box.innerHTML=`<div style="margin-bottom:6px">Scanned ${r.scanned} objects. Best match: <strong>${esc(r.best||'none')}</strong>. Hover a ✓ to see the field names.</div>`+
+      `<div style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px"><table style="width:100%;font-size:12px"><thead><tr><th>Object</th><th>Score</th><th>Referral src</th><th>Patient name</th><th>MRN/Kipu id</th><th>Status</th><th>Insurance</th></tr></thead><tbody>${rows}</tbody></table></div>`+
+      `<div id="sf_describe" style="margin-top:10px"></div>`;
+  }catch(e){ box.innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
+}
 async function sfDiscover(){
   const box=$('sf_discover'); if(!box) return;
   box.innerHTML='Asking Salesforce what objects it has…';

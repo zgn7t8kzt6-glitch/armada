@@ -910,6 +910,24 @@ export async function kipuInspect() {
           } else scan(v, `${prefix}${k}.`, depth + 1);
         }
       })(det, '', 0);
+      // Any key that looks admission/time-related, anywhere — with its value,
+      // so we can see exactly what field carries the admit time and its format.
+      const timeLike = [];
+      (function scan(o, prefix, depth) {
+        if (!o || typeof o !== 'object' || depth > 4) return;
+        for (const [k, v] of Object.entries(o)) {
+          if (v != null && typeof v !== 'object') {
+            if (/admit|admission|intake|arriv|\btime\b|created_at|_at$|date/i.test(k) && String(v).length < 48)
+              timeLike.push(`${prefix}${k} = ${String(v)}`);
+          } else scan(v, `${prefix}${k}.`, depth + 1);
+        }
+      })(det, '', 0);
+      // The raw census row's admission/time fields (the other possible source).
+      const censusTimeFields = [];
+      for (const [k, v] of Object.entries(list[0] || {})) {
+        if (v != null && typeof v !== 'object' && /admit|admission|intake|arriv|\btime\b|date|_at$/i.test(k))
+          censusTimeFields.push(`${k} = ${String(v).slice(0, 48)}`);
+      }
       patientDetail = {
         casefileId: cf,
         fields: Object.keys(det).slice(0, 60),
@@ -917,6 +935,8 @@ export async function kipuInspect() {
         levelOfCareFound: deepFind(det, LOC_KEY_RE) || '(none by key name)',
         referralFound: deepFind(det, REF_KEY_RE) || '(none by key name)',
         asamLikeValues: asamLike.slice(0, 14),
+        admitTimeFields_detail: timeLike.slice(0, 30),
+        admitTimeFields_census: censusTimeFields,
         attempts,
       };
     } else { patientDetail = { error: 'no patient detail returned', attempts }; }

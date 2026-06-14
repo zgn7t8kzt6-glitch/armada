@@ -596,15 +596,18 @@ async function kipuInspect(){ $('kipuResult').textContent='Inspecting Kipu field
   + (r.photoProbe ? '\n\n===== PHOTO PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.photoProbe,null,2) : '')
   + (r.roundsProbe ? '\n\n===== ROUNDS PROBE (copy this whole part to me) =====\n'+JSON.stringify(r.roundsProbe,null,2) : ''); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuFindRounds(){
-  $('kipuResult').textContent='Looking for the rounds/observation form on a live client…'; const el=$('kipuInspect'); el.style.display='none';
+  const client = prompt('Check a specific client by name (e.g. Shawn Adams)? Leave blank for the first active client.','')||'';
+  $('kipuResult').textContent='Pulling the chart form names…'; const el=$('kipuInspect'); el.style.display='none';
   try{
-    const r=await api('/kipu/find-rounds',{method:'POST'});
+    const r=await api('/kipu/find-rounds',{method:'POST',body:JSON.stringify({client})});
     if(r.error){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(r.error)+'</span>'; return; }
-    $('kipuResult').textContent=`Client ${r.client}: ${r.totalForms} forms · ${r.roundMatches.length} match the rounds pattern. Copy this to me:`;
+    $('kipuResult').textContent=`${esc(r.client)}: ${r.totalForms} forms on chart. Copy this to me:`;
     el.style.display='block';
-    el.textContent='ROUNDS MATCHES (auto-detected):\n  '+(r.roundMatches.join('\n  ')||'(none matched — see all form names below to tell me which IS the rounds form)')+
-      '\n\nALL FORM NAMES (by frequency):\n  '+(r.topByCount.join('\n  '))+
-      '\n\n(distinct names: '+r.distinctNames.length+')';
+    const cm=r.categoryMatches||{};
+    const catLine=(k,lbl)=>`  ${lbl}: ${(cm[k]&&cm[k].length)?cm[k].join(' | '):'(none found)'}`;
+    el.textContent='FORM-CATEGORY MATCHES (what we detect):\n'+
+      [catLine('tx_plan','Treatment plan'),catLine('biopsych','Biopsychosocial'),catLine('asam','ASAM'),catLine('cm_note','Case mgmt note'),catLine('nursing','Nursing'),catLine('rounds','Rounds')].join('\n')+
+      '\n\nALL FORM NAMES (by frequency):\n  '+(r.topByCount.join('\n  '));
   }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function kipuReconcile(){

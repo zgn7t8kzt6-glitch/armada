@@ -1270,7 +1270,7 @@ app.post('/api/kipu/reconcile', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuReconcile()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/kipu/find-rounds', requireAuth, requireAdmin, async (req, res) => {
-  try { res.json(await kipuFindRounds()); } catch (e) { res.status(502).json({ error: e.message }); }
+  try { res.json(await kipuFindRounds(req.body?.client || req.query.client)); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Data coverage: for every field the app uses, show how many clients have it
 // filled and where it comes from — so "is everything pulling?" is answerable.

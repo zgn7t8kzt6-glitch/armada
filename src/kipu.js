@@ -693,20 +693,26 @@ const ROUNDS_RE = new RegExp(process.env.KIPU_ROUNDS_PATTERN ||
 
 // DIAGNOSTIC: dump the form names on a real (active) client so we can see what
 // the rounds form is actually called, and which names match the rounds pattern.
-export async function kipuFindRounds() {
-  const c = db.prepare(`SELECT kipu_id, pref, name FROM clients WHERE active = 1 AND source = 'kipu' AND kipu_id IS NOT NULL AND kipu_id != '' ORDER BY id LIMIT 1`).get();
-  if (!c) return { error: 'No active Kipu client in the app — sync the roster first.' };
-  const list = await evalListRaw(c.kipu_id, { all: false });
+export async function kipuFindRounds(nameQuery) {
+  const c = (nameQuery && String(nameQuery).trim())
+    ? db.prepare(`SELECT kipu_id, pref, name FROM clients WHERE source = 'kipu' AND kipu_id IS NOT NULL AND kipu_id != '' AND (name LIKE ? OR pref LIKE ?) ORDER BY active DESC, id DESC LIMIT 1`).get('%' + nameQuery.trim() + '%', '%' + nameQuery.trim() + '%')
+    : db.prepare(`SELECT kipu_id, pref, name FROM clients WHERE active = 1 AND source = 'kipu' AND kipu_id IS NOT NULL AND kipu_id != '' ORDER BY id LIMIT 1`).get();
+  if (!c) return { error: nameQuery ? `No client matching "${nameQuery}" — check the name, or sync the roster.` : 'No active Kipu client in the app — sync the roster first.' };
+  // Look across ALL stays so we see the full chart (and tell which forms exist).
+  const list = await evalListRaw(c.kipu_id, { all: true });
   const names = [...new Set(list.map((e) => String(e.name || '').trim()).filter(Boolean))];
   const counts = {};
   for (const e of list) { const n = String(e.name || '').trim(); if (n) counts[n] = (counts[n] || 0) + 1; }
-  const matches = names.filter((n) => ROUNDS_RE.test(n));
+  // Which forms match each compliance category — so we can verify treatment plan etc.
+  const categoryMatches = {};
+  for (const [k, re] of Object.entries(FORM_PATTERNS)) categoryMatches[k] = names.filter((n) => re.test(n));
+  categoryMatches.rounds = names.filter((n) => ROUNDS_RE.test(n));
   return {
-    client: (String(c.pref || c.name || ' ')[0] || '?').toUpperCase() + '.', casefileId: c.kipu_id,
+    client: (String(c.pref || c.name || ' ').split(' ')[0] || '?'), casefileId: c.kipu_id,
     totalForms: list.length,
-    distinctNames: names.slice(0, 80),
-    roundMatches: matches,
-    topByCount: Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([n, k]) => `${k}× ${n}`),
+    categoryMatches,
+    topByCount: Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([n, k]) => `${k}× ${n}`),
+    distinctNames: names.slice(0, 90),
   };
 }
 

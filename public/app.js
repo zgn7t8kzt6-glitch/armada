@@ -1648,13 +1648,18 @@ async function loadCommand(){
     const schedBlock = sched.length
       ? sched.map(s=>`<div class="pc-note">${s.status==='arrived'?'✓':s.status==='no_show'?'✕':'•'} <strong>${esc(s.name)}</strong> <span class="hint">${esc(s.status==='no_show'?'no-show':s.status)}</span></div>`).join('')
       : '<div class="pc-note">None scheduled</div>';
+    const sentN=sendouts.length;
     $('cmdCensus').innerHTML =
       `<div class="cmd-sub">By level of care</div>${locLine}`+
       `<div class="cmd-row" style="border-top:2px solid var(--line)"><div class="cmd-row-main"><strong>TOTAL CENSUS</strong></div><span class="risk risk-elev">${f.census}</span></div>`+
-      `<div class="cmd-sub">Scheduled to arrive today</div>${schedBlock}`+
-      `<div class="cmd-sub">Intakes today</div>${intakes.length?intakes.map(a=>`<div class="pc-note">☀ <strong>${esc(a.name)}</strong>${a.loc?' · '+esc(a.loc):''}</div>`).join(''):'<div class="pc-note">ZERO</div>'}`+
-      `<div class="cmd-sub">Discharges</div>${dcBlock}`+
-      `<div class="cmd-sub">Other — medical send-outs (ED / hospital)</div>${sendoutBlock}`+
+      `<div class="cmd-sub">Today's movement <span class="hint" style="font-weight:400">— tap a number for the list</span></div>`+
+      `<div class="ret-cards" style="margin-top:6px">`+
+        `<div class="ret-card" onclick="cmdFlowPanel('scheduled')" style="cursor:pointer"><div class="n">${sched.length}</div><div class="l">Scheduled ›</div></div>`+
+        `<div class="ret-card" onclick="cmdFlowPanel('admits')" style="cursor:pointer"><div class="n">${intakes.length}</div><div class="l">Intakes ›</div></div>`+
+        `<div class="ret-card" onclick="cmdFlowPanel('dcToday')" style="cursor:pointer"><div class="n">${dcs.length}</div><div class="l">Discharges ›</div></div>`+
+        `<div class="ret-card ${sentN?'rc-warn':''}"><div class="n">${sentN}</div><div class="l">Out (ED/hospital)</div></div>`+
+      `</div>`+
+      (sentN?`<div class="cmd-sub">Medical send-outs (ED / hospital)</div>${sendoutBlock}`:'')+
       `<div class="handoff-add no-print" style="margin-top:10px;flex-wrap:wrap">
          <input id="so_name" placeholder="Client" style="flex:1;min-width:120px"/>
          <input id="so_dest" placeholder="Where (e.g. Akron General ED)" style="flex:1;min-width:140px"/>

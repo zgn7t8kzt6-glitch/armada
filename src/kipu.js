@@ -74,22 +74,41 @@ async function kipuGetBinary(path) {
   const contentMd5 = crypto.createHash('md5').update('').digest('base64');
   const canonical = [contentType, contentMd5, uri, date].join(',');
   const sig = crypto.createHmac('sha1', process.env.KIPU_SECRET_KEY).update(canonical).digest('base64');
-  const r = await fetch(base + uri, { headers: { Accept: contentType, 'Content-Type': contentType, 'Content-MD5': contentMd5, Date: date, Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}` } });
+  const r = await fetch(base + uri, { headers: { Accept: 'image/*, application/json', 'Content-Type': contentType, 'Content-MD5': contentMd5, Date: date, Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}` } });
   if (!r.ok) return null;
-  const ct = r.headers.get('content-type') || '';
+  const ct = (r.headers.get('content-type') || '').toLowerCase();
   const buf = Buffer.from(await r.arrayBuffer());
+  if (!buf.length) return null;
+  // Detect images by MAGIC BYTES (content-type from Kipu may be octet-stream).
+  const hex = buf.slice(0, 4).toString('hex');
+  if (hex.startsWith('ffd8ff')) return `data:image/jpeg;base64,${buf.toString('base64')}`;
+  if (hex.startsWith('89504e47')) return `data:image/png;base64,${buf.toString('base64')}`;
+  if (buf.slice(0, 3).toString('ascii') === 'GIF') return `data:image/gif;base64,${buf.toString('base64')}`;
+  if (buf.length > 12 && buf.slice(8, 12).toString('ascii') === 'WEBP') return `data:image/webp;base64,${buf.toString('base64')}`;
   if (/^image\//.test(ct)) return `data:${ct};base64,${buf.toString('base64')}`;
-  try { const j = JSON.parse(buf.toString('utf8')); const b64 = j.data || j.image || j.photo || j.base64 || j.picture; if (b64) return /^data:/.test(b64) ? b64 : `data:${j.content_type || j.mime || 'image/jpeg'};base64,${b64}`; } catch { /* not json */ }
+  // JSON wrapper: base64 field, or a URL to the image.
+  try {
+    const j = JSON.parse(buf.toString('utf8'));
+    const b64 = j.data || j.image || j.photo || j.base64 || j.picture || j.patient_picture || j.content;
+    if (b64 && typeof b64 === 'string') return /^data:/.test(b64) ? b64 : `data:${j.content_type || j.mime || 'image/jpeg'};base64,${b64}`;
+    const url = j.url || j.picture_url || j.image_url || j.photo_url;
+    if (url) { try { const r2 = await fetch(url); if (r2.ok) { const b2 = Buffer.from(await r2.arrayBuffer()); return `data:${r2.headers.get('content-type') || 'image/jpeg'};base64,${b2.toString('base64')}`; } } catch { /* url fetch failed */ } }
+  } catch { /* not json */ }
   return null;
 }
 // A patient's photo (for face-matching), best-effort across endpoint shapes.
 export async function kipuPatientPhoto(casefileId) {
   const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
   const phi = process.env.KIPU_PHI_LEVEL || 'high', e = encodeURIComponent;
+  const q = `phi_level=${phi}&patient_master_id=${e(uuid)}`;
   for (const path of [
-    `/api/patients/${master}/patient_picture?phi_level=${phi}&patient_master_id=${e(uuid)}`,
-    `/api/patients/${master}/picture?phi_level=${phi}&patient_master_id=${e(uuid)}`,
-    `/api/patients/${master}/photo?phi_level=${phi}&patient_master_id=${e(uuid)}`,
+    `/api/patients/${master}/patient_picture?${q}`,
+    `/api/patients/${master}/picture?${q}`,
+    `/api/patients/${master}/photo?${q}`,
+    `/api/patients/${master}/image?${q}`,
+    `/api/patients/${master}/patient_image?${q}`,
+    `/api/patients/${master}/avatar?${q}`,
+    `/api/patients/${e(uuid)}/patient_picture?phi_level=${phi}&patient_master_id=${master}`,
   ]) { try { const d = await kipuGetBinary(path); if (d) return d; } catch { /* try next */ } }
   return null;
 }
@@ -809,12 +828,15 @@ export async function kipuInspect() {
   let photoProbe = null;
   if (cf) {
     const m = cf.split(':')[0], u = cf.includes(':') ? cf.slice(cf.indexOf(':') + 1) : cf, phi = process.env.KIPU_PHI_LEVEL || 'high', e = encodeURIComponent;
+    const q = `phi_level=${phi}&patient_master_id=${e(u)}`;
     const paths = [
-      `/api/patients/${m}/patient_picture?phi_level=${phi}&patient_master_id=${e(u)}`,
-      `/api/patients/${m}/picture?phi_level=${phi}&patient_master_id=${e(u)}`,
-      `/api/patients/${m}/photo?phi_level=${phi}&patient_master_id=${e(u)}`,
+      `/api/patients/${m}/patient_picture?${q}`,
+      `/api/patients/${m}/picture?${q}`,
+      `/api/patients/${m}/photo?${q}`,
+      `/api/patients/${m}/image?${q}`,
+      `/api/patients/${m}/patient_image?${q}`,
+      `/api/patients/${m}/avatar?${q}`,
       `/api/patients/${m}/patient_picture`,
-      `/api/patients/${e(u)}/patient_picture?phi_level=${phi}&patient_master_id=${m}`,
       `/api/patients/${e(cf)}/patient_picture?phi_level=${phi}`,
     ];
     photoProbe = await mapLimit(paths, 4, (p) => kipuRawProbe(p));

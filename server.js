@@ -2297,7 +2297,13 @@ app.get('/api/arrivals', requireAuth, (req, res) => {
   const followUps = db.prepare(`SELECT * FROM expected_arrivals WHERE status='no_show' AND scheduled_date >= date('now','-14 day') ORDER BY scheduled_date DESC`).all();
   const counts = { expected: 0, arrived: 0, no_show: 0, cancelled: 0 };
   for (const a of day) counts[a.status] = (counts[a.status] || 0) + 1;
-  res.json({ date, arrivals: day, counts, followUps, configured: sfConfigured() });
+  // Admitted in Kipu on this date but never on the schedule — a front-door gap.
+  const admitsToday = db.prepare(`SELECT id, pref, name, room, program, loc, referral_source FROM clients WHERE substr(admit,1,10) = ? ORDER BY name`).all(date);
+  const matchedIds = new Set(db.prepare(`SELECT client_id FROM expected_arrivals WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
+  const schedNames = new Set(db.prepare(`SELECT first_name, last_name FROM expected_arrivals WHERE scheduled_date >= date(?, '-3 day')`).all(date).map((a) => normName(`${a.first_name || ''} ${a.last_name || ''}`)));
+  const unscheduled = admitsToday.filter((c) => !matchedIds.has(c.id) && !schedNames.has(normName(c.name)))
+    .map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (c.program || ''), referral: c.referral_source || '' }));
+  res.json({ date, arrivals: day, counts, followUps, unscheduled, configured: sfConfigured() });
 });
 // Front-desk action: arrived / no_show / cancelled (+ optional follow-up note).
 app.post('/api/arrivals/:id/status', requireAuth, (req, res) => {

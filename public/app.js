@@ -1358,6 +1358,11 @@ async function loadArrivals(){
     $('arrivalsList').innerHTML = rows
       ? `<table class="tbl"><tr><th>Guest</th><th>Status</th><th></th></tr>${rows}</table>`
       : (d.configured?'<div class="hint">No one scheduled to admit today.</div>':'<div class="hint">Connect Salesforce in Settings, then click “Pull from Salesforce.”</div>');
+    const uns=(d.unscheduled||[]);
+    if($('arrivalsUnschedCard')){
+      $('arrivalsUnschedCard').style.display = uns.length?'block':'none';
+      $('arrivalsUnsched').innerHTML = uns.map(c=>`<div class="todo" onclick="editClient(${c.id})" style="cursor:pointer"><div class="txt"><span class="risk risk-high">UNSCHEDULED</span> <strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}${(c.loc||c.referral)?'<div class="hint">'+[c.loc&&esc(c.loc), c.referral&&('via '+esc(c.referral))].filter(Boolean).join(' · ')+'</div>':''}</div><span class="hint">›</span></div>`).join('');
+    }
     const fu=(d.followUps||[]).map(a=>`<tr><td><strong>${esc((a.first_name||'')+' '+(a.last_name||''))}</strong><div class="hint">was due ${esc(a.scheduled_date||'')}${a.phone?' · '+esc(a.phone):''}</div></td>`+
       `<td><input class="sans" style="width:100%" placeholder="Follow-up note (what happened / next step)" value="${esc(a.follow_up||'')}" onchange="setArrivalNote(${a.id}, this.value)"/></td>`+
       `<td style="text-align:right"><button class="btn btn-ghost btn-sm sans" onclick="setArrival(${a.id},'cancelled')">Close</button></td></tr>`).join('');

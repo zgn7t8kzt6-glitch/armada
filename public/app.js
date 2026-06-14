@@ -1625,9 +1625,25 @@ async function cmdFlowPanel(key){
   }
   host.innerHTML=html; mark();
 }
+async function loadMoments(){
+  let m; try{ m=await api('/moments'); }catch(e){ return; }
+  const step=(title,done,total,gap,gapLabel)=>{
+    const pct = total? Math.round(done/total*100):100;
+    const gaps = gap.length ? `<div class="hint" style="margin:4px 0 2px">${gapLabel}:</div>`+gap.map(g=>`<div class="pc-note" onclick="editClient(${g.id})" style="cursor:pointer"><strong>${esc(g.name)}</strong>${g.room?' <span class="hint">· '+esc(g.room)+'</span>':''}${g.status?' <span class="hint">· '+esc(g.status)+'</span>':''} <span class="hint">›</span></div>`).join('') : '<div class="pc-note">✓ All set.</div>';
+    const sev = pct>=90?'risk-low':pct>=70?'risk-elev':'risk-high';
+    return `<div class="cmd-sub">${title} <span class="risk ${sev}" style="margin-left:6px">${done}/${total} · ${pct}%</span></div>${gaps}`;
+  };
+  $('momentsBody').innerHTML =
+    step('1 · Warm welcome — Care Card known in the first hour', m.welcomed.done, m.active, m.welcomed.gap, 'Not yet welcomed')+
+    step('2 · Anticipation — a personal touch delivered', m.anticipated.done, m.active, m.anticipated.gap, 'No touch delivered yet')+
+    step('3 · Fond farewell — Dignity Kit at departure (last 30d)', m.farewell.done, m.farewell.total, m.farewell.gap, 'Left without a kit logged');
+  const overall = m.active? Math.round((m.welcomed.done+m.anticipated.done)/(m.active*2)*100):100;
+  if($('momentsBadge')) $('momentsBadge').textContent = overall+'% served';
+}
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
+  loadMoments();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});

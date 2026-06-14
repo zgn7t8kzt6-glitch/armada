@@ -2005,6 +2005,31 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const stats = { wowsWeek, delightsWeek, standardStreak: streak };
   res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, stats, focus: { topic: focus.t, goal: focus.g }, wins });
 });
+
+// Moments of Truth — the three steps of service, made measurable per client:
+// warm welcome (Care Card known), anticipation (a personal touch delivered),
+// and a fond farewell (Dignity Kit at departure). Leadership's service north star.
+app.get('/api/moments', requireAuth, requireAdmin, (req, res) => {
+  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const delightSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM delights WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
+  const kitDelivered = new Set(db.prepare(`SELECT client_id FROM dignity_kits WHERE status = 'delivered'`).all().map((r) => r.client_id));
+  const nm = (c) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', status: c.discharge_status || '' });
+  const notWelcomed = [], notAnticipated = [];
+  let welcomedN = 0, anticipatedN = 0;
+  for (const c of active) {
+    if (careCardStatus(c).complete) welcomedN++; else notWelcomed.push(nm(c));
+    if (delightSet.has(c.id)) anticipatedN++; else notAnticipated.push(nm(c));
+  }
+  const disch = db.prepare(`SELECT * FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-30 day') ORDER BY discharge_date DESC`).all();
+  let farewellN = 0; const farewellGap = [];
+  for (const c of disch) { if (kitDelivered.has(c.id)) farewellN++; else farewellGap.push(nm(c)); }
+  res.json({
+    active: active.length,
+    welcomed: { done: welcomedN, gap: notWelcomed },
+    anticipated: { done: anticipatedN, gap: notAnticipated },
+    farewell: { total: disch.length, done: farewellN, gap: farewellGap },
+  });
+});
 app.get('/api/today', requireAuth, (req, res) => {
   const today = appToday();
   const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();

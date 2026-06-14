@@ -327,6 +327,11 @@ input:focus,select:focus,textarea:focus{outline:none;background:var(--paper);bor
 .cmd-chk-sec{margin-bottom:4px}
 .chip-warn{background:#fdf3ea;border-color:#e7c79a;color:#9a6a1f}
 [data-theme="dark"] .chip-warn{background:#2a2114;border-color:#5a4a2a;color:#e7c79a}
+/* Kipu demographics strip on the Care Card */
+.kdemo{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px 18px}
+.kdemo-k{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600}
+.kdemo-v{font-size:14.5px;color:var(--ink);margin-top:2px}
+[data-theme="dark"] #kipuDemo{background:#16242a;border-color:#28403c}
 [data-theme="dark"] .cmd-row{border-bottom-color:#28323c}
 /* daily snapshot */
 .cmd-days{display:flex;gap:14px;flex-wrap:wrap}

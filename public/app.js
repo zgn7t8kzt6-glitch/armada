@@ -225,9 +225,31 @@ async function dischargeClient(){
 const FF = ['name','pref','room','program','admit','admit_time','sober','therapist','case_manager','referral_source','touch','prefs','goals','triggers','safety','support','anchor_why','welcome_plan','aftercare_plan'];
 function fillForm(c){
   FF.forEach(f => $('f_'+f).value = c[f]||'');
+  renderKipuDemo(c);
   const tl = $('taskList'); tl.innerHTML='';
   (c.tasks||[]).forEach(t=>addTaskRow(t));
   if(!(c.tasks||[]).length) addTaskRow();
+}
+function ageFrom(dob){ if(!dob) return null; const d=new Date(dob); if(isNaN(d)) return null; const t=new Date(); let a=t.getFullYear()-d.getFullYear(); if(t.getMonth()<d.getMonth()||(t.getMonth()===d.getMonth()&&t.getDate()<d.getDate())) a--; return (a>=0&&a<120)?a:null; }
+function renderKipuDemo(c){
+  const box=$('kipuDemo'), body=$('kipuDemoBody'); if(!box) return;
+  const age=ageFrom(c.dob);
+  const items=[
+    ['Date of birth', c.dob ? esc((c.dob||'').slice(0,10))+(age!=null?` · ${age} yrs`:'') : ''],
+    ['Level of care', c.loc && c.loc!=='Unspecified' ? esc(c.loc) : ''],
+    ['Next level of care', c.next_loc ? esc(c.next_loc) : ''],
+    ['Anticipated discharge', c.anticipated_dc ? esc((c.anticipated_dc||'').slice(0,10)) : ''],
+    ['Diagnosis', c.diagnosis ? esc(c.diagnosis) : ''],
+    ['Insurance', c.insurance ? esc(c.insurance) : ''],
+    ['Phone', c.phone ? esc(c.phone) : ''],
+    ['Pronouns', c.pronouns ? esc(c.pronouns) : ''],
+    ['Language', c.language ? esc(c.language) : ''],
+    ['MRN', c.mrn ? esc(c.mrn) : ''],
+    ['Referral source', c.referral_source ? esc(c.referral_source) : ''],
+  ].filter(x=>x[1]);
+  if(!items.length){ box.style.display='none'; return; }
+  box.style.display='';
+  body.innerHTML = items.map(([k,v])=>`<div class="kdemo-item"><div class="kdemo-k">${k}</div><div class="kdemo-v">${v}</div></div>`).join('');
 }
 function addTaskRow(t={}){
   const tl=$('taskList'); const row=document.createElement('div'); row.className='task-row sans';

@@ -344,6 +344,7 @@ export async function kipuPatientNotes(casefileId) {
   const want = +(process.env.KIPU_NOTES_MAX || 12);
   let budget = 30;                 // bound detail fetches per patient
   const texts = [];
+  let therapist = null, caseMgrName = null;   // inferred from note authors
   for (const e of list) {
     if (texts.length >= want || budget <= 0) break;
     if (!e.id) continue;
@@ -356,11 +357,27 @@ export async function kipuPatientNotes(casefileId) {
       const body = extractText(ev?.evaluation_content);                  // the rendered note paragraph
       const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';
       content = [bodyClean, items].filter(Boolean).join('\n').trim();    // narrative first, then answered fields
-      // (no raw-structure fallback — empty is better than dumping metadata)
+      // Care team: a progress/individual note's author is the therapist; a case
+      // management note's author is the case manager. Take the most recent of each.
+      const nm = e.name || '';
+      const au = evalAuthor(e, ev);
+      if (au) {
+        if (!therapist && /individual|progress|counsel|psychotherapy|\btherap|clinical note|bio.?psycho|treatment plan/i.test(nm)) therapist = au;
+        if (!caseMgrName && /case ?manage|case ?mgmt|\bcm\b|discharge plan/i.test(nm)) caseMgrName = au;
+      }
     } catch { /* skip this note */ }
     if (content && content.length > 10) texts.push(`[${String(e.created_at || '').slice(0, 10)} · ${(e.name || 'Note').trim()}]\n${content}`);
   }
-  return texts.join('\n\n').slice(0, 18000); // keep the prompt bounded
+  return { text: texts.join('\n\n').slice(0, 18000), therapist, case_manager: caseMgrName };
+}
+
+// The clinician who signed/created an evaluation — for care-team attribution.
+const AUTHOR_FIELDS = ['evaluation_signed_by', 'signed_by', 'created_by_name', 'created_by', 'completed_by', 'staff_name', 'provider_name', 'clinician_name', 'clinician', 'author', 'user_name', 'employee_name'];
+function evalAuthor(...objs) {
+  const okName = (v) => typeof v === 'string' && v.trim() && !/^\d+$/.test(v.trim()) && /[a-z]/i.test(v);
+  for (const o of objs) { if (!o) continue; for (const k of AUTHOR_FIELDS) { if (okName(o[k])) return o[k].trim(); } }
+  for (const o of objs) { if (!o) continue; const f = deepFind(o, /(signed_by|created_by|completed_by|clinician|provider|^author$|staff_name|employee_name)/i); if (okName(f)) return f.trim(); }
+  return null;
 }
 
 // Pull label: value pairs out of Kipu evaluation items, keeping only REAL

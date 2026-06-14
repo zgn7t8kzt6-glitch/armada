@@ -282,7 +282,11 @@ async function runAssessAll(user) {
       let extra = [];
       if (c.kipu_id && kipuConfigured()) {
         try {
-          const txt = await kipuPatientNotes(c.kipu_id);
+          const np = await kipuPatientNotes(c.kipu_id);
+          const txt = np.text;
+          // Care team isn't on the Kipu patient record — infer it from note authors.
+          if (np.therapist && !c.therapist) db.prepare(`UPDATE clients SET therapist = ? WHERE id = ?`).run(np.therapist, c.id);
+          if (np.case_manager && !c.case_manager) db.prepare(`UPDATE clients SET case_manager = ? WHERE id = ?`).run(np.case_manager, c.id);
           if (txt && txt.trim()) {
             extra = [{ note: 'Kipu documentation:\n' + txt }];
             // Red-flag scan of the documentation: surfaces complaints, med issues,
@@ -327,7 +331,7 @@ async function runDischargeDebriefs(user) {
     debriefJob.current = c.pref || c.name;
     try {
       let notes = '';
-      if (c.kipu_id && kipuConfigured()) { try { notes = await kipuPatientNotes(c.kipu_id); } catch { /* care card only */ } }
+      if (c.kipu_id && kipuConfigured()) { try { notes = (await kipuPatientNotes(c.kipu_id)).text; } catch { /* care card only */ } }
       const d = await generateDischargeDebrief(c, notes);
       db.prepare(`UPDATE clients SET discharge_status = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
         .run(d.type && d.type !== 'Unknown' ? d.type : (c.discharge_status || 'Discharged'),
@@ -875,10 +879,11 @@ app.post('/api/kipu/notes-preview', requireAuth, requireAdmin, async (req, res) 
   const c = db.prepare(`SELECT kipu_id FROM clients WHERE active = 1 AND kipu_id IS NOT NULL AND kipu_id != '' LIMIT 1`).get();
   if (!c) return res.status(400).json({ error: 'No client with a Kipu id — sync the roster first.' });
   try {
-    const txt = await kipuPatientNotes(c.kipu_id);
+    const np = await kipuPatientNotes(c.kipu_id);
+    const txt = np.text;
     const blocks = txt.split(/\n\n(?=\[)/).filter(Boolean);
     const breakdown = blocks.map((b) => { const m = b.match(/^\[([^\]]+)\]/); return { head: m ? m[1] : '?', chars: b.length }; });
-    res.json({ chars: txt.length, noteCount: breakdown.length, breakdown, preview: txt.slice(0, 4000) });
+    res.json({ chars: txt.length, noteCount: breakdown.length, breakdown, therapist: np.therapist || null, case_manager: np.case_manager || null, preview: txt.slice(0, 4000) });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Clean reset: wipe the roster and rebuild it from the live Kipu active census

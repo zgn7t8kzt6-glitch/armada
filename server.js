@@ -97,10 +97,11 @@ app.get('/api/clients/:id/chart', requireAuth, async (req, res) => {
   if (!c) return res.status(404).json({ error: 'Not found' });
   if (!c.kipu_id || !kipuConfigured()) return res.json({ evaluations: [], extras: [], kipu: false });
   try {
-    const evaluations = await kipuPatientChart(c.kipu_id);
+    const all = req.query.all === '1';
+    const evaluations = await kipuPatientChart(c.kipu_id, { all });
     let extras = [], diag = [];
     try { const ex = await kipuPatientExtras(c.kipu_id); extras = ex.entries; diag = ex.diag; } catch { /* extras best-effort */ }
-    res.json({ evaluations, extras, diag, kipu: true });
+    res.json({ evaluations, extras, diag, all, kipu: true });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/clients/:id/chart/:evalId', requireAuth, async (req, res) => {

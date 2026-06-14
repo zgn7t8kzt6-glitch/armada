@@ -221,15 +221,16 @@ async function loadJourneyChart(cid){
   await chartRender(cid, 'jChartList', null, true);
   if(btn) btn.style.display='none';
 }
-async function chartRender(cid, listId, subId, reload){
+async function chartRender(cid, listId, subId, reload, all){
   const listEl=$(listId); if(!listEl) return;
-  if(reload) listEl.innerHTML='<div class="hint">Loading the full chart…</div>';
+  if(reload) listEl.innerHTML='<div class="hint">Loading the chart…</div>';
   try{
-    const d=await api('/clients/'+cid+'/chart');
+    const d=await api('/clients/'+cid+'/chart'+(all?'?all=1':''));
     if(!d.kipu){ listEl.innerHTML='<div class="hint">This client isn\'t linked to Kipu yet (sync the roster).</div>'; return; }
     const extras=d.extras||[];
-    if(!d.evaluations.length && !extras.length){ listEl.innerHTML='<div class="hint">No documents found in Kipu for this client.</div>'; return; }
-    if(subId&&$(subId)) $(subId).textContent = `${d.evaluations.length} notes${extras.length?' + '+extras.length+' meds/vitals/labs/scales':''} on this chart — click any to read it.`;
+    if(!d.evaluations.length && !extras.length){ listEl.innerHTML='<div class="hint">No documents found in Kipu for this client'+(all?'.':' for the current stay. <a href="#" onclick="chartRender('+cid+',\''+listId+'\',\''+(subId||'')+'\',true,true);return false">Show full history →</a>')+'</div>'; return; }
+    if(subId&&$(subId)) $(subId).textContent = `${all?'Full history':'Current stay'} · ${d.evaluations.length} notes${extras.length?' + '+extras.length+' meds/vitals/labs/scales':''} — click any to read it.`;
+    const toggle = `<div style="margin-bottom:10px"><button class="btn btn-ghost btn-sm sans" onclick="chartRender(${cid},'${listId}','${subId||''}',true,${all?'false':'true'})">${all?'← Current stay only':'Show full history (all admissions) →'}</button></div>`;
     let extraHtml='';
     if(extras.length){
       const cats=[...new Set(extras.map(x=>x.category))];
@@ -240,7 +241,7 @@ async function chartRender(cid, listId, subId, reload){
     }
     const notesHtml = d.evaluations.length ? '<div class="cmd-sub">Notes &amp; forms</div>'+d.evaluations.map(e=>`<details class="chart-note"><summary><span class="chart-name">${esc(e.name)}</span>${e.date?` <span class="hint">· ${esc(e.date)}</span>`:''}</summary><div class="chart-body" data-cid="${cid}" data-eid="${esc(String(e.id))}" data-loaded="0">Loading…</div></details>`).join('') : '';
     const diagHtml = (ME&&ME.role==='admin'&&d.diag&&d.diag.length) ? `<details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Source diagnostic</summary><div class="hint" style="white-space:pre-wrap">${d.diag.map(x=>`${x.cat}: ${x.count==null?'not available':x.count+' records'}`).join('\n')}</div></details>` : '';
-    listEl.innerHTML = extraHtml + notesHtml + diagHtml;
+    listEl.innerHTML = toggle + extraHtml + notesHtml + diagHtml;
     listEl.querySelectorAll('details').forEach(dt=>dt.addEventListener('toggle',function(){ if(this.open){ const b=this.querySelector('.chart-body[data-loaded="0"]'); if(b){ b.dataset.loaded='1'; openChartNote(b); } } }));
   }catch(e){ listEl.innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; }
 }

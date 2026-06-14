@@ -59,6 +59,39 @@ async function fetchEvalDetail(casefileId, evalId) {
   throw new Error(lastErr);
 }
 
+// The list of a patient's evaluations. By default scoped to the CURRENT stay
+// (the casefile) via the master sub-resource; pass { all:true } for the whole
+// cross-admission history. Walks every page until exhausted.
+async function evalListRaw(casefileId, { all = false } = {}) {
+  const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+  const phi = process.env.KIPU_PHI_LEVEL || 'high', e = encodeURIComponent;
+  const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
+  const bases = all
+    ? [tmpl.replace('{id}', s)]
+    : [`/api/patients/${master}/patient_evaluations?phi_level=${phi}&patient_master_id=${e(uuid)}`, tmpl.replace('{id}', s)];
+  let list = null, baseUsed = null;
+  for (const base of bases) {
+    try { const d = await kipuGet(base); const arr = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : null); if (Array.isArray(arr)) { list = arr; baseUsed = base; break; } }
+    catch { /* try next base */ }
+  }
+  if (!list) return [];
+  const sep = baseUsed.includes('?') ? '&' : '?';
+  const seenIds = new Set(list.map((x) => x.id ?? x.evaluation_id));
+  for (let pg = 2; pg <= 80; pg++) {
+    let chunk = [];
+    try { const d = await kipuGet(baseUsed + sep + 'page=' + pg); chunk = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : []); }
+    catch { break; }
+    if (!chunk.length) break;
+    const fresh = chunk.filter((x) => { const k = x.id ?? x.evaluation_id; if (k == null || seenIds.has(k)) return false; seenIds.add(k); return true; });
+    if (!fresh.length) break;
+    list = list.concat(fresh);
+    if (list.length > 8000) break;
+  }
+  // Anti-contamination: when rows carry a casefile, keep this patient's only.
+  list = list.filter((x) => { const cf = x.patient_casefile_id ?? x.casefile_id ?? x.patient_id; if (cf == null || cf === '') return true; const v = String(cf); return v === s || v.split(':')[0] === master; });
+  return list;
+}
+
 // Quick connectivity check.
 export async function kipuTest() {
   const path = process.env.KIPU_TEST_PATH || '/api/patients/census';
@@ -321,37 +354,8 @@ const extractText = (v) => {
 // evaluation_content (e.g. "standard"); the WRITTEN text lives in the
 // evaluation detail's patient_evaluation_items. So fetch detail per recent note.
 export async function kipuPatientNotes(casefileId) {
-  const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
-  const base = tmpl.replace('{id}', casefileId);
-  const first = await kipuGet(base);
-  let list = first?.patient_evaluations || first?.evaluations || (Array.isArray(first) ? first : []);
-  // Kipu paginates a re-admit's evaluations OLDEST-first, so the current stay's
-  // notes are on the LAST page(s). Pull those too, then dedupe.
-  const pag = first?.pagination || {};
-  const per = +(pag.per_page || pag.records_per_page || pag.per || 100) || 100;
-  const totalRecords = +(pag.total_records || pag.total_count || pag.total || pag.count || 0) || 0;
-  let totalPages = +(pag.total_pages || pag.total_page || pag.last_page || pag.pages || pag.page_count || 0) || 0;
-  if (!totalPages && totalRecords) totalPages = Math.ceil(totalRecords / per);
-  if (!totalPages) totalPages = list.length >= per ? 2 : 1;   // assume more if page is full
-  for (const pg of [totalPages, totalPages - 1, totalPages - 2]) {
-    if (pg > 1) {
-      try { const d = await kipuGet(base + (base.includes('?') ? '&' : '?') + 'page=' + pg);
-        list = list.concat(d?.patient_evaluations || d?.evaluations || []); } catch { /* ignore */ }
-    }
-  }
-  const seen = new Set();
-  list = list.filter((e) => { const k = e.id ?? e.evaluation_id; if (k == null || seen.has(k)) return false; seen.add(k); return true; });
-  // ANTI-CONTAMINATION: every evaluation carries patient_casefile_id — keep ONLY
-  // notes that belong to this exact patient (paginated pages can otherwise leak
-  // other patients' notes).
-  const want_cf = String(casefileId);
-  const want_pref = want_cf.split(':')[0];
-  list = list.filter((e) => {
-    const cf = e.patient_casefile_id ?? e.casefile_id ?? e.patient_id;
-    if (cf == null || cf === '') return true;            // keep if the note doesn't say
-    const s = String(cf);
-    return s === want_cf || s.split(':')[0] === want_pref;
-  });
+  // CURRENT STAY: scope the evaluation list to this casefile (master sub-resource).
+  let list = await evalListRaw(casefileId, { all: false });
   // CURRENT STAY ONLY: keep notes from the recent window so a re-admit's old
   // chart doesn't leak in — but ONLY when the list actually carries dates. Some
   // Kipu accounts return list rows with no created_at (just id/name/status); in
@@ -403,27 +407,8 @@ export async function kipuPatientNotes(casefileId) {
 
 // FULL CHART: list EVERY evaluation/form on a client (all pages), light rows for
 // a chart viewer. Detail is fetched on demand via kipuEvaluation.
-export async function kipuPatientChart(casefileId) {
-  const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
-  const base = tmpl.replace('{id}', casefileId);
-  const first = await kipuGet(base);
-  let list = first?.patient_evaluations || first?.evaluations || (Array.isArray(first) ? first : []);
-  const sep = base.includes('?') ? '&' : '?';
-  // Walk every page until one returns no NEW rows (robust to whatever the
-  // pagination metadata looks like, and to a page param being ignored).
-  const seenIds = new Set(list.map((e) => e.id ?? e.evaluation_id));
-  for (let pg = 2; pg <= 80; pg++) {
-    let chunk = [];
-    try { const d = await kipuGet(base + sep + 'page=' + pg); chunk = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : []); }
-    catch { break; }
-    if (!chunk.length) break;
-    const fresh = chunk.filter((e) => { const k = e.id ?? e.evaluation_id; if (k == null || seenIds.has(k)) return false; seenIds.add(k); return true; });
-    if (!fresh.length) break;
-    list = list.concat(fresh);
-    if (list.length > 8000) break;
-  }
-  const want_cf = String(casefileId), want_pref = want_cf.split(':')[0];
-  list = list.filter((e) => { const cf = e.patient_casefile_id ?? e.casefile_id ?? e.patient_id; if (cf == null || cf === '') return true; const s = String(cf); return s === want_cf || s.split(':')[0] === want_pref; });
+export async function kipuPatientChart(casefileId, opts = {}) {
+  let list = await evalListRaw(casefileId, { all: !!opts.all });
   list.sort((a, b) => { const ad = a.created_at || '', bd = b.created_at || ''; if (ad || bd) return String(bd).localeCompare(String(ad)); return (+b.id || 0) - (+a.id || 0); });
   return list.map((e) => ({ id: e.id ?? e.evaluation_id, name: String(e.name || 'Note').trim(), date: String(e.created_at || e.evaluation_date || e.date || '').slice(0, 10), status: e.status || '' }));
 }

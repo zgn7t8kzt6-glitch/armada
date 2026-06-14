@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState } from './src/db.js';
-import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
+import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
@@ -273,7 +273,7 @@ function buildCensusReport() {
 }
 async function sendCensusEmail() {
   const to = (getState('census_email_to') || process.env.CENSUS_EMAIL_TO || process.env.REPORT_TO || '').trim();
-  if (!emailConfigured() && !(process.env.SMTP_HOST || process.env.RESEND_API_KEY)) return { sent: false, reason: 'email not configured — set SMTP_* (your mailbox) or RESEND_API_KEY in Render' };
+  if (!emailConfigured()) return { sent: false, reason: 'email not connected — Settings → Email' };
   if (!to) return { sent: false, reason: 'no recipients set — add them under Recipients…' };
   const r = buildCensusReport();
   await sendEmail({ to, subject: r.subject, html: r.html });
@@ -282,8 +282,35 @@ async function sendCensusEmail() {
 app.post('/api/command/census/email', requireAuth, requireAdmin, async (req, res) => {
   try { const r = await sendCensusEmail(); res.json(r); } catch (e) { res.status(502).json({ error: e.message }); }
 });
-app.get('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => res.json({ to: getState('census_email_to') || '', emailReady: !!(process.env.SMTP_HOST || process.env.RESEND_API_KEY) }));
+app.get('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => res.json({ to: getState('census_email_to') || '', emailReady: emailConfigured() }));
 app.post('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => { setState('census_email_to', (req.body?.to || '').trim()); res.json({ ok: true }); });
+
+// ---- Email setup (in-app, no Render env editing). Secrets stored server-side;
+// never returned to the client. ----
+app.get('/api/email/config', requireAuth, requireAdmin, (req, res) => {
+  const st = emailStatus();
+  res.json({ ...st, hasResendKey: !!(getState('email_resend_key') || process.env.RESEND_API_KEY), hasSmtpPass: !!(getState('email_smtp_pass') || process.env.SMTP_PASS),
+    smtpPort: getState('email_smtp_port') || process.env.SMTP_PORT || '587', to: getState('email_to') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '' });
+});
+app.post('/api/email/config', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const set = (k, v) => { if (v !== undefined) setState('email_' + k, (v == null ? '' : String(v)).trim()); };
+  set('provider', b.provider); set('from', b.from); set('to', b.to);
+  set('smtp_host', b.smtp_host); set('smtp_port', b.smtp_port); set('smtp_user', b.smtp_user);
+  if (b.smtp_pass) set('smtp_pass', b.smtp_pass);              // only overwrite if provided
+  if (b.resend_key) set('resend_key', b.resend_key);
+  if (b.to != null) setState('census_email_to', String(b.to).trim());   // keep census recipients in sync
+  audit({ user: req.user, action: 'EMAIL_CONFIG', ip: req.ip });
+  res.json({ ok: true, status: emailStatus() });
+});
+app.post('/api/email/test', requireAuth, requireAdmin, async (req, res) => {
+  const to = (req.body?.to || getState('email_to') || getState('census_email_to') || '').trim();
+  if (!to) return res.status(400).json({ error: 'Enter a test recipient.' });
+  try {
+    await sendEmail({ to, subject: 'Armada — test email ✓', html: '<p style="font-family:Georgia,serif">This is a test from Armada Care Standards. Email is connected. 🎉</p>' });
+    res.json({ ok: true, to });
+  } catch (e) { res.status(502).json({ error: e.message || 'Send failed' }); }
+});
 
 // FULL KIPU CHART: list every documented evaluation/form on a client, and read
 // any single one on demand. This is the whole chart, not the AI's sample.

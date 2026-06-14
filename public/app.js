@@ -555,7 +555,37 @@ async function saveCoordinator(){ await api('/settings/aftercare-coordinator',{m
 async function saveOncall(){ await api('/settings/oncall',{method:'POST',body:JSON.stringify({email:$('oc_email').value,phone:$('oc_phone').value})}); alert('On-call leader saved. High alerts will reach them in real time.'); }
 
 /* ---- settings hub ---- */
+function emailProviderUI(){ const p=$('em_provider').value; if($('em_smtp'))$('em_smtp').style.display=(p==='smtp')?'':'none'; if($('em_resend'))$('em_resend').style.display=(p==='resend')?'':'none'; }
+async function loadEmailConfig(){
+  try{ const c=await api('/email/config');
+    if($('em_provider')){ $('em_provider').value = c.provider||'smtp'; }
+    if($('em_from')) $('em_from').value=c.from||'';
+    if($('em_smtp_host')) $('em_smtp_host').value=c.smtpHost||'';
+    if($('em_smtp_port')) $('em_smtp_port').value=c.smtpPort||'587';
+    if($('em_smtp_user')) $('em_smtp_user').value=c.smtpUser||'';
+    if($('em_to')) $('em_to').value=c.to||'';
+    if($('em_smtp_pass')) $('em_smtp_pass').placeholder = c.hasSmtpPass?'•••••• (saved)':'app password';
+    if($('em_resend_key')) $('em_resend_key').placeholder = c.hasResendKey?'•••••• (saved)':'re_…';
+    emailProviderUI();
+  }catch(e){}
+}
+async function saveEmailConfig(){
+  $('em_msg').textContent='Saving…';
+  const body={ provider:$('em_provider').value, from:$('em_from').value, to:$('em_to').value,
+    smtp_host:$('em_smtp_host').value, smtp_port:$('em_smtp_port').value, smtp_user:$('em_smtp_user').value };
+  if($('em_smtp_pass').value) body.smtp_pass=$('em_smtp_pass').value;
+  if($('em_resend_key').value) body.resend_key=$('em_resend_key').value;
+  try{ const r=await api('/email/config',{method:'POST',body:JSON.stringify(body)}); $('em_msg').textContent='✓ Saved'+(r.status&&r.status.provider?(' ('+r.status.provider+' ready)'):''); $('em_smtp_pass').value='';$('em_resend_key').value=''; loadEmailConfig(); }
+  catch(e){ $('em_msg').textContent='Error: '+e.message; }
+}
+async function testEmail(){
+  $('em_msg').textContent='Sending test…';
+  const to=$('em_test').value||$('em_to').value;
+  try{ const r=await api('/email/test',{method:'POST',body:JSON.stringify({to})}); $('em_msg').innerHTML='✓ Sent to '+esc(r.to)+' — check the inbox.'; }
+  catch(e){ $('em_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
+}
 async function loadSettings(){
+  loadEmailConfig();
   const st = await api('/settings');
   const dot=(ok)=>ok?'<span class="risk risk-low">ready</span>':'<span class="risk risk-warn">not set</span>';
   const prov = st.aiProvider==='bedrock'?'AWS Bedrock':'Anthropic API';

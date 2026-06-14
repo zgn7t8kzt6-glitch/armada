@@ -1,14 +1,19 @@
 // Weekly leadership report: outcomes, wow stories, concerns, delights, and the
 // week's discharges/aftercare. Viewable in-app, printable, and emailable.
-import { db } from './db.js';
+import { db, getState } from './db.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-export function smtpConfigured() {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-}
-export function emailConfigured() {
-  return Boolean(smtpConfigured() || (process.env.RESEND_API_KEY && process.env.REPORT_TO));
+// Email config resolves from the in-app settings first, then env vars.
+function ecfg(key, envName) { const v = getState('email_' + key); return (v != null && v !== '') ? v : (process.env[envName] || ''); }
+export function smtpConfigured() { return Boolean(ecfg('smtp_host', 'SMTP_HOST') && ecfg('smtp_user', 'SMTP_USER') && ecfg('smtp_pass', 'SMTP_PASS')); }
+export function resendConfigured() { return Boolean(ecfg('resend_key', 'RESEND_API_KEY')); }
+export function emailConfigured() { return smtpConfigured() || resendConfigured(); }
+export function emailStatus() {
+  return { smtp: smtpConfigured(), resend: resendConfigured(),
+    provider: smtpConfigured() ? 'smtp' : (resendConfigured() ? 'resend' : null),
+    from: ecfg('from', 'SMTP_FROM') || ecfg('from', 'REPORT_FROM') || ecfg('smtp_user', 'SMTP_USER') || '',
+    smtpHost: ecfg('smtp_host', 'SMTP_HOST'), smtpUser: ecfg('smtp_user', 'SMTP_USER') };
 }
 
 // Headline survey scores (averages) over the last `days` days.
@@ -136,24 +141,24 @@ export function renderReportHtml(d) {
 }
 
 export async function sendEmail({ subject, html, to }) {
-  const dest = (to || process.env.REPORT_TO || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const dest = (to || ecfg('to', 'CENSUS_EMAIL_TO') || process.env.REPORT_TO || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!dest.length) throw new Error('No recipient address.');
   // Preferred: send from your OWN mailbox over SMTP (e.g. Microsoft 365 / Google).
   if (smtpConfigured()) {
     const nodemailer = (await import('nodemailer')).default;
-    const port = +(process.env.SMTP_PORT || 587);
+    const port = +(ecfg('smtp_port', 'SMTP_PORT') || 587);
     const transport = nodemailer.createTransport({
-      host: process.env.SMTP_HOST, port, secure: port === 465,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      host: ecfg('smtp_host', 'SMTP_HOST'), port, secure: port === 465,
+      auth: { user: ecfg('smtp_user', 'SMTP_USER'), pass: ecfg('smtp_pass', 'SMTP_PASS') },
     });
-    const from = process.env.SMTP_FROM || process.env.REPORT_FROM || process.env.SMTP_USER;
+    const from = ecfg('from', 'SMTP_FROM') || ecfg('from', 'REPORT_FROM') || ecfg('smtp_user', 'SMTP_USER');
     await transport.sendMail({ from, to: dest, subject, html });
     return;
   }
   // Fallback: Resend API.
-  const key = process.env.RESEND_API_KEY;
-  if (!key) throw new Error('Email not configured. Set SMTP_HOST/SMTP_USER/SMTP_PASS (your mailbox) or RESEND_API_KEY.');
-  const from = process.env.REPORT_FROM || 'Armada Care <onboarding@resend.dev>';
+  const key = ecfg('resend_key', 'RESEND_API_KEY');
+  if (!key) throw new Error('Email not configured. Add SMTP (your mailbox) or a Resend key in Settings → Email.');
+  const from = ecfg('from', 'REPORT_FROM') || 'Armada Care <onboarding@resend.dev>';
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },

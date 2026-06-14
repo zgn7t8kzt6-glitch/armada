@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState } from './src/db.js';
-import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured } from './src/report.js';
+import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured, smsStatus } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
@@ -310,6 +310,27 @@ app.post('/api/email/test', requireAuth, requireAdmin, async (req, res) => {
     await sendEmail({ to, subject: 'Armada — test email ✓', html: '<p style="font-family:Georgia,serif">This is a test from Armada Care Standards. Email is connected. 🎉</p>' });
     res.json({ ok: true, to });
   } catch (e) { res.status(502).json({ error: e.message || 'Send failed' }); }
+});
+
+// ---- Texting (Twilio) setup, in-app. Secrets stored server-side. ----
+app.get('/api/sms/config', requireAuth, requireAdmin, (req, res) => {
+  const st = smsStatus();
+  res.json({ ...st, hasToken: !!(getState('email_sms_token') || process.env.TWILIO_TOKEN) });
+});
+app.post('/api/sms/config', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const set = (k, v) => { if (v !== undefined) setState('email_' + k, (v == null ? '' : String(v)).trim()); };
+  set('sms_sid', b.sid); set('sms_from', b.from);
+  if (b.token) set('sms_token', b.token);                 // only overwrite if provided
+  if (b.oncall != null) setState('oncall_phone', String(b.oncall).trim());
+  audit({ user: req.user, action: 'SMS_CONFIG', ip: req.ip });
+  res.json({ ok: true, status: smsStatus() });
+});
+app.post('/api/sms/test', requireAuth, requireAdmin, async (req, res) => {
+  const to = (req.body?.to || getState('oncall_phone') || '').trim();
+  if (!to) return res.status(400).json({ error: 'Enter a test phone number (e.g. +13305551212).' });
+  try { await sendSms({ to, body: 'Armada test text ✓ — texting is connected.' }); res.json({ ok: true, to }); }
+  catch (e) { res.status(502).json({ error: e.message || 'Send failed' }); }
 });
 
 // FULL KIPU CHART: list every documented evaluation/form on a client, and read

@@ -584,8 +584,29 @@ async function testEmail(){
   try{ const r=await api('/email/test',{method:'POST',body:JSON.stringify({to})}); $('em_msg').innerHTML='✓ Sent to '+esc(r.to)+' — check the inbox.'; }
   catch(e){ $('em_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
 }
+async function loadSmsConfig(){
+  try{ const c=await api('/sms/config');
+    if($('sms_sid')) $('sms_sid').value=c.sid||'';
+    if($('sms_from')) $('sms_from').value=c.from||'';
+    if($('sms_oncall')) $('sms_oncall').value=c.oncall||'';
+    if($('sms_token')) $('sms_token').placeholder = c.hasToken?'•••••• (saved)':'auth token';
+  }catch(e){}
+}
+async function saveSmsConfig(){
+  $('sms_msg').textContent='Saving…';
+  const body={ sid:$('sms_sid').value, from:$('sms_from').value, oncall:$('sms_oncall').value };
+  if($('sms_token').value) body.token=$('sms_token').value;
+  try{ const r=await api('/sms/config',{method:'POST',body:JSON.stringify(body)}); $('sms_msg').textContent='✓ Saved'+(r.status&&r.status.ready?' (ready)':''); $('sms_token').value=''; loadSmsConfig(); }
+  catch(e){ $('sms_msg').textContent='Error: '+e.message; }
+}
+async function testSms(){
+  $('sms_msg').textContent='Sending test text…';
+  const to=$('sms_test').value||$('sms_oncall').value;
+  try{ const r=await api('/sms/test',{method:'POST',body:JSON.stringify({to})}); $('sms_msg').innerHTML='✓ Sent to '+esc(r.to)+' — check the phone.'; }
+  catch(e){ $('sms_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
+}
 async function loadSettings(){
-  loadEmailConfig();
+  loadEmailConfig(); loadSmsConfig();
   const st = await api('/settings');
   const dot=(ok)=>ok?'<span class="risk risk-low">ready</span>':'<span class="risk risk-warn">not set</span>';
   const prov = st.aiProvider==='bedrock'?'AWS Bedrock':'Anthropic API';

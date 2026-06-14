@@ -167,12 +167,11 @@ export async function sendEmail({ subject, html, to }) {
   if (!r.ok) throw new Error('Email send failed: ' + (await r.text()).slice(0, 200));
 }
 
-export function smsConfigured() {
-  return Boolean(process.env.TWILIO_SID && process.env.TWILIO_TOKEN && process.env.TWILIO_FROM);
-}
+export function smsConfigured() { return Boolean(ecfg('sms_sid', 'TWILIO_SID') && ecfg('sms_token', 'TWILIO_TOKEN') && ecfg('sms_from', 'TWILIO_FROM')); }
+export function smsStatus() { return { ready: smsConfigured(), from: ecfg('sms_from', 'TWILIO_FROM'), sid: ecfg('sms_sid', 'TWILIO_SID'), oncall: getState('oncall_phone') || process.env.ONCALL_PHONE || '' }; }
 export async function sendSms({ to, body }) {
-  const sid = process.env.TWILIO_SID, token = process.env.TWILIO_TOKEN, from = process.env.TWILIO_FROM;
-  if (!sid || !token || !from || !to) throw new Error('SMS not configured (TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM).');
+  const sid = ecfg('sms_sid', 'TWILIO_SID'), token = ecfg('sms_token', 'TWILIO_TOKEN'), from = ecfg('sms_from', 'TWILIO_FROM');
+  if (!sid || !token || !from || !to) throw new Error('Texting not connected — Settings → Texting.');
   const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
     method: 'POST',
     headers: { Authorization: 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },

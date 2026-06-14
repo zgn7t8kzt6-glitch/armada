@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260613t" />
+<link rel="stylesheet" href="/styles.css?v=20260613u" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -509,6 +509,24 @@
           <span id="em_msg" class="hint" style="align-self:center"></span>
         </div>
         <p class="hint">Microsoft 365 note: an admin may need to enable “Authenticated SMTP” for the mailbox, and you'll use an <strong>app password</strong>. If SMTP is blocked, switch to Resend.</p>
+      </div>
+      <div class="card">
+        <h3>Texting (SMS alerts)</h3>
+        <p class="sub sans">Powers on-call alerts and overdue-rounds escalation. Uses <strong>Twilio</strong> — create a free trial at twilio.com, then copy your Account SID, Auth Token, and a Twilio phone number.</p>
+        <div class="grid3">
+          <div><label>Account SID</label><input id="sms_sid" placeholder="AC…"/></div>
+          <div><label>Auth Token <span class="hint" style="font-weight:400">(blank = keep saved)</span></label><input id="sms_token" type="password" placeholder="••••••••"/></div>
+          <div><label>From number (Twilio)</label><input id="sms_from" placeholder="+13305551212"/></div>
+        </div>
+        <label>On-call / alert number <span class="hint" style="font-weight:400">(where alerts go)</span></label>
+        <input id="sms_oncall" placeholder="+13305550000"/>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:10px">
+          <button class="btn btn-gold sans" onclick="saveSmsConfig()">Save</button>
+          <input id="sms_test" placeholder="test number +1…" style="width:auto"/>
+          <button class="btn btn-ghost sans" onclick="testSms()">Send test text</button>
+          <span id="sms_msg" class="hint" style="align-self:center"></span>
+        </div>
+        <p class="hint">Twilio trial: you can only text <strong>verified</strong> numbers until you add a little credit (~$20) and a number — then it texts anyone. Numbers must be in <strong>+1</strong> format.</p>
       </div>
       <div class="card">
         <h3>Kipu data warehouse (Azure SQL)</h3>
@@ -1093,6 +1111,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260613t"></script>
+<script src="/app.js?v=20260613u"></script>
 </body>
 </html>

@@ -624,6 +624,28 @@ async function testSf(){
   try{ const r=await api('/salesforce/test',{method:'POST'}); $('sf_msg').innerHTML='✓ Connected — Salesforce reachable.'; }
   catch(e){ $('sf_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
 }
+async function sfDiscover(){
+  const box=$('sf_discover'); if(!box) return;
+  box.innerHTML='Asking Salesforce what objects it has…';
+  try{
+    const r=await api('/salesforce/discover');
+    const rows=(r.objects||[]).map(o=>`<tr><td><a href="#" onclick="sfDescribe('${esc(o.name)}');return false">${esc(o.name)}</a></td><td>${esc(o.label||'')}</td><td>${o.custom?'custom':'standard'}</td></tr>`).join('');
+    box.innerHTML=`<div style="margin-bottom:6px">${r.count} queryable objects (custom first). Click one to see its fields:</div>`+
+      `<div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px"><table style="width:100%;font-size:13px"><thead><tr><th>API name</th><th>Label</th><th>Type</th></tr></thead><tbody>${rows}</tbody></table></div>`+
+      `<div id="sf_describe" style="margin-top:10px"></div>`;
+  }catch(e){ box.innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
+}
+async function sfDescribe(obj){
+  const box=$('sf_describe'); if(!box) return;
+  box.innerHTML='Describing '+esc(obj)+'…';
+  try{
+    const r=await api('/salesforce/describe?object='+encodeURIComponent(obj));
+    const rows=(r.fields||[]).map(f=>`<tr><td>${esc(f.name)}</td><td>${esc(f.label||'')}</td><td>${esc(f.type)}</td><td>${f.refTo?esc(f.refTo.join(', ')):''}</td></tr>`).join('');
+    box.innerHTML=`<div style="font-weight:600;margin-bottom:4px">${esc(r.object)} — ${r.fieldCount} fields</div>`+
+      `<div style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px"><table style="width:100%;font-size:12px"><thead><tr><th>Field</th><th>Label</th><th>Type</th><th>Lookup→</th></tr></thead><tbody>${rows}</tbody></table></div>`+
+      (r.sample&&r.sample.length?`<details style="margin-top:6px"><summary>Sample rows (${r.sample.length})</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(r.sample,null,2))}</pre></details>`:'');
+  }catch(e){ box.innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
+}
 async function loadSettings(){
   loadEmailConfig(); loadSmsConfig(); loadSfConfig();
   const st = await api('/settings');

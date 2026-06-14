@@ -72,6 +72,55 @@ export async function sfTest() {
   return { ok: true, sampleCount: data.totalSize ?? null };
 }
 
+// --- Schema discovery -------------------------------------------------------
+// Every org models referrals differently, so before we can write the right
+// sync query we ask the org what it actually has. These helpers power the
+// "Discover" button in Settings → Salesforce.
+
+async function sfGet(path) {
+  const token = await sfToken();
+  const r = await fetch(`${sfBase()}/services/data/${sfVersion()}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`Salesforce ${path} ${r.status}: ${JSON.stringify(data).slice(0, 200)}`);
+  return data;
+}
+
+// List the objects most likely to hold referral / patient data: all custom
+// objects (__c) plus the standard sales objects. Returns name + label + counts
+// so we (and the user) can spot which one is the referral record.
+export async function sfDiscover() {
+  const data = await sfGet('/sobjects/');
+  const wanted = new Set(['Lead', 'Opportunity', 'Account', 'Contact', 'Case']);
+  const objs = (data.sobjects || [])
+    .filter(o => o.queryable && (o.custom || wanted.has(o.name)))
+    .map(o => ({ name: o.name, label: o.label, custom: !!o.custom }))
+    .sort((a, b) => (a.custom === b.custom ? a.name.localeCompare(b.name) : (a.custom ? -1 : 1)));
+  return { count: objs.length, objects: objs };
+}
+
+// Describe one object's fields (name, label, type, and the target object for
+// lookups/master-detail) plus a couple of sample rows so we can map fields to
+// referral source, status/outcome, and the patient/Kipu link.
+export async function sfDescribe(objectName) {
+  const name = String(objectName || '').replace(/[^A-Za-z0-9_]/g, '');
+  if (!name) throw new Error('object name required');
+  const d = await sfGet(`/sobjects/${name}/describe/`);
+  const fields = (d.fields || []).map(f => ({
+    name: f.name, label: f.label, type: f.type,
+    refTo: (f.referenceTo && f.referenceTo.length) ? f.referenceTo : undefined,
+    relationship: f.relationshipName || undefined,
+  }));
+  let sample = [];
+  try {
+    const picks = fields.filter(f => ['id','string','reference','picklist','datetime','date','phone','email'].includes(f.type)).slice(0, 12).map(f => f.name);
+    if (picks.length) {
+      const q = await sfQuery(`SELECT ${picks.join(', ')} FROM ${name} ORDER BY CreatedDate DESC LIMIT 3`);
+      sample = (q.records || []).map(r => { const o = {}; for (const k of picks) o[k] = r[k]; return o; });
+    }
+  } catch { /* sampling is best-effort */ }
+  return { object: name, fieldCount: fields.length, fields, sample };
+}
+
 // Pull inbound referrals grouped by source account and upsert into
 // inbound_referrals. The SOQL is overridable per-org via SF_INBOUND_SOQL; it
 // must return columns aliased as: source_name, ref_date, outcome, sf_id.

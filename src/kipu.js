@@ -702,5 +702,29 @@ export async function kipuInspect() {
       };
     } else { patientDetail = { error: 'no patient detail returned', attempts }; }
   }
-  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail };
+  // Discharge analysis: is the census carrying any discharges, and is there a
+  // date-ranged feed that returns them? This decides how we source discharges.
+  const hasDc = (p) => { const dd = p.discharge_date || p.discharged_at; const dt = p.discharge_type || p.discharge_status; return (dd && String(dd).trim()) || (dt && !['active', 'admitted', 'current', ''].includes(String(dt).toLowerCase())); };
+  const dischargedRows = list.filter(hasDc);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const startStr = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const dischargeAnalysis = {
+    censusTotal: list.length,
+    censusWithDischargeDate: dischargedRows.length,
+    sampleDischargeFields: dischargedRows.slice(0, 3).map((p) => ({ discharge_date: p.discharge_date, discharge_type: p.discharge_type, discharge_status: p.discharge_status, location_id: p.location_id })),
+    probes: [],
+  };
+  for (const c of [
+    `/api/patients/census?start_date=${startStr}&end_date=${todayStr}`,
+    `/api/patients/census?phi_level=high&start_date=${startStr}&end_date=${todayStr}`,
+    `/api/patients/occupancy?start_date=${startStr}&end_date=${todayStr}`,
+    `/api/patients/latest`,
+  ]) {
+    try {
+      const d = await kipuGet(c);
+      const arr = d?.patients || d?.census || (Array.isArray(d) ? d : null);
+      dischargeAnalysis.probes.push({ path: c, ok: true, rows: Array.isArray(arr) ? arr.length : null, withDischargeDate: Array.isArray(arr) ? arr.filter(hasDc).length : null });
+    } catch (e) { dischargeAnalysis.probes.push({ path: c, ok: false, error: String(e.message).slice(0, 100) }); }
+  }
+  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, patientDetail, dischargeAnalysis };
 }

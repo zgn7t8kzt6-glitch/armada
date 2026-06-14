@@ -539,8 +539,11 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
 
   // Flow
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
+  const admitsTodayList = active.filter((c) => (c.admit || '').slice(0, 10) === today).map((c) => ({ name: c.pref || c.name, loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (parseLoc(c.program) || '') }));
   const discharges7d = db.prepare(`SELECT COUNT(*) n FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-7 day')`).get().n;
   const dischargesToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
+  const dischargesTodayList = db.prepare(`SELECT pref, name, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today)
+    .map((c) => ({ name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
 
   // Per-client latest read, computed once.
   const enriched = active.map((c) => {
@@ -628,9 +631,11 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   // Checklist progress for today
   const chk = db.prepare(`SELECT COUNT(*) total, SUM(status='done') done FROM command_checklist WHERE date = ?`).get(today);
 
+  const syncedAt = db.prepare(`SELECT max(updated_at) m FROM clients WHERE source = 'kipu'`).get()?.m || null;
   res.json({
     asOf: new Date().toISOString(),
-    flow: { census: active.length, admitsToday, dischargesToday, discharges7d },
+    syncedAt,
+    flow: { census: active.length, admitsToday, dischargesToday, discharges7d, admitsTodayList, dischargesTodayList },
     detox,
     levels: { census: locCensus, stepDowns, stepUps, stepByDest: stepDestList },
     daily: { today: todayMetrics, trend },

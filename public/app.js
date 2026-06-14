@@ -1202,6 +1202,20 @@ async function loadCommand(){
     <div class="ret-card ${d.staffing.gaps.length?'rc-high':''}"><div class="n">${d.staffing.pct!=null?d.staffing.pct+'%':'—'}</div><div class="l">Covered today</div></div>
     <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}"><div class="n">${d.documentation.gaps.length}</div><div class="l">Doc gaps</div></div>`;
 
+  // Midnight Census — mirrors the nightly census email
+  if($('cmdCensus')){
+    if(d.syncedAt) $('censusAsOf').textContent='Kipu data as of '+new Date(d.syncedAt.replace(' ','T')+'Z').toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const lv=(d.levels&&d.levels.census)||[];
+    const locLine = lv.length ? lv.map(l=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(l.code||l.label)}</strong>${l.code?' <span class="hint">'+esc(l.label)+'</span>':''}</div><span class="risk risk-low">${l.count}</span></div>`).join('') : '<div class="hint">No level-of-care data — run a Kipu sync.</div>';
+    const intakes=(f.admitsTodayList||[]);
+    const dcs=(f.dischargesTodayList||[]);
+    $('cmdCensus').innerHTML =
+      `<div class="cmd-sub">By level of care</div>${locLine}`+
+      `<div class="cmd-row" style="border-top:2px solid var(--line)"><div class="cmd-row-main"><strong>TOTAL CENSUS</strong></div><span class="risk risk-elev">${f.census}</span></div>`+
+      `<div class="cmd-sub">Intakes today</div>${intakes.length?intakes.map(a=>`<div class="pc-note">☀ <strong>${esc(a.name)}</strong>${a.loc?' · '+esc(a.loc):''}</div>`).join(''):'<div class="pc-note">ZERO</div>'}`+
+      `<div class="cmd-sub">Discharges today</div>${dcs.length?dcs.map(x=>`<div class="pc-note">↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)}${x.reason?' · '+esc(x.reason):''}</div>`).join(''):'<div class="pc-note">ZERO</div>'}`;
+  }
+
   // Daily snapshot (midnight cutoff) + 14-day trend
   const dm = d.daily.today;
   $('cmdCutoff').textContent = 'resets at midnight';

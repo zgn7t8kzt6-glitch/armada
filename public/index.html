@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260613w" />
+<link rel="stylesheet" href="/styles.css?v=20260613x" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -528,6 +528,24 @@
           <span id="sms_msg" class="hint" style="align-self:center"></span>
         </div>
         <p class="hint">Twilio trial: you can only text <strong>verified</strong> numbers until you add a little credit (~$20) and a number — then it texts anyone. Numbers must be in <strong>+1</strong> format.</p>
+      </div>
+      <div class="card">
+        <h3>Salesforce</h3>
+        <p class="sub sans">Connect Salesforce (system of record for inbound referrals) via a Connected App using the OAuth client-credentials flow. Paste the three values below and Test.</p>
+        <div class="grid2">
+          <div><label>Instance URL</label><input id="sf_instance_url" placeholder="https://yourorg.my.salesforce.com"/></div>
+          <div><label>API version</label><input id="sf_api_version" placeholder="v60.0"/></div>
+        </div>
+        <div class="grid2">
+          <div><label>Consumer Key (Client ID)</label><input id="sf_client_id" placeholder="3MVG9…"/></div>
+          <div><label>Consumer Secret <span class="hint" style="font-weight:400">(blank = keep saved)</span></label><input id="sf_client_secret" type="password" placeholder="••••••••"/></div>
+        </div>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:10px">
+          <button class="btn btn-gold sans" onclick="saveSfConfig()">Save</button>
+          <button class="btn btn-ghost sans" onclick="testSf()">Test connection</button>
+          <span id="sf_msg" class="hint" style="align-self:center"></span>
+        </div>
+        <p class="hint">In Salesforce: <strong>Setup → App Manager → New Connected App</strong> → enable OAuth, add scopes <em>api</em> + <em>refresh_token</em>, check <strong>Enable Client Credentials Flow</strong>, save. Then <strong>Manage → Edit Policies</strong> → set a “Run As” integration user. Get the key/secret under <strong>Manage Consumer Details</strong>. Instance URL is your <strong>My Domain</strong> (Setup → My Domain).</p>
       </div>
       <div class="card">
         <h3>Kipu data warehouse (Azure SQL)</h3>
@@ -1112,6 +1130,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260613w"></script>
+<script src="/app.js?v=20260613x"></script>
 </body>
 </html>

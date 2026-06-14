@@ -605,8 +605,27 @@ async function testSms(){
   try{ const r=await api('/sms/test',{method:'POST',body:JSON.stringify({to})}); $('sms_msg').innerHTML='✓ Sent to '+esc(r.to)+' — check the phone.'; }
   catch(e){ $('sms_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
 }
+async function loadSfConfig(){
+  try{ const c=await api('/salesforce/config');
+    if($('sf_instance_url')) $('sf_instance_url').value=c.instanceUrl||'';
+    if($('sf_api_version')) $('sf_api_version').value=c.apiVersion||'v60.0';
+    if($('sf_client_secret')) $('sf_client_secret').placeholder = c.hasSecret?'•••••• (saved)':'consumer secret';
+  }catch(e){}
+}
+async function saveSfConfig(){
+  $('sf_msg').textContent='Saving…';
+  const body={ instance_url:$('sf_instance_url').value, api_version:$('sf_api_version').value, client_id:$('sf_client_id').value };
+  if($('sf_client_secret').value) body.client_secret=$('sf_client_secret').value;
+  try{ const r=await api('/salesforce/config',{method:'POST',body:JSON.stringify(body)}); $('sf_msg').textContent='✓ Saved'+(r.status&&r.status.configured?' (configured)':''); $('sf_client_secret').value=''; loadSfConfig(); }
+  catch(e){ $('sf_msg').textContent='Error: '+e.message; }
+}
+async function testSf(){
+  $('sf_msg').textContent='Testing…';
+  try{ const r=await api('/salesforce/test',{method:'POST'}); $('sf_msg').innerHTML='✓ Connected — Salesforce reachable.'; }
+  catch(e){ $('sf_msg').innerHTML='<span style="color:var(--danger)">Failed: '+esc(e.message)+'</span>'; }
+}
 async function loadSettings(){
-  loadEmailConfig(); loadSmsConfig();
+  loadEmailConfig(); loadSmsConfig(); loadSfConfig();
   const st = await api('/settings');
   const dot=(ok)=>ok?'<span class="risk risk-low">ready</span>':'<span class="risk risk-warn">not set</span>';
   const prov = st.aiProvider==='bedrock'?'AWS Bedrock':'Anthropic API';

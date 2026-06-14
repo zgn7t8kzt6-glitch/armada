@@ -10,7 +10,7 @@ import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds } from './src/kipu.js';
-import { sfConfigured, sfTest, sfSyncInbound } from './src/salesforce.js';
+import { sfConfigured, sfTest, sfSyncInbound, sfStatus } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
@@ -1959,6 +1959,15 @@ app.get('/api/referrals/insights', requireAuth, async (req, res) => {
 
 /* ---------------- Salesforce (referral reciprocity sync) ---------------- */
 app.get('/api/salesforce/status', requireAuth, requireAdmin, (req, res) => res.json({ configured: sfConfigured() }));
+app.get('/api/salesforce/config', requireAuth, requireAdmin, (req, res) => res.json(sfStatus()));
+app.post('/api/salesforce/config', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const set = (k, v) => { if (v !== undefined) setState('sf_' + k, (v == null ? '' : String(v)).trim()); };
+  set('instance_url', b.instance_url); set('client_id', b.client_id); set('api_version', b.api_version);
+  if (b.client_secret) set('client_secret', b.client_secret);   // only overwrite if provided
+  audit({ user: req.user, action: 'SF_CONFIG', ip: req.ip });
+  res.json({ ok: true, status: sfStatus() });
+});
 app.post('/api/salesforce/test', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await sfTest()); } catch (e) { res.status(502).json({ error: e.message }); }
 });

@@ -16,17 +16,24 @@
 // Until credentials exist this stays inert; the app's own referral tracking
 // works fully without it.
 
+import { getState } from './db.js';
+
 let _token = null, _tokenExp = 0;
 
+// Config resolves from in-app settings first, then env vars.
+function scfg(key, envName) { const v = getState('sf_' + key); return (v != null && v !== '') ? v : (process.env[envName] || ''); }
 export function sfConfigured() {
-  return Boolean(process.env.SF_INSTANCE_URL && process.env.SF_CLIENT_ID && process.env.SF_CLIENT_SECRET);
+  return Boolean(scfg('instance_url', 'SF_INSTANCE_URL') && scfg('client_id', 'SF_CLIENT_ID') && scfg('client_secret', 'SF_CLIENT_SECRET'));
+}
+export function sfStatus() {
+  return { configured: sfConfigured(), instanceUrl: scfg('instance_url', 'SF_INSTANCE_URL'), hasSecret: !!scfg('client_secret', 'SF_CLIENT_SECRET'), apiVersion: scfg('api_version', 'SF_API_VERSION') || 'v60.0' };
 }
 
 function sfBase() {
-  return (process.env.SF_INSTANCE_URL || '').replace(/\/+$/, '');
+  return scfg('instance_url', 'SF_INSTANCE_URL').replace(/\/+$/, '');
 }
 function sfVersion() {
-  return process.env.SF_API_VERSION || 'v60.0';
+  return scfg('api_version', 'SF_API_VERSION') || 'v60.0';
 }
 
 // OAuth 2.0 client-credentials token (cached until ~2 min before expiry).
@@ -35,8 +42,8 @@ async function sfToken() {
   if (_token && Date.now() < _tokenExp) return _token;
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
-    client_id: process.env.SF_CLIENT_ID,
-    client_secret: process.env.SF_CLIENT_SECRET,
+    client_id: scfg('client_id', 'SF_CLIENT_ID'),
+    client_secret: scfg('client_secret', 'SF_CLIENT_SECRET'),
   });
   const r = await fetch(sfBase() + '/services/oauth2/token', {
     method: 'POST',

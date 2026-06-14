@@ -269,3 +269,49 @@ export async function sfSyncInbound(db) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   return { leads, matched, updated, partnerRefs };
 }
+
+// --- Scheduled arrivals (front-desk board) ----------------------------------
+// Pull Leads with a scheduled admit date in a window around today and upsert
+// into expected_arrivals. Preserves front-desk actions (arrived/no-show) and
+// the Kipu-confirmed flag on rows already worked.
+export async function sfSyncArrivals(db) {
+  const soql = process.env.SF_ARRIVALS_SOQL || `
+    SELECT Id, FirstName, LastName, Preferred_Name__c, DOB__c, Phone, MobilePhone,
+           Date_Looking_to_Admit__c, LeadSource, Status, Patient_ID__c,
+           Insurance_Company__c, Plan_Type__c,
+           Referring_Organization__r.Name, Referring_Contact__r.Name,
+           Web_Form_How_did_you_hear_about_us__c
+    FROM Lead
+    WHERE Date_Looking_to_Admit__c >= LAST_N_DAYS:3 AND Date_Looking_to_Admit__c <= NEXT_N_DAYS:21
+    ORDER BY Date_Looking_to_Admit__c ASC`;
+  const records = await sfQueryAll(soql);
+
+  const find = db.prepare(`SELECT id, status FROM expected_arrivals WHERE sf_lead_id = ?`);
+  const ins = db.prepare(`INSERT INTO expected_arrivals
+    (sf_lead_id, first_name, last_name, preferred_name, dob, phone, scheduled_date, program, referral_source, insurance)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  // Only refresh descriptive fields on rows still 'expected' — never clobber a
+  // front-desk arrived/no-show decision.
+  const upd = db.prepare(`UPDATE expected_arrivals SET first_name=?, last_name=?, preferred_name=?, dob=?, phone=?,
+    scheduled_date=?, program=?, referral_source=?, insurance=?, updated_at=datetime('now')
+    WHERE sf_lead_id=? AND status='expected'`);
+
+  let pulled = records.length, created = 0, updated = 0;
+  db.exec('BEGIN');
+  try {
+    for (const r of records) {
+      const sched = (r.Date_Looking_to_Admit__c || '').slice(0, 10) || null;
+      if (!sched) continue;
+      const vals = [
+        r.FirstName || null, r.LastName || null, r.Preferred_Name__c || null,
+        (r.DOB__c || '').slice(0, 10) || null, r.Phone || r.MobilePhone || null,
+        sched, null /*program*/, leadSource(r) || null, r.Insurance_Company__c || null,
+      ];
+      const existing = find.get(r.Id);
+      if (existing) { upd.run(...vals, r.Id); updated++; }
+      else { ins.run(r.Id, ...vals); created++; }
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { pulled, created, updated };
+}

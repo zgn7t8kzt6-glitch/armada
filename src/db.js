@@ -533,6 +533,26 @@ CREATE TABLE IF NOT EXISTS inbound_referrals (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Expected arrivals (front-desk board): who's scheduled to admit, pulled from
+-- Salesforce Leads (Date_Looking_to_Admit__c). Front desk greets them, marks
+-- arrived/no-show; a Kipu admission flips them to arrived automatically.
+CREATE TABLE IF NOT EXISTS expected_arrivals (
+  id INTEGER PRIMARY KEY,
+  sf_lead_id TEXT UNIQUE,
+  first_name TEXT, last_name TEXT, preferred_name TEXT,
+  dob TEXT, phone TEXT,
+  scheduled_date TEXT,                    -- YYYY-MM-DD they're expected
+  program TEXT, referral_source TEXT, insurance TEXT,
+  status TEXT NOT NULL DEFAULT 'expected', -- expected | arrived | no_show | cancelled
+  arrived_at TEXT,                        -- when marked/auto-arrived
+  auto INTEGER NOT NULL DEFAULT 0,        -- 1 = arrival confirmed by Kipu admission
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  follow_up TEXT,                         -- no-show follow-up note
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_arrivals_date ON expected_arrivals(scheduled_date);
+
 -- Scheduling: a staffing need (one row per part×role on a date, with how many needed).
 CREATE TABLE IF NOT EXISTS schedule_slots (
   id INTEGER PRIMARY KEY,

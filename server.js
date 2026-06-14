@@ -10,7 +10,7 @@ import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds } from './src/kipu.js';
-import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap } from './src/salesforce.js';
+import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
@@ -970,11 +970,24 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   // Checklist progress for today
   const chk = db.prepare(`SELECT COUNT(*) total, SUM(status='done') done FROM command_checklist WHERE date = ?`).get(today);
 
+  // Scheduled to admit today (front-desk arrivals, from Salesforce).
+  const schedRows = db.prepare(`SELECT pref_or_first AS name, status FROM (
+      SELECT COALESCE(NULLIF(preferred_name,''), first_name) || ' ' || last_name AS pref_or_first, status
+      FROM expected_arrivals WHERE scheduled_date = ?) ORDER BY status`).all(today);
+  const scheduledArrivals = {
+    total: schedRows.length,
+    arrived: schedRows.filter((r) => r.status === 'arrived').length,
+    waiting: schedRows.filter((r) => r.status === 'expected').length,
+    noShow: schedRows.filter((r) => r.status === 'no_show').length,
+    list: schedRows.map((r) => ({ name: r.name, status: r.status })),
+  };
+
   const syncedAt = db.prepare(`SELECT max(updated_at) m FROM clients WHERE source = 'kipu'`).get()?.m || null;
   res.json({
     asOf: new Date().toISOString(),
     syncedAt,
     flow: { census: active.length, admitsToday, dischargesToday, discharges7d, admitsTodayList, dischargesTodayList, dischargesRecentList, sendouts: sendoutsActive },
+    scheduled: scheduledArrivals,
     detox,
     levels: { census: locCensus, stepDowns, stepUps, stepByDest: stepDestList },
     daily: { today: todayMetrics, trend },
@@ -1419,6 +1432,7 @@ app.post('/api/kipu/reset', requireAuth, requireAdmin, async (req, res) => {
 function afterSyncAssess(user) {
   try { chartCache.clear(); } catch { /* cache may not be ready */ }
   try { ensureDignityKits(); } catch (e) { console.error('[dignity] ensure:', e.message); }
+  try { reconcileArrivals(); } catch (e) { console.error('[arrivals] reconcile:', e.message); } // new admits auto-arrive
   if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
     runAssessAll({ id: user?.id ?? null, name: user?.name || 'Sync' }, { incremental: true }).catch((e) => console.error('[assess] after sync:', e.message));
   }
@@ -1984,6 +1998,83 @@ app.get('/api/salesforce/describe', requireAuth, requireAdmin, async (req, res) 
 });
 app.get('/api/salesforce/automap', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await sfAutomap()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* ---------------- Front-desk arrivals board ---------------- */
+const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+// Flip expected arrivals to "arrived" when a matching Kipu admission appears.
+// Match by name (+DOB when both have it), tied to this scheduled event by admit
+// date. Skips rows the front desk already decided. Returns how many flipped.
+function reconcileArrivals() {
+  const rows = db.prepare(`SELECT * FROM expected_arrivals WHERE status='expected' AND scheduled_date >= date('now','-14 day')`).all();
+  if (!rows.length) return { matched: 0 };
+  const clients = db.prepare(`SELECT id, name, dob, admit FROM clients WHERE admit IS NOT NULL AND admit != ''`).all();
+  const mark = db.prepare(`UPDATE expected_arrivals SET status='arrived', arrived_at=datetime('now'), auto=1, client_id=?, updated_at=datetime('now') WHERE id=?`);
+  let matched = 0;
+  for (const a of rows) {
+    const full = normName(`${a.first_name || ''} ${a.last_name || ''}`);
+    const f = normName(a.first_name), l = normName(a.last_name);
+    const dob = (a.dob || '').slice(0, 10);
+    const m = clients.find((c) => {
+      const cn = normName(c.name);
+      const nameOk = cn === full || (f && l && cn.includes(f) && cn.includes(l));
+      if (!nameOk) return false;
+      if (dob && c.dob && (c.dob || '').slice(0, 10) !== dob) return false;
+      if (a.scheduled_date && c.admit && c.admit.slice(0, 10) < addDays(a.scheduled_date, -2)) return false;
+      return true;
+    });
+    if (m) { mark.run(m.id, a.id); matched++; }
+  }
+  return { matched };
+}
+// At cutoff: anyone still "expected" for a past day didn't show — flag for follow-up.
+function markNoShows() {
+  const today = appToday();
+  return db.prepare(`UPDATE expected_arrivals SET status='no_show', updated_at=datetime('now') WHERE status='expected' AND scheduled_date < ?`).run(today).changes;
+}
+
+// Pull from Salesforce, then reconcile against Kipu admits.
+app.post('/api/arrivals/sync', requireAuth, async (req, res) => {
+  try {
+    if (!sfConfigured()) return res.status(400).json({ error: 'Salesforce not connected.' });
+    const r = await sfSyncArrivals(db);
+    const rec = reconcileArrivals();
+    audit({ user: req.user, action: 'ARRIVALS_SYNC', detail: `${r.pulled} pulled, ${rec.matched} arrived`, ip: req.ip });
+    res.json({ ...r, ...rec });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Today's (or a given day's) board, split by status.
+app.get('/api/arrivals', requireAuth, (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  reconcileArrivals(); // keep it live without waiting on a sync
+  const day = db.prepare(`SELECT * FROM expected_arrivals WHERE scheduled_date = ? ORDER BY status, last_name, first_name`).all(date);
+  // Outstanding no-shows from the last 14 days for the follow-up queue.
+  const followUps = db.prepare(`SELECT * FROM expected_arrivals WHERE status='no_show' AND scheduled_date >= date('now','-14 day') ORDER BY scheduled_date DESC`).all();
+  const counts = { expected: 0, arrived: 0, no_show: 0, cancelled: 0 };
+  for (const a of day) counts[a.status] = (counts[a.status] || 0) + 1;
+  res.json({ date, arrivals: day, counts, followUps, configured: sfConfigured() });
+});
+// Front-desk action: arrived / no_show / cancelled (+ optional follow-up note).
+app.post('/api/arrivals/:id/status', requireAuth, (req, res) => {
+  const status = String(req.body?.status || '').trim();
+  if (!['expected', 'arrived', 'no_show', 'cancelled'].includes(status)) return res.status(400).json({ error: 'bad status' });
+  const arrivedAt = status === 'arrived' ? "datetime('now')" : 'arrived_at';
+  db.prepare(`UPDATE expected_arrivals SET status=?, follow_up=COALESCE(?, follow_up), arrived_at=${arrivedAt}, auto=0, updated_at=datetime('now') WHERE id=?`)
+    .run(status, req.body?.follow_up != null ? String(req.body.follow_up) : null, req.params.id);
+  audit({ user: req.user, action: 'ARRIVAL_STATUS', detail: `#${req.params.id} -> ${status}`, ip: req.ip });
+  res.json({ ok: true });
+});
+// Welcome TV board: just the greet-able names for today (first name + last initial).
+app.get('/api/arrivals/board', requireAuth, (req, res) => {
+  reconcileArrivals();
+  const today = appToday();
+  const rows = db.prepare(`SELECT first_name, last_name, preferred_name, status FROM expected_arrivals WHERE scheduled_date = ? AND status IN ('expected','arrived') ORDER BY status DESC, first_name`).all(today);
+  const greet = (a) => {
+    const first = (a.preferred_name || a.first_name || '').trim();
+    const li = (a.last_name || '').trim().slice(0, 1);
+    return { name: li ? `${first} ${li}.` : first, arrived: a.status === 'arrived' };
+  };
+  res.json({ date: today, facility: getState('facility_name') || 'Armada Recovery', names: rows.map(greet) });
 });
 
 /* ---------------- Risk & outcome analytics ---------------- */
@@ -2825,6 +2916,10 @@ function runDailyCutoff() {
     rollupDailyMetrics(yesterday);   // finalize the day that just ended
     rollupDailyMetrics(today);       // open today's fresh record
     db.prepare(`DELETE FROM command_checklist WHERE date < date(?, '-14 day')`).run(today); // tidy old checklists
+    const noShows = markNoShows();   // scheduled-but-never-admitted -> follow-up queue
+    if (noShows) console.log(`[cutoff] ${noShows} no-show(s) flagged for follow-up`);
+    // Refresh tomorrow's expected arrivals from Salesforce for the front-desk board.
+    if (sfConfigured()) sfSyncArrivals(db).then(() => reconcileArrivals()).catch((e) => console.error('[cutoff] arrivals sync:', e.message));
     console.log(`[cutoff] daily report finalized for ${yesterday} (${APP_TZ})`);
     // Email the midnight census to the distribution list (replaces the manual one).
     sendCensusEmail().then((r) => { if (r.sent) console.log('[cutoff] census emailed to', r.to); }).catch((e) => console.error('[cutoff] census email:', e.message));
@@ -2832,6 +2927,13 @@ function runDailyCutoff() {
   setTimeout(runDailyCutoff, msUntilLocalMidnight());  // re-arm for the next midnight
 }
 setTimeout(runDailyCutoff, msUntilLocalMidnight());
+
+// Keep the front-desk arrivals board fresh through the day (Salesforce pull +
+// Kipu reconcile) without anyone clicking refresh.
+setInterval(() => {
+  if (!sfConfigured()) return;
+  sfSyncArrivals(db).then(() => reconcileArrivals()).catch((e) => console.error('[arrivals] auto:', e.message));
+}, 2 * 3600 * 1000);
 
 // ---- Overdue-rounds escalation: when a client is past their check window
 // (+grace), text the on-call leader. Opt-in (Rounds → escalation toggle), and

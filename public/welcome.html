@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Welcome — Armada Recovery</title>
+<style>
+  :root{ --gold:#c9a64a; --ink:#0e1726; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:'Cormorant Garamond',Georgia,serif;
+    background:radial-gradient(120% 120% at 50% 0%, #16243b 0%, #0a1220 60%, #060b14 100%);
+    color:#f4efe3; display:flex; flex-direction:column; min-height:100vh; overflow:hidden;
+  }
+  header{ text-align:center; padding:6vh 4vw 2vh; }
+  .eyebrow{ letter-spacing:.5em; text-transform:uppercase; font-size:1.4vw; color:var(--gold); font-family:'Inter',system-ui,sans-serif; margin:0 0 1.4vh }
+  h1{ margin:0; font-size:5.5vw; font-weight:600; line-height:1.05 }
+  h1 .fac{ color:var(--gold) }
+  .sub{ margin:1.5vh 0 0; font-size:1.8vw; opacity:.85 }
+  main{ flex:1; display:flex; align-items:center; justify-content:center; padding:0 5vw 6vh; }
+  .names{ display:flex; flex-wrap:wrap; gap:2.2vh 2.2vw; justify-content:center; max-width:90vw }
+  .chip{
+    font-size:3.2vw; padding:1.6vh 3vw; border-radius:999px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(201,166,74,.4);
+    backdrop-filter:blur(6px); display:flex; align-items:center; gap:1.4vw;
+  }
+  .chip.arrived{ border-color:rgba(120,200,160,.6); background:rgba(120,200,160,.10) }
+  .dot{ width:1.4vw; height:1.4vw; border-radius:50%; background:var(--gold) }
+  .chip.arrived .dot{ background:#7ec8a0 }
+  .empty{ font-size:2.6vw; opacity:.7 }
+  footer{ text-align:center; padding:0 0 4vh; font-family:'Inter',system-ui,sans-serif; font-size:1.1vw; letter-spacing:.2em; text-transform:uppercase; opacity:.5 }
+</style>
+</head>
+<body>
+  <header>
+    <p class="eyebrow">Today we welcome</p>
+    <h1>Welcome to <span class="fac" id="fac">Armada Recovery</span></h1>
+    <p class="sub">You belong here. Your care starts the moment you walk in.</p>
+  </header>
+  <main><div class="names" id="names"><div class="empty">Preparing today's welcome…</div></div></main>
+  <footer>Armada Care Standards</footer>
+<script>
+async function refresh(){
+  try{
+    const r = await fetch('/api/arrivals/board', { credentials:'same-origin' });
+    if(r.status===401){ document.getElementById('names').innerHTML='<div class="empty">Please sign in on this device first (open the app, log in), then reload.</div>'; return; }
+    const d = await r.json();
+    if(d.facility) document.getElementById('fac').textContent = d.facility;
+    const box = document.getElementById('names');
+    if(!d.names || !d.names.length){ box.innerHTML='<div class="empty">No scheduled arrivals today.</div>'; return; }
+    box.innerHTML = d.names.map(n=>`<div class="chip${n.arrived?' arrived':''}"><span class="dot"></span>${(n.name||'').replace(/[<>&]/g,'')}</div>`).join('');
+  }catch(e){ /* keep last good board on transient errors */ }
+}
+refresh(); setInterval(refresh, 30000);
+</script>
+</body>
+</html>

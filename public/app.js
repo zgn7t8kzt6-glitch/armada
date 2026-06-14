@@ -110,7 +110,7 @@ const GROUP_OF={
   report:'care',lineup:'care',concierge:'care',dignity:'care',rounds:'care',program:'care',
   retention:'clinical',casemgmt:'clinical',surveys:'clinical',incidents:'clinical',
   mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',
-  admissions:'growth',referrals:'growth',partners:'growth',alumni:'growth',
+  arrivals:'growth',admissions:'growth',referrals:'growth',partners:'growth',alumni:'growth',
   outcomes:'insights',analytics:'insights',scorecard:'insights','report-view':'insights',accountability:'insights',
   training:'learn',library:'learn',standard:'learn',
   askai:'ask',
@@ -171,6 +171,7 @@ function show(v){
   if(v==='casemgmt') loadCaseMgmt();
   if(v==='dignity') loadDignity();
   if(v==='rounds') loadRounds();
+  if(v==='arrivals') loadArrivals();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
   if(v==='surveys') loadSurveys();
@@ -1293,6 +1294,51 @@ async function logInbound(){
     $('pt_msg').textContent='✓ Inbound referral logged.'; setTimeout(()=>$('pt_msg').textContent='',2500); loadPartners();
   }catch(e){ $('pt_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
+/* ---- Front desk: scheduled arrivals ---- */
+let _arrivalsTimer=null;
+async function loadArrivals(){
+  try{
+    const d=await api('/arrivals');
+    const c=d.counts||{};
+    $('arrivalsKpis').innerHTML=
+      `<div class="ret-card"><div class="n">${c.expected||0}</div><div class="l">Still expected</div></div>`+
+      `<div class="ret-card"><div class="n" style="color:var(--good,#1a8)">${c.arrived||0}</div><div class="l">Arrived</div></div>`+
+      `<div class="ret-card"><div class="n" style="color:var(--danger)">${c.no_show||0}</div><div class="l">No-show</div></div>`;
+    const badge=(s)=> s==='arrived'?'<span class="risk risk-low">arrived</span>'
+      : s==='no_show'?'<span class="risk risk-warn">no-show</span>'
+      : s==='cancelled'?'<span class="hint">cancelled</span>'
+      : '<span class="risk risk-elev">expected</span>';
+    const rows=(d.arrivals||[]).map(a=>{
+      const greet=esc((a.preferred_name||a.first_name||'')+' '+(a.last_name||''));
+      const sub=[a.referral_source&&('via '+esc(a.referral_source)), a.insurance&&esc(a.insurance)].filter(Boolean).join(' · ');
+      const acts = a.status==='arrived' && a.auto ? '<span class="hint">confirmed by Kipu</span>'
+        : `<button class="btn btn-gold btn-sm sans" onclick="setArrival(${a.id},'arrived')">Arrived</button>`+
+          `<button class="btn btn-ghost btn-sm sans" onclick="setArrival(${a.id},'no_show')">No-show</button>`+
+          `<button class="btn btn-ghost btn-sm sans" onclick="setArrival(${a.id},'cancelled')">Cancel</button>`;
+      return `<tr><td><strong>${greet}</strong>${sub?`<div class="hint">${sub}</div>`:''}</td><td>${badge(a.status)}</td><td style="text-align:right">${acts}</td></tr>`;
+    }).join('');
+    $('arrivalsList').innerHTML = rows
+      ? `<table class="tbl"><tr><th>Guest</th><th>Status</th><th></th></tr>${rows}</table>`
+      : (d.configured?'<div class="hint">No one scheduled to admit today.</div>':'<div class="hint">Connect Salesforce in Settings, then click “Pull from Salesforce.”</div>');
+    const fu=(d.followUps||[]).map(a=>`<tr><td><strong>${esc((a.first_name||'')+' '+(a.last_name||''))}</strong><div class="hint">was due ${esc(a.scheduled_date||'')}${a.phone?' · '+esc(a.phone):''}</div></td>`+
+      `<td><input class="sans" style="width:100%" placeholder="Follow-up note (what happened / next step)" value="${esc(a.follow_up||'')}" onchange="setArrivalNote(${a.id}, this.value)"/></td>`+
+      `<td style="text-align:right"><button class="btn btn-ghost btn-sm sans" onclick="setArrival(${a.id},'cancelled')">Close</button></td></tr>`).join('');
+    $('arrivalsFollow').innerHTML = fu ? `<table class="tbl"><tr><th>Guest</th><th>Follow-up</th><th></th></tr>${fu}</table>` : '<div class="hint">No outstanding no-shows. 🎉</div>';
+  }catch(e){ $('arrivalsList').innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; }
+  clearTimeout(_arrivalsTimer); _arrivalsTimer=setTimeout(()=>{ if(document.getElementById('arrivals').classList.contains('active')) loadArrivals(); }, 60000);
+}
+async function setArrival(id,status){
+  try{ await api('/arrivals/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadArrivals(); }
+  catch(e){ alert(e.message); }
+}
+async function setArrivalNote(id,note){
+  try{ await api('/arrivals/'+id+'/status',{method:'POST',body:JSON.stringify({status:'no_show',follow_up:note})}); }catch(e){}
+}
+async function arrivalsSync(){
+  $('arrivals_msg').textContent='Pulling from Salesforce…';
+  try{ const r=await api('/arrivals/sync',{method:'POST'}); $('arrivals_msg').textContent=`✓ ${r.pulled} scheduled · ${r.matched} already arrived (Kipu).`; loadArrivals(); }
+  catch(e){ $('arrivals_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
 async function syncSalesforce(){
   $('pt_msg').textContent='Syncing Salesforce…';
   try{ const r=await api('/salesforce/sync',{method:'POST'}); $('pt_msg').textContent=`✓ ${r.leads} leads pulled · ${r.matched} matched to admitted clients · referral source filled. ${r.partnerRefs} partner referrals.`; loadPartners(); }
@@ -1483,6 +1529,7 @@ async function loadCommand(){
   const f = d.flow;
   $('cmdFlow').innerHTML = `
     <div class="ret-card"><div class="n">${f.census}</div><div class="l">Census</div></div>
+    ${d.scheduled?`<div class="ret-card ${d.scheduled.waiting?'rc-warn':''}" onclick="show('arrivals')" style="cursor:pointer"><div class="n">${d.scheduled.waiting}</div><div class="l">Scheduled to arrive</div></div>`:''}
     <div class="ret-card"><div class="n">${f.admitsToday}</div><div class="l">Admits today</div></div>
     <div class="ret-card"><div class="n">${f.dischargesToday}</div><div class="l">Discharges today</div></div>
     <div class="ret-card"><div class="n">${f.discharges7d}</div><div class="l">Discharges · 7d</div></div>
@@ -1504,9 +1551,14 @@ async function loadCommand(){
       ? dcs.map(x=>`<div class="pc-note">↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)}${x.reason?' · '+esc(x.reason):''}</div>`).join('')
       : '<div class="pc-note">ZERO today</div>'+(dcRecent.length?`<div class="hint" style="margin-top:4px">Recent (72h):</div>`+dcRecent.map(x=>`<div class="pc-note">↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)} <span class="hint">${esc(x.date||'')}</span>${x.reason?' · '+esc(x.reason):''}</div>`).join(''):'');
     const sendoutBlock = sendouts.length?sendouts.map(s=>`<div class="pc-note">🏥 <strong>${esc(s.client_name)}</strong> — ${esc(s.destination||'sent out')}${s.reason?': '+esc(s.reason):''}</div>`).join(''):'<div class="hint">None out right now.</div>';
+    const sched=(d.scheduled&&d.scheduled.list)||[];
+    const schedBlock = sched.length
+      ? sched.map(s=>`<div class="pc-note">${s.status==='arrived'?'✓':s.status==='no_show'?'✕':'•'} <strong>${esc(s.name)}</strong> <span class="hint">${esc(s.status==='no_show'?'no-show':s.status)}</span></div>`).join('')
+      : '<div class="pc-note">None scheduled</div>';
     $('cmdCensus').innerHTML =
       `<div class="cmd-sub">By level of care</div>${locLine}`+
       `<div class="cmd-row" style="border-top:2px solid var(--line)"><div class="cmd-row-main"><strong>TOTAL CENSUS</strong></div><span class="risk risk-elev">${f.census}</span></div>`+
+      `<div class="cmd-sub">Scheduled to arrive today</div>${schedBlock}`+
       `<div class="cmd-sub">Intakes today</div>${intakes.length?intakes.map(a=>`<div class="pc-note">☀ <strong>${esc(a.name)}</strong>${a.loc?' · '+esc(a.loc):''}</div>`).join(''):'<div class="pc-note">ZERO</div>'}`+
       `<div class="cmd-sub">Discharges</div>${dcBlock}`+
       `<div class="cmd-sub">Other — medical send-outs (ED / hospital)</div>${sendoutBlock}`+

@@ -827,6 +827,21 @@ export function rollupDailyMetrics(date) {
     .run(date, c('admit'), c('discharge') + ama, c('loc_change'), ama, census);
 }
 
+// ---- Medical send-outs: ED/hospital trips (the "OTHER" section of the census).
+// A client physically sent out for medical care — still on our census until
+// formally discharged, tracked separately. ----
+db.exec(`CREATE TABLE IF NOT EXISTS medical_sendouts (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  client_name TEXT NOT NULL,
+  destination TEXT,
+  reason TEXT,
+  sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+  sent_by TEXT,
+  status TEXT NOT NULL DEFAULT 'out',     -- out | returned | admitted_elsewhere
+  returned_at TEXT, returned_by TEXT, note TEXT
+);`);
+
 // ---- Dignity Kit: every client gets one; delivery must be confirmed by the
 // owner, and anyone who lets it go overdue is tracked. One kit per client. ----
 db.exec(`CREATE TABLE IF NOT EXISTS dignity_kits (

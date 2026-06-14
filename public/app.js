@@ -1209,11 +1209,29 @@ async function loadCommand(){
     const locLine = lv.length ? lv.map(l=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(l.code||l.label)}</strong>${l.code?' <span class="hint">'+esc(l.label)+'</span>':''}</div><span class="risk risk-low">${l.count}</span></div>`).join('') : '<div class="hint">No level-of-care data — run a Kipu sync.</div>';
     const intakes=(f.admitsTodayList||[]);
     const dcs=(f.dischargesTodayList||[]);
+    const dcRecent=(f.dischargesRecentList||[]);
+    const sendouts=(f.sendouts||[]);
+    const dcBlock = dcs.length
+      ? dcs.map(x=>`<div class="pc-note">↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)}${x.reason?' · '+esc(x.reason):''}</div>`).join('')
+      : '<div class="pc-note">ZERO today</div>'+(dcRecent.length?`<div class="hint" style="margin-top:4px">Recent (72h):</div>`+dcRecent.map(x=>`<div class="pc-note">↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)} <span class="hint">${esc(x.date||'')}</span>${x.reason?' · '+esc(x.reason):''}</div>`).join(''):'');
+    const sendoutBlock = sendouts.length?sendouts.map(s=>`<div class="pc-note">🏥 <strong>${esc(s.client_name)}</strong> — ${esc(s.destination||'sent out')}${s.reason?': '+esc(s.reason):''}</div>`).join(''):'<div class="hint">None out right now.</div>';
     $('cmdCensus').innerHTML =
       `<div class="cmd-sub">By level of care</div>${locLine}`+
       `<div class="cmd-row" style="border-top:2px solid var(--line)"><div class="cmd-row-main"><strong>TOTAL CENSUS</strong></div><span class="risk risk-elev">${f.census}</span></div>`+
       `<div class="cmd-sub">Intakes today</div>${intakes.length?intakes.map(a=>`<div class="pc-note">☀ <strong>${esc(a.name)}</strong>${a.loc?' · '+esc(a.loc):''}</div>`).join(''):'<div class="pc-note">ZERO</div>'}`+
-      `<div class="cmd-sub">Discharges today</div>${dcs.length?dcs.map(x=>`<div class="pc-note">↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)}${x.reason?' · '+esc(x.reason):''}</div>`).join(''):'<div class="pc-note">ZERO</div>'}`;
+      `<div class="cmd-sub">Discharges</div>${dcBlock}`+
+      `<div class="cmd-sub">Other — medical send-outs (ED / hospital)</div>${sendoutBlock}`+
+      `<div class="handoff-add no-print" style="margin-top:10px;flex-wrap:wrap">
+         <input id="so_name" placeholder="Client" style="flex:1;min-width:120px"/>
+         <input id="so_dest" placeholder="Where (e.g. Akron General ED)" style="flex:1;min-width:140px"/>
+         <input id="so_reason" placeholder="Reason" style="flex:2;min-width:160px"/>
+         <button class="btn btn-ghost btn-sm sans" onclick="sendoutAdd()">Log send-out</button>
+       </div>
+       <div class="toolbar no-print" style="justify-content:flex-start;margin-top:8px">
+         <button class="btn btn-gold btn-sm sans" onclick="emailCensus()">✉ Email census now</button>
+         <button class="btn btn-ghost btn-sm sans" onclick="censusRecipients()">Recipients…</button>
+         <span id="censusMsg" class="hint" style="align-self:center"></span>
+       </div>`;
   }
 
   // Daily snapshot (midnight cutoff) + 14-day trend
@@ -1276,6 +1294,23 @@ async function loadCommand(){
   loadCommandChecklist();
   loadCommandIssues(ISSUE_RANGE);
   cmdAssessPoll();
+}
+async function sendoutAdd(){
+  const client_name=$('so_name').value.trim(); if(!client_name){ $('censusMsg').textContent='Enter a client.'; return; }
+  await api('/sendouts',{method:'POST',body:JSON.stringify({client_name,destination:$('so_dest').value,reason:$('so_reason').value})});
+  loadCommand();
+}
+async function emailCensus(){
+  $('censusMsg').textContent='Sending…';
+  try{ const r=await api('/command/census/email',{method:'POST'}); $('censusMsg').textContent = r.sent?('✓ Emailed to '+r.to):('Not sent — '+(r.reason||'email not configured')); }
+  catch(e){ $('censusMsg').textContent='Error: '+e.message; }
+}
+async function censusRecipients(){
+  let cur=''; try{ cur=(await api('/command/census/recipients')).to||''; }catch(e){}
+  const to=prompt('Email the midnight census to (comma-separated addresses):', cur);
+  if(to===null) return;
+  await api('/command/census/recipients',{method:'POST',body:JSON.stringify({to})});
+  $('censusMsg').textContent='✓ Recipients saved';
 }
 let ISSUE_RANGE='day';
 function setIssueRange(r){ ISSUE_RANGE=r; $('issTabDay').classList.toggle('active',r==='day'); $('issTabWeek').classList.toggle('active',r==='week'); loadCommandIssues(r); }

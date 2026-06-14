@@ -386,21 +386,84 @@ export async function kipuPatientChart(casefileId) {
   const base = tmpl.replace('{id}', casefileId);
   const first = await kipuGet(base);
   let list = first?.patient_evaluations || first?.evaluations || (Array.isArray(first) ? first : []);
-  const pag = first?.pagination || {};
-  const per = +(pag.per_page || pag.records_per_page || pag.per || 100) || 100;
-  const total = +(pag.total_records || pag.total_count || pag.total || pag.count || 0) || 0;
-  let pages = +(pag.total_pages || pag.total_page || pag.last_page || pag.pages || 0) || (total ? Math.ceil(total / per) : (list.length >= per ? 2 : 1));
-  pages = Math.min(pages, 40);   // safety cap (~4000 evaluations)
-  for (let pg = 2; pg <= pages; pg++) {
-    try { const d = await kipuGet(base + (base.includes('?') ? '&' : '?') + 'page=' + pg); list = list.concat(d?.patient_evaluations || d?.evaluations || []); }
-    catch { /* stop on a bad page */ }
+  const sep = base.includes('?') ? '&' : '?';
+  // Walk every page until one returns no NEW rows (robust to whatever the
+  // pagination metadata looks like, and to a page param being ignored).
+  const seenIds = new Set(list.map((e) => e.id ?? e.evaluation_id));
+  for (let pg = 2; pg <= 80; pg++) {
+    let chunk = [];
+    try { const d = await kipuGet(base + sep + 'page=' + pg); chunk = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : []); }
+    catch { break; }
+    if (!chunk.length) break;
+    const fresh = chunk.filter((e) => { const k = e.id ?? e.evaluation_id; if (k == null || seenIds.has(k)) return false; seenIds.add(k); return true; });
+    if (!fresh.length) break;
+    list = list.concat(fresh);
+    if (list.length > 8000) break;
   }
-  const seen = new Set();
-  list = list.filter((e) => { const k = e.id ?? e.evaluation_id; if (k == null || seen.has(k)) return false; seen.add(k); return true; });
   const want_cf = String(casefileId), want_pref = want_cf.split(':')[0];
   list = list.filter((e) => { const cf = e.patient_casefile_id ?? e.casefile_id ?? e.patient_id; if (cf == null || cf === '') return true; const s = String(cf); return s === want_cf || s.split(':')[0] === want_pref; });
   list.sort((a, b) => { const ad = a.created_at || '', bd = b.created_at || ''; if (ad || bd) return String(bd).localeCompare(String(ad)); return (+b.id || 0) - (+a.id || 0); });
   return list.map((e) => ({ id: e.id ?? e.evaluation_id, name: String(e.name || 'Note').trim(), date: String(e.created_at || e.evaluation_date || e.date || '').slice(0, 10), status: e.status || '' }));
+}
+
+// Additional chart resources that are NOT patient_evaluations — medications/MAR,
+// vitals, withdrawal scales (CIWA/COWS), labs, glucose, groups. Best-effort:
+// tries the documented endpoint shapes and includes whatever returns; a missing
+// resource is simply skipped (no error). Returns rendered entries + a diagnostic.
+const EXTRA_RESOURCES = [
+  { cat: 'Medications / MAR', paths: ['patient_medications', 'medications', 'patient_orders', 'orders', 'mar'] },
+  { cat: 'Vital signs', paths: ['vital_signs', 'vitals'] },
+  { cat: 'Withdrawal — CIWA', paths: ['ciwa_ars', 'ciwa_bs', 'ciwa'] },
+  { cat: 'Withdrawal — COWS', paths: ['cows'] },
+  { cat: 'Glucose', paths: ['glucose_logs', 'glucose'] },
+  { cat: 'Labs / drug screens', paths: ['lab_results', 'labs', 'orders_labs', 'drug_screens', 'toxicology'] },
+  { cat: 'Groups', paths: ['patient_group_sessions', 'group_sessions', 'groups'] },
+];
+function firstArray(d) {
+  if (Array.isArray(d)) return d;
+  if (d && typeof d === 'object') for (const [k, v] of Object.entries(d)) { if (Array.isArray(v) && k !== 'pagination') return v; }
+  return null;
+}
+function renderResourceRow(it) {
+  if (it == null || typeof it !== 'object') return { date: '', content: String(it) };
+  const date = it.created_at || it.recorded_at || it.administered_at || it.date || it.timestamp || it.scheduled_time || it.collected_at || '';
+  const parts = [];
+  for (const [k, v] of Object.entries(it)) {
+    if (v == null || typeof v === 'object') continue;
+    if (/(_id$|^id$|casefile|patient_master|^patient_id$|enterprise|location_id)/i.test(k)) continue;
+    const s = String(v).trim();
+    if (!s || s === 'false' || s === '0') continue;
+    parts.push(`${k.replace(/_/g, ' ')}: ${s}`);
+    if (parts.length >= 14) break;
+  }
+  return { date: String(date).slice(0, 16).replace('T', ' '), content: parts.join('\n') };
+}
+export async function kipuPatientExtras(casefileId) {
+  const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+  const phi = process.env.KIPU_PHI_LEVEL || 'high';
+  const e = encodeURIComponent;
+  const tryPath = async (path) => {
+    for (const url of [
+      `/api/patients/${master}/${path}?phi_level=${phi}&patient_master_id=${e(uuid)}`,
+      `/api/${path}?patient_id=${s}`,
+      `/api/patients/${e(s)}/${path}?phi_level=${phi}`,
+    ]) {
+      try { const d = await kipuGet(url); const arr = firstArray(d); if (arr) return arr; } catch { /* try next */ }
+    }
+    return null;
+  };
+  const entries = [], diag = [];
+  for (const r of EXTRA_RESOURCES) {
+    let arr = null, used = null;
+    for (const p of r.paths) { arr = await tryPath(p); if (arr) { used = p; break; } }
+    diag.push({ cat: r.cat, path: used || r.paths[0], count: arr ? arr.length : null });
+    if (!arr) continue;
+    arr.slice(0, 80).forEach((it, i) => {
+      const row = renderResourceRow(it);
+      if (row.content && row.content.length > 2) entries.push({ category: r.cat, name: r.cat + (row.date ? ' · ' + row.date : ' #' + (i + 1)), date: row.date, content: row.content });
+    });
+  }
+  return { entries, diag };
 }
 
 // One evaluation, fully readable — for the human chart viewer. Falls back to a

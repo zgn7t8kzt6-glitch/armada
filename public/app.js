@@ -217,10 +217,22 @@ async function loadKipuChart(cid, reload){
   try{
     const d=await api('/clients/'+cid+'/chart');
     if(!d.kipu){ card.style.display='none'; return; }
-    if(!d.evaluations.length){ $('kipuChartList').innerHTML='<div class="hint">No documents found in Kipu for this client.</div>'; return; }
-    $('kipuChartSub').textContent = d.evaluations.length+' documents on this chart — click any to read it.';
-    $('kipuChartList').innerHTML = d.evaluations.map(e=>`<details class="chart-note"><summary><span class="chart-name">${esc(e.name)}</span>${e.date?` <span class="hint">· ${esc(e.date)}</span>`:''}</summary><div class="chart-body" data-cid="${cid}" data-eid="${esc(String(e.id))}" data-loaded="0">Loading…</div></details>`).join('');
-    document.querySelectorAll('#kipuChartList details').forEach(dt=>dt.addEventListener('toggle',function(){ if(this.open){ const b=this.querySelector('.chart-body'); if(b&&b.dataset.loaded==='0'){ b.dataset.loaded='1'; openChartNote(b); } } }));
+    const extras=d.extras||[];
+    if(!d.evaluations.length && !extras.length){ $('kipuChartList').innerHTML='<div class="hint">No documents found in Kipu for this client.</div>'; return; }
+    $('kipuChartSub').textContent = `${d.evaluations.length} notes${extras.length?' + '+extras.length+' meds/vitals/labs/scales':''} on this chart — click any to read it.`;
+    // Extra clinical resources (meds, vitals, withdrawal scales, labs), grouped.
+    let extraHtml='';
+    if(extras.length){
+      const cats=[...new Set(extras.map(x=>x.category))];
+      extraHtml = '<div class="cmd-sub">Medications · Vitals · Withdrawal scales · Labs</div>'+cats.map(cat=>{
+        const items=extras.filter(x=>x.category===cat);
+        return `<details class="chart-note"><summary><span class="chart-name">${esc(cat)}</span> <span class="hint">· ${items.length}</span></summary><div class="chart-body">${items.map(it=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong class="hint">${esc(it.date||'')}</strong>\n${esc(it.content)}</div>`).join('')}</div></details>`;
+      }).join('');
+    }
+    const notesHtml = d.evaluations.length ? '<div class="cmd-sub">Notes &amp; forms</div>'+d.evaluations.map(e=>`<details class="chart-note" data-name="${esc(e.name).toLowerCase()}"><summary><span class="chart-name">${esc(e.name)}</span>${e.date?` <span class="hint">· ${esc(e.date)}</span>`:''}</summary><div class="chart-body" data-cid="${cid}" data-eid="${esc(String(e.id))}" data-loaded="0">Loading…</div></details>`).join('') : '';
+    const diagHtml = (ME&&ME.role==='admin'&&d.diag&&d.diag.length) ? `<details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Source diagnostic</summary><div class="hint" style="white-space:pre-wrap">${d.diag.map(x=>`${x.cat}: ${x.count==null?'not available':x.count+' records'}`).join('\n')}</div></details>` : '';
+    $('kipuChartList').innerHTML = extraHtml + notesHtml + diagHtml;
+    document.querySelectorAll('#kipuChartList details').forEach(dt=>dt.addEventListener('toggle',function(){ if(this.open){ const b=this.querySelector('.chart-body[data-loaded="0"]'); if(b){ b.dataset.loaded='1'; openChartNote(b); } } }));
   }catch(e){ $('kipuChartList').innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; }
 }
 async function openChartNote(b){

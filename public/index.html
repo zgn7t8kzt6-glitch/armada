@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260614d" />
+<link rel="stylesheet" href="/styles.css?v=20260614e" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -156,6 +156,17 @@
         </div>
       </div>
       <div id="cmdFlow" class="ret-cards"></div>
+      <div class="card" id="periodCard">
+        <div class="cmd-hero-row">
+          <div><h3>Period summary</h3><p class="sub sans">Scheduled, admitted, discharged and AMA since a start date — straight from Kipu &amp; Salesforce. Click an AMA to read why.</p></div>
+          <div class="toolbar" style="justify-content:flex-end">
+            <label class="hint" style="align-self:center">Since</label>
+            <input type="date" id="periodSince" value="2026-06-01" onchange="loadCommandPeriod()"/>
+          </div>
+        </div>
+        <div id="periodKpis" class="ret-cards"></div>
+        <div id="periodDetail"></div>
+      </div>
       <div class="card" id="censusCard">
         <div class="cmd-hero-row">
           <div><h3>Midnight Census</h3><p class="sub sans">The live equivalent of your nightly census email — level-of-care breakdown, intakes, and discharges.</p></div>
@@ -1153,6 +1164,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260614d"></script>
+<script src="/app.js?v=20260614e"></script>
 </body>
 </html>

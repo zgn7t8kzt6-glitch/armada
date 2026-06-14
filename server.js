@@ -1000,6 +1000,40 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+// Period summary since a given date (default: 1st of the current month).
+// Pure Kipu/Salesforce data — scheduled, admitted, discharged, AMA + the
+// discharge breakdown and an AMA drill-down list (reason + link to notes).
+app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday().slice(0, 8) + '01';
+  const scheduled = db.prepare(`SELECT status, COUNT(*) n FROM expected_arrivals WHERE scheduled_date >= ? GROUP BY status`).all(since);
+  const schedMap = Object.fromEntries(scheduled.map((r) => [r.status, r.n]));
+  const schedTotal = scheduled.reduce((s, r) => s + r.n, 0);
+
+  const admitted = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(admit,1,10) >= ?`).get(since).n;
+  const dischRows = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist
+    FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? ORDER BY discharge_date DESC`).all(since);
+  const byStatus = {};
+  for (const d of dischRows) { const s = d.discharge_status || 'Discharged'; byStatus[s] = (byStatus[s] || 0) + 1; }
+  const losOf = (a, d) => { if (!a || !d) return null; const n = Math.round((Date.parse(d) - Date.parse(a)) / 864e5); return n >= 0 ? n : null; };
+  const amaList = dischRows.filter((d) => d.discharge_status === 'AMA').map((d) => ({
+    id: d.id, name: d.pref || d.name, date: (d.discharge_date || '').slice(0, 10),
+    los: losOf(d.admit, d.discharge_date), reason: d.discharge_reason || '', improve: d.discharge_improve || '',
+    referral: d.referral_source || '', therapist: d.therapist || '',
+    hasRead: !!latestAmaRead(d.id),
+  }));
+  const amaCount = amaList.length;
+  const losVals = dischRows.map((d) => losOf(d.admit, d.discharge_date)).filter((n) => n != null);
+  const avgLos = losVals.length ? +(losVals.reduce((a, b) => a + b, 0) / losVals.length).toFixed(1) : null;
+
+  res.json({
+    since,
+    scheduled: { total: schedTotal, arrived: schedMap.arrived || 0, noShow: schedMap.no_show || 0, expected: schedMap.expected || 0 },
+    admitted,
+    discharged: { total: dischRows.length, byStatus, avgLos, amaRate: dischRows.length ? Math.round(amaCount / dischRows.length * 100) : 0 },
+    ama: { count: amaCount, list: amaList },
+  });
+});
+
 // Trending issues: cluster what clients are raising across ALL notes + check-ins,
 // for the day and the week. Quantitative counts always; AI digest cached per day.
 app.get('/api/command/issues', requireAuth, requireAdmin, async (req, res) => {

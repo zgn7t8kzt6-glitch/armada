@@ -5,38 +5,58 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Welcome — Armada Recovery</title>
 <style>
-  :root{ --gold:#c9a64a; --ink:#0e1726; }
+  /* Brand palette (from the Armada Recovery logo) */
+  :root{
+    --teal:#235056; --teal-2:#2d6168; --aqua:#5fb0c2; --sage:#a7ba86;
+    --gold:#d29a5e; --gold-2:#e5a05e; --cream:#f5f3ed; --paper:#ffffff;
+    --ink:#1b2825; --muted:#6f7a75;
+  }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{
-    font-family:'Cormorant Garamond',Georgia,serif;
-    background:radial-gradient(120% 120% at 50% 0%, #16243b 0%, #0a1220 60%, #060b14 100%);
-    color:#f4efe3; display:flex; flex-direction:column; min-height:100vh; overflow:hidden;
+    font-family:'Cormorant Garamond',Georgia,'Times New Roman',serif;
+    color:var(--teal);
+    background:
+      radial-gradient(1200px 700px at 50% -8%, rgba(210,154,94,.16), transparent 60%),
+      radial-gradient(1000px 800px at 90% 110%, rgba(95,176,194,.18), transparent 55%),
+      linear-gradient(160deg,#fbf9f3 0%, var(--cream) 55%, #efeadf 100%);
+    display:flex; flex-direction:column; min-height:100vh; overflow:hidden;
   }
-  header{ text-align:center; padding:6vh 4vw 2vh; }
-  .eyebrow{ letter-spacing:.5em; text-transform:uppercase; font-size:1.4vw; color:var(--gold); font-family:'Inter',system-ui,sans-serif; margin:0 0 1.4vh }
-  h1{ margin:0; font-size:5.5vw; font-weight:600; line-height:1.05 }
-  h1 .fac{ color:var(--gold) }
-  .sub{ margin:1.5vh 0 0; font-size:1.8vw; opacity:.85 }
-  main{ flex:1; display:flex; align-items:center; justify-content:center; padding:0 5vw 6vh; }
-  .names{ display:flex; flex-wrap:wrap; gap:2.2vh 2.2vw; justify-content:center; max-width:90vw }
+  header{ text-align:center; padding:5vh 4vw 1vh; }
+  .logo{ height:18vh; max-height:200px; width:auto; margin-bottom:2vh;
+    filter:drop-shadow(0 6px 22px rgba(35,80,86,.18)); }
+  .eyebrow{ letter-spacing:.55em; text-transform:uppercase; font-size:1.3vw;
+    color:var(--gold); font-family:'Inter',system-ui,sans-serif; margin:0 0 1vh; font-weight:600 }
+  h1{ margin:0; font-size:4.6vw; font-weight:600; line-height:1.05; color:var(--teal) }
+  .sub{ margin:1.4vh 0 0; font-size:1.7vw; color:var(--teal-2); opacity:.9 }
+  /* gold gradient divider echoing the logo's sunrise */
+  .rule{ width:34vw; max-width:560px; height:3px; margin:2.4vh auto 0; border-radius:3px;
+    background:linear-gradient(90deg, transparent, var(--gold), var(--aqua), transparent) }
+  main{ flex:1; display:flex; align-items:center; justify-content:center; padding:0 5vw 5vh; }
+  .names{ display:flex; flex-wrap:wrap; gap:2.2vh 2.2vw; justify-content:center; max-width:92vw }
   .chip{
-    font-size:3.2vw; padding:1.6vh 3vw; border-radius:999px;
-    background:rgba(255,255,255,.06); border:1px solid rgba(201,166,74,.4);
-    backdrop-filter:blur(6px); display:flex; align-items:center; gap:1.4vw;
+    font-size:3vw; padding:1.5vh 3vw; border-radius:999px; color:var(--teal);
+    background:var(--paper); border:1.5px solid rgba(95,176,194,.55);
+    box-shadow:0 8px 26px rgba(35,80,86,.10);
+    display:flex; align-items:center; gap:1.3vw;
   }
-  .chip.arrived{ border-color:rgba(120,200,160,.6); background:rgba(120,200,160,.10) }
-  .dot{ width:1.4vw; height:1.4vw; border-radius:50%; background:var(--gold) }
-  .chip.arrived .dot{ background:#7ec8a0 }
-  .empty{ font-size:2.6vw; opacity:.7 }
-  footer{ text-align:center; padding:0 0 4vh; font-family:'Inter',system-ui,sans-serif; font-size:1.1vw; letter-spacing:.2em; text-transform:uppercase; opacity:.5 }
+  .chip.arrived{ border-color:var(--sage); background:linear-gradient(180deg,#fff,#f4f8ef) }
+  .dot{ width:1.3vw; height:1.3vw; border-radius:50%;
+    background:linear-gradient(160deg,var(--gold),var(--aqua)) }
+  .chip.arrived .dot{ background:var(--sage) }
+  .chip.arrived::after{ content:'✓'; color:var(--teal); font-size:2.4vw; margin-left:.4vw }
+  .empty{ font-size:2.4vw; color:var(--muted) }
+  footer{ text-align:center; padding:0 0 3.5vh; font-family:'Inter',system-ui,sans-serif;
+    font-size:1vw; letter-spacing:.28em; text-transform:uppercase; color:var(--muted); opacity:.8 }
 </style>
 </head>
 <body>
   <header>
+    <img class="logo" src="/logo.png" alt="Armada Recovery"/>
     <p class="eyebrow">Today we welcome</p>
-    <h1>Welcome to <span class="fac" id="fac">Armada Recovery</span></h1>
-    <p class="sub">You belong here. Your care starts the moment you walk in.</p>
+    <h1 id="welcomeLine">Welcome home</h1>
+    <p class="sub">You belong here. Your care begins the moment you walk in.</p>
+    <div class="rule"></div>
   </header>
   <main><div class="names" id="names"><div class="empty">Preparing today's welcome…</div></div></main>
   <footer>Armada Care Standards</footer>
@@ -44,13 +64,12 @@
 async function refresh(){
   try{
     const r = await fetch('/api/arrivals/board', { credentials:'same-origin' });
-    if(r.status===401){ document.getElementById('names').innerHTML='<div class="empty">Please sign in on this device first (open the app, log in), then reload.</div>'; return; }
+    if(r.status===401){ document.getElementById('names').innerHTML='<div class="empty">Please sign in on this device first (open the app and log in), then reload this page.</div>'; return; }
     const d = await r.json();
-    if(d.facility) document.getElementById('fac').textContent = d.facility;
     const box = document.getElementById('names');
     if(!d.names || !d.names.length){ box.innerHTML='<div class="empty">No scheduled arrivals today.</div>'; return; }
     box.innerHTML = d.names.map(n=>`<div class="chip${n.arrived?' arrived':''}"><span class="dot"></span>${(n.name||'').replace(/[<>&]/g,'')}</div>`).join('');
-  }catch(e){ /* keep last good board on transient errors */ }
+  }catch(e){ /* keep the last good board on transient errors */ }
 }
 refresh(); setInterval(refresh, 30000);
 </script>

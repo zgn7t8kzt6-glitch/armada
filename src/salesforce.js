@@ -282,7 +282,7 @@ export async function sfSyncArrivals(db) {
            Referring_Organization__r.Name, Referring_Contact__r.Name,
            Web_Form_How_did_you_hear_about_us__c
     FROM Lead
-    WHERE Date_Looking_to_Admit__c >= LAST_N_DAYS:3 AND Date_Looking_to_Admit__c <= NEXT_N_DAYS:21
+    WHERE Date_Looking_to_Admit__c >= LAST_N_DAYS:${+process.env.SF_ARRIVALS_BACK_DAYS || 45} AND Date_Looking_to_Admit__c <= NEXT_N_DAYS:21
     ORDER BY Date_Looking_to_Admit__c ASC`;
   const records = await sfQueryAll(soql);
 

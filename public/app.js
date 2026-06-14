@@ -1523,8 +1523,31 @@ async function loadOwnerAccountability(){
 }
 
 /* ---- Leadership Command Center ---- */
+async function loadCommandPeriod(){
+  const since=($('periodSince')&&$('periodSince').value)||'2026-06-01';
+  let p; try{ p = await api('/command/since?date='+encodeURIComponent(since)); }catch(e){ return; }
+  const dc=p.discharged||{}, sc=p.scheduled||{};
+  $('periodKpis').innerHTML=
+    `<div class="ret-card"><div class="n">${sc.total||0}</div><div class="l">Scheduled</div></div>`+
+    `<div class="ret-card"><div class="n">${p.admitted||0}</div><div class="l">Admitted</div></div>`+
+    `<div class="ret-card"><div class="n">${dc.total||0}</div><div class="l">Discharged</div></div>`+
+    `<div class="ret-card ${dc.amaRate>=20?'rc-high':(p.ama&&p.ama.count?'rc-warn':'')}"><div class="n">${(p.ama&&p.ama.count)||0}</div><div class="l">AMA · ${dc.amaRate||0}%</div></div>`+
+    `<div class="ret-card"><div class="n">${dc.avgLos!=null?dc.avgLos:'—'}</div><div class="l">Avg LOS (days)</div></div>`;
+  const sb=Object.entries(dc.byStatus||{}).map(([k,n])=>`<span class="risk ${/ama/i.test(k)?'risk-warn':'risk-low'}" style="margin-right:6px">${esc(k)}: ${n}</span>`).join('');
+  const amaRows=((p.ama&&p.ama.list)||[]).map(a=>`<tr onclick="editClient(${a.id})" style="cursor:pointer">`+
+    `<td><strong>${esc(a.name)}</strong>${a.therapist?`<div class="hint">${esc(a.therapist)}</div>`:''}</td>`+
+    `<td>${esc(a.date||'')}</td><td>${a.los!=null?a.los+'d':'—'}</td>`+
+    `<td>${esc(a.reason||a.improve||'')||'<span class=hint>—</span>'}</td>`+
+    `<td>${a.hasRead?'<span class="risk risk-low">read ✓</span>':'<span class="hint">no read</span>'}</td></tr>`).join('');
+  $('periodDetail').innerHTML =
+    (sb?`<div style="margin:10px 0">${sb}</div>`:'')+
+    (amaRows?`<div class="cmd-sub">AMA discharges — why they left (click a row to open the chart)</div>`+
+      `<table class="tbl"><tr><th>Client</th><th>Left</th><th>LOS</th><th>Reason / what we'd improve</th><th></th></tr>${amaRows}</table>`
+      :'<div class="hint" style="margin-top:8px">No AMA discharges in this period. 🎉</div>');
+}
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
+  loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   const f = d.flow;
   $('cmdFlow').innerHTML = `

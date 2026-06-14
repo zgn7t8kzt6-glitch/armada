@@ -574,8 +574,8 @@ export async function kipuPatientNotes(casefileId) {
     if (ad || bd) return String(bd).localeCompare(String(ad));
     return (+b.id || 0) - (+a.id || 0);
   });
-  const want = +(process.env.KIPU_NOTES_MAX || 12);
-  const candidates = list.filter((e) => e.id).slice(0, want + 4);   // a few extra in case some are empty
+  const want = +(process.env.KIPU_NOTES_MAX || 8);
+  const candidates = list.filter((e) => e.id).slice(0, want + 3);   // a few extra in case some are empty
   const debug = { candidates: list.length, anyDated, fetched: candidates.length, withContent: 0, sampleNames: [...new Set(list.map((e) => e.name).filter(Boolean))].slice(0, 8) };
   // Fetch the note details CONCURRENTLY (big speed-up vs. one-by-one).
   const results = await mapLimit(candidates, +(process.env.KIPU_CONCURRENCY || 6), async (e) => {
@@ -599,7 +599,7 @@ export async function kipuPatientNotes(casefileId) {
     }
     if (r.content && r.content.length > 10 && texts.length < want) { debug.withContent++; texts.push(`[${r.date ? r.date + ' · ' : ''}${nm.trim() || 'Note'}]\n${r.content}`); }
   }
-  return { text: texts.join('\n\n').slice(0, 18000), therapist, case_manager: caseMgrName, forms, debug };
+  return { text: texts.join('\n\n').slice(0, +(process.env.KIPU_NOTES_CHARS || 9000)), therapist, case_manager: caseMgrName, forms, debug };
 }
 
 // FULL CHART: list EVERY evaluation/form on a client (all pages), light rows for

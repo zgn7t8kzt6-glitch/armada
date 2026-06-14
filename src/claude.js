@@ -59,6 +59,9 @@ async function callAI(params, tries = 4) {
     catch (e) {
       const status = e?.status || e?.statusCode;
       const msg = String(e?.message || e);
+      // A DAILY token/quota cap won't clear with a short backoff — fail fast and
+      // mark it so the batch can stop instead of burning more of the budget.
+      if (/per day|daily|quota/i.test(msg)) { const err = new Error('Daily AI limit reached'); err.dailyLimit = true; throw err; }
       const throttled = status === 429 || status === 529 || (status >= 500 && status < 600) || /throttl|rate.?limit|too many|timeout|ECONNRESET|503|overloaded/i.test(msg);
       if (!throttled || i === tries - 1) throw e;
       await new Promise((r) => setTimeout(r, wait + Math.random() * 600));
@@ -660,7 +663,7 @@ export async function scanNote(text, clientName) {
     max_tokens: 900,
     system: G + NOTE_SYSTEM,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: NOTE_SCHEMA } },
-    messages: [{ role: 'user', content: `Client: ${DEID ? 'the client (name withheld)' : (clientName || 'unknown')}\n\nNOTE:\n${scrub(text, [clientName])}` }],
+    messages: [{ role: 'user', content: `Client: ${DEID ? 'the client (name withheld)' : (clientName || 'unknown')}\n\nNOTE:\n${scrub(String(text).slice(0, 5000), [clientName])}` }],
   });
   if (response.stop_reason === 'refusal') throw new Error('Declined.');
   const t = response.content.find((b) => b.type === 'text');

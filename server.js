@@ -611,12 +611,23 @@ app.post('/api/clients/:id/ama-read', requireAuth, async (req, res) => {
 // ---- Batch risk assessment: read every active client's Kipu documentation and
 // score their AMA risk, in the background, with live progress. ----
 let assessJob = { running: false, total: 0, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, lastError: null, current: null, startedAt: null, finishedAt: null };
-async function runAssessAll(user) {
-  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+async function runAssessAll(user, opts = {}) {
+  let clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  // Incremental (scheduled) runs only read clients with NO read or a stale one —
+  // re-reading everyone every few hours burns the daily AI token budget.
+  if (opts.incremental) {
+    const staleH = +(process.env.ASSESS_STALE_HOURS || 18);
+    clients = clients.filter((c) => {
+      const a = latestAmaRead(c.id);
+      if (!a || !a.created_at) return true;
+      return (Date.now() - Date.parse(String(a.created_at).replace(' ', 'T') + 'Z')) > staleH * 3600e3;
+    });
+    if (!clients.length) { assessJob = { ...assessJob, running: false, finishedAt: Date.now() }; return; }
+  }
   // Clear stale auto-generated risk/concern alerts so a re-run refreshes rather
   // than piling up duplicates.
   db.prepare(`DELETE FROM alerts WHERE kind IN ('risk', 'concern') AND status = 'New'`).run();
-  assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, lastError: null, current: null, startedAt: Date.now(), finishedAt: null };
+  assessJob = { running: true, total: clients.length, done: 0, high: 0, elevated: 0, low: 0, flagged: 0, errors: 0, aborted: false, lastError: null, current: null, startedAt: Date.now(), finishedAt: null };
   const assessOne = async (c) => {
     assessJob.current = c.pref || c.name;
     try {
@@ -658,17 +669,19 @@ async function runAssessAll(user) {
           }
         } catch { /* rounds optional */ }
       }
-      // Author the policy plans once, hands-off (regenerate anytime from the card).
-      try { if (!c.welcome_plan) { const wp = await generateWelcomePlan(c); if (wp) db.prepare(`UPDATE clients SET welcome_plan = ? WHERE id = ?`).run(wp, c.id); } } catch { /* plan optional */ }
-      try { if (!c.aftercare_plan && (c.next_loc || c.anticipated_dc)) { const ap = await generateAftercarePlan(c); if (ap) db.prepare(`UPDATE clients SET aftercare_plan = ? WHERE id = ?`).run(ap, c.id); } } catch { /* plan optional */ }
-    } catch (e) { assessJob.errors++; assessJob.lastError = (e?.message || String(e)).slice(0, 200); }
+      // (Welcome/aftercare plans are generated ON-DEMAND from the Care Card, not
+      // here — keeps the batch's daily token use down.)
+    } catch (e) {
+      assessJob.errors++; assessJob.lastError = (e?.message || String(e)).slice(0, 200);
+      if (e?.dailyLimit) { assessJob.aborted = true; assessJob.lastError = 'Daily AI limit reached — paused. Try again later, or raise the Bedrock token quota.'; }
+    }
     assessJob.done++;
   };
   // Assess several clients CONCURRENTLY (each does Kipu + AI). AI_CONCURRENCY tunes it.
   const limit = Math.max(1, +(process.env.AI_CONCURRENCY || 2));
   let idx = 0;
   await Promise.all(Array.from({ length: Math.min(limit, clients.length) }, async () => {
-    while (idx < clients.length) { const c = clients[idx++]; await assessOne(c); }
+    while (idx < clients.length && !assessJob.aborted) { const c = clients[idx++]; await assessOne(c); }
   }));
   assessJob.running = false; assessJob.current = null; assessJob.finishedAt = Date.now();
 }
@@ -1407,7 +1420,7 @@ function afterSyncAssess(user) {
   try { chartCache.clear(); } catch { /* cache may not be ready */ }
   try { ensureDignityKits(); } catch (e) { console.error('[dignity] ensure:', e.message); }
   if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
-    runAssessAll({ id: user?.id ?? null, name: user?.name || 'Sync' }).catch((e) => console.error('[assess] after sync:', e.message));
+    runAssessAll({ id: user?.id ?? null, name: user?.name || 'Sync' }, { incremental: true }).catch((e) => console.error('[assess] after sync:', e.message));
   }
 }
 // Azure SQL data-warehouse (Chaim's Kipu warehouse) — read-only sync.
@@ -2764,7 +2777,7 @@ if (kipuConfigured()) {
         // Re-assess the census automatically (clears stale alerts + refreshes every
         // client's clean read/snapshot). Disable with KIPU_AUTO_ASSESS=false.
         if (claudeConfigured() && process.env.KIPU_AUTO_ASSESS !== 'false' && !assessJob.running) {
-          await runAssessAll({ id: null, name: 'Auto-sync' });
+          await runAssessAll({ id: null, name: 'Auto-sync' }, { incremental: true });
         }
         // Anyone newly discharged gets an automatic "what could we do better" debrief.
         if (claudeConfigured() && !debriefJob.running) runDischargeDebriefs({ id: null, name: 'Auto-sync' }).catch((e) => { debriefJob.running = false; console.error('[debrief]', e.message); });

@@ -16,7 +16,7 @@ import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems } from './src/seed.js';
+import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -26,6 +26,7 @@ if (process.env.SEED_SAMPLE === 'true') ensureSampleData();
 ensureExampleClient12A();
 ensureInventoryCatalog();
 try { const added = ensureInventoryItems(); if (added) console.log(`[inventory] added ${added} item(s) from the building-walk list`); } catch (e) { console.error('[inventory] ensureItems:', e.message); }
+try { ensureStaffingStandard(); } catch (e) { console.error('[staffing] ensureStandard:', e.message); }
 // Default census recipient so a test send reaches the right person out of the box.
 if (!getState('census_email_to')) setState('census_email_to', process.env.CENSUS_EMAIL_TO || 'shlomo@armadarecovery.com');
 // One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.
@@ -3568,6 +3569,74 @@ app.get('/api/analytics/insights', requireAuth, async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
+/* ---------------- Staffing model: standard + daily coverage + AMA trend ------ */
+// The staffing standard, today's logged actual coverage vs. needed, and a
+// 14-day trend of understaffed shifts against AMA — to see if thin staffing and
+// people leaving move together.
+app.get('/api/staffing-model', requireAuth, (req, res) => {
+  const date = (req.query.date || appToday()).slice(0, 10);
+  const std = db.prepare(`SELECT id, block, role, shift_label, needed FROM staffing_standard ORDER BY sort, id`).all();
+  const logRow = db.prepare(`SELECT actual, note FROM shift_staffing WHERE date = ? AND role = ? AND shift_label = ?`);
+  const blocks = {};
+  let shortToday = 0;
+  for (const s of std) {
+    const lg = logRow.get(date, s.role, s.shift_label);
+    const actual = lg ? lg.actual : null;
+    const short = actual != null && actual < s.needed;
+    if (short) shortToday++;
+    (blocks[s.block] = blocks[s.block] || []).push({ id: s.id, role: s.role, shift: s.shift_label, needed: s.needed, actual, short, logged: !!lg, note: lg?.note || '' });
+  }
+  // 14-day trend: understaffed shift-logs per day vs AMA (from daily_metrics).
+  const trend = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = addDays(date, -i);
+    const rows = db.prepare(`SELECT needed, actual FROM shift_staffing WHERE date = ?`).all(d);
+    const understaffed = rows.filter((r) => r.actual < r.needed).length;
+    const logged = rows.length;
+    const m = db.prepare(`SELECT ama, census FROM daily_metrics WHERE date = ?`).get(d) || {};
+    trend.push({ date: d, understaffed, logged, ama: m.ama || 0, census: m.census ?? null });
+  }
+  // % of logged shifts that were fully staffed — week and month (for the scorecard).
+  const pctStaffed = (days) => {
+    const rows = db.prepare(`SELECT needed, actual FROM shift_staffing WHERE date >= date('now', ?)`).all(`-${days} day`);
+    if (!rows.length) return { pct: null, logged: 0 };
+    const ok = rows.filter((r) => r.actual >= r.needed).length;
+    return { pct: Math.round(ok / rows.length * 100), logged: rows.length };
+  };
+  res.json({ date, blocks: Object.entries(blocks).map(([name, rows]) => ({ block: name, rows })), shortToday, trend,
+    staffedWeek: pctStaffed(7), staffedMonth: pctStaffed(30) });
+});
+// Just the staffed % (week/month) — for the scorecard.
+function staffingScorecard() {
+  const pctStaffed = (days) => {
+    const rows = db.prepare(`SELECT needed, actual FROM shift_staffing WHERE date >= date('now', ?)`).all(`-${days} day`);
+    if (!rows.length) return null;
+    return Math.round(rows.filter((r) => r.actual >= r.needed).length / rows.length * 100);
+  };
+  return { week: pctStaffed(7), month: pctStaffed(30) };
+}
+// Admin: set the needed count on a standard row.
+app.post('/api/staffing-model/standard', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (!b.id) return res.status(400).json({ error: 'id required' });
+  db.prepare(`UPDATE staffing_standard SET needed = ? WHERE id = ?`).run(Math.max(0, parseInt(b.needed, 10) || 0), b.id);
+  res.json({ ok: true });
+});
+// Log actual coverage for a date/role/shift (upsert).
+app.post('/api/staffing-model/log', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const date = (b.date || appToday()).slice(0, 10);
+  const s = db.prepare(`SELECT needed FROM staffing_standard WHERE role = ? AND shift_label = ?`).get(b.role, b.shift_label);
+  if (!s) return res.status(400).json({ error: 'Unknown role/shift' });
+  const actual = Math.max(0, parseInt(b.actual, 10) || 0);
+  db.prepare(`INSERT INTO shift_staffing (date, role, shift_label, needed, actual, note, by_id, by_name) VALUES (?,?,?,?,?,?,?,?)
+    ON CONFLICT(date, role, shift_label) DO UPDATE SET actual = excluded.actual, needed = excluded.needed, note = excluded.note, by_id = excluded.by_id, by_name = excluded.by_name, updated_at = datetime('now')`)
+    .run(date, b.role, b.shift_label, s.needed, actual, (b.note || '').trim() || null, req.user.id, req.user.name);
+  if (actual < s.needed) createAlert(null, `understaffed_${date}_${b.role}_${b.shift_label}`.slice(0, 60), 'Elevated', `Understaffed: ${b.role} ${b.shift_label} — ${actual}/${s.needed} on. Backfill or adjust.`);
+  audit({ user: req.user, action: 'STAFFING_LOG', detail: `${b.role} ${b.shift_label} ${actual}/${s.needed}`, ip: req.ip });
+  res.json({ ok: true, short: actual < s.needed });
+});
+
 /* ---------------- Scheduling & workforce ---------------- */
 // The schedule for a date: each slot with assignments, plus live coverage
 // (needed vs scheduled vs called-off vs currently clocked-in).
@@ -4387,6 +4456,9 @@ app.get('/api/scorecard', requireAuth, (req, res) => {
   const avgH = cl.length ? Math.round(cl.reduce((a, b) => a + b.h, 0) / cl.length * 10) / 10 : null;
   push('Avg defect closure (30d)', avgH == null ? '—' : avgH, 'hrs', '≤ 24', avgH == null ? null : avgH <= 24, `${cl.length} resolved`);
   push('Delights delivered (30d)', db.prepare(`SELECT COUNT(*) n FROM delights WHERE created_at >= datetime('now','-30 day')`).get().n, '', '↑ more', true, '');
+  const ss = staffingScorecard();
+  push('Shifts fully staffed (7d)', ss.week == null ? '—' : ss.week, '%', '≥ 95%', ss.week == null ? null : ss.week >= 95, 'vs the staffing standard');
+  push('Shifts fully staffed (30d)', ss.month == null ? '—' : ss.month, '%', '≥ 95%', ss.month == null ? null : ss.month >= 95, '');
   res.json({ metrics: m });
 });
 

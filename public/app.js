@@ -117,7 +117,7 @@ const GROUP_OF={
   report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',meals:'care',
   casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',continuum:'clinical',
   admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
-  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',inventory:'team',maintenance:'team',
+  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',inventory:'team',maintenance:'team',staffmodel:'team',
   training:'learn',library:'learn',standard:'learn',
   command:'command',compliance:'command',accountability:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
@@ -172,6 +172,7 @@ function show(v){
   if(v==='analytics') loadAnalytics();
   if(v==='coverage') loadCoverage();
   if(v==='schedule') loadSchedule();
+  if(v==='staffmodel') loadStaffModel();
   if(v==='clients') renderClients();
   if(v==='records') loadRecords();
   if(v==='retention') loadRetention();
@@ -2146,6 +2147,35 @@ async function loadRoundsToday(){ try{ const {rounds}=await api('/rounds/today')
 async function logDuty(){ const text=$('du_text').value.trim(); if(!text){return;} await api('/duties',{method:'POST',body:JSON.stringify({part:$('du_part').value,role:$('du_role').value,text})}); $('du_text').value=''; $('du_msg').textContent='✓ Logged'; setTimeout(()=>$('du_msg').textContent='',2000); loadCoverage(); }
 
 let SCHED_STAFF=null;
+async function loadStaffModel(){
+  if($('sm_date')&&!$('sm_date').value) $('sm_date').value=today();
+  const date=$('sm_date')?$('sm_date').value:today();
+  let d; try{ d=await api('/staffing-model?date='+date); }catch(e){ $('smBoard').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const wk=d.staffedWeek, mo=d.staffedMonth;
+  $('smKpis').innerHTML = `
+    <div class="ret-card ${wk.pct!=null&&wk.pct<95?'rc-warn':''}"><div class="n">${wk.pct!=null?wk.pct+'%':'—'}</div><div class="l">Shifts staffed · week (${wk.logged})</div></div>
+    <div class="ret-card ${mo.pct!=null&&mo.pct<95?'rc-warn':''}"><div class="n">${mo.pct!=null?mo.pct+'%':'—'}</div><div class="l">Shifts staffed · month (${mo.logged})</div></div>
+    <div class="ret-card ${d.shortToday?'rc-high':''}"><div class="n">${d.shortToday}</div><div class="l">Short right now</div></div>`;
+  const isAdmin = ME&&ME.role==='admin';
+  $('smBoard').innerHTML = d.blocks.map(b=>`<div class="card"><h3>${esc(b.block)}</h3>
+    <table class="tbl"><tr><th>Role</th><th>Shift</th><th>Needed</th><th>On now</th><th>Status</th></tr>
+    ${b.rows.map(r=>`<tr ${r.short?'style="background:#fbeaea"':''}>
+      <td><strong>${esc(r.role)}</strong></td><td class="hint">${esc(r.shift)}</td>
+      <td>${isAdmin?`<input type="number" min="0" value="${r.needed}" style="width:54px" onchange="setStdNeeded(${r.id},this.value)"/>`:r.needed}</td>
+      <td><input type="number" min="0" id="sm_a_${r.id}" value="${r.actual!=null?r.actual:''}" placeholder="${r.actual!=null?r.actual:'#'}" style="width:54px"/> <button class="btn btn-sm btn-gold sans" onclick="logStaff('${esc(r.role).replace(/'/g,"\\'")}','${esc(r.shift).replace(/'/g,"\\'")}',${r.id})">Save</button></td>
+      <td>${!r.logged?'<span class="hint">not logged</span>':r.short?'<span class="risk risk-high">short '+(r.needed-r.actual)+'</span>':'<span class="risk risk-low">✓ staffed</span>'}</td>
+    </tr>`).join('')}</table></div>`).join('');
+  // trend
+  const max=Math.max(1,...d.trend.map(t=>Math.max(t.understaffed,t.ama)));
+  $('smTrend').innerHTML = `<table class="tbl"><tr><th>Day</th><th>Understaffed shifts</th><th>AMA</th><th>Census</th></tr>${d.trend.map(t=>`<tr>
+    <td class="hint">${esc(t.date.slice(5))}</td>
+    <td>${t.understaffed?'<span class="risk risk-warn">'+t.understaffed+'</span>':(t.logged?'0':'<span class="hint">—</span>')}</td>
+    <td>${t.ama?'<span class="risk risk-high">'+t.ama+'</span>':'0'}</td>
+    <td class="hint">${t.census??'—'}</td></tr>`).join('')}</table>
+    <p class="hint" style="margin-top:6px">Understaffed = logged shifts below the standard that day. Log coverage daily to make this meaningful.</p>`;
+}
+async function setStdNeeded(id, needed){ try{ await api('/staffing-model/standard',{method:'POST',body:JSON.stringify({id,needed})}); loadStaffModel(); }catch(e){ alert(e.message); } }
+async function logStaff(role, shift, id){ const inp=$('sm_a_'+id); if(!inp||inp.value==='')return; const date=$('sm_date')?$('sm_date').value:today(); try{ await api('/staffing-model/log',{method:'POST',body:JSON.stringify({date,role,shift_label:shift,actual:inp.value})}); loadStaffModel(); }catch(e){ alert(e.message); } }
 async function loadSchedule(){
   if(!$('sc_date').value) $('sc_date').value=today();
   await ensureReferralMeta().catch(()=>{});

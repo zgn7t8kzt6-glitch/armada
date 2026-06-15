@@ -293,11 +293,34 @@ export function ensureInventoryItems() {
   return n;
 }
 
+// The facility staffing standard — how many of each role per shift. Seeded once;
+// admins tune the needed counts in-app. Drives the per-shift coverage check.
+const STAFFING_STANDARD = [
+  ['Nursing — Day', 'Nursing Supervisor', '7a–7p', 1],
+  ['Nursing — Day', 'Intake RN', '7a–7p', 1],
+  ['Nursing — Day', 'LPN', '7a–7p', 2],
+  ['Nursing — Night', 'RN', '7p–7a', 1],
+  ['Nursing — Night', 'LPN', '7p–7a', 1],
+  ['RT / BHT', 'RT', '7a–3p', 2],
+  ['RT / BHT', 'RT', '3p–11p', 2],
+  ['RT / BHT', 'RT', '11p–7a', 2],
+  ['Case Mgmt / Therapist', 'Case Mgmt / Therapist', '8a–4p', 3],
+  ['Case Mgmt / Therapist', 'Case Mgmt / Therapist', '2p–10p', 2],
+  ['Support', 'Housekeeper', 'Day', 1],
+  ['Support', 'Receptionist', 'Day', 1],
+];
+export function ensureStaffingStandard() {
+  if (db.prepare(`SELECT id FROM staffing_standard LIMIT 1`).get()) return;
+  const ins = db.prepare(`INSERT INTO staffing_standard (block, role, shift_label, needed, sort) VALUES (?,?,?,?,?)`);
+  STAFFING_STANDARD.forEach((r, i) => ins.run(r[0], r[1], r[2], r[3], i));
+}
+
 // Allow `npm run seed` to set up admin + sample data locally.
 if (import.meta.url === `file://${process.argv[1]}`) {
   ensureAdmin();
   ensureSampleData();
   ensureExampleClient12A();
   ensureInventoryCatalog();
+  ensureStaffingStandard();
   console.log('Seed complete.');
 }

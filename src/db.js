@@ -471,6 +471,33 @@ CREATE TABLE IF NOT EXISTS client_sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_client_sessions ON client_sessions(client_id, created_at);
+
+-- STAFFING MODEL — the facility's staffing standard (how many of each role per
+-- shift) and a daily log of actual coverage, so every shift can be checked for
+-- full staffing and AMA can be trended against staffing patterns.
+CREATE TABLE IF NOT EXISTS staffing_standard (
+  id INTEGER PRIMARY KEY,
+  block TEXT NOT NULL,                       -- Nursing — Day | Nursing — Night | RT | Case Mgmt / Therapist | Support
+  role TEXT NOT NULL,
+  shift_label TEXT NOT NULL,                 -- e.g. 7a–7p, 7a–3p, 8a–4p
+  needed INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(role, shift_label)
+);
+CREATE TABLE IF NOT EXISTS shift_staffing (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,                        -- YYYY-MM-DD
+  role TEXT NOT NULL,
+  shift_label TEXT NOT NULL,
+  needed INTEGER NOT NULL DEFAULT 0,
+  actual INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(date, role, shift_label)
+);
+CREATE INDEX IF NOT EXISTS idx_shift_staffing ON shift_staffing(date);
 CREATE TABLE IF NOT EXISTS saves (
   id INTEGER PRIMARY KEY,
   client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,

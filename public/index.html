@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616H" />
+<link rel="stylesheet" href="/styles.css?v=20260616I" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -76,6 +76,7 @@
     <button data-view="maintenance">Maintenance</button>
     <button data-view="coverage" data-subview>Coverage</button>
     <button data-view="schedule" data-admin>Staffing</button>
+    <button data-view="staffmodel" data-admin data-subview>Staffing Model</button>
     <button data-view="training">Training</button>
     <button data-view="library">Library / SOPs</button>
     <button data-view="standard" data-subview>Standard</button>
@@ -1321,7 +1322,7 @@
 
     <!-- SCHEDULE BUILDER -->
     <section id="schedule" class="view">
-      <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-bottom:10px"><button class="btn btn-ghost btn-sm sans" onclick="show('coverage')">Coverage ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('assign')">Assign Staff ↗</button></div>
+      <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-bottom:10px"><button class="btn btn-ghost btn-sm sans" onclick="show('staffmodel')">Staffing Model ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('coverage')">Coverage ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('assign')">Assign Staff ↗</button></div>
       <div class="card no-print">
         <h3>Build the Schedule</h3>
         <p class="sub sans">Set how many of each role you need per shift, then assign staff. Gaps and call-offs surface on Coverage so you're never caught short.</p>
@@ -1342,6 +1343,23 @@
         <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="addSlot()">Add to schedule</button><span class="hint" id="sc_msg"></span></div>
       </div>
       <div id="scBoard"></div>
+    </section>
+
+    <!-- STAFFING MODEL: standard + per-shift coverage + AMA trend -->
+    <section id="staffmodel" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Staffing Model</h3><p class="sub sans">The staffing standard for every shift. Log who's actually on, see fully-staffed % for the week &amp; month, and watch it against AMA.</p></div>
+          <div class="controls" style="margin:0"><input id="sm_date" type="date" onchange="loadStaffModel()"/><button class="btn btn-ghost sans" onclick="loadStaffModel()">Refresh</button></div>
+        </div>
+        <div id="smKpis" class="ret-cards"></div>
+      </div>
+      <div id="smBoard"></div>
+      <div class="card">
+        <h3>📉 AMA vs staffing (14 days)</h3>
+        <p class="sub sans">Understaffed shifts and AMAs side by side — do thin shifts and people leaving move together?</p>
+        <div id="smTrend"></div>
+      </div>
     </section>
 
     <!-- RISK ANALYTICS -->
@@ -1495,6 +1513,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616H"></script>
+<script src="/app.js?v=20260616I"></script>
 </body>
 </html>

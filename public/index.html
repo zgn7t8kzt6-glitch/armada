@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615D" />
+<link rel="stylesheet" href="/styles.css?v=20260615E" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -71,6 +71,7 @@
     <button data-view="alumni">Alumni</button>
     <button data-view="accountability" data-admin data-subview>Accountability</button>
     <button data-view="team">Team</button>
+    <button data-view="inventory">Supplies</button>
     <button data-view="coverage" data-subview>Coverage</button>
     <button data-view="schedule" data-admin>Staffing</button>
     <button data-view="training">Training</button>
@@ -308,6 +309,50 @@
           <div class="itabs" style="margin:0;border:none"><button class="itab active" id="engTabWeek" onclick="setEngRange('week')">This week</button><button class="itab" id="engTabMonth" onclick="setEngRange('month')">This month</button></div>
         </div>
         <div id="engStaff"></div>
+      </div>
+    </section>
+
+    <!-- SUPPLY STANDARDS (shift inventory) -->
+    <section id="inventory" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Supply Standards</h3><p class="sub sans">Never let a guest reach for something and find it empty. Count your department each shift — anything low auto-orders from corporate. <span id="invShift" class="badge"></span></p></div>
+          <button class="btn btn-ghost sans" onclick="loadInventory()">Refresh</button>
+        </div>
+        <div id="invKpis" class="ret-cards"></div>
+      </div>
+      <div class="card" id="invReorderCard" style="display:none;border-left:4px solid var(--gold)">
+        <div class="cmd-hero-row"><div><h3>🛒 Reorder queue</h3><p class="sub sans">Flagged short and sent to corporate. Mark ordered when placed, received when it arrives.</p></div></div>
+        <div id="invReorders"></div>
+      </div>
+      <div class="itabs" id="invTabs" style="margin-top:8px"></div>
+      <div id="invBoard"></div>
+      <div class="card" data-admin>
+        <details><summary class="sans" style="cursor:pointer;font-weight:600">⚙ Manage catalog &amp; reorder email (admin)</summary>
+          <div style="margin-top:12px">
+            <label>Send reorder emails to (corporate / purchasing)</label>
+            <div class="toolbar" style="justify-content:flex-start"><input id="inv_corp_email" type="email" placeholder="orders@armadarecovery.com" style="min-width:260px"/><button class="btn btn-gold sans" onclick="saveInvSettings()">Save</button><span id="inv_corp_msg" class="hint" style="align-self:center"></span></div>
+            <p class="sub sans" style="margin-top:6px">Email must be configured in Settings → Email for auto-orders to send. Critical items (Narcan, AED) also raise an on-call alert when out.</p>
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0"/>
+            <h4 class="sans">Add / edit an item</h4>
+            <div class="grid2">
+              <div class="field"><label>Name</label><input id="inv_i_name"/></div>
+              <div class="field"><label>Department</label><select id="inv_i_dept"><option>Kitchen</option><option>Housekeeping</option><option>Front Desk</option><option>Medical</option><option>Safety</option></select></div>
+              <div class="field"><label>Category</label><input id="inv_i_cat" placeholder="e.g. Snacks"/></div>
+              <div class="field"><label>Unit</label><input id="inv_i_unit" placeholder="box, case, each…" value="each"/></div>
+              <div class="field"><label>Par (target on hand)</label><input id="inv_i_par" type="number" min="0" value="4"/></div>
+              <div class="field"><label>Reorder at (≤)</label><input id="inv_i_re" type="number" min="0" value="2"/></div>
+            </div>
+            <div class="toolbar" style="justify-content:flex-start;flex-wrap:wrap">
+              <label class="sans" style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="inv_i_crit"/> Critical (never out)</label>
+              <label class="sans" style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="inv_i_exp"/> Track expiry</label>
+              <button class="btn btn-gold sans" onclick="saveInvItem()">Save item</button>
+              <button class="btn btn-ghost sans" onclick="resetInvItem()">Clear</button>
+              <span id="inv_i_msg" class="hint" style="align-self:center"></span>
+            </div>
+            <div id="invCatalog" style="margin-top:12px"></div>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -598,7 +643,18 @@
           <div><label>Auto-draft welcome plans</label><select id="au_welcome_auto"><option value="on">On</option><option value="off">Off</option></select></div>
           <div><label>On-call alert detail <span class="hint" style="font-weight:400">(in SMS/email)</span></label><select id="au_alert_detail"><option value="locator">Name + room (recommended)</option><option value="minimal">No identifier (most private)</option><option value="full">Full message</option></select></div>
         </div>
+        <div class="grid2">
+          <div><label>Daily meal count to kitchen</label><select id="au_meal_on"><option value="on">On</option><option value="off">Off</option></select></div>
+          <div><label>Meal count email hour (0–23)</label><input id="au_meal_hour" type="number" min="0" max="23"/></div>
+        </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:12px"><button class="btn btn-gold sans" onclick="saveAutomation()">Save automation</button><span id="au_msg" class="hint" style="align-self:center"></span></div>
+      </div>
+      <div class="card">
+        <h3>🍽️ Daily meal count — caterer &amp; kitchen (Asher)</h3>
+        <p class="sub sans">Each morning we email how many meals to prepare for tomorrow: current residents + a welcome meal for every scheduled new arrival.</p>
+        <div id="mealPreview" class="ret-cards"></div>
+        <label>Send to (caterer, Asher — comma-separated emails)</label>
+        <div class="toolbar" style="justify-content:flex-start"><input id="meal_to" type="text" placeholder="caterer@…, asher@armadarecovery.com" style="min-width:300px"/><button class="btn btn-gold sans" onclick="saveMealRecipients()">Save recipients</button><button class="btn btn-ghost sans" onclick="sendMealNow()">Send now</button><span id="meal_msg" class="hint" style="align-self:center"></span></div>
       </div>
       <div class="card">
         <h3>Approved referral partners</h3>
@@ -1310,6 +1366,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615D"></script>
+<script src="/app.js?v=20260615E"></script>
 </body>
 </html>

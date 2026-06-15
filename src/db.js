@@ -579,6 +579,62 @@ CREATE TABLE IF NOT EXISTS expected_arrivals (
 );
 CREATE INDEX IF NOT EXISTS idx_arrivals_date ON expected_arrivals(scheduled_date);
 
+-- SUPPLY STANDARDS (Horst "anticipate every need — never run out") -------------
+-- The catalog of everything we keep on hand, owned by a department. Each item has
+-- a par level (target on-hand) and a reorder point (count at/below = "low" → fires
+-- a reorder request + email to corporate). Critical items (Narcan, AED, first aid)
+-- are flagged so an Out is escalated. Expiry-tracked items prompt a date.
+CREATE TABLE IF NOT EXISTS inventory_items (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  department TEXT NOT NULL,                -- Kitchen | Housekeeping | Front Desk | Medical | Safety
+  category TEXT,                           -- grouping within a department
+  unit TEXT NOT NULL DEFAULT 'each',       -- box, case, pack, roll, each…
+  par_level INTEGER NOT NULL DEFAULT 0,    -- target quantity on hand
+  reorder_point INTEGER NOT NULL DEFAULT 0,-- at/below this = low → reorder
+  critical INTEGER NOT NULL DEFAULT 0,     -- never-out item (escalates on Out)
+  track_expiry INTEGER NOT NULL DEFAULT 0, -- prompt for an expiry date on count
+  shift_check INTEGER NOT NULL DEFAULT 1,  -- part of the every-shift checklist
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_inv_items_dept ON inventory_items(department, active);
+
+-- One shift count of one item: qty on hand + computed status. The checklist log.
+CREATE TABLE IF NOT EXISTS inventory_counts (
+  id INTEGER PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  qty INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,                     -- ok | low | out
+  shift TEXT,                              -- Morning | Day | Evening | Night
+  expiry TEXT,                             -- earliest expiry seen (track_expiry items)
+  note TEXT,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_inv_counts_item ON inventory_counts(item_id, created_at);
+
+-- A reorder request — raised when an item hits low/out, emailed to corporate.
+CREATE TABLE IF NOT EXISTS reorder_requests (
+  id INTEGER PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  qty_on_hand INTEGER NOT NULL DEFAULT 0,
+  level TEXT NOT NULL,                      -- low | out
+  status TEXT NOT NULL DEFAULT 'open',      -- open | ordered | received
+  requested_by_id INTEGER REFERENCES users(id),
+  requested_by TEXT,
+  note TEXT,
+  emailed_at TEXT,
+  ordered_at TEXT, ordered_by TEXT,
+  received_at TEXT, received_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_reorder_status ON reorder_requests(status, item_id);
+
 -- Scheduling: a staffing need (one row per part×role on a date, with how many needed).
 CREATE TABLE IF NOT EXISTS schedule_slots (
   id INTEGER PRIMARY KEY,

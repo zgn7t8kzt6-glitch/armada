@@ -320,6 +320,7 @@ details.card[open]>summary{margin-bottom:12px}
 .assign-row input{width:auto}
 .badge{font-size:11px;padding:2px 8px;border-radius:20px;background:#eef2f7;color:var(--navy)}
 .badge.admin{background:#efe7d8;color:#7a5a2c}
+.badge-danger{font-size:11px;padding:2px 8px;border-radius:20px;background:#fbecea;color:var(--danger)}
 
 /* ===== Leadership Command Center ===== */
 .cmd-hero{background:linear-gradient(125deg,#20484e,#2d6168);border:none;color:#fff}

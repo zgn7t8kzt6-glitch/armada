@@ -114,7 +114,7 @@ const GROUP_OF={
   report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',
   casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',continuum:'clinical',
   admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
-  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',
+  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',inventory:'team',
   training:'learn',library:'learn',standard:'learn',
   command:'command',compliance:'command',accountability:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
@@ -176,6 +176,7 @@ function show(v){
   if(v==='dignity') loadDignity();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
+  if(v==='inventory') loadInventory();
   if(v==='arrivals') loadArrivals();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
@@ -711,15 +712,30 @@ async function loadAutomation(){
     const set=(id,v)=>{ const el=$(id); if(el) el.value = v; };
     set('au_detox_min',a.detox_min); set('au_default_min',a.default_min); set('au_carecard_min',a.carecard_min);
     set('au_brief_hour',a.brief_hour); set('au_brief_on',a.brief_on); set('au_recovery_max',a.recovery_max); set('au_welcome_auto',a.welcome_auto); set('au_alert_detail',a.alert_detail);
+    set('au_meal_on',a.meal_on); set('au_meal_hour',a.meal_hour);
   }catch(e){}
+  loadMealCount();
 }
 async function saveAutomation(){
   $('au_msg').textContent='Saving…';
   const body={ detox_min:$('au_detox_min').value, default_min:$('au_default_min').value, carecard_min:$('au_carecard_min').value,
-    brief_hour:$('au_brief_hour').value, brief_on:$('au_brief_on').value, recovery_max:$('au_recovery_max').value, welcome_auto:$('au_welcome_auto').value, alert_detail:$('au_alert_detail').value };
+    brief_hour:$('au_brief_hour').value, brief_on:$('au_brief_on').value, recovery_max:$('au_recovery_max').value, welcome_auto:$('au_welcome_auto').value, alert_detail:$('au_alert_detail').value,
+    meal_on:$('au_meal_on').value, meal_hour:$('au_meal_hour').value };
   try{ await api('/settings/automation',{method:'POST',body:JSON.stringify(body)}); $('au_msg').textContent='✓ Saved'; }
   catch(e){ $('au_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
+async function loadMealCount(){
+  if(!$('mealPreview')) return;
+  try{ const m=await api('/command/meals');
+    $('mealPreview').innerHTML = `
+      <div class="ret-card"><div class="n">${m.total}</div><div class="l">Meals tomorrow</div></div>
+      <div class="ret-card"><div class="n">${m.census}</div><div class="l">Current residents</div></div>
+      <div class="ret-card"><div class="n">${m.welcome}</div><div class="l">Welcome meals</div></div>`;
+    if($('meal_to')) $('meal_to').value = m.to||'';
+  }catch(e){}
+}
+async function saveMealRecipients(){ const to=$('meal_to').value.trim(); try{ await api('/command/meals/recipients',{method:'POST',body:JSON.stringify({to})}); $('meal_msg').textContent='✓ Saved'; }catch(e){ $('meal_msg').textContent=e.message; } }
+async function sendMealNow(){ $('meal_msg').textContent='Sending…'; try{ const r=await api('/command/meals/send',{method:'POST'}); $('meal_msg').textContent = r.sent?('✓ Sent to '+r.to):('Not sent — '+(r.reason||'')); }catch(e){ $('meal_msg').textContent=e.message; } }
 async function loadSettings(){
   loadEmailConfig(); loadSmsConfig(); loadSfConfig(); loadAutomation(); loadApprovedPartners();
   if($('kipuWebUrl')) $('kipuWebUrl').value = (META && META.kipuWeb) || '';
@@ -2427,6 +2443,93 @@ function renderEngStaff(){
   const rows = ENG_RANGE==='month'?ENG_STAFF.month:ENG_STAFF.week;
   const medal=i=>['🥇','🥈','🥉'][i]||(i+1)+'.';
   $('engStaff').innerHTML = rows.length ? `<table class="tbl"><tr><th>Staff</th><th>Activities</th><th>Clients engaged</th></tr>${rows.map((r,i)=>`<tr><td>${medal(i)} <strong>${esc(r.by_name)}</strong></td><td>${r.n}</td><td>${r.clients}</td></tr>`).join('')}</table>` : '<div class="hint">No activities logged yet this '+ENG_RANGE+'. Log one from the disengaged list above.</div>';
+}
+
+/* ---- Supply Standards: shift inventory + reorder ---- */
+let INV_DATA=null, INV_DEPT=null;
+async function loadInventory(){
+  let d; try{ d=await api('/inventory'); }catch(e){ $('invBoard').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  INV_DATA=d;
+  if($('invShift')) $('invShift').textContent = d.shift+' shift';
+  const s=d.stats;
+  $('invKpis').innerHTML = `
+    <div class="ret-card ${s.out?'rc-high':''}"><div class="n">${s.out}</div><div class="l">Out of stock</div></div>
+    <div class="ret-card ${s.low?'rc-warn':''}"><div class="n">${s.low}</div><div class="l">Running low</div></div>
+    <div class="ret-card ${s.criticalOut?'rc-high':''}"><div class="n">${s.criticalOut}</div><div class="l">Critical out</div></div>
+    <div class="ret-card"><div class="n">${s.openReorders}</div><div class="l">On order</div></div>
+    <div class="ret-card"><div class="n">${s.items}</div><div class="l">Items tracked</div></div>`;
+  // department tabs
+  const depts=d.departments.map(x=>x.name);
+  if(!INV_DEPT||!depts.includes(INV_DEPT)) INV_DEPT=depts[0]||null;
+  $('invTabs').innerHTML = depts.map(n=>{
+    const dd=d.departments.find(x=>x.name===n);
+    const short = dd.items.filter(i=>i.status==='low'||i.status==='out').length;
+    return `<button class="itab ${n===INV_DEPT?'active':''}" onclick="setInvDept('${n.replace(/'/g,"\\'")}')">${esc(n)}${short?` <span class="badge badge-danger">${short}</span>`:''}</button>`;
+  }).join('');
+  renderInvBoard();
+  loadReorders();
+  if($('inv_corp_email')) $('inv_corp_email').placeholder = d.corporateEmail || 'orders@armadarecovery.com';
+  if(ME&&ME.role==='admin') loadInvCatalog();
+}
+function setInvDept(n){ INV_DEPT=n; loadInventory(); }
+function renderInvBoard(){
+  if(!INV_DATA) return;
+  const dd=(INV_DATA.departments||[]).find(x=>x.name===INV_DEPT);
+  if(!dd){ $('invBoard').innerHTML=''; return; }
+  // group by category
+  const cats={}; dd.items.forEach(i=>{ (cats[i.category||'Other']=cats[i.category||'Other']||[]).push(i); });
+  const dot=i=>{ const c=i.status==='out'?'var(--danger)':i.status==='low'?'#c98a14':i.status==='ok'?'var(--good)':'var(--line)'; const lbl=i.status==='unknown'?'not counted':i.status; return `<span class="risk" style="background:${c}1a;color:${c};border:1px solid ${c}55">${lbl}</span>`; };
+  const row=i=>`<tr ${i.status==='out'?'style="background:#fbeaea"':i.status==='low'?'style="background:#fdf6e8"':''}>
+    <td><strong>${esc(i.name)}</strong>${i.critical?' <span class="badge badge-danger" title="Never out">critical</span>':''}<div class="hint">par ${i.par} ${esc(i.unit)} · reorder ≤${i.reorder}${i.checkedThisShift?' · ✓ counted this shift':i.lastAt?' · last '+i.lastAt:''}</div></td>
+    <td>${dot(i)}${i.reorderOpen?' <span class="hint">🛒 on order</span>':''}</td>
+    <td style="white-space:nowrap"><input type="number" min="0" id="invq_${i.id}" value="${i.qty!=null?i.qty:''}" placeholder="${i.qty!=null?i.qty:'qty'}" style="width:64px" ${i.trackExpiry?'':''}/>${i.trackExpiry?` <input type="date" id="inve_${i.id}" value="${i.expiry||''}" title="earliest expiry" style="width:140px"/>`:''} <button class="btn btn-sm btn-gold sans" onclick="logCount(${i.id})">Save</button></td>
+  </tr>`;
+  $('invBoard').innerHTML = Object.keys(cats).map(cat=>`<div class="card"><h3>${esc(cat)}</h3>
+    <table class="tbl"><tr><th>Item</th><th>Status</th><th style="width:240px">Count on hand</th></tr>${cats[cat].map(row).join('')}</table>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="logCategory('${cat.replace(/'/g,"\\'")}')">Save all in ${esc(cat)}</button></div></div>`).join('');
+}
+async function logCount(id){
+  const q=$('invq_'+id); if(!q||q.value===''){ return; }
+  const body={item_id:id, qty:parseInt(q.value,10)||0};
+  const ed=$('inve_'+id); if(ed&&ed.value) body.expiry=ed.value;
+  try{ const r=await api('/inventory/count',{method:'POST',body:JSON.stringify(body)}); loadInventory(); }catch(e){ alert(e.message); }
+}
+async function logCategory(cat){
+  const dd=(INV_DATA.departments||[]).find(x=>x.name===INV_DEPT); if(!dd) return;
+  const counts=dd.items.filter(i=>(i.category||'Other')===cat).map(i=>{ const q=$('invq_'+i.id); if(!q||q.value==='') return null; const o={item_id:i.id,qty:parseInt(q.value,10)||0}; const ed=$('inve_'+i.id); if(ed&&ed.value)o.expiry=ed.value; return o; }).filter(Boolean);
+  if(!counts.length){ return; }
+  try{ const r=await api('/inventory/count',{method:'POST',body:JSON.stringify({counts})}); loadInventory(); }catch(e){ alert(e.message); }
+}
+async function loadReorders(){
+  let d; try{ d=await api('/inventory/reorders'); }catch(e){ return; }
+  const open=d.reorders.filter(r=>r.status==='open');
+  $('invReorderCard').style.display = d.reorders.length?'block':'none';
+  $('invReorders').innerHTML = d.reorders.length ? `<table class="tbl"><tr><th>Item</th><th>Dept</th><th>On hand</th><th>Suggest</th><th>Status</th><th></th></tr>${d.reorders.map(r=>`<tr>
+    <td><strong>${esc(r.item)}</strong>${r.critical?' <span class="badge badge-danger">critical</span>':''} ${r.level==='out'?'<span class="risk risk-high">OUT</span>':'<span class="risk risk-warn">low</span>'}</td>
+    <td class="hint">${esc(r.department)}</td><td>${r.onHand} ${esc(r.unit)}</td><td>${r.suggest} ${esc(r.unit)}</td>
+    <td>${r.status==='open'?(r.emailed?'sent to corporate':'queued'):r.status}</td>
+    <td style="white-space:nowrap">${r.status==='open'?`<button class="btn btn-sm btn-ghost sans" onclick="markReorder(${r.id},'ordered')">Ordered</button> `:''}${r.status!=='received'?`<button class="btn btn-sm btn-gold sans" onclick="markReorder(${r.id},'received')">Received</button>`:'✓ received'}</td>
+  </tr>`).join('')}</table>` : '<div class="hint">Nothing on order.</div>';
+}
+async function markReorder(id,status){ try{ await api('/inventory/reorders/'+id,{method:'POST',body:JSON.stringify({status})}); loadInventory(); }catch(e){ alert(e.message); } }
+async function saveInvSettings(){ const v=$('inv_corp_email').value.trim(); try{ await api('/inventory/settings',{method:'POST',body:JSON.stringify({corporate_email:v})}); $('inv_corp_msg').textContent='✓ Saved'; }catch(e){ $('inv_corp_msg').textContent=e.message; } }
+let INV_EDIT_ID=null;
+async function loadInvCatalog(){
+  if(!$('invCatalog')) return;
+  let d; try{ d=await api('/inventory/catalog'); }catch(e){ return; }
+  $('invCatalog').innerHTML = `<table class="tbl"><tr><th>Item</th><th>Dept</th><th>Par</th><th>Reorder</th><th>Flags</th><th></th></tr>${d.items.map(i=>`<tr ${i.active?'':'style="opacity:.5"'}>
+    <td><strong>${esc(i.name)}</strong> <span class="hint">${esc(i.unit)}${i.category?' · '+esc(i.category):''}</span></td>
+    <td class="hint">${esc(i.department)}</td><td>${i.par_level}</td><td>${i.reorder_point}</td>
+    <td>${i.critical?'⚠ critical ':''}${i.track_expiry?'📅 expiry':''}${i.active?'':' · inactive'}</td>
+    <td><button class="btn btn-sm btn-ghost sans" onclick='editInvItem(${JSON.stringify(i)})'>Edit</button></td>
+  </tr>`).join('')}</table>`;
+}
+function editInvItem(i){ INV_EDIT_ID=i.id; $('inv_i_name').value=i.name; $('inv_i_dept').value=i.department; $('inv_i_cat').value=i.category||''; $('inv_i_unit').value=i.unit; $('inv_i_par').value=i.par_level; $('inv_i_re').value=i.reorder_point; $('inv_i_crit').checked=!!i.critical; $('inv_i_exp').checked=!!i.track_expiry; $('inv_i_msg').textContent='Editing '+i.name; window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'}); }
+function resetInvItem(){ INV_EDIT_ID=null; ['inv_i_name','inv_i_cat'].forEach(x=>$(x).value=''); $('inv_i_unit').value='each'; $('inv_i_par').value='4'; $('inv_i_re').value='2'; $('inv_i_crit').checked=false; $('inv_i_exp').checked=false; $('inv_i_msg').textContent=''; }
+async function saveInvItem(){
+  const body={ id:INV_EDIT_ID, name:$('inv_i_name').value.trim(), department:$('inv_i_dept').value, category:$('inv_i_cat').value.trim(), unit:$('inv_i_unit').value.trim()||'each', par_level:$('inv_i_par').value, reorder_point:$('inv_i_re').value, critical:$('inv_i_crit').checked, track_expiry:$('inv_i_exp').checked };
+  if(!body.name){ $('inv_i_msg').textContent='Name required'; return; }
+  try{ await api('/inventory/items',{method:'POST',body:JSON.stringify(body)}); $('inv_i_msg').textContent='✓ Saved'; resetInvItem(); loadInvCatalog(); }catch(e){ $('inv_i_msg').textContent=e.message; }
 }
 
 /* ---- My Shift: role-tailored employee dashboard ---- */

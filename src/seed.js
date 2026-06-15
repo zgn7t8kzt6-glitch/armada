@@ -89,10 +89,137 @@ export function ensureExampleClient12A() {
   ].forEach((t, i) => ins.run(cid, t[0], t[1], t[2], t[3], i));
 }
 
+// Supply Standards default catalog — the Horst "anticipate every need" list for a
+// detox/residential facility, owned by department. par = target on hand, reorder =
+// count at/below which we raise a reorder. critical = never-out (escalates on Out).
+// Idempotent: only seeds when the catalog is empty, and never deletes admin edits.
+const INVENTORY_CATALOG = [
+  // ── KITCHEN (techs cover this for now) ──────────────────────────────
+  ['Kitchen','Snacks','Snacks — chips/crackers','box',6,2,0,0],
+  ['Kitchen','Snacks','Snacks — granola/protein bars','box',6,2,0,0],
+  ['Kitchen','Snacks','Cookies / sweet snacks','box',4,2,0,0],
+  ['Kitchen','Snacks','Fresh fruit','case',3,1,0,0],
+  ['Kitchen','Beverages','Bottled water','case',10,3,1,0],
+  ['Kitchen','Beverages','Gatorade / electrolyte drinks','case',6,2,1,0],
+  ['Kitchen','Beverages','Juice (apple/orange/cranberry)','case',4,2,0,0],
+  ['Kitchen','Beverages','Soda (regular + caffeine-free)','case',4,1,0,0],
+  ['Kitchen','Beverages','Coffee — regular','bag',6,2,0,0],
+  ['Kitchen','Beverages','Coffee — decaf','bag',4,2,0,0],
+  ['Kitchen','Beverages','Tea (regular + herbal/decaf)','box',4,1,0,0],
+  ['Kitchen','Beverages','Creamer','case',4,1,0,0],
+  ['Kitchen','Beverages','Sugar / sweetener packets','box',4,1,0,0],
+  ['Kitchen','Beverages','Hot chocolate / electrolyte packets','box',3,1,0,0],
+  ['Kitchen','Cutlery & Paper','Plastic forks','pack',8,3,0,0],
+  ['Kitchen','Cutlery & Paper','Plastic spoons','pack',8,3,0,0],
+  ['Kitchen','Cutlery & Paper','Plastic knives','pack',6,2,0,0],
+  ['Kitchen','Cutlery & Paper','Paper / foam plates','pack',8,3,0,0],
+  ['Kitchen','Cutlery & Paper','Bowls','pack',6,2,0,0],
+  ['Kitchen','Cutlery & Paper','Cups (hot + cold)','pack',10,3,0,0],
+  ['Kitchen','Cutlery & Paper','Napkins','pack',8,3,0,0],
+  ['Kitchen','Cutlery & Paper','Paper towels','case',6,2,0,0],
+  ['Kitchen','Cutlery & Paper','Food storage / foil / wrap','box',4,1,0,0],
+  ['Kitchen','Condiments','Condiments (ketchup/mustard/mayo/salt/pepper)','set',4,1,0,0],
+  ['Kitchen','Cleaning','Dish soap','bottle',4,1,0,0],
+  ['Kitchen','Cleaning','Sanitizer wipes — kitchen','tub',6,2,0,0],
+
+  // ── HOUSEKEEPING ────────────────────────────────────────────────────
+  ['Housekeeping','Toiletries','Toothbrushes','box',10,3,1,0],
+  ['Housekeeping','Toiletries','Toothpaste','box',8,3,1,0],
+  ['Housekeeping','Toiletries','Bar / body soap','box',10,3,1,0],
+  ['Housekeeping','Toiletries','Shampoo + conditioner','box',8,3,1,0],
+  ['Housekeeping','Toiletries','Deodorant','box',8,2,1,0],
+  ['Housekeeping','Toiletries','Disposable razors','box',6,2,0,0],
+  ['Housekeeping','Toiletries','Shaving cream','box',4,1,0,0],
+  ['Housekeeping','Toiletries','Combs / brushes','box',6,2,0,0],
+  ['Housekeeping','Toiletries','Lotion','box',4,1,0,0],
+  ['Housekeeping','Toiletries','Feminine hygiene products','box',6,2,1,0],
+  ['Housekeeping','Toiletries','Lip balm','box',4,1,0,0],
+  ['Housekeeping','Linens','Bed sheets (sets)','set',12,4,0,0],
+  ['Housekeeping','Linens','Pillowcases','each',16,5,0,0],
+  ['Housekeeping','Linens','Pillows','each',8,3,0,0],
+  ['Housekeeping','Linens','Blankets','each',10,3,0,0],
+  ['Housekeeping','Linens','Bath towels','each',16,5,0,0],
+  ['Housekeeping','Linens','Washcloths','each',20,6,0,0],
+  ['Housekeeping','Clothing','Socks (new admit)','pack',8,2,0,0],
+  ['Housekeeping','Clothing','Underwear (new admit, assorted)','pack',8,2,0,0],
+  ['Housekeeping','Clothing','Slipper-socks / non-slip socks','pack',8,2,1,0],
+  ['Housekeeping','Clothing','Robes / gowns','each',6,2,0,0],
+  ['Housekeeping','Paper','Toilet paper','case',8,3,1,0],
+  ['Housekeeping','Paper','Facial tissues','case',6,2,0,0],
+  ['Housekeeping','Cleaning','Disinfectant / multi-surface cleaner','bottle',8,2,1,0],
+  ['Housekeeping','Cleaning','Bleach','bottle',6,2,0,0],
+  ['Housekeeping','Cleaning','Glass cleaner','bottle',3,1,0,0],
+  ['Housekeeping','Cleaning','Toilet bowl cleaner','bottle',4,1,0,0],
+  ['Housekeeping','Cleaning','Disinfecting wipes','tub',10,3,1,0],
+  ['Housekeeping','Cleaning','Mop heads','each',6,2,0,0],
+  ['Housekeeping','Cleaning','Sponges / scrubbers','pack',4,1,0,0],
+  ['Housekeeping','Cleaning','Hand soap refills','bottle',8,2,1,0],
+  ['Housekeeping','Cleaning','Hand sanitizer refills','bottle',8,2,1,0],
+  ['Housekeeping','Laundry','Laundry detergent','jug',6,2,1,0],
+  ['Housekeeping','Laundry','Dryer sheets','box',4,1,0,0],
+  ['Housekeeping','Laundry','Laundry bags','each',8,2,0,0],
+  ['Housekeeping','Trash','Trash bags — regular','box',8,3,1,0],
+  ['Housekeeping','Trash','Trash bags — large/contractor','box',4,1,0,0],
+
+  // ── FRONT DESK / ADMIN ──────────────────────────────────────────────
+  ['Front Desk','Welcome','New-admit welcome / dignity kits','each',10,3,1,0],
+  ['Front Desk','Welcome','Patient ID wristbands','box',4,1,0,0],
+  ['Front Desk','Office','Pens','box',6,2,0,0],
+  ['Front Desk','Office','Copy paper','ream',8,2,0,0],
+  ['Front Desk','Office','Printer toner / ink','each',3,1,1,0],
+  ['Front Desk','Office','Labels','pack',3,1,0,0],
+  ['Front Desk','Office','Lanyards / badge holders','each',10,3,0,0],
+  ['Front Desk','Forms','Intake packets','pack',6,2,1,0],
+  ['Front Desk','Forms','Consent / ROI forms','pack',6,2,0,0],
+  ['Front Desk','Office','Visitor sign-in sheets','pack',3,1,0,0],
+
+  // ── MEDICAL / CLINICAL (non-controlled supplies) ────────────────────
+  ['Medical','PPE','Nitrile gloves (S/M/L)','box',12,4,1,0],
+  ['Medical','PPE','Face masks','box',10,3,1,0],
+  ['Medical','PPE','Gowns','pack',6,2,0,0],
+  ['Medical','Vitals','Thermometer probe covers','box',6,2,1,0],
+  ['Medical','Vitals','BP cuff (working spares)','each',2,1,1,0],
+  ['Medical','Vitals','Pulse oximeter (working spares)','each',2,1,1,0],
+  ['Medical','Vitals','AA/AAA batteries (vitals devices)','pack',6,2,1,0],
+  ['Medical','Testing','Urine drug screen (UDS) cups','box',8,3,1,0],
+  ['Medical','Testing','Breathalyzer mouthpieces','box',4,1,0,0],
+  ['Medical','Testing','Glucometer test strips','box',4,1,1,1],
+  ['Medical','Testing','Lancets','box',4,1,0,0],
+  ['Medical','OTC / Comfort','OTC comfort meds (per protocol)','set',1,1,1,1],
+  ['Medical','First Aid','Adhesive bandages','box',6,2,1,0],
+  ['Medical','First Aid','Gauze / wound supplies','box',4,2,1,0],
+  ['Medical','First Aid','Alcohol prep pads','box',6,2,1,0],
+  ['Medical','First Aid','Antibiotic ointment','tube',4,1,0,0],
+  ['Medical','Critical Safety','Naloxone / Narcan kits','kit',6,3,1,1],
+  ['Medical','Critical Safety','AED pads (in-date)','set',2,1,1,1],
+  ['Medical','Critical Safety','AED battery','each',1,1,1,1],
+  ['Medical','Biohazard','Sharps containers','each',4,1,1,0],
+  ['Medical','Biohazard','Biohazard / red bags','box',3,1,1,0],
+  ['Medical','Biohazard','Bodily-fluid spill kit','each',2,1,1,0],
+
+  // ── SAFETY / FACILITY / ENVIRONMENTAL ───────────────────────────────
+  ['Safety','Detectors','Smoke/CO detector batteries (9V)','pack',4,2,1,0],
+  ['Safety','Lighting','Light bulbs (assorted)','pack',4,1,0,0],
+  ['Safety','Lighting','Flashlights (working) + batteries','each',4,2,1,0],
+  ['Safety','Fire','Fire extinguisher — inspection in-date','each',1,1,1,1],
+  ['Safety','Environment','Air freshener','each',4,1,0,0],
+  ['Safety','Environment','Pest control / traps','set',2,1,0,0],
+];
+
+export function ensureInventoryCatalog() {
+  if (db.prepare(`SELECT id FROM inventory_items LIMIT 1`).get()) return;
+  const ins = db.prepare(`INSERT INTO inventory_items
+    (department, category, name, unit, par_level, reorder_point, critical, track_expiry, sort)
+    VALUES (?,?,?,?,?,?,?,?,?)`);
+  INVENTORY_CATALOG.forEach((r, i) =>
+    ins.run(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], i));
+}
+
 // Allow `npm run seed` to set up admin + sample data locally.
 if (import.meta.url === `file://${process.argv[1]}`) {
   ensureAdmin();
   ensureSampleData();
   ensureExampleClient12A();
+  ensureInventoryCatalog();
   console.log('Seed complete.');
 }

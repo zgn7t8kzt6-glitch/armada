@@ -16,7 +16,7 @@ import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData, ensureExampleClient12A } from './src/seed.js';
+import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -24,6 +24,7 @@ import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBr
 ensureAdmin();
 if (process.env.SEED_SAMPLE === 'true') ensureSampleData();
 ensureExampleClient12A();
+ensureInventoryCatalog();
 // Default census recipient so a test send reaches the right person out of the box.
 if (!getState('census_email_to')) setState('census_email_to', process.env.CENSUS_EMAIL_TO || 'shlomo@armadarecovery.com');
 // One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.
@@ -228,6 +229,172 @@ app.post('/api/partners/approve', requireAuth, requireAdmin, (req, res) => {
   audit({ user: req.user, action: 'APPROVE_PARTNER', detail: name, ip: req.ip });
   res.json({ ok: true, id, name });
 });
+// ── SUPPLY STANDARDS (shift-based inventory + reorder-to-corporate) ──────────
+// Horst principle: never let a guest reach for something and find it empty. Each
+// shift a department counts its items; anything at/below its reorder point raises
+// a reorder request and emails corporate to order. Critical items (Narcan, AED,
+// first aid) escalate when Out.
+const INV_DEPTS = ['Kitchen', 'Housekeeping', 'Front Desk', 'Medical', 'Safety'];
+function invStatus(qty, item) {
+  if (qty <= 0) return 'out';
+  if (qty <= (item.reorder_point || 0)) return 'low';
+  return 'ok';
+}
+function corporateEmail() {
+  return getState('inventory_corporate_email') || process.env.CORPORATE_EMAIL || '';
+}
+// Raise (or refresh) a reorder request for an item. Dedupes on an open request so
+// corporate gets one email per shortage, not one per shift count. Returns true if
+// a NEW request was opened (i.e. an email should fire).
+function raiseReorder(item, qty, level, user) {
+  const open = db.prepare(`SELECT id FROM reorder_requests WHERE item_id = ? AND status = 'open'`).get(item.id);
+  if (open) {
+    db.prepare(`UPDATE reorder_requests SET qty_on_hand = ?, level = ?, updated_at = datetime('now') WHERE id = ?`).run(qty, level, open.id);
+    return false;
+  }
+  db.prepare(`INSERT INTO reorder_requests (item_id, qty_on_hand, level, requested_by_id, requested_by) VALUES (?,?,?,?,?)`)
+    .run(item.id, qty, level, user?.id || null, user?.name || '');
+  return true;
+}
+async function emailReorder(item, qty, level, user) {
+  const to = corporateEmail();
+  if (!to || !emailConfigured()) return false;
+  const urgency = level === 'out' ? (item.critical ? 'CRITICAL — OUT OF STOCK' : 'OUT OF STOCK') : 'Running low';
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
+    <h2 style="margin:0 0 4px">Reorder needed — ${item.name}</h2>
+    <p style="color:#${level === 'out' ? 'b00' : 'a60'};font-weight:bold;margin:0 0 12px">${urgency}</p>
+    <table style="border-collapse:collapse">
+      <tr><td style="padding:3px 12px 3px 0;color:#666">Department</td><td><b>${item.department}</b>${item.category ? ' · ' + item.category : ''}</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#666">On hand</td><td><b>${qty}</b> ${item.unit} (par ${item.par_level}, reorder at ${item.reorder_point})</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#666">Suggested order</td><td><b>${Math.max(item.par_level - qty, 1)}</b> ${item.unit} to reach par</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#666">Flagged by</td><td>${user?.name || 'Staff'}</td></tr>
+    </table>
+    <p style="color:#888;margin-top:14px">Sent automatically by Armada Care Standards — Supply Standards.</p>
+  </div>`;
+  try {
+    await sendEmail({ to, subject: `Armada reorder — ${item.name} (${urgency})`, html });
+    db.prepare(`UPDATE reorder_requests SET emailed_at = datetime('now') WHERE item_id = ? AND status = 'open'`).run(item.id);
+    return true;
+  } catch (e) { console.error('reorder email:', e.message); return false; }
+}
+
+// The shift checklist / board, grouped by department.
+app.get('/api/inventory', requireAuth, (req, res) => {
+  const items = db.prepare(`SELECT * FROM inventory_items WHERE active = 1 ORDER BY department, sort, name`).all();
+  const shift = currentShift();
+  const openByItem = {};
+  db.prepare(`SELECT item_id, level FROM reorder_requests WHERE status = 'open'`).all().forEach((r) => { openByItem[r.item_id] = r.level; });
+  const depts = {};
+  let low = 0, out = 0, criticalOut = 0;
+  for (const it of items) {
+    const last = db.prepare(`SELECT qty, status, shift, expiry, by_name, created_at FROM inventory_counts WHERE item_id = ? ORDER BY id DESC LIMIT 1`).get(it.id);
+    const checkedToday = last && String(last.created_at).slice(0, 10) === appToday() ;
+    const checkedThisShift = checkedToday && last.shift === shift;
+    const status = last ? last.status : 'unknown';
+    if (status === 'low') low++; if (status === 'out') { out++; if (it.critical) criticalOut++; }
+    (depts[it.department] = depts[it.department] || []).push({
+      id: it.id, name: it.name, category: it.category || '', unit: it.unit,
+      par: it.par_level, reorder: it.reorder_point, critical: !!it.critical, trackExpiry: !!it.track_expiry,
+      status, qty: last ? last.qty : null, expiry: last ? last.expiry : null,
+      lastBy: last ? last.by_name : '', lastAt: last ? String(last.created_at).slice(0, 16) : '',
+      checkedThisShift, reorderOpen: openByItem[it.id] || null,
+    });
+  }
+  const openReorders = db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'open'`).get().n;
+  res.json({
+    shift, departments: INV_DEPTS.filter((d) => depts[d]).map((d) => ({ name: d, items: depts[d] })),
+    stats: { low, out, criticalOut, openReorders, items: items.length },
+    corporateEmail: corporateEmail() ? corporateEmail().replace(/(.{2}).*(@.*)/, '$1•••$2') : '',
+    emailReady: emailConfigured(),
+  });
+});
+
+// Log shift counts — one item or a batch. Computes status, fires reorder + email.
+app.post('/api/inventory/count', requireAuth, async (req, res) => {
+  const body = req.body || {};
+  const list = Array.isArray(body.counts) ? body.counts : [body];
+  const shift = currentShift();
+  const flagged = [];
+  for (const c of list) {
+    const item = db.prepare(`SELECT * FROM inventory_items WHERE id = ? AND active = 1`).get(c.item_id);
+    if (!item) continue;
+    const qty = Math.max(0, parseInt(c.qty, 10) || 0);
+    const status = invStatus(qty, item);
+    db.prepare(`INSERT INTO inventory_counts (item_id, qty, status, shift, expiry, note, by_id, by_name) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(item.id, qty, status, shift, c.expiry || null, c.note || null, req.user.id, req.user.name);
+    if (status === 'low' || status === 'out') {
+      const isNew = raiseReorder(item, qty, status, req.user);
+      if (isNew) { flagged.push({ item, qty, status }); }
+      // Critical item out → escalate as an alert (on-call) even if email isn't set.
+      if (status === 'out' && item.critical) createAlert(null, 'supply_out_' + item.id, 'High', `Supply OUT: ${item.name} (${item.department}). Critical item — restock now.`);
+    } else {
+      // Restocked back above reorder — close any open request.
+      db.prepare(`UPDATE reorder_requests SET status = 'received', received_at = datetime('now'), received_by = ?, updated_at = datetime('now') WHERE item_id = ? AND status = 'open'`).run(req.user.name, item.id);
+    }
+  }
+  audit({ user: req.user, action: 'INVENTORY_COUNT', detail: `${list.length} item(s), shift ${shift}`, ip: req.ip });
+  // Email corporate for each newly-flagged shortage.
+  let emailed = 0;
+  for (const f of flagged) { if (await emailReorder(f.item, f.qty, f.status, req.user)) emailed++; }
+  res.json({ ok: true, flagged: flagged.length, emailed, corporate: corporateEmail() ? true : false });
+});
+
+// Open + recent reorder requests (the corporate ordering queue).
+app.get('/api/inventory/reorders', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT r.*, i.name, i.department, i.category, i.unit, i.par_level, i.reorder_point, i.critical
+    FROM reorder_requests r JOIN inventory_items i ON i.id = r.item_id
+    WHERE r.status = 'open' OR r.updated_at >= datetime('now','-14 day')
+    ORDER BY (r.status='open') DESC, (r.level='out') DESC, i.critical DESC, r.updated_at DESC`).all();
+  res.json({ reorders: rows.map((r) => ({
+    id: r.id, item: r.name, department: r.department, category: r.category || '', unit: r.unit,
+    onHand: r.qty_on_hand, par: r.par_level, suggest: Math.max(r.par_level - r.qty_on_hand, 1),
+    level: r.level, status: r.status, critical: !!r.critical, by: r.requested_by || '',
+    emailed: !!r.emailed_at, at: String(r.created_at).slice(0, 16),
+  })) });
+});
+
+// Mark a reorder ordered / received.
+app.post('/api/inventory/reorders/:id', requireAuth, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const status = req.body?.status;
+  if (!['ordered', 'received'].includes(status)) return res.status(400).json({ error: 'status must be ordered|received' });
+  const col = status === 'ordered' ? 'ordered' : 'received';
+  db.prepare(`UPDATE reorder_requests SET status = ?, ${col}_at = datetime('now'), ${col}_by = ?, updated_at = datetime('now') WHERE id = ?`).run(status, req.user.name, id);
+  audit({ user: req.user, action: 'REORDER_' + status.toUpperCase(), entity_id: id, ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Admin: manage the catalog (add / edit / deactivate an item).
+app.post('/api/inventory/items', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Name required' });
+  const dept = INV_DEPTS.includes(b.department) ? b.department : 'Kitchen';
+  const fields = [name, dept, b.category || null, b.unit || 'each',
+    Math.max(0, parseInt(b.par_level, 10) || 0), Math.max(0, parseInt(b.reorder_point, 10) || 0),
+    b.critical ? 1 : 0, b.track_expiry ? 1 : 0, b.shift_check === false ? 0 : 1, b.active === false ? 0 : 1];
+  if (b.id) {
+    db.prepare(`UPDATE inventory_items SET name=?, department=?, category=?, unit=?, par_level=?, reorder_point=?, critical=?, track_expiry=?, shift_check=?, active=? WHERE id=?`).run(...fields, b.id);
+    res.json({ ok: true, id: b.id });
+  } else {
+    const id = db.prepare(`INSERT INTO inventory_items (name, department, category, unit, par_level, reorder_point, critical, track_expiry, shift_check, active) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(...fields).lastInsertRowid;
+    res.json({ ok: true, id });
+  }
+});
+
+// Admin: full catalog (for the manage screen).
+app.get('/api/inventory/catalog', requireAuth, requireAdmin, (req, res) => {
+  res.json({ items: db.prepare(`SELECT * FROM inventory_items ORDER BY active DESC, department, sort, name`).all() });
+});
+
+// Admin: set where reorder emails go.
+app.post('/api/inventory/settings', requireAuth, requireAdmin, (req, res) => {
+  const email = (req.body?.corporate_email || '').trim();
+  setState('inventory_corporate_email', email);
+  audit({ user: req.user, action: 'INVENTORY_SETTINGS', detail: email, ip: req.ip });
+  res.json({ ok: true });
+});
+
 // Every Kipu discharge must have the in-app fond-farewell completed (Safe
 // Departure checklist + where they went). What's missing on a given discharge:
 function dischargeMissing(c) {
@@ -433,6 +600,13 @@ app.post('/api/command/census/recipients', requireAuth, requireAdmin, (req, res)
 app.post('/api/command/brief', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await sendMorningBrief()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Daily meal count to the caterer + kitchen lead (Asher): how many to prepare for
+// tomorrow = current census + tomorrow's scheduled arrivals (welcome meals).
+app.get('/api/command/meals', requireAuth, requireAdmin, (req, res) => res.json({ ...buildMealCount(), to: getState('meal_count_to') || '', emailReady: emailConfigured() }));
+app.post('/api/command/meals/recipients', requireAuth, requireAdmin, (req, res) => { setState('meal_count_to', (req.body?.to || '').trim()); res.json({ ok: true }); });
+app.post('/api/command/meals/send', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await sendMealCount()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
 // Tunable automation thresholds — adjust the behavior we ship without a redeploy.
 app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res.json({
   detox_min: autoCfg('detox_min', process.env.OBS_DETOX_MIN || 30),
@@ -443,10 +617,12 @@ app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res
   recovery_max: autoCfg('recovery_max', 3),
   welcome_auto: autoCfg('welcome_auto', 'on'),
   alert_detail: autoCfg('alert_detail', process.env.ALERT_INCLUDE_PHI === 'true' ? 'full' : 'locator'),
+  meal_on: autoCfg('meal_on', 'on'),
+  meal_hour: mealHour(),
 }));
 app.post('/api/settings/automation', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
-  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail']) {
+  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour']) {
     if (b[k] !== undefined) setState('auto_' + k, String(b[k]).trim());
   }
   audit({ user: req.user, action: 'AUTO_CONFIG', ip: req.ip });
@@ -3789,6 +3965,55 @@ async function sendMorningBrief() {
   await sendEmail({ to, subject: b.subject, html: b.html, text: b.text });
   return { sent: true, to };
 }
+// Tomorrow's meal count for the caterer + kitchen lead. Total to prepare =
+// current census (everyone here) + tomorrow's scheduled arrivals (welcome meals).
+// We can't reliably know who discharges tomorrow, so census is the safe floor.
+function buildMealCount() {
+  const today = appToday();
+  const tomorrow = addDays(today, 1);
+  const active = db.prepare(`SELECT pref, name, prefs FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const census = active.length;
+  const arrivals = db.prepare(`SELECT preferred_name, first_name, last_name FROM expected_arrivals WHERE scheduled_date = ? AND status IN ('expected','arrived')`).all(tomorrow);
+  const welcome = arrivals.length;
+  const total = census + welcome;
+  // Dietary flags we can derive from care-card prefs (best-effort, for the caterer).
+  const diet = (re) => active.filter((c) => re.test(c.prefs || '')).length;
+  const veg = diet(/vegetarian|vegan/i);
+  const gf = diet(/gluten|celiac/i);
+  const dtLabel = new Date(tomorrow + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
+  const names = arrivals.map((a) => `${a.preferred_name || a.first_name || ''} ${a.last_name || ''}`.trim()).filter(Boolean);
+  return { date: tomorrow, dtLabel, census, welcome, total, veg, gf, arrivals: names };
+}
+async function sendMealCount() {
+  const to = (getState('meal_count_to') || process.env.MEAL_COUNT_TO || '').trim();
+  if (!emailConfigured()) return { sent: false, reason: 'email not connected' };
+  if (!to) return { sent: false, reason: 'no recipients (set the caterer + Asher in Command → Meal count)' };
+  const m = buildMealCount();
+  const dietLine = (m.veg || m.gf) ? `<tr><td style="padding:4px 14px 4px 0;color:#666">Dietary (from care cards)</td><td>${m.veg ? `${m.veg} vegetarian/vegan` : ''}${m.veg && m.gf ? ' · ' : ''}${m.gf ? `${m.gf} gluten-free` : ''}</td></tr>` : '';
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
+    <h2 style="margin:0 0 2px">Meals to prepare — ${m.dtLabel}</h2>
+    <p style="color:#666;margin:0 0 14px">Armada Recovery · daily count for the kitchen</p>
+    <div style="font-size:40px;font-weight:700;color:#1a1a1a;line-height:1">${m.total} meals</div>
+    <table style="border-collapse:collapse;margin-top:12px">
+      <tr><td style="padding:4px 14px 4px 0;color:#666">Current residents</td><td><b>${m.census}</b></td></tr>
+      <tr><td style="padding:4px 14px 4px 0;color:#666">Welcome meals (arriving ${m.dtLabel.split(',')[0]})</td><td><b>${m.welcome}</b>${m.arrivals.length ? ` — ${m.arrivals.join(', ')}` : ''}</td></tr>
+      ${dietLine}
+      <tr><td style="padding:8px 14px 4px 0;color:#666;border-top:1px solid #eee"><b>Total to prepare</b></td><td style="border-top:1px solid #eee;padding-top:8px"><b>${m.total}</b></td></tr>
+    </table>
+    <p style="color:#888;margin-top:16px;font-size:12px">Includes a welcome meal for each scheduled new arrival. Sent automatically by Armada Care Standards.</p>
+  </div>`;
+  await sendEmail({ to, subject: `Armada meal count — ${m.dtLabel}: ${m.total} meals`, html });
+  return { sent: true, to, total: m.total, census: m.census, welcome: m.welcome };
+}
+function mealHour() { return +autoCfg('meal_hour', process.env.MEAL_COUNT_HOUR || 8); }
+function runMealCount() {
+  if (autoCfg('meal_on', 'on') !== 'off') {
+    sendMealCount().then((r) => { if (r.sent) console.log('[meals] meal count emailed to', r.to, '·', r.total, 'meals'); else console.log('[meals] skipped:', r.reason); }).catch((e) => console.error('[meals]', e.message));
+  }
+  setTimeout(runMealCount, msUntilLocalHour(mealHour()));
+}
+setTimeout(runMealCount, msUntilLocalHour(mealHour()));
+
 function briefHour() { return +autoCfg('brief_hour', process.env.MORNING_BRIEF_HOUR || 7); }
 function runMorningBrief() {
   if (autoCfg('brief_on', process.env.MORNING_BRIEF === 'false' ? 'off' : 'on') !== 'off') {

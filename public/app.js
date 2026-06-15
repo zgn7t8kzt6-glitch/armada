@@ -1717,10 +1717,16 @@ async function loadMoments(){
   const overall = m.active? Math.round((m.welcomed.done+m.anticipated.done)/(m.active*2)*100):100;
   if($('momentsBadge')) $('momentsBadge').textContent = overall+'% served';
 }
+async function loadVoice(){
+  if(!$('cmdVoice')) return;
+  try{ const v=await api('/voice');
+    $('cmdVoice').innerHTML = (v.checkins||[]).length ? v.checkins.map(x=>`<div class="pc-note">💬 <strong>${esc(x.client||'Client')}</strong>${x.room?' <span class="hint">· '+esc(x.room)+'</span>':''}: “${esc(x.answer)}” <span class="hint">— ${esc(x.shift||'')} ${esc((x.at||'').slice(5))}${x.by?' · '+esc(x.by):''}</span></div>`).join('') : '<div class="hint">No check-in answers yet. Ask the shift question on Rounds.</div>';
+  }catch(e){ $('cmdVoice').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; }
+}
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
-  loadMoments();
+  loadMoments(); loadVoice();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});

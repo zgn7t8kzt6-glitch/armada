@@ -172,6 +172,15 @@ app.post('/api/checkins', requireAuth, (req, res) => {
   audit({ user: req.user, action: 'CHECKIN', entity: 'client', entity_id: +b.client_id, ip: req.ip });
   res.json({ ok: true });
 });
+// Voice of the guest: what clients said on rounds (last 3 days) — the qualitative
+// feedback leadership should read and act on, gathered automatically.
+app.get('/api/voice', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`SELECT ch.answer, ch.question, ch.shift, ch.by_name, substr(ch.created_at,1,16) at, c.pref, c.name, c.room
+    FROM client_checkins ch LEFT JOIN clients c ON c.id = ch.client_id
+    WHERE ch.answer IS NOT NULL AND ch.answer != '' AND ch.created_at >= datetime('now','-3 day')
+    ORDER BY ch.id DESC LIMIT 50`).all();
+  res.json({ checkins: rows.map((x) => ({ client: x.pref || x.name || '', room: x.room || '', answer: x.answer, question: x.question, shift: x.shift, by: x.by_name, at: x.at })) });
+});
 app.get('/api/rounds/board', requireAuth, (req, res) => {
   const active = db.prepare(`SELECT id, pref, name, room, loc, photo, obs_interval FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
   const lastChk = db.prepare(`SELECT ts, by_name, status FROM obs_checks WHERE client_id = ? ORDER BY id DESC LIMIT 1`);

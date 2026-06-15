@@ -174,6 +174,18 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 CREATE INDEX IF NOT EXISTS idx_activities_client ON activities(client_id, created_at);
 
+-- Shift care check-in: a rotating Horst question asked of each client every
+-- shift on rounds ("hungry? bored? what would make your stay better?"), so the
+-- guest's voice is gathered and unmet needs get acted on.
+CREATE TABLE IF NOT EXISTS client_checkins (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  question TEXT, answer TEXT, shift TEXT,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_checkins ON client_checkins(client_id, created_at);
+
 -- Contingency-management points: an evidence-based, lawful way to reinforce
 -- therapeutic ENGAGEMENT (activities, groups, milestones) with modest rewards.
 -- A signed ledger (earn +, redeem -); balance = SUM for the client.

@@ -1559,16 +1559,18 @@ async function loadRounds(){
   $('roundsKpis').innerHTML = `
     <div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.overdue}</div><div class="l">Overdue now</div></div>
     <div class="ret-card"><div class="n">${d.onTime}</div><div class="l">On time</div></div>
-    <div class="ret-card"><div class="n">${d.total}</div><div class="l">Clients</div></div>
+    <div class="ret-card ${(d.total-d.askedThisShift)?'rc-warn':''}"><div class="n">${d.askedThisShift}/${d.total}</div><div class="l">Asked this shift</div></div>
     <div class="ret-card"><div class="n">q${d.defaultMin}</div><div class="l">Default cadence</div></div>`;
+  if($('roundsQuestion')) $('roundsQuestion').innerHTML = d.question ? `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Ask every client this ${esc((d.shift||'').toLowerCase())} shift</div><h3 style="margin:4px 0 0">“${esc(d.question)}”</h3><p class="sub sans" style="margin:4px 0 0">Tap 💬 on each client to capture their answer. Needs become requests automatically; distress pulls a human in person.</p></div>` : '';
   const rows=[...d.rows].sort((a,b)=>(b.overdue-a.overdue)||((b.minsSince??1e9)-(a.minsSince??1e9)));
   board.innerHTML = rows.map(r=>{
     const when = r.minsSince==null?'never checked':(r.minsSince+'m ago'+(r.lastBy?' · '+esc(r.lastBy):''));
     return `<div class="cmd-row ${r.overdue?'cmd-row-flag':''}">
       ${r.photo?`<img src="${esc(r.photo)}" class="client-photo sm" alt=""/>`:''}
-      <div class="cmd-row-main"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''}
+      <div class="cmd-row-main"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''}${r.asked?' <span class="risk risk-low">asked ✓</span>':''}
         <div class="hint">${r.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}last: ${when}${r.lastStatus&&r.lastStatus!=='ok'?' · '+esc(r.lastStatus):''} · q${r.interval}</div></div>
       <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm sans" onclick="roundAsk(${r.id}, ${JSON.stringify(r.name).replace(/"/g,'&quot;')})" title="Ask the shift question">💬 Ask</button>
         <button class="btn btn-gold btn-sm sans" onclick="roundCheck(${r.id},'ok')">✓ Check</button>
         <button class="btn btn-ghost btn-sm sans" onclick="roundConcern(${r.id})" title="Log a concern">⚑</button>
       </div></div>`;
@@ -1578,6 +1580,7 @@ async function loadRounds(){
   // Live: refresh every 45s so the clocks stay honest.
   if($('rounds').classList.contains('active')) roundsTimer=setTimeout(loadRounds, 45000);
 }
+async function roundAsk(id, name){ const answer=prompt('Their answer to this shift\'s question'+(name?' — '+name:'')+':\n(needs become requests automatically)'); if(answer===null) return; try{ await api('/checkins',{method:'POST',body:JSON.stringify({client_id:id,answer})}); loadRounds(); }catch(e){ alert(e.message); } }
 async function roundCheck(id, status){ await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:status||'ok'})}); loadRounds(); }
 async function roundConcern(id){ const note=prompt('What did you observe? (logs a safety concern)'); if(note===null) return; await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:'concern',note})}); loadRounds(); }
 async function roundsSweep(){ if(!confirm('Log a completed safety check for EVERY client right now?')) return; await api('/rounds/sweep',{method:'POST'}); loadRounds(); }

@@ -136,22 +136,60 @@ app.delete('/api/sendouts/:id', requireAuth, (req, res) => { db.prepare(`DELETE 
 // ---- Observation / safety rounds: prove every client is being checked ----
 const OBS_DEFAULT_MIN = +(process.env.OBS_DEFAULT_MIN || 60);
 const OBS_STATUSES = ['ok', 'asleep', 'concern', 'refused', 'off-unit'];
+// A rotating, guest-facing care question the team asks each client every shift —
+// the Horst "anticipate the unexpressed need" move, made a habit on rounds.
+const SHIFT_QUESTIONS = [
+  'What is one thing we could do to make your stay better right now?',
+  'Are you hungry or thirsty — can we get you something?',
+  'Are you bored? What would you enjoy doing right now?',
+  'How did you sleep — what would help you rest better?',
+  'Is there anyone you would like to call or connect with?',
+  'What has been the hardest part of your day?',
+  'Is there anything bothering you that we have not taken care of?',
+  'What would make today a good day for you?',
+  'Do you have everything you need to be comfortable?',
+  'How are you really doing right now — honestly?',
+];
+const SHIFTS_LIST = ['Morning', 'Day', 'Evening', 'Night'];
+function currentShift() { const h = localHour(); if (h >= 6 && h < 12) return 'Morning'; if (h >= 12 && h < 17) return 'Day'; if (h >= 17 && h < 22) return 'Evening'; return 'Night'; }
+function currentQuestion() { const idx = (Math.floor(Date.now() / 864e5) * 4 + SHIFTS_LIST.indexOf(currentShift())) % SHIFT_QUESTIONS.length; return SHIFT_QUESTIONS[(idx + SHIFT_QUESTIONS.length) % SHIFT_QUESTIONS.length]; }
+app.post('/api/checkins', requireAuth, (req, res) => {
+  const b = req.body || {}; if (!b.client_id) return res.status(400).json({ error: 'client_id required' });
+  const shift = currentShift(), question = currentQuestion(), answer = (b.answer || '').trim();
+  db.prepare(`INSERT INTO client_checkins (client_id, question, answer, shift, by_id, by_name) VALUES (?,?,?,?,?,?)`)
+    .run(+b.client_id, question, answer || null, shift, req.user.id, req.user.name);
+  if (answer) {
+    // An answer that reveals an unmet need becomes a request so it's acted on;
+    // distress becomes a High alert (a human goes to them).
+    if (/hungr|thirst|snack|food|eat|drink|cold|blanket|bored|nothing to do|\bcall\b|family|can'?t sleep|pain|hurt|uncomfortable|leav|go home|talk to/i.test(answer)) {
+      const c = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(+b.client_id);
+      const urgent = /leav|go home|hurt|pain|can'?t sleep/i.test(answer);
+      db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?,?,?,?,?)`)
+        .run(+b.client_id, 'Front Desk / Concierge', `Round check-in: "${answer.slice(0, 140)}"`, urgent ? 'Urgent' : 'Normal', req.user.name);
+      if (/leav|leaving|go home|hurt myself|kill|hopeless|suicid/i.test(answer)) createAlert(+b.client_id, 'concern', 'High', `${c ? (c.pref || c.name) : 'A client'} on rounds: "${answer.slice(0, 80)}". Go to them in person now.`);
+    }
+  }
+  audit({ user: req.user, action: 'CHECKIN', entity: 'client', entity_id: +b.client_id, ip: req.ip });
+  res.json({ ok: true });
+});
 app.get('/api/rounds/board', requireAuth, (req, res) => {
   const active = db.prepare(`SELECT id, pref, name, room, loc, photo, obs_interval FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
   const lastChk = db.prepare(`SELECT ts, by_name, status FROM obs_checks WHERE client_id = ? ORDER BY id DESC LIMIT 1`);
   const now = Date.now();
+  const shift = currentShift();
+  const askedSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM client_checkins WHERE date(created_at) = date('now') AND shift = ?`).all(shift).map((r) => r.client_id));
   const rows = active.map((c) => {
     const l = lastChk.get(c.id);
     const interval = c.obs_interval || OBS_DEFAULT_MIN;
     const lastTs = l ? Date.parse(String(l.ts).replace(' ', 'T') + 'Z') : null;
     const mins = lastTs ? Math.floor((now - lastTs) / 60000) : null;
     return { id: c.id, name: c.pref || c.name, room: c.room, photo: c.photo || null, interval,
-      lastBy: l?.by_name || null, lastStatus: l?.status || null, minsSince: mins, overdue: mins == null || mins >= interval };
+      lastBy: l?.by_name || null, lastStatus: l?.status || null, minsSince: mins, overdue: mins == null || mins >= interval, asked: askedSet.has(c.id) };
   });
   const overdue = rows.filter((r) => r.overdue).length;
   // Accountability: checks logged today, by person.
   const byPerson = db.prepare(`SELECT COALESCE(by_name,'—') k, COUNT(*) n FROM obs_checks WHERE date(ts) = date('now') GROUP BY by_name ORDER BY n DESC`).all();
-  res.json({ rows, total: rows.length, onTime: rows.length - overdue, overdue, defaultMin: OBS_DEFAULT_MIN, statuses: OBS_STATUSES, byPerson });
+  res.json({ rows, total: rows.length, onTime: rows.length - overdue, overdue, defaultMin: OBS_DEFAULT_MIN, statuses: OBS_STATUSES, byPerson, shift, question: currentQuestion(), askedThisShift: askedSet.size });
 });
 app.post('/api/rounds/check', requireAuth, (req, res) => {
   const b = req.body || {};

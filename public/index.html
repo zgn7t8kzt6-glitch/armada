@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615C" />
+<link rel="stylesheet" href="/styles.css?v=20260615D" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -324,11 +324,7 @@
       <div class="card" id="dcIncompleteCard" style="display:none;border-left:4px solid var(--danger)"><h3>⚠ Discharged in Kipu — in-app form not completed</h3><p class="sub sans">Discharged in Kipu but the fond-farewell wasn't finished here. Each shows what's missing and who's accountable. Click to complete.</p><div id="dcIncomplete"></div></div>
       <div class="card"><h3>Everyone's path</h3><div id="contBoard"></div></div>
       <div class="card"><h3>By case manager — conversion accountability</h3><div id="contCM"></div></div>
-      <details class="card no-print" data-admin>
-        <summary>Approved referral partners (reciprocal relationships)</summary>
-        <p class="sub sans" style="margin:8px 0">Mark the facilities case managers are allowed to refer to for aftercare. Steer the relationships you want to build.</p>
-        <div id="contPartners"></div>
-      </details>
+      <p class="sub sans" data-admin>Approved referral partners are managed in <strong>Settings → Approved partners</strong>.</p>
     </section>
 
     <!-- DOCUMENTATION COMPLIANCE (admin) -->
@@ -603,6 +599,12 @@
           <div><label>On-call alert detail <span class="hint" style="font-weight:400">(in SMS/email)</span></label><select id="au_alert_detail"><option value="locator">Name + room (recommended)</option><option value="minimal">No identifier (most private)</option><option value="full">Full message</option></select></div>
         </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:12px"><button class="btn btn-gold sans" onclick="saveAutomation()">Save automation</button><span id="au_msg" class="hint" style="align-self:center"></span></div>
+      </div>
+      <div class="card">
+        <h3>Approved referral partners</h3>
+        <p class="sub sans">The only facilities case managers may refer to for aftercare. Mark the reciprocal relationships you want to build — these (and only these) appear at discharge.</p>
+        <div class="toolbar" style="justify-content:flex-start"><input id="ap_new" placeholder="Add a partner facility…" style="min-width:240px"/><button class="btn btn-gold sans" onclick="addApprovedPartner()">+ Approve partner</button><span id="ap_msg" class="hint" style="align-self:center"></span></div>
+        <div id="ap_list" style="margin-top:10px"></div>
       </div>
       <div class="card">
         <h3>Aftercare Coordinator</h3>
@@ -1042,9 +1044,7 @@
           </div>
           <div class="controls" style="margin-top:2px">
             <div class="field"><label>↪ Next step in the continuum <span class="hint" style="font-weight:400">(required — no one leaves without a plan)</span></label><select id="d_dest" onchange="dischargeDestUI()"><option value="">— choose the next level of care —</option><option>Armada Outpatient</option><option>Approved partner</option><option>Home / self</option></select></div>
-            <div class="field" id="d_partnerWrap" style="display:none"><label>Which approved partner</label><select id="d_partner"></select>
-              <div class="no-print" data-admin style="margin-top:6px;display:flex;gap:6px"><input id="d_newPartner" placeholder="Add an approved partner…" style="flex:1"/><button type="button" class="btn btn-ghost btn-sm sans" onclick="addApprovedPartner()">+ Add</button></div>
-            </div>
+            <div class="field" id="d_partnerWrap" style="display:none"><label>Which approved partner</label><select id="d_partner"></select></div>
           </div>
           <div class="grid3" style="margin-top:4px">
             <div><label>Why are they leaving? (debrief)</label><textarea id="d_reason"></textarea></div>
@@ -1310,6 +1310,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615C"></script>
+<script src="/app.js?v=20260615D"></script>
 </body>
 </html>

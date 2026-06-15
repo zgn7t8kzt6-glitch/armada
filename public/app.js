@@ -231,8 +231,7 @@ async function editClient(id){
   if(client.kipu_id) loadKipuChart(id); else if($('kipuChartCard')) $('kipuChartCard').style.display='none';
 }
 function dischargeDestUI(){ const w=$('d_partnerWrap'); if(!w) return; const partner=$('d_dest').value==='Approved partner'; w.style.display=partner?'':'none'; if(partner) loadDischargePartners(); }
-async function loadDischargePartners(){ if(!$('d_partner')) return; try{ const d=await api('/continuum'); const opts=(d.partners||[]); $('d_partner').innerHTML = opts.length ? '<option value="">— choose —</option>'+opts.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('') : '<option value="">No approved partners yet — add one below'+(ME&&ME.role==='admin'?'':' (ask an admin)')+'</option>'; }catch(e){} }
-async function addApprovedPartner(){ const n=$('d_newPartner')?$('d_newPartner').value.trim():''; if(!n) return; try{ const r=await api('/partners/approve',{method:'POST',body:JSON.stringify({name:n})}); $('d_newPartner').value=''; await loadDischargePartners(); if($('d_partner')) $('d_partner').value=r.id; }catch(e){ alert(e.message); } }
+async function loadDischargePartners(){ if(!$('d_partner')) return; try{ const d=await api('/continuum'); const opts=(d.partners||[]); $('d_partner').innerHTML = opts.length ? '<option value="">— choose —</option>'+opts.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('') : '<option value="">No approved partners — an admin sets these in Settings → Approved partners</option>'; }catch(e){} }
 async function loadKipuChart(cid, reload){
   const card=$('kipuChartCard'); if(!card) return;
   card.style.display='';
@@ -722,7 +721,7 @@ async function saveAutomation(){
   catch(e){ $('au_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function loadSettings(){
-  loadEmailConfig(); loadSmsConfig(); loadSfConfig(); loadAutomation();
+  loadEmailConfig(); loadSmsConfig(); loadSfConfig(); loadAutomation(); loadApprovedPartners();
   if($('kipuWebUrl')) $('kipuWebUrl').value = (META && META.kipuWeb) || '';
   const st = await api('/settings');
   const dot=(ok)=>ok?'<span class="risk risk-low">ready</span>':'<span class="risk risk-warn">not set</span>';
@@ -2384,7 +2383,6 @@ async function loadContinuum(){
       $('dcIncomplete').innerHTML = inc.map(c=>`<div class="todo" onclick="editClient(${c.id})" style="cursor:pointer"><div class="txt"><span class="risk risk-high">INCOMPLETE</span> <strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''} <span class="hint">· discharged ${esc(c.date)}</span><div class="hint">missing: ${esc(c.missing.join(', '))}${c.kipuStaff?' · Kipu discharge by '+esc(c.kipuStaff):(c.owner?' · owner: '+esc(c.owner):'')}</div></div><span class="hint">complete ›</span></div>`).join(''); } }catch(e){}
   $('contBoard').innerHTML = d.rows.length ? `<table class="tbl"><tr><th>Client</th><th>Now</th><th>Next</th><th>Destination</th><th>By</th><th></th></tr>${d.rows.map(r=>`<tr><td><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">'+esc(r.room)+'</span>':''}</td><td>${esc(r.loc||'—')}</td><td>${esc(r.nextLoc||'—')}</td><td>${r.hasPlan?'<span class="risk risk-low">'+esc(r.destName||r.dest)+'</span>':'<span class="risk risk-high">none</span>'}</td><td class="hint">${esc(r.caseManager||'—')}</td><td>${planBtn(r)}</td></tr>`).join('')}</table>` : '<div class="hint">No active clients.</div>';
   $('contCM').innerHTML = d.byCM.length ? `<table class="tbl"><tr><th>Case manager</th><th>Clients</th><th>Planned</th><th>→ Armada</th></tr>${d.byCM.map(c=>`<tr><td>${esc(c.cm)}</td><td>${c.total}</td><td>${c.planned}/${c.total}</td><td>${c.armada}</td></tr>`).join('')}</table>` : '<div class="hint">—</div>';
-  if($('contPartners')&&ME.role==='admin'){ try{ const {facilities}=await api('/facilities'); $('contPartners').innerHTML = facilities.length ? facilities.map(f=>`<label class="sans" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:5px 10px;margin:3px;cursor:pointer"><input type="checkbox" ${f.preferred?'checked':''} onchange="togglePartner(${f.id}, this.checked)"/> ${esc(f.name)}</label>`).join('') : '<div class="hint">No partner facilities yet. Add them in Partners.</div>'; }catch(e){} }
 }
 async function planContinuum(id, name){
   const d=CONTINUUM_DATA; if(!d) return;
@@ -2399,7 +2397,9 @@ async function planContinuum(id, name){
   try{ await api('/clients/'+id+'/continuum',{method:'POST',body:JSON.stringify({aftercare_dest:dest, aftercare_facility_id:fid, next_loc:nl})}); loadContinuum(); }catch(e){ alert(e.message); }
 }
 function pickFrom(title, opts){ const list=opts.map((o,i)=>`${i+1}. ${o}`).join('\n'); const p=prompt(`${title}:\n\n${list}\n\nEnter a number:`); if(p===null) return Promise.resolve(null); const i=parseInt(p,10); return Promise.resolve(opts[i-1]||null); }
-async function togglePartner(id, on){ try{ await api('/facilities/'+id+'/preferred',{method:'POST',body:JSON.stringify({preferred:on?1:0})}); loadContinuum(); }catch(e){ alert(e.message); } }
+async function togglePartner(id, on){ try{ await api('/facilities/'+id+'/preferred',{method:'POST',body:JSON.stringify({preferred:on?1:0})}); loadApprovedPartners(); }catch(e){ alert(e.message); } }
+async function loadApprovedPartners(){ if(!$('ap_list')) return; try{ const {facilities}=await api('/facilities'); $('ap_list').innerHTML = facilities.length ? facilities.map(f=>`<label class="sans" style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${f.preferred?'var(--gold)':'var(--line)'};border-radius:8px;padding:6px 11px;margin:3px;cursor:pointer">${f.preferred?'✓ ':''}<input type="checkbox" ${f.preferred?'checked':''} onchange="togglePartner(${f.id}, this.checked)"/> ${esc(f.name)}</label>`).join('') : '<div class="hint">No facilities yet. Add one above, or they appear as you log outbound referrals.</div>'; }catch(e){} }
+async function addApprovedPartner(){ const n=$('ap_new')?$('ap_new').value.trim():''; if(!n){ return; } try{ await api('/partners/approve',{method:'POST',body:JSON.stringify({name:n})}); $('ap_new').value=''; if($('ap_msg'))$('ap_msg').textContent='✓ Approved'; loadApprovedPartners(); }catch(e){ if($('ap_msg'))$('ap_msg').textContent=e.message; } }
 
 /* ---- Engagement: client engagement tracking + STAFF rewards ---- */
 let ENG_RANGE='week', ENG_STAFF=null;

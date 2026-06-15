@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615z" />
+<link rel="stylesheet" href="/styles.css?v=20260615A" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -321,6 +321,7 @@
         <div id="contKpis" class="ret-cards"></div>
       </div>
       <div class="card" style="border-left:4px solid var(--danger)"><h3>No plan yet — set their next step</h3><p class="sub sans">These clients have no continuum plan. "If you want, you can stay" is not a plan. Give each a named next step.</p><div id="contNeedsPlan"></div></div>
+      <div class="card" id="dcIncompleteCard" style="display:none;border-left:4px solid var(--danger)"><h3>⚠ Discharged in Kipu — in-app form not completed</h3><p class="sub sans">Discharged in Kipu but the fond-farewell wasn't finished here. Each shows what's missing and who's accountable. Click to complete.</p><div id="dcIncomplete"></div></div>
       <div class="card"><h3>Everyone's path</h3><div id="contBoard"></div></div>
       <div class="card"><h3>By case manager — conversion accountability</h3><div id="contCM"></div></div>
       <details class="card no-print" data-admin>
@@ -1307,6 +1308,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615z"></script>
+<script src="/app.js?v=20260615A"></script>
 </body>
 </html>

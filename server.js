@@ -219,6 +219,22 @@ app.post('/api/facilities/:id/preferred', requireAuth, requireAdmin, (req, res) 
   db.prepare(`UPDATE facilities SET preferred = ? WHERE id = ?`).run(req.body?.preferred ? 1 : 0, req.params.id);
   res.json({ ok: true });
 });
+// Every Kipu discharge must have the in-app fond-farewell completed (Safe
+// Departure checklist + where they went). What's missing on a given discharge:
+function dischargeMissing(c) {
+  const m = [];
+  if (!(c.departure_steps && String(c.departure_steps).trim())) m.push('Safe Departure checklist');
+  if (!c.aftercare_dest) m.push('next step / where they went');
+  if (!(c.discharge_improve && String(c.discharge_improve).trim()) && !(c.discharge_reason && String(c.discharge_reason).trim())) m.push('debrief');
+  return m;
+}
+app.get('/api/discharges/incomplete', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT id, pref, name, room, discharge_status, discharge_date, departure_steps, aftercare_dest, discharge_reason, discharge_improve, case_manager, therapist, discharged_by_kipu
+    FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-30 day') ORDER BY discharge_date DESC`).all();
+  const incomplete = rows.map((c) => ({ ...c, missing: dischargeMissing(c) })).filter((c) => c.missing.length)
+    .map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', date: (c.discharge_date || '').slice(0, 10), status: c.discharge_status || '', owner: c.case_manager || c.therapist || '', kipuStaff: c.discharged_by_kipu || '', missing: c.missing }));
+  res.json({ incomplete });
+});
 // Voice of the guest: what clients said on rounds (last 3 days) — the qualitative
 // feedback leadership should read and act on, gathered automatically.
 app.get('/api/voice', requireAuth, requireAdmin, (req, res) => {
@@ -1682,6 +1698,16 @@ function runFlowAutomations() {
   const hasFollow = db.prepare(`SELECT 1 FROM followups WHERE client_id = ? AND type = ?`);
   const insFollow = db.prepare(`INSERT INTO followups (client_id, type, due_date) VALUES (?, ?, ?)`);
   let kits = 0, follows = 0;
+  // Discharged in Kipu but the in-app fond-farewell wasn't completed → alert,
+  // naming the owner (and the Kipu discharging staff if Kipu gave us one).
+  const dcForm = db.prepare(`SELECT id, pref, name, departure_steps, aftercare_dest, discharge_reason, discharge_improve, case_manager, therapist, discharged_by_kipu
+    FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-7 day')`).all();
+  for (const c of dcForm) {
+    const missing = dischargeMissing(c);
+    if (!missing.length) continue;
+    const who = c.discharged_by_kipu ? `Kipu discharge by ${c.discharged_by_kipu}` : (c.case_manager || c.therapist ? `owner: ${c.case_manager || c.therapist}` : '');
+    createAlert(c.id, 'dc_incomplete', 'Elevated', `${c.pref || c.name} was discharged in Kipu but the in-app discharge form is incomplete (missing: ${missing.join(', ')})${who ? ' · ' + who : ''}. Complete it.`);
+  }
   const FOLLOW_CADENCE = [['24h', 1], ['48h', 2], ['30d', 30]];
   for (const c of recentDisch) {
     if (!hasKit.get(c.id)) { insKit.run(c.id, `+${DIGNITY_DUE_HOURS} hours`, DIGNITY_ROLE); createAlert(c.id, 'dignity', 'Normal', `${c.pref || c.name} — Dignity Kit for a safe departure`); kits++; }

@@ -527,8 +527,9 @@ export async function kipuSyncRoster() {
           g('referrer_name', 'first_contact_name'), flat2(pick(p, 'dob', 'date_of_birth')), flat2(pick(p, 'diagnosis_codes')),
           flat2(pick(p, 'insurance_company')), flat2(pick(p, 'phone')), flat2(pick(p, 'pronouns')), flat2(pick(p, 'preferred_language')),
           flat2(pick(p, 'mr_number')), null, null, null, kid);
-        db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, discharge_reason = ? WHERE id = ?`)
-          .run(g('discharge_type', 'discharge_type_code', 'discharge_or_transition_name') || 'Discharged', dDate, g('discharge_or_transition_name'), g('discharge_reason'), info.lastInsertRowid);
+        db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, discharge_reason = ?, discharged_by_kipu = ? WHERE id = ?`)
+          .run(g('discharge_type', 'discharge_type_code', 'discharge_or_transition_name') || 'Discharged', dDate, g('discharge_or_transition_name'), g('discharge_reason'),
+            g('discharged_by', 'discharge_clinician', 'discharged_by_name') || deepFind(det, /discharg.*(by|clinician|provider|staff)|disposition.*by/i) || null, info.lastInsertRowid);
         importedDischarges++;
       }
     } catch (e) { /* discharge feed optional */ }

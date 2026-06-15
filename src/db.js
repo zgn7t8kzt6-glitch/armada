@@ -898,6 +898,7 @@ addColumn('clients', 'interests', 'TEXT');             // amenities/activities t
 addColumn('clients', 'aftercare_dest', 'TEXT');        // continuum: planned next step destination (Armada Outpatient / Partner / Home / Undecided)
 addColumn('clients', 'aftercare_facility_id', 'INTEGER'); // if Partner, which approved facility
 addColumn('facilities', 'preferred', 'INTEGER');       // 1 = approved reciprocal partner CMs may refer to
+addColumn('clients', 'discharged_by_kipu', 'TEXT');    // who did the discharge in Kipu (best-effort), for accountability
 // Case-management needs the team should help with, pulled from the notes + manual.
 db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   id INTEGER PRIMARY KEY,

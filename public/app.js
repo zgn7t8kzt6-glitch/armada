@@ -2230,6 +2230,7 @@ async function loadJourney(){
       ${sec("Today's schedule", schedHtml)}
       ${sec('Open requests', reqHtml)}
       ${sec('Open concerns', concernHtml)}
+      ${sec('🎯 Engagement', (c.interests?`<div class="pc-note">💛 Loves: ${esc(c.interests)}</div>`:'<div class="pc-note">No interests set — ask and add to the Care Card.</div>')+`<div class="pc-note">${j.activityWeek||0} activit${(j.activityWeek||0)===1?'y':'ies'} this week</div>`+((j.activities||[]).length?j.activities.map(a=>`<div class="pc-note">▸ ${esc(a.type)} <span class="hint">· ${esc(a.d)}${a.by_name?' · '+esc(a.by_name):''}</span></div>`).join(''):'<div class="pc-note">No activities logged yet.</div>')+`<button class="btn btn-gold btn-sm sans no-print" style="margin-top:6px" onclick="dashLogActivity(${c.id}, ${JSON.stringify(c.pref||c.name).replace(/"/g,'&quot;')})">Log activity</button>`)}
       ${sec('Recent delights', delHtml)}
       ${sec('Recent pulses', pulseHtml)}
       ${followHtml?sec('Aftercare', followHtml):''}
@@ -2431,7 +2432,8 @@ async function dashLogActivity(id, name){
   const type = (!isNaN(idx) && AMENITIES[idx-1]) ? AMENITIES[idx-1] : pick.trim();
   if(!type) return;
   try{ await api('/activities',{method:'POST',body:JSON.stringify({client_id:id, type})});
-    if($('dashboard')&&$('dashboard').classList.contains('active')) loadDashboard(); }
+    const act=(v)=>$(v)&&$(v).classList.contains('active');
+    if(act('dashboard')) loadDashboard(); else if(act('engagement')) loadEngagement(); else if(act('journey')) loadJourney(); }
   catch(e){ alert(e.message); }
 }
 async function celebrate(id, label, btn){

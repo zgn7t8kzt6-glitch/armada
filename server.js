@@ -1916,6 +1916,8 @@ app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
     followups: db.prepare(`SELECT * FROM followups WHERE client_id = ? AND status = 'Pending' ORDER BY due_date`).all(c.id),
     family: db.prepare(`SELECT * FROM family_contacts WHERE client_id = ? ORDER BY id`).all(c.id),
     visits: db.prepare(`SELECT * FROM visits WHERE client_id = ? AND date >= date('now') AND status = 'Scheduled' ORDER BY date, time`).all(c.id),
+    activities: db.prepare(`SELECT type, note, by_name, substr(created_at,1,10) d FROM activities WHERE client_id = ? ORDER BY id DESC LIMIT 8`).all(c.id),
+    activityWeek: db.prepare(`SELECT COUNT(*) n FROM activities WHERE client_id = ? AND created_at >= datetime('now','-7 day')`).get(c.id).n,
   } });
 });
 

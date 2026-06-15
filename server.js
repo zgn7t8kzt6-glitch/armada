@@ -426,7 +426,7 @@ app.get('/api/maintenance', requireAuth, (req, res) => {
     CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, created_at DESC`).all();
   const map = (r) => ({ id: r.id, title: r.title, location: r.location || '', category: r.category, priority: r.priority,
     description: r.description || '', status: r.status, reportedBy: r.reported_by || '', assignedTo: r.assigned_to || '',
-    resolution: r.resolution || '', at: String(r.created_at).slice(0, 16),
+    resolution: r.resolution || '', photo: r.photo || null, at: String(r.created_at).slice(0, 16),
     ageH: Math.floor((Date.now() - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z')) / 3.6e6) });
   const open = rows.filter((r) => r.status === 'open');
   const stats = {
@@ -446,8 +446,14 @@ app.post('/api/maintenance', requireAuth, async (req, res) => {
   if (!title) return res.status(400).json({ error: 'A short title is required' });
   const category = MAINT_CATEGORIES.includes(b.category) ? b.category : 'General';
   const priority = MAINT_PRIORITIES.includes(b.priority) ? b.priority : 'Normal';
-  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, reported_by_id, reported_by) VALUES (?,?,?,?,?,?,?)`)
-    .run(title, (b.location || '').trim() || null, category, priority, (b.description || '').trim() || null, req.user.id, req.user.name).lastInsertRowid;
+  let photo = null;
+  if (b.photo) {
+    if (!/^data:image\/(jpeg|png|webp);base64,/.test(b.photo)) return res.status(400).json({ error: 'Photo must be a JPEG/PNG/WebP image.' });
+    if (b.photo.length > 900000) return res.status(400).json({ error: 'Photo too large — it should be auto-resized; try again.' });
+    photo = b.photo;
+  }
+  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, photo, reported_by_id, reported_by) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(title, (b.location || '').trim() || null, category, priority, (b.description || '').trim() || null, photo, req.user.id, req.user.name).lastInsertRowid;
   const r = db.prepare(`SELECT * FROM maintenance_requests WHERE id = ?`).get(id);
   audit({ user: req.user, action: 'MAINT_NEW', entity_id: id, detail: `${title} (${priority}/${category})`, ip: req.ip });
   // Urgent or any Safety/Security item escalates to the on-call leader immediately.

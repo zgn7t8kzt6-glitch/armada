@@ -942,6 +942,7 @@ addColumn('clients', 'aftercare_dest', 'TEXT');        // continuum: planned nex
 addColumn('clients', 'aftercare_facility_id', 'INTEGER'); // if Partner, which approved facility
 addColumn('facilities', 'preferred', 'INTEGER');       // 1 = approved reciprocal partner CMs may refer to
 addColumn('clients', 'discharged_by_kipu', 'TEXT');    // who did the discharge in Kipu (best-effort), for accountability
+addColumn('maintenance_requests', 'photo', 'TEXT');    // optional work-order photo (client-resized JPEG data URL)
 // Case-management needs the team should help with, pulled from the notes + manual.
 db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   id INTEGER PRIMARY KEY,

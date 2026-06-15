@@ -2563,17 +2563,31 @@ function renderMaintBoard(){
       <div class="cmd-hero-row">
         <div><strong>${esc(r.title)}</strong> ${priPill(r.priority)} <span class="badge">${esc(r.category)}</span>${overdue?' <span class="badge badge-danger">past SLA</span>':''}
           <div class="hint">${r.location?esc(r.location)+' · ':''}reported by ${esc(r.reportedBy)||'staff'} · ${r.ageH}h ago${r.assignedTo?' · assigned: '+esc(r.assignedTo):''}</div>
-          ${r.description?`<div class="sans" style="margin-top:4px">${esc(r.description)}</div>`:''}</div>
+          ${r.description?`<div class="sans" style="margin-top:4px">${esc(r.description)}</div>`:''}
+          ${r.photo?`<img src="${r.photo}" alt="" style="height:64px;border-radius:8px;margin-top:6px;cursor:pointer;border:1px solid var(--line)" onclick='maintLightbox(this.src)'/>`:''}</div>
         <div style="text-align:right">${r.status==='open'?`<button class="btn btn-sm btn-ghost sans" onclick="maintStatus(${r.id},'in_progress')">Start</button>`:''} <button class="btn btn-sm btn-gold sans" onclick="maintResolve(${r.id})">Resolve</button></div>
       </div>
     </div>`;
   }).join('');
 }
+let MAINT_PHOTO=null;
+async function maintPhotoPick(input){
+  const file=input.files && input.files[0]; if(!file){ return; }
+  $('mt_msg').textContent='Processing photo…';
+  try{ MAINT_PHOTO = await resizeImage(file, 900, 0.7);
+    $('mt_photoThumb').innerHTML = `<img src="${MAINT_PHOTO}" alt="" style="height:40px;border-radius:6px;vertical-align:middle;cursor:pointer" onclick="maintLightbox(MAINT_PHOTO)"/> <a href="#" class="hint" onclick="clearMaintPhoto();return false">remove</a>`;
+    $('mt_msg').textContent='';
+  }catch(e){ $('mt_msg').textContent='Could not read photo'; }
+  input.value='';
+}
+function clearMaintPhoto(){ MAINT_PHOTO=null; $('mt_photoThumb').innerHTML=''; }
+function maintLightbox(src){ let o=$('maintLb'); if(!o){ o=document.createElement('div'); o.id='maintLb'; o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out'; o.onclick=()=>o.remove(); document.body.appendChild(o); } o.innerHTML=`<img src="${src}" style="max-width:92%;max-height:92%;border-radius:8px"/>`; }
 async function submitMaintenance(){
   const title=$('mt_title').value.trim(); if(!title){ $('mt_msg').textContent='Add a short title'; return; }
   const body={ title, location:$('mt_loc').value.trim(), category:$('mt_cat').value, priority:$('mt_pri').value, description:$('mt_desc').value.trim() };
+  if(MAINT_PHOTO) body.photo=MAINT_PHOTO;
   $('mt_msg').textContent='Submitting…';
-  try{ await api('/maintenance',{method:'POST',body:JSON.stringify(body)}); $('mt_msg').textContent='✓ Logged & routed'; ['mt_title','mt_loc','mt_desc'].forEach(x=>$(x).value=''); loadMaintenance(); }
+  try{ await api('/maintenance',{method:'POST',body:JSON.stringify(body)}); $('mt_msg').textContent='✓ Logged & routed'; ['mt_title','mt_loc','mt_desc'].forEach(x=>$(x).value=''); clearMaintPhoto(); loadMaintenance(); }
   catch(e){ $('mt_msg').textContent=e.message; }
 }
 async function maintStatus(id,status){ try{ await api('/maintenance/'+id,{method:'POST',body:JSON.stringify({status})}); loadMaintenance(); }catch(e){ alert(e.message); } }

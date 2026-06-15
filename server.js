@@ -1568,6 +1568,24 @@ function runFlowAutomations() {
     setIv.run(obsIntervalForLoc(c.loc || c.program), c.id);
   }
 
+  // Documentation auto-escalation: one summary alert per client whose required
+  // docs have blown their SLA, naming the owner. Deduped daily (kind 'docs'), so
+  // it surfaces accountability without drowning the urgent clinical alerts.
+  const docClients = db.prepare(`SELECT id, pref, name, admit, admit_time, loc, diagnosis, insurance, therapist, case_manager, referral_source, doc_forms FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  for (const c of docClients) {
+    const mins = careCardMinsSinceAdmit(c); if (mins == null) continue;
+    let forms = null; try { forms = c.doc_forms ? JSON.parse(c.doc_forms) : null; } catch { /* ignore */ }
+    const overdueDocs = [];
+    for (const rq of DOC_REQS) {
+      let ok; if (rq.form) { if (forms == null) continue; ok = !!forms[rq.form]; } else ok = !!rq.has(c);
+      if (!ok && mins > rq.slaHrs * 60) overdueDocs.push(rq.label);
+    }
+    if (overdueDocs.length) {
+      const owner = c.therapist || c.case_manager || '';
+      createAlert(c.id, 'docs', 'Normal', `${c.pref || c.name} — ${overdueDocs.length} document(s) overdue: ${overdueDocs.slice(0, 3).join(', ')}${overdueDocs.length > 3 ? '…' : ''}${owner ? ` · ${owner}` : ''}. Document in Kipu.`);
+    }
+  }
+
   // Auto-onboarding: every admit gets its standard case-management checklist, so
   // nothing gets missed and Case Mgmt / accountability populate themselves.
   const recentAdmits = db.prepare(`SELECT id FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) >= date('now','-3 day')`).all();

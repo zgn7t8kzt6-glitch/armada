@@ -4003,6 +4003,9 @@ app.get('/api/kiosk/data', (req, res) => {
 app.post('/api/kiosk/request', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
   const b = req.body || {}; if (!b.text?.trim()) return res.status(400).json({ error: 'Tell us what you need' });
+  // A request must name the client — we can't deliver a blanket to "anonymous".
+  const reqClient = b.client_id ? db.prepare(`SELECT id FROM clients WHERE id = ?`).get(b.client_id) : null;
+  if (!reqClient) return res.status(400).json({ error: 'Please choose your name so we can bring it to the right person.' });
   const text = b.text.trim();
   // Distress detection: a client signalling they want to leave / are struggling
   // is a safety + Save moment — flag it loudly so a human goes to them now.

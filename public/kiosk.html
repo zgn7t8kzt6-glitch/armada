@@ -44,7 +44,7 @@ async function enter(){
 }
 function home(){
   $('kview').innerHTML=`<h1>How can we care for you?</h1>
-    <p class="ksub">You can ask for something or tell us how you're doing. It's anonymous unless you choose your name.</p>
+    <p class="ksub">Ask for something, or tell us how you're doing. Surveys can be anonymous; a request will ask your name so we can bring it to you.</p>
     <label>I am (optional)</label>
     <select id="kclient"><option value="">Prefer not to say</option>${DATA.clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
     <button class="kbtn" onclick="reqView()">🛎  Request something</button>
@@ -55,17 +55,22 @@ function reqView(){
   CLIENT=client();
   const quick=['An extra blanket','A snack','To call my family','To talk to someone','Something for comfort','I want to leave'];
   $('kview').innerHTML=`<h1>What do you need?</h1>
-    <p class="ksub">Tap a common one, or write your own.</p>
-    <div id="kquick">${quick.map(q=>`<button class="kbtn" onclick="quickReq(this)">${esc(q)}</button>`).join('')}</div>
+    <p class="ksub">First, choose your name so we know who to help. Then tap a common one or write your own.</p>
+    <label>Your name <span style="color:#c0392b">*</span></label>
+    <select id="kreqclient"><option value="">— choose your name —</option>${DATA.clients.map(c=>`<option value="${c.id}"${String(c.id)===String(CLIENT)?' selected':''}>${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
+    <div id="kquick" style="margin-top:10px">${quick.map(q=>`<button class="kbtn" onclick="quickReq(this)">${esc(q)}</button>`).join('')}</div>
     <label style="margin-top:10px;display:block">Or tell us in your words</label><select id="kdept"><option value="">Anything</option>${DATA.departments.map(d=>`<option>${esc(d)}</option>`).join('')}</select>
     <textarea id="krtext" placeholder="e.g. an extra blanket, to call my family, a snack…"></textarea>
+    <div id="kreqerr" class="err"></div>
     <button class="btn btn-gold big" style="width:100%;margin-top:10px" onclick="sendReq()">Send</button>
     <button class="kbtn" onclick="home()">← Back</button>`;
 }
 function quickReq(b){ const t=$('krtext'); if(t){ t.value=b.textContent; } sendReq(); }
 async function sendReq(){
-  if(!$('krtext').value.trim())return;
-  await kapi('request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,client_id:CLIENT||null,department:$('kdept').value||null,text:$('krtext').value})});
+  const cid = $('kreqclient') ? $('kreqclient').value : '';
+  if(!cid){ if($('kreqerr')) $('kreqerr').textContent='Please choose your name so we can bring it to the right person.'; const s=$('kreqclient'); if(s){ s.focus(); s.style.borderColor='#c0392b'; } return; }
+  if(!$('krtext').value.trim()) { if($('kreqerr')) $('kreqerr').textContent='Tell us what you need.'; return; }
+  await kapi('request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,client_id:cid,department:$('kdept').value||null,text:$('krtext').value})});
   thanks('We\'re on it. Someone will take care of this for you.');
 }
 function surveyView(id){

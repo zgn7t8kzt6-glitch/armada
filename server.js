@@ -3626,6 +3626,16 @@ app.get('/api/surveys/:id/results', requireAuth, requireAdmin, (req, res) => {
   }
   res.json({ survey, responses, questions });
 });
+// Erase a survey's responses (admin) — for clearing trial/test data before going
+// live. Answers cascade-delete with the response rows.
+app.post('/api/surveys/:id/clear', requireAuth, requireAdmin, (req, res) => {
+  const survey = db.prepare(`SELECT id, title FROM surveys WHERE id = ?`).get(req.params.id);
+  if (!survey) return res.status(404).json({ error: 'Not found' });
+  const before = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?`).get(survey.id).n;
+  db.prepare(`DELETE FROM survey_responses WHERE survey_id = ?`).run(survey.id);
+  audit({ user: req.user, action: 'SURVEY_CLEAR', entity: 'survey', entity_id: survey.id, detail: `cleared ${before} response(s) from ${survey.title}`, ip: req.ip });
+  res.json({ ok: true, cleared: before });
+});
 
 // Weekly leadership report (admin): preview the HTML, or send it now.
 app.get('/api/report/weekly', requireAuth, requireAdmin, (req, res) => {

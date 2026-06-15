@@ -3157,8 +3157,14 @@ async function showSurveyResults(){
         <div class="res-num ${low?'low':''}">${q.avg!=null?q.avg+'/5':'—'} <span class="hint">(${q.count})</span></div></div></div>`;
     }
   });
-  $('surveyArea').innerHTML = `<div class="card"><h3>${esc(survey.title)} — results</h3>
-    <p class="sub sans">${responses} response${responses===1?'':'s'}. Scores under 3.5 are flagged. Low "feel cared for" scores are an early AMA signal.</p>${html}</div>`;
+  $('surveyArea').innerHTML = `<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(survey.title)} — results</h3>
+    <p class="sub sans">${responses} response${responses===1?'':'s'}. Scores under 3.5 are flagged. Low "feel cared for" scores are an early AMA signal.</p></div>
+    ${responses?`<button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${survey.id}, ${responses})" title="Erase all responses (e.g. trial data)">🗑 Clear ${responses} response${responses===1?'':'s'}</button>`:''}</div>${html}</div>`;
+}
+async function clearSurveyResponses(id, n){
+  if(!confirm(`Erase all ${n} response(s) for this survey? This permanently deletes the trial/test data and can't be undone.`)) return;
+  try{ const r=await api('/surveys/'+id+'/clear',{method:'POST'}); alert('✓ Cleared '+r.cleared+' response(s).'); showSurveyResults(); }
+  catch(e){ alert(e.message); }
 }
 
 /* ---- weekly report ---- */

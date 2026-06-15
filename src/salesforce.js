@@ -275,15 +275,16 @@ export async function sfSyncInbound(db) {
 // into expected_arrivals. Preserves front-desk actions (arrived/no-show) and
 // the Kipu-confirmed flag on rows already worked.
 export async function sfSyncArrivals(db) {
+  // The schedule lives on OPPORTUNITIES: a Lead converts to an Opportunity the
+  // moment someone is scheduled to admit. Stage "Admission Scheduled" = coming
+  // in; CloseDate = the planned admit date. Configurable per org.
+  const stages = (process.env.SF_SCHEDULE_STAGES || 'Admission Scheduled')
+    .split(',').map((s) => `'${s.trim().replace(/'/g, '')}'`).join(',');
   const soql = process.env.SF_ARRIVALS_SOQL || `
-    SELECT Id, FirstName, LastName, Preferred_Name__c, DOB__c, Phone, MobilePhone,
-           Date_Looking_to_Admit__c, LeadSource, Status, Patient_ID__c,
-           Insurance_Company__c, Plan_Type__c,
-           Referring_Organization__r.Name, Referring_Contact__r.Name,
-           Web_Form_How_did_you_hear_about_us__c
-    FROM Lead
-    WHERE Date_Looking_to_Admit__c >= LAST_N_DAYS:${+process.env.SF_ARRIVALS_BACK_DAYS || 45} AND Date_Looking_to_Admit__c <= NEXT_N_DAYS:21
-    ORDER BY Date_Looking_to_Admit__c ASC`;
+    SELECT Id, Name, StageName, CloseDate, CreatedDate
+    FROM Opportunity
+    WHERE IsClosed = false AND StageName IN (${stages})
+    ORDER BY CloseDate ASC NULLS LAST`;
   const records = await sfQueryAll(soql);
 
   const find = db.prepare(`SELECT id, status FROM expected_arrivals WHERE sf_lead_id = ?`);
@@ -296,17 +297,21 @@ export async function sfSyncArrivals(db) {
     scheduled_date=?, program=?, referral_source=?, insurance=?, updated_at=datetime('now')
     WHERE sf_lead_id=? AND status='expected'`);
 
+  // Opportunity Name is usually "First Last m/d/yyyy" — strip a trailing date.
+  const parseName = (name) => {
+    const clean = String(name || '').replace(/\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/, '').trim();
+    const parts = clean.split(/\s+/);
+    return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
+  };
+
   let pulled = records.length, created = 0, updated = 0;
   db.exec('BEGIN');
   try {
     for (const r of records) {
-      const sched = (r.Date_Looking_to_Admit__c || '').slice(0, 10) || null;
+      const sched = (r.CloseDate || '').slice(0, 10) || null;
       if (!sched) continue;
-      const vals = [
-        r.FirstName || null, r.LastName || null, r.Preferred_Name__c || null,
-        (r.DOB__c || '').slice(0, 10) || null, r.Phone || r.MobilePhone || null,
-        sched, null /*program*/, leadSource(r) || null, r.Insurance_Company__c || null,
-      ];
+      const { first, last } = parseName(r.Name);
+      const vals = [first || null, last || null, first || null, null, null, sched, r.StageName || null, null, null];
       const existing = find.get(r.Id);
       if (existing) { upd.run(...vals, r.Id); updated++; }
       else { ins.run(r.Id, ...vals); created++; }

@@ -176,6 +176,49 @@ app.post('/api/checkins', requireAuth, (req, res) => {
   audit({ user: req.user, action: 'CHECKIN', entity: 'client', entity_id: +b.client_id, ip: req.ip });
   res.json({ ok: true });
 });
+// ---- Continuum of care: keep clients moving through the full path (detox →
+// residential → PHP → IOP → outpatient). Every client needs a named next step
+// and a named destination; referrals out go only to approved reciprocal
+// partners; conversion is measured by case manager. ----
+const AFTERCARE_DESTS = ['Armada Outpatient', 'Approved partner', 'Home / self', 'Undecided'];
+app.get('/api/continuum', requireAuth, (req, res) => {
+  const active = db.prepare(`SELECT id, pref, name, room, loc, program, admit, case_manager, next_loc, anticipated_dc, aftercare_dest, aftercare_facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const facName = db.prepare(`SELECT name FROM facilities WHERE id = ?`);
+  const rows = active.map((c) => {
+    const hasPlan = !!(c.aftercare_dest && c.aftercare_dest !== 'Undecided');
+    const destName = c.aftercare_dest === 'Approved partner' && c.aftercare_facility_id ? (facName.get(c.aftercare_facility_id)?.name || 'partner') : (c.aftercare_dest || '');
+    return { id: c.id, name: c.pref || c.name, room: c.room || '', loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (parseLoc(c.program) || ''), nextLoc: c.next_loc || '', anticipatedDc: c.anticipated_dc ? String(c.anticipated_dc).slice(0, 10) : '', dest: c.aftercare_dest || '', destName, caseManager: c.case_manager || '', hasPlan };
+  });
+  // Metrics: who has a plan, where they're headed, by case manager.
+  const planned = rows.filter((r) => r.hasPlan).length;
+  const destCounts = {}; for (const r of rows) if (r.hasPlan) destCounts[r.dest] = (destCounts[r.dest] || 0) + 1;
+  const byCM = {};
+  for (const r of rows) { const k = r.caseManager || '(unassigned)'; (byCM[k] = byCM[k] || { cm: k, total: 0, planned: 0, armada: 0 }); byCM[k].total++; if (r.hasPlan) byCM[k].planned++; if (r.dest === 'Armada Outpatient') byCM[k].armada++; }
+  // Discharge conversion (90d): did completed clients continue in the Armada continuum?
+  const disch = db.prepare(`SELECT aftercare_dest, discharge_status FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-90 day')`).all();
+  const completed = disch.filter((d) => /complete|graduat|step/i.test(d.discharge_status || ''));
+  const toArmada = disch.filter((d) => d.aftercare_dest === 'Armada Outpatient').length;
+  const partners = db.prepare(`SELECT id, name FROM facilities WHERE preferred = 1 ORDER BY name`).all();
+  res.json({
+    rows, total: rows.length, planned, needsPlan: rows.filter((r) => !r.hasPlan),
+    destCounts, byCM: Object.values(byCM).sort((a, b) => b.total - a.total),
+    conversion: { discharged: disch.length, completed: completed.length, toArmada },
+    partners, dests: AFTERCARE_DESTS,
+  });
+});
+app.post('/api/clients/:id/continuum', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const dest = AFTERCARE_DESTS.includes(b.aftercare_dest) ? b.aftercare_dest : null;
+  const fid = dest === 'Approved partner' && b.aftercare_facility_id ? +b.aftercare_facility_id : null;
+  db.prepare(`UPDATE clients SET aftercare_dest = ?, aftercare_facility_id = ?, next_loc = COALESCE(NULLIF(?,''), next_loc) WHERE id = ?`)
+    .run(dest, fid, (b.next_loc || '').trim(), req.params.id);
+  audit({ user: req.user, action: 'CONTINUUM', entity: 'client', entity_id: +req.params.id, detail: dest || '', ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/facilities/:id/preferred', requireAuth, requireAdmin, (req, res) => {
+  db.prepare(`UPDATE facilities SET preferred = ? WHERE id = ?`).run(req.body?.preferred ? 1 : 0, req.params.id);
+  res.json({ ok: true });
+});
 // Voice of the guest: what clients said on rounds (last 3 days) — the qualitative
 // feedback leadership should read and act on, gathered automatically.
 app.get('/api/voice', requireAuth, requireAdmin, (req, res) => {

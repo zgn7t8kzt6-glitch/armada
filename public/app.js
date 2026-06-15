@@ -112,7 +112,7 @@ const GROUP_OF={
   dashboard:'today',today:'today',lineup:'today',arrivals:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',
   report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',
-  casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',
+  casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',continuum:'clinical',
   admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
   mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',
   training:'learn',library:'learn',standard:'learn',
@@ -172,6 +172,7 @@ function show(v){
   if(v==='clients') renderClients();
   if(v==='retention') loadRetention();
   if(v==='casemgmt') loadCaseMgmt();
+  if(v==='continuum') loadContinuum();
   if(v==='dignity') loadDignity();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
@@ -2355,6 +2356,37 @@ function renderAttentionList(t){
       <div class="txt">${icon[a.kind]||'•'} ${esc(a.text)}</div>
       ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}</div>`).join('') : '<div class="pc-note">✓ All clear. Touch every client, deliver every personal touch.</div>';
 }
+/* ---- Continuum of Care ---- */
+let CONTINUUM_DATA=null;
+async function loadContinuum(){
+  let d; try{ d=await api('/continuum'); }catch(e){ if($('contBoard')) $('contBoard').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  CONTINUUM_DATA=d;
+  const pct = d.total? Math.round(d.planned/d.total*100):100;
+  $('contKpis').innerHTML = `<div class="ret-card ${d.needsPlan.length?'rc-high':''}"><div class="n">${pct}%</div><div class="l">Have a next-step plan</div></div>`+
+    `<div class="ret-card ${d.needsPlan.length?'rc-high':''}"><div class="n">${d.needsPlan.length}</div><div class="l">No plan yet</div></div>`+
+    `<div class="ret-card"><div class="n">${d.destCounts['Armada Outpatient']||0}</div><div class="l">→ Armada Outpatient</div></div>`+
+    `<div class="ret-card"><div class="n">${d.conversion.toArmada}</div><div class="l">Continued w/ Armada (90d)</div></div>`;
+  const planBtn=(r)=>`<button class="btn btn-gold btn-sm sans" onclick="planContinuum(${r.id}, ${JSON.stringify(r.name).replace(/"/g,'&quot;')})">Set plan</button>`;
+  $('contNeedsPlan').innerHTML = d.needsPlan.length ? d.needsPlan.map(r=>`<div class="todo"><div class="txt"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''} <span class="hint">· ${esc(r.loc||'')}${r.caseManager?' · CM: '+esc(r.caseManager):' · no CM'}</span></div>${planBtn(r)}</div>`).join('') : '<div class="pc-note">✓ Everyone has a next-step plan.</div>';
+  $('contBoard').innerHTML = d.rows.length ? `<table class="tbl"><tr><th>Client</th><th>Now</th><th>Next</th><th>Destination</th><th>By</th><th></th></tr>${d.rows.map(r=>`<tr><td><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">'+esc(r.room)+'</span>':''}</td><td>${esc(r.loc||'—')}</td><td>${esc(r.nextLoc||'—')}</td><td>${r.hasPlan?'<span class="risk risk-low">'+esc(r.destName||r.dest)+'</span>':'<span class="risk risk-high">none</span>'}</td><td class="hint">${esc(r.caseManager||'—')}</td><td>${planBtn(r)}</td></tr>`).join('')}</table>` : '<div class="hint">No active clients.</div>';
+  $('contCM').innerHTML = d.byCM.length ? `<table class="tbl"><tr><th>Case manager</th><th>Clients</th><th>Planned</th><th>→ Armada</th></tr>${d.byCM.map(c=>`<tr><td>${esc(c.cm)}</td><td>${c.total}</td><td>${c.planned}/${c.total}</td><td>${c.armada}</td></tr>`).join('')}</table>` : '<div class="hint">—</div>';
+  if($('contPartners')&&ME.role==='admin'){ try{ const {facilities}=await api('/facilities'); $('contPartners').innerHTML = facilities.length ? facilities.map(f=>`<label class="sans" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:5px 10px;margin:3px;cursor:pointer"><input type="checkbox" ${f.preferred?'checked':''} onchange="togglePartner(${f.id}, this.checked)"/> ${esc(f.name)}</label>`).join('') : '<div class="hint">No partner facilities yet. Add them in Partners.</div>'; }catch(e){} }
+}
+async function planContinuum(id, name){
+  const d=CONTINUUM_DATA; if(!d) return;
+  const dest = await pickFrom('Plan the next step for '+name, d.dests); if(!dest) return;
+  let fid=null;
+  if(dest==='Approved partner'){
+    if(!d.partners.length){ alert('No approved partners set yet. An admin marks them under "Approved referral partners".'); return; }
+    const f = await pickFrom('Which approved partner?', d.partners.map(p=>p.name)); if(!f) return;
+    fid = (d.partners.find(p=>p.name===f)||{}).id||null;
+  }
+  const nl = prompt('Next level of care (optional — e.g. PHP, IOP, Outpatient):','')||'';
+  try{ await api('/clients/'+id+'/continuum',{method:'POST',body:JSON.stringify({aftercare_dest:dest, aftercare_facility_id:fid, next_loc:nl})}); loadContinuum(); }catch(e){ alert(e.message); }
+}
+function pickFrom(title, opts){ const list=opts.map((o,i)=>`${i+1}. ${o}`).join('\n'); const p=prompt(`${title}:\n\n${list}\n\nEnter a number:`); if(p===null) return Promise.resolve(null); const i=parseInt(p,10); return Promise.resolve(opts[i-1]||null); }
+async function togglePartner(id, on){ try{ await api('/facilities/'+id+'/preferred',{method:'POST',body:JSON.stringify({preferred:on?1:0})}); loadContinuum(); }catch(e){ alert(e.message); } }
+
 /* ---- Engagement: client engagement tracking + STAFF rewards ---- */
 let ENG_RANGE='week', ENG_STAFF=null;
 async function loadEngagement(){

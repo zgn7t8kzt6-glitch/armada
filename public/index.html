@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615x" />
+<link rel="stylesheet" href="/styles.css?v=20260615y" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -60,6 +60,7 @@
     <button data-view="program">Program</button>
     <button data-view="incidents" data-subview>Incidents</button>
     <button data-view="casemgmt">Case Mgmt</button>
+    <button data-view="continuum">Continuum</button>
     <button data-view="referrals">Referrals</button>
     <button data-view="partners" data-subview>Partners</button>
     <button data-view="askai" data-subview>Ask AI</button>
@@ -308,6 +309,25 @@
         </div>
         <div id="engStaff"></div>
       </div>
+    </section>
+
+    <!-- CONTINUUM OF CARE -->
+    <section id="continuum" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Continuum of Care</h3><p class="sub sans">The next level of care is the next chapter — not optional. Every client needs a named next step and destination before they leave. If it's not Armada outpatient, refer only to approved partners.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadContinuum()">Refresh</button>
+        </div>
+        <div id="contKpis" class="ret-cards"></div>
+      </div>
+      <div class="card" style="border-left:4px solid var(--danger)"><h3>No plan yet — set their next step</h3><p class="sub sans">These clients have no continuum plan. "If you want, you can stay" is not a plan. Give each a named next step.</p><div id="contNeedsPlan"></div></div>
+      <div class="card"><h3>Everyone's path</h3><div id="contBoard"></div></div>
+      <div class="card"><h3>By case manager — conversion accountability</h3><div id="contCM"></div></div>
+      <details class="card no-print" data-admin>
+        <summary>Approved referral partners (reciprocal relationships)</summary>
+        <p class="sub sans" style="margin:8px 0">Mark the facilities case managers are allowed to refer to for aftercare. Steer the relationships you want to build.</p>
+        <div id="contPartners"></div>
+      </details>
     </section>
 
     <!-- DOCUMENTATION COMPLIANCE (admin) -->
@@ -1283,6 +1303,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615x"></script>
+<script src="/app.js?v=20260615y"></script>
 </body>
 </html>

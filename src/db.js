@@ -895,6 +895,9 @@ addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapsho
 addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
 addColumn('clients', 'likes', 'TEXT');                 // what the client likes/enjoys (AI, kept fresh)
 addColumn('clients', 'interests', 'TEXT');             // amenities/activities they love (Care Card) — drives engagement
+addColumn('clients', 'aftercare_dest', 'TEXT');        // continuum: planned next step destination (Armada Outpatient / Partner / Home / Undecided)
+addColumn('clients', 'aftercare_facility_id', 'INTEGER'); // if Partner, which approved facility
+addColumn('facilities', 'preferred', 'INTEGER');       // 1 = approved reciprocal partner CMs may refer to
 // Case-management needs the team should help with, pulled from the notes + manual.
 db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   id INTEGER PRIMARY KEY,

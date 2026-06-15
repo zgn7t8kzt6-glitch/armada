@@ -2135,6 +2135,16 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'watch', title: 'Watch tonight — at risk of leaving (run the Save)', items: atRisk.map((x) => item(x.c, x.c.anchor_why ? 'why they came: ' + x.c.anchor_why : '', x.lvl)) });
     sections.push({ key: 'touches', title: "Anticipate — personal touches to deliver", items: personalTouches.map((c) => item(c, c.touch || c.prefs || '')) });
     sections.push({ key: 'rounds', title: 'Safety checks due', items: overdue.map((c) => item(c, 'overdue for a check')), cta: { label: 'Open Rounds →', view: 'rounds' } });
+    // Listening loop on the frontline: who's due for an experience survey this week.
+    const expS = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get();
+    if (expS) {
+      const surveyDue = db.prepare(`SELECT id, pref, name, room FROM clients c WHERE c.active = 1 AND c.discharge_status IS NULL
+        AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id = ? AND r.client_id = c.id AND r.created_at >= datetime('now','-7 day')) ORDER BY room, name`).all(expS.id);
+      if (surveyDue.length) {
+        tiles.push({ key: 'survey', label: 'Experience surveys to gather', n: surveyDue.length, sev: 'warn', view: 'surveys' });
+        sections.push({ key: 'survey', title: 'Ask how we’re doing — experience surveys due this week', items: surveyDue.map((c) => item(c, 'no survey in 7 days')), cta: { label: 'Open Surveys →', view: 'surveys' } });
+      }
+    }
   }
 
   // The Horst layer, on every role's dashboard: today's Standard (the lineup

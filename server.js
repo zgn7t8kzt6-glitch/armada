@@ -2860,9 +2860,23 @@ app.post('/api/surveys/:id/respond', requireAuth, (req, res) => {
     if (num == null && text == null) continue;
     ins.run(rid, a.question_id, num, text);
   }
+  surveyRecovery(req.body.client_id, answers);   // bad feedback → instant service recovery
   audit({ user: req.user, action: 'SURVEY', entity: 'survey', entity_id: survey.id, detail: req.body.client_id ? 'client ' + req.body.client_id : 'anonymous', ip: req.ip });
   res.json({ ok: true });
 });
+// Close the loop on the voice of the guest: a low score (or a 1-2 on any item)
+// raises a service-recovery alert so a leader checks in immediately.
+function surveyRecovery(clientId, answers) {
+  if (!clientId || !Array.isArray(answers)) return;
+  const nums = answers.map((a) => ((a.num === 0 || a.num) ? Number(a.num) : null)).filter((n) => n != null && !Number.isNaN(n));
+  if (!nums.length) return;
+  const avg = nums.reduce((s, n) => s + n, 0) / nums.length;
+  const low = nums.some((n) => n <= 2);
+  if (avg > 3 && !low) return;
+  const c = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(clientId);
+  const nm = c ? (c.pref || c.name) : ('client ' + clientId);
+  createAlert(clientId, 'recovery', (avg <= 2 || low) ? 'High' : 'Elevated', `${nm} — low experience score (${avg.toFixed(1)}/5). Service recovery: a leader should check in now.`);
+}
 
 // Surveys that are due: discharge survey after discharge, experience survey weekly.
 app.get('/api/surveys/due', requireAuth, (req, res) => {
@@ -3078,6 +3092,7 @@ app.post('/api/kiosk/survey', (req, res) => {
     if (a.question_id == null) continue;
     ins.run(info.lastInsertRowid, a.question_id, (a.num === 0 || a.num) ? Number(a.num) : null, a.text?.trim() || null);
   }
+  surveyRecovery(b.client_id, b.answers);   // the guest spoke — recover instantly if it's low
   res.json({ ok: true });
 });
 

@@ -745,7 +745,7 @@ app.post('/api/command/brief', requireAuth, requireAdmin, async (req, res) => {
 });
 // Daily meal count to the caterer + kitchen lead (Asher): how many to prepare for
 // tomorrow = current census + tomorrow's scheduled arrivals (welcome meals).
-app.get('/api/command/meals', requireAuth, requireAdmin, (req, res) => res.json({ ...buildMealCount(), to: getState('meal_count_to') || '', emailReady: emailConfigured() }));
+app.get('/api/command/meals', requireAuth, requireAdmin, (req, res) => res.json({ ...buildMealCount(), to: mealRecipients(), emailReady: emailConfigured() }));
 app.post('/api/command/meals/recipients', requireAuth, requireAdmin, (req, res) => { setState('meal_count_to', (req.body?.to || '').trim()); res.json({ ok: true }); });
 app.post('/api/command/meals/send', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await sendMealCount()); } catch (e) { res.status(502).json({ error: e.message }); }
@@ -4227,7 +4227,7 @@ function buildMealCount() {
   return { date: tomorrow, dtLabel, census, welcome, total, veg, gf, arrivals: names };
 }
 async function sendMealCount() {
-  const to = (getState('meal_count_to') || process.env.MEAL_COUNT_TO || '').trim();
+  const to = mealRecipients();
   if (!emailConfigured()) return { sent: false, reason: 'email not connected' };
   if (!to) return { sent: false, reason: 'no recipients (set the caterer + Asher in Command → Meal count)' };
   const m = buildMealCount();
@@ -4247,6 +4247,10 @@ async function sendMealCount() {
   await sendEmail({ to, subject: `Armada meal count — ${m.dtLabel}: ${m.total} meals`, html });
   return { sent: true, to, total: m.total, census: m.census, welcome: m.welcome };
 }
+// Default kitchen recipient (Asher) until/unless someone sets it in the app
+// (Command → Meal count). An email address isn't a secret; the app UI overrides.
+const DEFAULT_MEAL_TO = 'apepose@armadarecovery.com';
+function mealRecipients() { return (getState('meal_count_to') || process.env.MEAL_COUNT_TO || DEFAULT_MEAL_TO).trim(); }
 function mealHour() { return +autoCfg('meal_hour', process.env.MEAL_COUNT_HOUR || 8); }
 function runMealCount() {
   if (autoCfg('meal_on', 'on') !== 'off') {

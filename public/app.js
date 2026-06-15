@@ -2174,6 +2174,7 @@ function fillClientSelect(el, withBlank){
   }).catch(()=>{});
 }
 async function loadConcierge(){
+  if(META.kioskCode && $('kioskCodeHint2')) $('kioskCodeHint2').innerHTML = 'Kiosk code: <strong>'+esc(META.kioskCode)+'</strong> — staff enter this to begin (change it in Settings → Kiosk &amp; display code).';
   await fillClientSelect($('rq_client'), 'Whole house / no client');
   if($('rq_dept').options.length===0){ $('rq_dept').innerHTML=(META.departments||[]).map(d=>`<option>${esc(d)}</option>`).join(''); $('rq_filter_dept').innerHTML='<option value="">All departments</option>'+(META.departments||[]).map(d=>`<option>${esc(d)}</option>`).join(''); }
   const dept=$('rq_filter_dept').value, status=$('rq_filter_status').value;
@@ -2741,6 +2742,7 @@ async function loadToday(){
     api('/carecards').catch(()=>({incomplete:[],overdue:0})),
   ]);
   if(META.kioskCode) $('kioskCodeHint').innerHTML = 'kiosk code: <strong>'+esc(META.kioskCode)+'</strong>';
+  if(META.kioskCode && $('kioskCodeHint2')) $('kioskCodeHint2').innerHTML = 'Kiosk code: <strong>'+esc(META.kioskCode)+'</strong> — staff enter this to begin (change it in Settings → Kiosk &amp; display code).';
   if(t.claude) $('todayBriefBtn').style.display='inline-block';
   const m=t.metrics;
   // Populate the (collapsed) detail panels

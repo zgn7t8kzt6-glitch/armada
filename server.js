@@ -219,6 +219,15 @@ app.post('/api/facilities/:id/preferred', requireAuth, requireAdmin, (req, res) 
   db.prepare(`UPDATE facilities SET preferred = ? WHERE id = ?`).run(req.body?.preferred ? 1 : 0, req.params.id);
   res.json({ ok: true });
 });
+// Create + approve a referral partner in one step (used from the discharge flow).
+app.post('/api/partners/approve', requireAuth, requireAdmin, (req, res) => {
+  const name = (req.body?.name || '').trim(); if (!name) return res.status(400).json({ error: 'Partner name required' });
+  const f = db.prepare(`SELECT id FROM facilities WHERE name = ? COLLATE NOCASE`).get(name);
+  const id = f ? f.id : db.prepare(`INSERT INTO facilities (name, preferred) VALUES (?, 1)`).run(name).lastInsertRowid;
+  db.prepare(`UPDATE facilities SET preferred = 1 WHERE id = ?`).run(id);
+  audit({ user: req.user, action: 'APPROVE_PARTNER', detail: name, ip: req.ip });
+  res.json({ ok: true, id, name });
+});
 // Every Kipu discharge must have the in-app fond-farewell completed (Safe
 // Departure checklist + where they went). What's missing on a given discharge:
 function dischargeMissing(c) {

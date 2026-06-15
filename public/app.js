@@ -231,7 +231,8 @@ async function editClient(id){
   if(client.kipu_id) loadKipuChart(id); else if($('kipuChartCard')) $('kipuChartCard').style.display='none';
 }
 function dischargeDestUI(){ const w=$('d_partnerWrap'); if(!w) return; const partner=$('d_dest').value==='Approved partner'; w.style.display=partner?'':'none'; if(partner) loadDischargePartners(); }
-async function loadDischargePartners(){ if(!$('d_partner')||$('d_partner').dataset.loaded) return; try{ const d=await api('/continuum'); $('d_partner').innerHTML='<option value="">— choose —</option>'+(d.partners||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join(''); $('d_partner').dataset.loaded='1'; }catch(e){} }
+async function loadDischargePartners(){ if(!$('d_partner')) return; try{ const d=await api('/continuum'); const opts=(d.partners||[]); $('d_partner').innerHTML = opts.length ? '<option value="">— choose —</option>'+opts.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('') : '<option value="">No approved partners yet — add one below'+(ME&&ME.role==='admin'?'':' (ask an admin)')+'</option>'; }catch(e){} }
+async function addApprovedPartner(){ const n=$('d_newPartner')?$('d_newPartner').value.trim():''; if(!n) return; try{ const r=await api('/partners/approve',{method:'POST',body:JSON.stringify({name:n})}); $('d_newPartner').value=''; await loadDischargePartners(); if($('d_partner')) $('d_partner').value=r.id; }catch(e){ alert(e.message); } }
 async function loadKipuChart(cid, reload){
   const card=$('kipuChartCard'); if(!card) return;
   card.style.display='';

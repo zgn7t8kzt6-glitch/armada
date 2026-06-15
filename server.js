@@ -2052,16 +2052,22 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const myTasks = mine.length ? tasks.filter((t) => caseload.some((c) => c.id === t.cid)) : tasks;
     const followups = db.prepare(`SELECT f.id, f.due_date, c.id cid, c.pref, c.name FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' ORDER BY f.due_date`).all();
     const planning = caseload.filter((c) => c.anticipated_dc || c.next_loc);
+    // Family as a guest: keep families in the loop — those with a contact but no update in 7+ days.
+    const famContact = db.prepare(`SELECT 1 FROM family_contacts WHERE client_id = ? LIMIT 1`);
+    const lastFam = db.prepare(`SELECT created_at FROM family_updates WHERE client_id = ? ORDER BY id DESC LIMIT 1`);
+    const famDue = caseload.filter((c) => { if (!famContact.get(c.id)) return false; const l = lastFam.get(c.id); return !l || (Date.now() - Date.parse(String(l.created_at).replace(' ', 'T') + 'Z')) > 7 * 864e5; });
     northStar = { label: 'Open case tasks', value: myTasks.length, sev: myTasks.length ? 'warn' : 'ok' };
     tiles = [
       { key: 'caseload', label: 'My clients', n: caseload.length, sev: 'ok' },
       { key: 'tasks', label: 'Open case tasks', n: myTasks.length, sev: myTasks.length ? 'warn' : 'ok' },
       { key: 'planning', label: 'Aftercare to plan', n: planning.length, sev: planning.length ? 'warn' : 'ok' },
       { key: 'followups', label: 'Follow-ups due', n: followups.length, sev: followups.length ? 'high' : 'ok' },
+      { key: 'family', label: 'Family updates due', n: famDue.length, sev: famDue.length ? 'warn' : 'ok' },
     ];
     sections.push({ key: 'tasks', title: 'Open case tasks', items: myTasks.map((t) => ({ id: t.cid, name: t.pref || t.name, sub: (t.category ? '[' + t.category + '] ' : '') + t.text })) });
     sections.push({ key: 'planning', title: 'Send-off — aftercare to plan', items: planning.map((c) => item(c, (c.next_loc ? '→ ' + c.next_loc : '') + (c.anticipated_dc ? ' · by ' + String(c.anticipated_dc).slice(0, 10) : ''))) });
     sections.push({ key: 'followups', title: 'Follow-up calls due', items: followups.map((f) => ({ id: f.cid, name: f.pref || f.name, sub: 'due ' + (f.due_date || '') })) });
+    sections.push({ key: 'family', title: 'Family updates due — keep families in the loop', items: famDue.map((c) => item(c, 'no family update in 7+ days')) });
     sections.push({ key: 'caseload', title: 'My caseload', items: caseload.map((c) => item(c, c.program || '')) });
   } else if (jr === 'Front Desk') {
     subtitle = 'The warm welcome — greet every arrival by name.';

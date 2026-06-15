@@ -1736,6 +1736,14 @@ app.post('/api/staff-pulse', requireAuth, (req, res) => {
     .run(req.user.id, req.body?.load || null, req.body?.note || null, new Date().toISOString().slice(0, 10));
   res.json({ ok: true });
 });
+// Save outcomes summary (the existing saves table: outcome Stayed/Left/Pending).
+app.get('/api/saves/stats', requireAuth, (req, res) => {
+  const days = Math.min(365, Math.max(7, +req.query.days || 90));
+  const rows = db.prepare(`SELECT outcome, COUNT(*) n FROM saves WHERE created_at >= datetime('now','-${days} day') GROUP BY outcome`).all();
+  const by = Object.fromEntries(rows.map((r) => [r.outcome, r.n]));
+  const stayed = by.Stayed || 0, left = by.Left || 0, total = stayed + left;
+  res.json({ days, stayed, left, pending: by.Pending || 0, total, successRate: total ? Math.round(stayed / total * 100) : null });
+});
 
 // Client voice
 app.post('/api/client-experience', requireAuth, (req, res) => {
@@ -2161,7 +2169,10 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const delightsWeek = db.prepare(`SELECT COUNT(*) n FROM delights WHERE by_id = ? AND created_at >= datetime('now','-7 day')`).get(uid).n;
   const fdays = new Set(db.prepare(`SELECT DISTINCT date FROM focus_logs WHERE user_id = ? AND date >= date('now','-30 day')`).all(uid).map((r) => r.date));
   let streak = 0, cursor = today; while (fdays.has(cursor)) { streak++; cursor = addDays(cursor, -1); }
-  const stats = { wowsWeek, delightsWeek, standardStreak: streak };
+  const sv = db.prepare(`SELECT outcome, COUNT(*) n FROM saves WHERE created_at >= datetime('now','-90 day') GROUP BY outcome`).all();
+  const svBy = Object.fromEntries(sv.map((r) => [r.outcome, r.n]));
+  const svTotal = (svBy.Stayed || 0) + (svBy.Left || 0);
+  const stats = { wowsWeek, delightsWeek, standardStreak: streak, saveRate: svTotal ? Math.round((svBy.Stayed || 0) / svTotal * 100) : null, savesKept: svBy.Stayed || 0 };
   // Proactive alerts (the automations' output) surfaced on every shift screen.
   const alerts = db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all();
   res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins });

@@ -2357,6 +2357,7 @@ async function loadDashboard(){
       <div class="ret-card"><div class="n">${st.standardStreak||0}</div><div class="l">Day Standard streak${(st.standardStreak||0)>=3?' 🔥':''}</div></div>
       <div class="ret-card"><div class="n">${st.wowsWeek||0}</div><div class="l">Wows this week</div></div>
       <div class="ret-card"><div class="n">${st.delightsWeek||0}</div><div class="l">Touches delivered this week</div></div>
+      <div class="ret-card"><div class="n">${st.saveRate!=null?st.saveRate+'%':'—'}</div><div class="l">Saves kept (90d)</div></div>
     </div>`;
   // Anticipation — deliver these without being asked (the unexpressed need)
   const nudges=(d.nudges||[]);
@@ -2382,6 +2383,15 @@ async function dashJoinFocus(btn){
 async function markDelivered(id, text, btn){
   try{ await api('/delights',{method:'POST',body:JSON.stringify({client_id:id, text})});
     if(btn){ btn.textContent='✓ Done'; btn.disabled=true; const row=btn.closest('.todo'); if(row) row.style.opacity='.5'; } }
+  catch(e){ alert(e.message); }
+}
+async function dashLogSave(){
+  const trigger = prompt('What triggered it? (e.g. day-4 cravings, family call)','')||'';
+  if(trigger===null) return;
+  const stayed = confirm('Outcome?\n\nOK = they STAYED (great work) · Cancel = they left');
+  const note = prompt('What you did / what worked (optional):','')||'';
+  try{ await api('/saves',{method:'POST',body:JSON.stringify({trigger:trigger.trim()||null, outcome: stayed?'Stayed':'Left', note})});
+    if($('dashboard')&&$('dashboard').classList.contains('active')) loadDashboard(); else alert(stayed?'✓ Save logged — they stayed. 🛟':'Logged. Run the Second Save call in 24–72h.'); }
   catch(e){ alert(e.message); }
 }
 async function logWow(){

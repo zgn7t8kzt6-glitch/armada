@@ -2173,9 +2173,20 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const svBy = Object.fromEntries(sv.map((r) => [r.outcome, r.n]));
   const svTotal = (svBy.Stayed || 0) + (svBy.Left || 0);
   const stats = { wowsWeek, delightsWeek, standardStreak: streak, saveRate: svTotal ? Math.round((svBy.Stayed || 0) / svTotal * 100) : null, savesKept: svBy.Stayed || 0 };
+  // Sobriety milestones landing today/tomorrow — a celebration to deliver on the floor.
+  const MILES = [1, 3, 7, 14, 30, 60, 90, 180, 365];
+  const milestones = [];
+  for (const c of active) {
+    if (!c.sober) continue;
+    const base = new Date(c.sober + 'T00:00').getTime(); if (isNaN(base)) continue;
+    for (const m of MILES) {
+      const inDays = Math.round((base + m * 864e5 - Date.now()) / 864e5);
+      if (inDays === 0 || inDays === 1) milestones.push({ id: c.id, name: c.pref || c.name, label: `${m} day${m > 1 ? 's' : ''} clean`, today: inDays === 0 });
+    }
+  }
   // Proactive alerts (the automations' output) surfaced on every shift screen.
   const alerts = db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all();
-  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins });
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins });
 });
 
 // Moments of Truth — the three steps of service, made measurable per client:

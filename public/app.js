@@ -2361,6 +2361,12 @@ async function loadDashboard(){
       <div class="ret-card"><div class="n">${st.delightsWeek||0}</div><div class="l">Touches delivered this week</div></div>
       <div class="ret-card"><div class="n">${st.saveRate!=null?st.saveRate+'%':'—'}</div><div class="l">Saves kept (90d)</div></div>
     </div>`;
+  // Celebrate — sobriety milestones landing today/tomorrow
+  const miles=(d.milestones||[]);
+  $('dashMiles').innerHTML = miles.length ? `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee">
+      <h3 style="margin:0 0 6px">🎉 Celebrate today</h3>
+      ${miles.map(m=>`<div class="todo"><div class="txt">🎉 <strong>${esc(m.name)}</strong> — ${esc(m.label)} ${m.today?'<span class="risk risk-low">today</span>':'<span class="hint">tomorrow</span>'}</div><button class="btn btn-gold btn-sm sans" onclick="celebrate(${m.id}, ${JSON.stringify(m.label).replace(/"/g,'&quot;')}, this)">Celebrated 🎉</button></div>`).join('')}
+    </div>` : '';
   // Anticipation — deliver these without being asked (the unexpressed need)
   const nudges=(d.nudges||[]);
   $('dashNudges').innerHTML = nudges.length ? `<div class="card" style="border-left:4px solid var(--aqua);background:#f4fafb">
@@ -2381,6 +2387,11 @@ async function loadDashboard(){
 }
 async function dashJoinFocus(btn){
   try{ await api('/focus',{method:'POST',body:JSON.stringify({})}); if(btn){ btn.textContent='✓ On it'; btn.disabled=true; } }catch(e){ alert(e.message); }
+}
+async function celebrate(id, label, btn){
+  try{ await api('/delights',{method:'POST',body:JSON.stringify({client_id:id, text:'Celebrated their '+label+' milestone 🎉'})});
+    if(btn){ btn.textContent='✓ Celebrated'; btn.disabled=true; const row=btn.closest('.todo'); if(row) row.style.opacity='.6'; } }
+  catch(e){ alert(e.message); }
 }
 async function markDelivered(id, text, btn){
   try{ await api('/delights',{method:'POST',body:JSON.stringify({client_id:id, text})});

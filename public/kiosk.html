@@ -53,12 +53,16 @@ function home(){
 function client(){ const s=$('kclient'); return s?s.value:''; }
 function reqView(){
   CLIENT=client();
+  const quick=['An extra blanket','A snack','To call my family','To talk to someone','Something for comfort','I want to leave'];
   $('kview').innerHTML=`<h1>What do you need?</h1>
-    <label>Type (optional)</label><select id="kdept"><option value="">Anything</option>${DATA.departments.map(d=>`<option>${esc(d)}</option>`).join('')}</select>
-    <label>Your request</label><textarea id="krtext" placeholder="e.g. an extra blanket, to call my family, a snack…"></textarea>
+    <p class="ksub">Tap a common one, or write your own.</p>
+    <div id="kquick">${quick.map(q=>`<button class="kbtn" onclick="quickReq(this)">${esc(q)}</button>`).join('')}</div>
+    <label style="margin-top:10px;display:block">Or tell us in your words</label><select id="kdept"><option value="">Anything</option>${DATA.departments.map(d=>`<option>${esc(d)}</option>`).join('')}</select>
+    <textarea id="krtext" placeholder="e.g. an extra blanket, to call my family, a snack…"></textarea>
     <button class="btn btn-gold big" style="width:100%;margin-top:10px" onclick="sendReq()">Send</button>
     <button class="kbtn" onclick="home()">← Back</button>`;
 }
+function quickReq(b){ const t=$('krtext'); if(t){ t.value=b.textContent; } sendReq(); }
 async function sendReq(){
   if(!$('krtext').value.trim())return;
   await kapi('request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,client_id:CLIENT||null,department:$('kdept').value||null,text:$('krtext').value})});

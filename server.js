@@ -3133,8 +3133,18 @@ app.get('/api/kiosk/data', (req, res) => {
 app.post('/api/kiosk/request', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
   const b = req.body || {}; if (!b.text?.trim()) return res.status(400).json({ error: 'Tell us what you need' });
-  db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, 'Normal', ?)`)
-    .run(b.client_id || null, b.department || 'Front Desk / Concierge', b.text.trim(), 'Client (kiosk)');
+  const text = b.text.trim();
+  // Distress detection: a client signalling they want to leave / are struggling
+  // is a safety + Save moment — flag it loudly so a human goes to them now.
+  const distress = /\b(leave|leaving|go home|sign out|ama|can'?t do this|done with this|want out|give up|hurt myself|kill myself|suicid|hopeless|panic|can'?t breathe|withdraw|sick)\b/i.test(text);
+  const priority = distress ? 'Urgent' : 'Normal';
+  db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, ?, ?)`)
+    .run(b.client_id || null, b.department || 'Front Desk / Concierge', text, priority, 'Client (kiosk)');
+  if (distress) {
+    const c = b.client_id ? db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(b.client_id) : null;
+    const who = c ? (c.pref || c.name) : 'A client';
+    createAlert(b.client_id || null, 'concern', 'High', `${who} reached out from the kiosk: "${text.slice(0, 80)}". Go to them in person now — run the Save.`);
+  }
   res.json({ ok: true });
 });
 app.post('/api/kiosk/survey', (req, res) => {

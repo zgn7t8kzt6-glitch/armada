@@ -62,7 +62,7 @@ app.use((req, res, next) => {
 });
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping'];
+const JOB_ROLES = ['Executive Director', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping'];
 const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nurse / Medical (comfort, not feeling well)', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
@@ -2772,7 +2772,32 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const atRisk = active.map((c) => ({ c, lvl: riskOf(c) })).filter((x) => x.lvl === 'High' || x.lvl === 'Elevated');
   const personalTouches = active.filter((c) => (c.touch && c.touch.trim()) || (c.prefs && c.prefs.trim()));
 
-  if (jr === 'Nurse') {
+  if (jr === 'Executive Director' || jr === 'Clinical Director') {
+    subtitle = 'The house at a glance — census, who\'s at risk, how we\'re serving, and what needs leadership.';
+    const today2 = today;
+    const dToday = db.prepare(`SELECT pref, name, discharge_status FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today2);
+    const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
+    const openIncidents = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'`).get().n;
+    const incidentsRecent = db.prepare(`SELECT i.type, i.severity, i.description, c.pref, c.name FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE i.status = 'Open' ORDER BY (i.severity IN ('High','Critical')) DESC, i.id DESC LIMIT 8`).all();
+    // Service: warm welcome (care card) + anticipation (a delight) delivered.
+    const delightSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM delights WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
+    let welcomed = 0, anticipated = 0;
+    for (const c of active) { if (careCardStatus(c).complete) welcomed++; if (delightSet.has(c.id)) anticipated++; }
+    const served = active.length ? Math.round((welcomed + anticipated) / (active.length * 2) * 100) : 100;
+    const dcOpen = db.prepare(`SELECT departure_steps, aftercare_dest, discharge_reason, discharge_improve FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-7 day')`).all().filter((c) => dischargeMissing(c).length).length;
+    northStar = { label: 'Three Steps of Service delivered', value: served + '%', sev: served >= 80 ? 'ok' : served >= 60 ? 'warn' : 'high' };
+    tiles = [
+      { key: 'census', label: 'Census', n: active.length, sev: 'ok' },
+      { key: 'risk', label: 'At risk of leaving', n: atRisk.length, sev: atRisk.length ? 'high' : 'ok', view: 'retention' },
+      { key: 'ama', label: 'AMA today', n: amaToday, sev: amaToday ? 'high' : 'ok' },
+      { key: 'incidents', label: 'Open incidents', n: openIncidents, sev: openIncidents ? 'warn' : 'ok', view: 'incidents' },
+      { key: 'dcform', label: 'Discharges missing form', n: dcOpen, sev: dcOpen ? 'high' : 'ok', view: 'continuum' },
+    ];
+    sections.push({ key: 'risk', title: 'At risk of leaving — the Save', items: atRisk.map((x) => item(x.c, x.c.anchor_why ? 'anchor: ' + x.c.anchor_why : '', x.lvl)) });
+    sections.push({ key: 'incidents', title: 'Open incidents', cta: { label: 'Open Incidents →', view: 'incidents' }, items: incidentsRecent.map((i) => ({ name: i.pref || i.name || 'House', sub: `${i.type} — ${i.description}`, badge: i.severity })) });
+    sections.push({ key: 'newadmits', title: 'New admits today', items: newAdmits.map((c) => item(c, c.program || '', 'NEW')) });
+    sections.push({ key: 'discharges', title: 'Discharges today', items: dToday.map((d) => ({ name: d.pref || d.name, sub: d.discharge_status || '' })) });
+  } else if (jr === 'Nurse') {
     subtitle = 'Medical watch — withdrawal, meds, and the safety of every client.';
     const detox = active.filter((c) => isDetoxProgram(c.program) || /3\.?7|3\.?2|wm/i.test(c.loc || ''));
     const sendouts = db.prepare(`SELECT client_name name, destination, reason FROM medical_sendouts WHERE status = 'out' ORDER BY sent_at DESC`).all();

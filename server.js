@@ -2162,7 +2162,9 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const fdays = new Set(db.prepare(`SELECT DISTINCT date FROM focus_logs WHERE user_id = ? AND date >= date('now','-30 day')`).all(uid).map((r) => r.date));
   let streak = 0, cursor = today; while (fdays.has(cursor)) { streak++; cursor = addDays(cursor, -1); }
   const stats = { wowsWeek, delightsWeek, standardStreak: streak };
-  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, stats, focus: { topic: focus.t, goal: focus.g }, wins });
+  // Proactive alerts (the automations' output) surfaced on every shift screen.
+  const alerts = db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all();
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins });
 });
 
 // Moments of Truth — the three steps of service, made measurable per client:

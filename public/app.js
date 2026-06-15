@@ -2324,6 +2324,12 @@ async function loadDashboard(){
           <h3 style="margin:2px 0 0">${esc(fc.topic)}</h3>${fc.goal?`<p class="sub sans" style="margin:4px 0 0">${esc(fc.goal)}</p>`:''}</div>
         <div class="toolbar" style="gap:8px"><button class="btn btn-ghost btn-sm sans" onclick="startHuddle()">▶ Run the lineup</button><button class="btn btn-gold btn-sm sans" onclick="dashJoinFocus(this)">I'm on it ✋</button></div>
       </div></div>` : '';
+  // Proactive alerts — the automations reach the floor
+  const al=(d.alerts||[]);
+  $('dashAlerts').innerHTML = al.length ? `<div class="card" style="border-left:4px solid var(--danger)">
+      <h3 style="margin:0 0 6px">⚡ Alerts <span class="badge">${al.length}</span></h3>
+      ${al.map(a=>`<div class="todo"><div class="txt">${a.level==='High'?'🔴 ':''}${esc(a.message)}</div><button class="btn btn-ghost btn-sm sans" onclick="ackAlert(${a.id})">Got it ✓</button></div>`).join('')}
+    </div>` : '';
   // Your week — healthy pride
   const st=d.stats||{};
   $('dashStats').innerHTML = `<div class="ret-cards" style="margin-top:0">
@@ -2446,7 +2452,11 @@ function renderAlertsList(d){
       ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}
       <button class="btn btn-ghost btn-sm sans" onclick="ackAlert(${a.id})">Got it ✓</button></div>`).join('') : '<div class="pc-note">✓ No open alerts.</div>';
 }
-async function ackAlert(id){ await api('/alerts/'+id+'/ack',{method:'POST'}); await loadToday(); todayPanel('alerts'); }
+async function ackAlert(id){
+  await api('/alerts/'+id+'/ack',{method:'POST'});
+  if($('dashboard')&&$('dashboard').classList.contains('active')){ loadDashboard(); return; }
+  await loadToday(); todayPanel('alerts');
+}
 
 /* ---- alumni ---- */
 async function loadAlumni(){

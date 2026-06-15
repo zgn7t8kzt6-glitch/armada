@@ -1774,7 +1774,7 @@ async function loadVoice(){
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
-  loadMoments(); loadVoice(); loadMealCount();
+  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
@@ -3089,8 +3089,9 @@ async function loadSurveys(){
         <button class="btn btn-gold btn-sm sans" onclick="startDue(${d.survey_id},${d.client_id})">Offer now</button></div>`).join('')}</div>` : '';
   } catch(e){ $('surveyDue').innerHTML=''; }
   const isAdmin = ME && ME.role==='admin';
-  if(isAdmin) loadSurveyOverview();
+  if(isAdmin) await loadSurveyOverview();
   surveyTab(isAdmin?'results':'give');
+  if(isAdmin && PENDING_SURVEY){ const id=PENDING_SURVEY; PENDING_SURVEY=null; showSurveyResults(id); }
 }
 function surveyTab(which){
   const res = which==='results' && ME && ME.role==='admin';
@@ -3099,6 +3100,17 @@ function surveyTab(which){
   if($('svTabResults')) $('svTabResults').classList.toggle('active',res);
   if($('svTabGive')) $('svTabGive').classList.toggle('active',!res);
 }
+async function loadCmdSurveys(){
+  if(!$('cmdSurveys')) return;
+  let d; try{ d=await api('/surveys/overview'); }catch(e){ $('cmdSurveys').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  const any = d.surveys.some(s=>s.responses);
+  $('cmdSurveys').innerHTML = any ? `<div class="ret-cards">${d.surveys.map(s=>{
+      const low = s.avg!=null && s.avg<3.5;
+      return `<div class="ret-card ${low?'rc-warn':''}" style="cursor:pointer" onclick="openSurveyResults(${s.id})"><div class="n">${s.avg!=null?s.avg+'<span style="font-size:14px">/5</span>':'—'}</div><div class="l">${esc(s.title)} · ${s.responses} ›</div></div>`;
+    }).join('')}</div>` : '<div class="hint">No survey responses yet. Put the kiosk on the unit to start gathering them.</div>';
+}
+let PENDING_SURVEY=null;
+function openSurveyResults(id){ PENDING_SURVEY=id; show('surveys'); }
 async function loadSurveyOverview(){
   if(!$('surveyOverview')) return;
   let d; try{ d=await api('/surveys/overview'); }catch(e){ return; }

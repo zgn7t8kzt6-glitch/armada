@@ -3377,6 +3377,7 @@ function runDailyCutoff() {
     const noShows = markNoShows();   // scheduled-but-never-admitted -> follow-up queue
     if (noShows) console.log(`[cutoff] ${noShows} no-show(s) flagged for follow-up`);
     try { ensureDignityKits(); runFlowAutomations(); } catch (e) { console.error('[cutoff] automations:', e.message); }
+    try { maybeCrownChampion(today); } catch (e) { console.error('[champion]', e.message); }
     // Refresh tomorrow's expected arrivals from Salesforce for the front-desk board.
     if (sfConfigured()) sfSyncArrivals(db).then(() => reconcileArrivals()).catch((e) => console.error('[cutoff] arrivals sync:', e.message));
     console.log(`[cutoff] daily report finalized for ${yesterday} (${APP_TZ})`);
@@ -3386,6 +3387,28 @@ function runDailyCutoff() {
   setTimeout(runDailyCutoff, msUntilLocalMidnight());  // re-arm for the next midnight
 }
 setTimeout(runDailyCutoff, msUntilLocalMidnight());
+
+// On the 1st of the month, crown last month's Care Champion (most acts of care
+// logged) — auto-posts a recognition Wow and notifies the lead. Idempotent.
+function maybeCrownChampion(today) {
+  if (!/-01$/.test(today)) return;
+  const d = new Date(today + 'T00:00:00Z');
+  const prev = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
+  const lastStart = prev.toISOString().slice(0, 10), thisStart = today, lastMonth = lastStart.slice(0, 7);
+  if (getState('champion_announced:' + lastMonth)) return;
+  const champ = db.prepare(`SELECT user_name, COUNT(*) n FROM (
+      SELECT u.name user_name FROM pulses p JOIN users u ON u.id = p.author_id WHERE p.date >= ? AND p.date < ?
+      UNION ALL SELECT by_name FROM delights WHERE created_at >= ? AND created_at < ? AND by_name IS NOT NULL
+      UNION ALL SELECT by_name FROM wows WHERE created_at >= ? AND created_at < ? AND by_name IS NOT NULL
+    ) GROUP BY user_name ORDER BY n DESC LIMIT 1`).get(lastStart, thisStart, lastStart, thisStart, lastStart, thisStart);
+  setState('champion_announced:' + lastMonth, '1');
+  if (!champ || !champ.user_name) return;
+  const monthName = new Date(lastStart + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  db.prepare(`INSERT INTO wows (text, recognize, by_name) VALUES (?, ?, 'Armada')`)
+    .run(`🏅 ${champ.user_name} is the Care Champion for ${monthName} — the most acts of care logged. Thank you for living the standard.`, champ.user_name);
+  notifyOnCall(`🏅 Care Champion for ${monthName}: ${champ.user_name}. Recognize them publicly today.`);
+  console.log(`[champion] crowned ${champ.user_name} for ${monthName}`);
+}
 
 // ---- Morning leadership brief: the day's numbers, emailed before the shift ----
 function msUntilLocalHour(targetHour) {

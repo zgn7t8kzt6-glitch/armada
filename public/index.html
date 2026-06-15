@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616I" />
+<link rel="stylesheet" href="/styles.css?v=20260616J" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -59,6 +59,7 @@
     <button data-view="engagement">Engagement</button>
     <button data-view="program">Program</button>
     <button data-view="meals">Meals</button>
+    <button data-view="dischargepage">Discharge</button>
     <button data-view="incidents" data-subview>Incidents</button>
     <button data-view="casemgmt">Case Mgmt</button>
     <button data-view="continuum">Continuum</button>
@@ -345,6 +346,43 @@
       <div class="card">
         <div class="cmd-hero-row"><div><h3>📋 Caterer scorecard (30 days)</h3><p class="sub sans">Are they holding the standard? Track it tight.</p></div></div>
         <div id="mealsScore"></div>
+      </div>
+    </section>
+
+    <!-- DISCHARGE (simple standalone fond-farewell page) -->
+    <section id="dischargepage" class="view">
+      <div class="card">
+        <div class="field" style="max-width:420px"><label>Client to discharge</label>
+          <select id="dp_client" onchange="dpPick()"><option value="">— select a client —</option></select></div>
+      </div>
+      <div id="dpForm" style="display:none">
+        <div class="card" style="background:#faf8f3;border:1px solid var(--line)">
+          <h3 style="color:var(--navy);margin:0 0 4px">🤝 Discharge — the fond farewell</h3>
+          <p class="sub sans" style="margin:0 0 12px">Completed or AMA automatically schedules 24-hour, 48-hour, and 30-day aftercare check-in calls.</p>
+          <div class="controls">
+            <div class="field"><label>Outcome</label><select id="dp_status"><option>Completed</option><option>AMA</option><option>Transferred</option></select></div>
+            <div class="field"><label>Date</label><input id="dp_date" type="date"/></div>
+          </div>
+          <div class="controls" style="margin-top:2px">
+            <div class="field"><label>↪ Next step in the continuum <span class="hint" style="font-weight:400">(required — no one leaves without a plan)</span></label><select id="dp_dest" onchange="dpDestUI()"><option value="">— choose the next level of care —</option><option>Armada Outpatient</option><option>Approved partner</option><option>Home / self</option></select></div>
+            <div class="field" id="dp_partnerWrap" style="display:none"><label>Which approved partner</label><select id="dp_partner"></select></div>
+          </div>
+          <div class="grid3" style="margin-top:4px">
+            <div><label>Why are they leaving? (debrief)</label><textarea id="dp_reason"></textarea></div>
+            <div><label>What did we follow through on?</label><textarea id="dp_follow"></textarea></div>
+            <div><label>What could we have done better?</label><textarea id="dp_improve"></textarea></div>
+          </div>
+          <div id="dpSafe" style="margin-top:6px">
+            <div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Safe Departure checklist — every departure, dignity intact</div>
+            <label class="trg"><input type="checkbox" class="sd" data-s="In-person, calm conversation; AMA explained in plain language with risks and the open door"/> In-person, calm conversation — risks + open door explained</label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Refusal to sign witnessed by two staff and documented (still an AMA)"/> Refusal to sign witnessed by two staff (if applicable)</label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Naloxone in hand + 60-sec overdose education (per clinical protocol — Medical Director owns)"/> Naloxone in hand + overdose education <span class="hint">(per clinical protocol)</span></label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Belongings returned with dignity; destination/transport asked; food for the road offered"/> Belongings returned; transport asked; food for the road</label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Last words an invitation: you are welcome back any time"/> "You are welcome back — any time"</label>
+            <label class="trg"><input type="checkbox" class="sd" data-s="Follow-up call scheduled within 24–72 hours"/> Follow-up within 24–72h (auto-scheduled)</label>
+          </div>
+          <div class="toolbar"><button class="btn btn-primary sans" onclick="dischargeStandalone()">Discharge &amp; start aftercare</button><span id="dp_msg" class="hint" style="align-self:center"></span></div>
+        </div>
       </div>
     </section>
 
@@ -1513,6 +1551,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616I"></script>
+<script src="/app.js?v=20260616J"></script>
 </body>
 </html>

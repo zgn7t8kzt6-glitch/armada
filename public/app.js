@@ -114,7 +114,7 @@ const GROUPS=[
 const GROUP_OF={
   dashboard:'today',today:'today',lineup:'today',arrivals:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',records:'clients',
-  report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',meals:'care',
+  report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',meals:'care',dischargepage:'care',
   casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',continuum:'clinical',
   admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
   mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',inventory:'team',maintenance:'team',staffmodel:'team',
@@ -183,6 +183,7 @@ function show(v){
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
   if(v==='meals') loadMeals();
+  if(v==='dischargepage') loadDischargePage();
   if(v==='maintenance') loadMaintenance();
   if(v==='arrivals') loadArrivals();
   if(v==='outcomes') loadOutcomes();
@@ -299,6 +300,48 @@ async function dischargeClient(){
     alert('Discharged. Aftercare calls scheduled — see the Outcomes tab.');
     show('clients');
   }
+}
+/* ---- Standalone simple Discharge page ---- */
+let DP_ID=null;
+async function loadDischargePage(){
+  DP_ID=null;
+  if($('dpForm')) $('dpForm').style.display='none';
+  if($('dp_msg')) $('dp_msg').textContent='';
+  try{ const { clients } = await api('/clients');
+    const active=(clients||[]).filter(c=>c.active!==0 && !c.discharge_status);
+    $('dp_client').innerHTML='<option value="">— select a client —</option>'+active.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('');
+  }catch(e){ $('dp_client').innerHTML='<option value="">'+esc(e.message)+'</option>'; }
+}
+function dpPick(){
+  DP_ID=$('dp_client').value||null;
+  if(!DP_ID){ $('dpForm').style.display='none'; return; }
+  $('dpForm').style.display='block';
+  if(!$('dp_date').value) $('dp_date').value=today();
+  // reset fields for the newly picked client
+  ['dp_reason','dp_follow','dp_improve'].forEach(x=>{ if($(x)) $(x).value=''; });
+  document.querySelectorAll('#dpSafe .sd').forEach(c=>c.checked=false);
+  $('dp_dest').value=''; dpDestUI(); $('dp_msg').textContent='';
+}
+function dpDestUI(){ const w=$('dp_partnerWrap'); if(!w) return; const partner=$('dp_dest').value==='Approved partner'; w.style.display=partner?'':'none'; if(partner) loadDpPartners(); }
+async function loadDpPartners(){ if(!$('dp_partner')) return; try{ const d=await api('/continuum'); const opts=(d.partners||[]); $('dp_partner').innerHTML = opts.length ? '<option value="">— choose —</option>'+opts.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('') : '<option value="">No approved partners — an admin sets these in Settings → Approved partners</option>'; }catch(e){} }
+async function dischargeStandalone(){
+  if(!DP_ID){ return; }
+  const status=$('dp_status').value;
+  const dest=$('dp_dest').value;
+  if(!dest){ $('dp_msg').textContent='Set the next step — no one leaves without a plan.'; $('dp_dest').focus(); return; }
+  const fid = dest==='Approved partner' ? ($('dp_partner')&&$('dp_partner').value||null) : null;
+  if(dest==='Approved partner' && !fid){ $('dp_msg').textContent='Pick which approved partner.'; return; }
+  if(!confirm(`Discharge as "${status}"? Next step: ${dest}${fid?' (partner)':''}. This starts the aftercare calls.`)) return;
+  const steps=[...document.querySelectorAll('#dpSafe .sd:checked')].map(c=>c.dataset.s);
+  const cid=DP_ID;
+  $('dp_msg').textContent='Saving…';
+  try{
+    try{ await api('/clients/'+cid+'/continuum',{method:'POST',body:JSON.stringify({aftercare_dest:dest, aftercare_facility_id:fid})}); }catch(e){}
+    await api('/clients/'+cid+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('dp_date').value,steps,reason:$('dp_reason').value,followthrough:$('dp_follow').value,improve:$('dp_improve').value})});
+    $('dp_msg').textContent='✓ Discharged — aftercare calls scheduled.';
+    if(status!=='Transferred' && confirm('Discharged — aftercare calls scheduled.\n\nDo the Discharge survey with the client now?')){ gotoSurvey('discharge', cid); return; }
+    loadDischargePage();
+  }catch(e){ $('dp_msg').textContent=e.message; }
 }
 const FF = ['name','pref','room','program','admit','admit_time','sober','therapist','case_manager','referral_source','touch','prefs','goals','triggers','safety','support','anchor_why','interests','welcome_plan','aftercare_plan'];
 const AMENITIES = ['Music room','Gym','Art room','Arcade','Outdoors','Games','Movies','Reading'];

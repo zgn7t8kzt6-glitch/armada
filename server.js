@@ -2841,50 +2841,49 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'checks', title: 'Safety checks due', items: active.filter(obsOverdue).map((c) => item(c, 'overdue for a check')) });
     sections.push({ key: 'sendouts', title: 'Medical send-outs (currently out)', items: sendouts.map((s) => ({ name: s.name, sub: (s.destination || '') + (s.reason ? ' · ' + s.reason : ''), badge: 'OUT' })) });
     sections.push({ key: 'farewell', title: 'Send-off today — meds & naloxone', items: dischToday.map((c) => item(c, c.discharge_status || 'planned')) });
-  } else if (jr === 'Therapist') {
-    subtitle = 'Your caseload — sessions, notes, and catching the quiet AMA.';
-    const mine = active.filter((c) => nameMatches(c.therapist, req.user.name));
-    const caseload = mine.length ? mine : active;   // fallback: whole house if names don't match yet
-    const docDue = caseload.filter((c) => { let f = {}; try { f = JSON.parse(c.doc_forms || '{}'); } catch { } return !f.biopsych || !f.tx_plan; });
-    const risk = caseload.map((c) => ({ c, lvl: riskOf(c) })).filter((x) => x.lvl === 'High' || x.lvl === 'Elevated');
-    const planning = caseload.filter((c) => c.anticipated_dc || c.next_loc);
-    northStar = { label: 'Caseload documented', value: caseload.length ? Math.round((caseload.length - docDue.length) / caseload.length * 100) + '%' : '—', sev: docDue.length ? 'warn' : 'ok' };
-    tiles = [
-      { key: 'caseload', label: 'My clients', n: caseload.length, sev: 'ok' },
-      { key: 'docs', label: 'Notes / plans due', n: docDue.length, sev: docDue.length ? 'high' : 'ok' },
-      { key: 'risk', label: 'At risk — run the Save', n: risk.length, sev: risk.length ? 'high' : 'ok' },
-      { key: 'planning', label: 'Aftercare to plan', n: planning.length, sev: planning.length ? 'warn' : 'ok' },
-    ];
-    if (!mine.length) subtitle += ' (Showing the whole house — assign therapists in Kipu to see just yours.)';
-    sections.push({ key: 'risk', title: 'Anticipate — at risk of leaving (the Save)', items: risk.map((x) => item(x.c, x.c.anchor_why ? 'anchor: ' + x.c.anchor_why : '', x.lvl)) });
-    sections.push({ key: 'docs', title: 'Documentation due — biopsychosocial / treatment plan', items: docDue.map((c) => item(c, c.program || '')) });
-    sections.push({ key: 'planning', title: 'Send-off — aftercare to plan', items: planning.map((c) => item(c, (c.next_loc ? '→ ' + c.next_loc : '') + (c.anticipated_dc ? ' · by ' + String(c.anticipated_dc).slice(0, 10) : ''))) });
-    sections.push({ key: 'caseload', title: 'My caseload', items: caseload.map((c) => item(c, c.program || '', riskOf(c) || '')) });
-  } else if (jr === 'Case Manager') {
-    subtitle = 'Coordination — case tasks, aftercare, and follow-ups.';
-    const mine = active.filter((c) => nameMatches(c.case_manager, req.user.name));
+  } else if (jr === 'Therapist' || jr === 'Case Manager') {
+    // Therapist & Case Manager share the same caseload duties at Armada — one
+    // clinical dashboard built on their responsibilities (relationship first,
+    // 24h assessments, coordination, groups/1:1s, discharge planning, LOC).
+    subtitle = 'Your caseload. First: make every client feel heard and cared for. Then: assessments on time, the next step planned, nothing dropped.';
+    const mine = active.filter((c) => nameMatches(c.therapist, req.user.name) || nameMatches(c.case_manager, req.user.name));
     const caseload = mine.length ? mine : active;
-    const tasks = db.prepare(`SELECT t.id, t.text, t.category, c.id cid, c.pref, c.name FROM case_tasks t JOIN clients c ON c.id = t.client_id WHERE t.status = 'open' AND c.active = 1 AND c.discharge_status IS NULL ORDER BY t.id DESC`).all();
-    const myTasks = mine.length ? tasks.filter((t) => caseload.some((c) => c.id === t.cid)) : tasks;
-    const followups = db.prepare(`SELECT f.id, f.due_date, c.id cid, c.pref, c.name FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' ORDER BY f.due_date`).all();
+    if (!mine.length) subtitle += ' (Showing the whole house — set therapist/case manager in Kipu to see just yours.)';
+    // 1) 24-hour intake assessments: Biopsychosocial, ASAM, Tx plan, CM assessment.
+    const ASSESS = [['Biopsychosocial', (f, c) => !!f.biopsych], ['ASAM', (f, c) => !!f.asam || (c.loc && c.loc !== 'Unspecified')], ['Tx plan', (f, c) => !!f.tx_plan], ['CM assessment', (f, c) => !!f.cm_note]];
+    const assess = caseload.map((c) => { let f = {}; try { f = JSON.parse(c.doc_forms || '{}'); } catch { /* */ } const missing = ASSESS.filter((a) => !a[1](f, c)).map((a) => a[0]); const mins = careCardMinsSinceAdmit(c); return { c, missing, overdue: missing.length && mins != null && mins > 24 * 60 }; }).filter((x) => x.missing.length);
+    const assessOverdue = assess.filter((x) => x.overdue);
+    const assessedPct = caseload.length ? Math.round((caseload.length - assess.length) / caseload.length * 100) : 100;
+    // 2) At risk — the relationship/Save.
+    const risk = caseload.map((c) => ({ c, lvl: riskOf(c) })).filter((x) => x.lvl === 'High' || x.lvl === 'Elevated');
+    // 3) Coordination — appointments (medical/legal/other) as open case tasks.
+    const allTasks = db.prepare(`SELECT t.id, t.item, t.category, c.id cid, c.pref, c.name FROM case_tasks t JOIN clients c ON c.id = t.client_id WHERE t.status = 'open' AND c.active = 1 AND c.discharge_status IS NULL ORDER BY t.id DESC`).all();
+    const myTasks = mine.length ? allTasks.filter((t) => caseload.some((c) => c.id === t.cid)) : allTasks;
+    // 4) Discharge arrangements + ride — approaching discharge without a set plan.
+    const planNeeds = caseload.filter((c) => c.anticipated_dc && (!c.aftercare_dest || c.aftercare_dest === 'Undecided'));
     const planning = caseload.filter((c) => c.anticipated_dc || c.next_loc);
-    // Family as a guest: keep families in the loop — those with a contact but no update in 7+ days.
-    const famContact = db.prepare(`SELECT 1 FROM family_contacts WHERE client_id = ? LIMIT 1`);
-    const lastFam = db.prepare(`SELECT created_at FROM family_updates WHERE client_id = ? ORDER BY id DESC LIMIT 1`);
-    const famDue = caseload.filter((c) => { if (!famContact.get(c.id)) return false; const l = lastFam.get(c.id); return !l || (Date.now() - Date.parse(String(l.created_at).replace(' ', 'T') + 'Z')) > 7 * 864e5; });
-    northStar = { label: 'Open case tasks', value: myTasks.length, sev: myTasks.length ? 'warn' : 'ok' };
+    // 5) Follow-up calls assigned to me (aftercare).
+    const followups = db.prepare(`SELECT f.id, f.due_date, f.type, c.pref, c.name, c.id cid FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' AND f.assignee_id = ? ORDER BY f.due_date`).all(req.user.id);
+    // 6) LOC review — past the anticipated step-down date but still here.
+    const locReview = caseload.filter((c) => c.anticipated_dc && String(c.anticipated_dc).slice(0, 10) <= today);
+    northStar = { label: 'Intake assessments done on time (24h)', value: assessedPct + '%', sev: assessOverdue.length ? 'high' : assess.length ? 'warn' : 'ok' };
     tiles = [
-      { key: 'caseload', label: 'My clients', n: caseload.length, sev: 'ok' },
-      { key: 'tasks', label: 'Open case tasks', n: myTasks.length, sev: myTasks.length ? 'warn' : 'ok' },
-      { key: 'planning', label: 'Aftercare to plan', n: planning.length, sev: planning.length ? 'warn' : 'ok' },
-      { key: 'followups', label: 'Follow-ups due', n: followups.length, sev: followups.length ? 'high' : 'ok' },
-      { key: 'family', label: 'Family updates due', n: famDue.length, sev: famDue.length ? 'warn' : 'ok' },
+      { key: 'caseload', label: 'My caseload', n: caseload.length, sev: 'ok' },
+      { key: 'assess', label: 'Assessments due (24h)', n: assess.length, sev: assessOverdue.length ? 'high' : assess.length ? 'warn' : 'ok' },
+      { key: 'risk', label: 'At risk — the Save', n: risk.length, sev: risk.length ? 'high' : 'ok', view: 'retention' },
+      { key: 'tasks', label: 'Appointments to set up', n: myTasks.length, sev: myTasks.length ? 'warn' : 'ok', view: 'casemgmt' },
+      { key: 'planning', label: 'Discharge & ride to arrange', n: planNeeds.length, sev: planNeeds.length ? 'high' : 'ok', view: 'continuum' },
+      { key: 'followups', label: 'Follow-up calls due', n: followups.length, sev: followups.length ? 'high' : 'ok', view: 'mytasks' },
     ];
-    sections.push({ key: 'tasks', title: 'Open case tasks', items: myTasks.map((t) => ({ id: t.cid, name: t.pref || t.name, sub: (t.category ? '[' + t.category + '] ' : '') + t.text })) });
-    sections.push({ key: 'planning', title: 'Send-off — aftercare to plan', items: planning.map((c) => item(c, (c.next_loc ? '→ ' + c.next_loc : '') + (c.anticipated_dc ? ' · by ' + String(c.anticipated_dc).slice(0, 10) : ''))) });
-    sections.push({ key: 'followups', title: 'Follow-up calls due', items: followups.map((f) => ({ id: f.cid, name: f.pref || f.name, sub: 'due ' + (f.due_date || '') })) });
-    sections.push({ key: 'family', title: 'Family updates due — keep families in the loop', items: famDue.map((c) => item(c, 'no family update in 7+ days')) });
-    sections.push({ key: 'caseload', title: 'My caseload', items: caseload.map((c) => item(c, c.program || '')) });
+    // Relationship first — Horst's #1: be present for each client.
+    sections.push({ key: 'connect', title: '💬 Make time today — be present for your caseload', items: caseload.map((c) => item(c, c.anchor_why ? 'why they came: ' + c.anchor_why : (c.touch || c.prefs || 'check in — how are they really doing?'), riskOf(c) || '')) });
+    sections.push({ key: 'assess', title: '📋 Assessments due within 24h — Biopsychosocial · ASAM · Tx plan · CM', items: assess.map((x) => ({ id: x.c.id, name: x.c.pref || x.c.name, room: x.c.room || '', sub: 'missing: ' + x.missing.join(', '), badge: x.overdue ? 'OVERDUE' : 'due' })) });
+    sections.push({ key: 'risk', title: 'At risk of leaving — run the Save', items: risk.map((x) => item(x.c, x.c.anchor_why ? 'anchor: ' + x.c.anchor_why : '', x.lvl)) });
+    sections.push({ key: 'tasks', title: '📞 Appointments & coordination to set up (medical / legal / other)', cta: { label: 'Open Case Mgmt →', view: 'casemgmt' }, items: myTasks.map((t) => ({ id: t.cid, name: t.pref || t.name, sub: (t.category ? '[' + t.category + '] ' : '') + t.item })) });
+    sections.push({ key: 'planning', title: '🚪 Discharge arrangements & transport to set up', cta: { label: 'Open Continuum →', view: 'continuum' }, items: planning.map((c) => item(c, (c.aftercare_dest && c.aftercare_dest !== 'Undecided' ? '→ ' + c.aftercare_dest : 'NO destination set — arrange it + a ride') + (c.anticipated_dc ? ' · by ' + String(c.anticipated_dc).slice(0, 10) : ''), (!c.aftercare_dest || c.aftercare_dest === 'Undecided') ? 'PLAN' : '')) });
+    if (locReview.length) sections.push({ key: 'loc', title: '🔁 LOC review — past the planned step-down, update Kipu & notify the team', items: locReview.map((c) => item(c, (c.loc || '') + (c.next_loc ? ' → ' + c.next_loc : ''))) });
+    sections.push({ key: 'followups', title: 'Follow-up calls due', cta: { label: 'Open My Tasks →', view: 'mytasks' }, items: followups.map((f) => ({ id: f.cid, name: f.pref || f.name, sub: (f.type || '') + ' · due ' + (f.due_date || '') })) });
+    sections.push({ key: 'groups', title: '👥 Groups & 1:1s — facilitate, then enter notes promptly', items: [{ name: 'Log group notes & 1:1 sessions in Kipu the same day', sub: 'Give each 1:1 client material to complete before the next session.' }] });
   } else if (jr === 'Front Desk') {
     subtitle = 'The warm welcome — greet every arrival by name.';
     const arr = db.prepare(`SELECT preferred_name, first_name, last_name, status, referral_source FROM expected_arrivals WHERE scheduled_date = ? ORDER BY status`).all(today);

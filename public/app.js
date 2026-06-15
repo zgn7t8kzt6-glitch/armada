@@ -2673,6 +2673,20 @@ async function openRecord(id){
         <div class="hint">${c.case_manager?'CM: '+esc(c.case_manager)+' · ':''}${c.therapist?'Therapist: '+esc(c.therapist):''}</div>
       </div><button class="btn btn-ghost btn-sm sans" onclick="openJourney(${c.id})">Open Client 360 ↗</button></div>
     </div>
+    <div class="card" style="border-left:4px solid var(--gold)">
+      <details id="recIncForm"><summary class="sans" style="cursor:pointer;font-weight:600">🚩 File an incident on ${esc(c.name)}</summary>
+        <div style="margin-top:12px">
+          <div class="grid2">
+            <div class="field"><label>Type</label><select id="rec_in_type"><option>Behavioral</option><option>Conflict</option><option>Property</option><option>Elopement/AMA</option><option>Medical</option><option>Medication error</option><option>Fall</option><option>Other</option></select></div>
+            <div class="field"><label>Severity</label><select id="rec_in_sev"><option>Low</option><option>Moderate</option><option selected>High</option><option>Critical</option></select></div>
+          </div>
+          <div class="field"><label>What happened</label><textarea id="rec_in_desc" rows="3" placeholder="Describe the incident factually — who, what, when, where, who else was involved."></textarea></div>
+          <div class="field"><label>Action taken (optional)</label><textarea id="rec_in_action" rows="2" placeholder="How it was handled — separation, 1:1, notifications, etc."></textarea></div>
+          <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="recFileIncident(${c.id})">File incident</button><span id="rec_in_msg" class="hint" style="align-self:center"></span></div>
+          <p class="sub sans" style="margin-top:4px">High/Critical incidents alert the on-call leader. This is the formal record — keep it factual.</p>
+        </div>
+      </details>
+    </div>
     ${discharge}
     ${feed('🚩 Incidents', d.incidents, x=>line(x.at+(x.by?' · '+x.by:''), `${sev(x.severity)} <strong>${esc(x.type)}</strong> — ${esc(x.description)}${x.action?`<div class="hint">Action: ${esc(x.action)}</div>`:''}<div class="hint">${esc(x.status)}</div>`), 'No incidents logged.')}
     ${feed('💓 Pulse notes', d.pulses, p=>line(p.date+' '+p.shift, `${sev(p.concern)} ${p.engagement?'<span class="badge">'+esc(p.engagement)+'</span> ':''}${p.triggers&&p.triggers.length?'<span class="hint">'+p.triggers.map(esc).join(', ')+'</span>':''}${p.statements?`<div>“${esc(p.statements)}”</div>`:''}${p.note?`<div>${esc(p.note)}</div>`:''}`), 'No pulse notes.')}
@@ -2686,6 +2700,15 @@ async function openRecord(id){
     ${feed('🎯 Activities', d.activities, a=>line(a.at+(a.by?' · '+a.by:''), `${esc(a.type)}${a.note?' — '+esc(a.note):''}`), 'No activities logged.')}
     ${feed('📞 Follow-ups', d.followups, f=>line('', `${esc(f.type)} · due ${esc(f.due)} · ${esc(f.status)}`), 'No follow-ups.')}`;
   $('recDetail').scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function recFileIncident(id){
+  const desc=$('rec_in_desc').value.trim();
+  if(!desc){ $('rec_in_msg').textContent='Describe what happened first.'; return; }
+  $('rec_in_msg').textContent='Filing…';
+  try{
+    await api('/incidents',{method:'POST',body:JSON.stringify({client_id:id, type:$('rec_in_type').value, severity:$('rec_in_sev').value, description:desc, action_taken:$('rec_in_action').value.trim()||null})});
+    openRecord(id);   // reload — the new incident shows in the Incidents section
+  }catch(e){ $('rec_in_msg').textContent=e.message; }
 }
 
 /* ---- My Shift: role-tailored employee dashboard ---- */

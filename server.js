@@ -1723,6 +1723,15 @@ function runFlowAutomations() {
     const who = c.discharged_by_kipu ? `Kipu discharge by ${c.discharged_by_kipu}` : (c.case_manager || c.therapist ? `owner: ${c.case_manager || c.therapist}` : '');
     createAlert(c.id, 'dc_incomplete', 'Elevated', `${c.pref || c.name} was discharged in Kipu but the in-app discharge form is incomplete (missing: ${missing.join(', ')})${who ? ' · ' + who : ''}. Complete it.`);
   }
+  // Approaching discharge with NO continuum plan → nudge the owner now, not at
+  // the door. Don't let "you can stay if you want" be the default.
+  for (const c of db.prepare(`SELECT id, pref, name, anticipated_dc, case_manager, therapist FROM clients
+    WHERE active = 1 AND discharge_status IS NULL AND anticipated_dc IS NOT NULL
+    AND substr(anticipated_dc,1,10) <= date('now','+2 day')
+    AND (aftercare_dest IS NULL OR aftercare_dest = 'Undecided')`).all()) {
+    const owner = c.case_manager || c.therapist || '';
+    createAlert(c.id, 'continuum', 'Elevated', `${c.pref || c.name} discharges ~${String(c.anticipated_dc).slice(0, 10)} with NO continuum plan${owner ? ' · owner: ' + owner : ''}. Set their next step now.`);
+  }
   const FOLLOW_CADENCE = [['24h', 1], ['48h', 2], ['30d', 30]];
   for (const c of recentDisch) {
     if (!hasKit.get(c.id)) { insKit.run(c.id, `+${DIGNITY_DUE_HOURS} hours`, DIGNITY_ROLE); createAlert(c.id, 'dignity', 'Normal', `${c.pref || c.name} — Dignity Kit for a safe departure`); kits++; }

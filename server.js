@@ -2442,7 +2442,7 @@ app.get('/api/clients/:id/record', requireAuth, (req, res) => {
     client: {
       id: c.id, name: c.pref || c.name, full: c.name, room: c.room || '', program: c.program || '', loc: c.loc || '',
       admit: (c.admit || '').slice(0, 10), sober: c.sober || '', case_manager: c.case_manager || '', therapist: c.therapist || '',
-      active: !!c.active && !c.discharge_status, los: losDays,
+      active: !!c.active && !c.discharge_status, los: losDays, allergies: c.allergies || '',
       discharge_status: c.discharge_status || '', discharge_date: (c.discharge_date || '').slice(0, 10),
       discharge_reason: c.discharge_reason || '', discharge_destination: c.discharge_destination || '',
       discharge_improve: c.discharge_improve || '', discharge_followthrough: c.discharge_followthrough || '',

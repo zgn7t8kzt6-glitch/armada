@@ -321,6 +321,7 @@ details.card[open]>summary{margin-bottom:12px}
 .badge{font-size:11px;padding:2px 8px;border-radius:20px;background:#eef2f7;color:var(--navy)}
 .badge.admin{background:#efe7d8;color:#7a5a2c}
 .badge-danger{font-size:11px;padding:2px 8px;border-radius:20px;background:#fbecea;color:var(--danger)}
+.allergy-banner{display:inline-block;margin:6px 0;padding:5px 12px;border-radius:8px;background:#fbecea;color:var(--danger);border:1px solid #e3b3ac;font-weight:700;font-size:13px;letter-spacing:.02em}
 
 /* ===== Leadership Command Center ===== */
 .cmd-hero{background:linear-gradient(125deg,#20484e,#2d6168);border:none;color:#fff}

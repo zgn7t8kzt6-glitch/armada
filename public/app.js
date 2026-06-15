@@ -226,6 +226,7 @@ function newClient(){
 async function editClient(id){
   const { client } = await api('/clients/'+id);
   currentId = id; fillForm(client);
+  if($('editorAllergy')) $('editorAllergy').innerHTML = (client.allergies&&client.allergies.trim())?`<div class="allergy-banner">⚠ ALLERGIES: ${esc(client.allergies)}</div>`:'';
   $('editorTitle').textContent = 'Care Card · '+(client.pref||client.name||'');
   $('deleteBtn').style.display = ME.role==='admin' ? 'inline-block':'none';
   $('dischargeBox').style.display='block'; $('d_date').value = today();
@@ -390,6 +391,7 @@ function renderKipuDemo(c){
     ['Level of care', c.loc && c.loc!=='Unspecified' ? esc(c.loc) : ''],
     ['Next level of care', c.next_loc ? esc(c.next_loc) : ''],
     ['Anticipated discharge', c.anticipated_dc ? esc((c.anticipated_dc||'').slice(0,10)) : ''],
+    ['Allergies', c.allergies ? esc(c.allergies) : ''],
     ['Diagnosis', c.diagnosis ? esc(c.diagnosis) : ''],
     ['Insurance', c.insurance ? esc(c.insurance) : ''],
     ['Phone', c.phone ? esc(c.phone) : ''],
@@ -2680,6 +2682,7 @@ async function openRecord(id){
     <div class="card">
       <div class="cmd-hero-row"><div>
         <h3 style="margin:0">${esc(c.name)} ${c.active?'<span class="risk risk-low">Active</span>':'<span class="risk risk-warn">Discharged</span>'}</h3>
+        ${c.allergies&&c.allergies.trim()?`<div class="allergy-banner">⚠ ALLERGIES: ${esc(c.allergies)}</div>`:''}
         <div class="hint">${c.full&&c.full!==c.name?esc(c.full)+' · ':''}${c.room?'Room '+esc(c.room)+' · ':''}${c.program?esc(c.program)+' · ':''}${c.loc?esc(c.loc)+' · ':''}admit ${esc(c.admit)||'—'}${c.los!=null?' · LOS '+c.los+'d':''}</div>
         <div class="hint">${c.case_manager?'CM: '+esc(c.case_manager)+' · ':''}${c.therapist?'Therapist: '+esc(c.therapist):''}</div>
       </div><button class="btn btn-ghost btn-sm sans" onclick="openJourney(${c.id})">Open Client 360 ↗</button></div>

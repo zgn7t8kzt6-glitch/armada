@@ -226,9 +226,12 @@ async function editClient(id){
   $('editorTitle').textContent = 'Care Card · '+(client.pref||client.name||'');
   $('deleteBtn').style.display = ME.role==='admin' ? 'inline-block':'none';
   $('dischargeBox').style.display='block'; $('d_date').value = today();
+  if($('d_dest')){ $('d_dest').value = client.aftercare_dest||''; if($('d_partner')) $('d_partner').dataset.loaded=''; dischargeDestUI(); }
   show('editor');
   if(client.kipu_id) loadKipuChart(id); else if($('kipuChartCard')) $('kipuChartCard').style.display='none';
 }
+function dischargeDestUI(){ const w=$('d_partnerWrap'); if(!w) return; const partner=$('d_dest').value==='Approved partner'; w.style.display=partner?'':'none'; if(partner) loadDischargePartners(); }
+async function loadDischargePartners(){ if(!$('d_partner')||$('d_partner').dataset.loaded) return; try{ const d=await api('/continuum'); $('d_partner').innerHTML='<option value="">— choose —</option>'+(d.partners||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join(''); $('d_partner').dataset.loaded='1'; }catch(e){} }
 async function loadKipuChart(cid, reload){
   const card=$('kipuChartCard'); if(!card) return;
   card.style.display='';
@@ -272,9 +275,14 @@ function filterChartIn(listId){ const inp = listId==='jChartList'?$('jChartFilte
 async function dischargeClient(){
   if(!currentId) return;
   const status=$('d_status').value;
-  if(!confirm(`Discharge this client as "${status}"? This starts the aftercare calls and removes them from the active playbook.`)) return;
+  const dest=$('d_dest')?$('d_dest').value:'';
+  if(!dest){ alert('Set the next step in the continuum first — no one leaves without a plan. (Choose Armada Outpatient, an approved partner, or Home/self.)'); if($('d_dest'))$('d_dest').focus(); return; }
+  const fid = dest==='Approved partner' ? ($('d_partner')&&$('d_partner').value||null) : null;
+  if(dest==='Approved partner' && !fid){ alert('Pick which approved partner.'); return; }
+  if(!confirm(`Discharge this client as "${status}"? Next step: ${dest}${fid?' (partner)':''}. This starts the aftercare calls and removes them from the active playbook.`)) return;
   const cid = currentId;
   const steps = [...document.querySelectorAll('#safeDeparture .sd:checked')].map(c=>c.dataset.s);
+  try{ await api('/clients/'+currentId+'/continuum',{method:'POST',body:JSON.stringify({aftercare_dest:dest, aftercare_facility_id:fid})}); }catch(e){}
   await api('/clients/'+currentId+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('d_date').value,steps,reason:$('d_reason').value,followthrough:$('d_follow').value,improve:$('d_improve').value})});
   if(status!=='Transferred' && confirm('Discharged — aftercare calls scheduled.\n\nWould you like to do the Discharge survey with the client now?')){
     gotoSurvey('discharge', cid);

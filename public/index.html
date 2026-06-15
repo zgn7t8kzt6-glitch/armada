@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615y" />
+<link rel="stylesheet" href="/styles.css?v=20260615z" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1039,6 +1039,10 @@
             <div class="field"><label>Outcome</label><select id="d_status"><option>Completed</option><option>AMA</option><option>Transferred</option></select></div>
             <div class="field"><label>Date</label><input id="d_date" type="date"/></div>
           </div>
+          <div class="controls" style="margin-top:2px">
+            <div class="field"><label>↪ Next step in the continuum <span class="hint" style="font-weight:400">(required — no one leaves without a plan)</span></label><select id="d_dest" onchange="dischargeDestUI()"><option value="">— choose the next level of care —</option><option>Armada Outpatient</option><option>Approved partner</option><option>Home / self</option></select></div>
+            <div class="field" id="d_partnerWrap" style="display:none"><label>Which approved partner</label><select id="d_partner"></select></div>
+          </div>
           <div class="grid3" style="margin-top:4px">
             <div><label>Why are they leaving? (debrief)</label><textarea id="d_reason"></textarea></div>
             <div><label>What did we follow through on?</label><textarea id="d_follow"></textarea></div>
@@ -1303,6 +1307,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615y"></script>
+<script src="/app.js?v=20260615z"></script>
 </body>
 </html>

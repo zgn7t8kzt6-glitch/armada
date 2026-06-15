@@ -242,7 +242,13 @@ app.get('/api/voice', requireAuth, requireAdmin, (req, res) => {
     FROM client_checkins ch LEFT JOIN clients c ON c.id = ch.client_id
     WHERE ch.answer IS NOT NULL AND ch.answer != '' AND ch.created_at >= datetime('now','-3 day')
     ORDER BY ch.id DESC LIMIT 50`).all();
-  res.json({ checkins: rows.map((x) => ({ client: x.pref || x.name || '', room: x.room || '', answer: x.answer, question: x.question, shift: x.shift, by: x.by_name, at: x.at })) });
+  const requests = db.prepare(`SELECT r.text, r.priority, substr(r.created_at,1,16) at, c.pref, c.name, c.room
+    FROM requests r LEFT JOIN clients c ON c.id = r.client_id
+    WHERE r.created_by_name LIKE 'Client%' AND r.status != 'Done' AND r.created_at >= datetime('now','-3 day') ORDER BY r.id DESC LIMIT 30`).all();
+  res.json({
+    checkins: rows.map((x) => ({ client: x.pref || x.name || '', room: x.room || '', answer: x.answer, question: x.question, shift: x.shift, by: x.by_name, at: x.at })),
+    requests: requests.map((r) => ({ client: r.pref || r.name || 'A client', room: r.room || '', text: r.text, priority: r.priority, at: r.at })),
+  });
 });
 app.get('/api/rounds/board', requireAuth, (req, res) => {
   const active = db.prepare(`SELECT id, pref, name, room, loc, photo, obs_interval FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();

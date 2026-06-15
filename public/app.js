@@ -1733,7 +1733,9 @@ async function loadMoments(){
 async function loadVoice(){
   if(!$('cmdVoice')) return;
   try{ const v=await api('/voice');
-    $('cmdVoice').innerHTML = (v.checkins||[]).length ? v.checkins.map(x=>`<div class="pc-note">💬 <strong>${esc(x.client||'Client')}</strong>${x.room?' <span class="hint">· '+esc(x.room)+'</span>':''}: “${esc(x.answer)}” <span class="hint">— ${esc(x.shift||'')} ${esc((x.at||'').slice(5))}${x.by?' · '+esc(x.by):''}</span></div>`).join('') : '<div class="hint">No check-in answers yet. Ask the shift question on Rounds.</div>';
+    const reqs=(v.requests||[]).map(r=>`<div class="pc-note">🛎 <strong>${esc(r.client)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''} asked: “${esc(r.text)}”${r.priority==='Urgent'?' <span class="risk risk-high">urgent</span>':''} <span class="hint">— ${esc((r.at||'').slice(5))}</span></div>`).join('');
+    const chk=(v.checkins||[]).map(x=>`<div class="pc-note">💬 <strong>${esc(x.client||'Client')}</strong>${x.room?' <span class="hint">· '+esc(x.room)+'</span>':''}: “${esc(x.answer)}” <span class="hint">— ${esc(x.shift||'')} ${esc((x.at||'').slice(5))}${x.by?' · '+esc(x.by):''}</span></div>`).join('');
+    $('cmdVoice').innerHTML = (reqs||chk) ? ((reqs?`<div class="cmd-sub">What they're asking for (kiosk)</div>${reqs}`:'')+(chk?`<div class="cmd-sub">What they're telling us (rounds)</div>${chk}`:'')) : '<div class="hint">No guest voice yet. Ask the shift question on Rounds, and put the kiosk on the unit.</div>';
   }catch(e){ $('cmdVoice').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; }
 }
 async function loadCommand(){

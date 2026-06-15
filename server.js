@@ -2683,6 +2683,21 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       if (inDays === 0 || inDays === 1) milestones.push({ id: c.id, name: c.pref || c.name, label: `${m} day${m > 1 ? 's' : ''} clean`, today: inDays === 0 });
     }
   }
+  // Operations layer — on every role's shift screen so nothing operational is
+  // invisible: open maintenance work orders, and whether today's shifts are short.
+  const maintOpen = db.prepare(`SELECT id, title, location, category, priority, created_at FROM maintenance_requests WHERE status IN ('open','in_progress') ORDER BY
+    CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, created_at DESC`).all();
+  const maintUrgent = maintOpen.filter((r) => r.priority === 'Urgent' || r.priority === 'High').length;
+  tiles.push({ key: 'maintenance', label: 'Open maintenance', n: maintOpen.length, sev: maintUrgent ? 'high' : maintOpen.length ? 'warn' : 'ok', view: 'maintenance' });
+  if (maintOpen.length) sections.push({ key: 'maintenance', title: '🛠️ Open maintenance — report or pick one up', cta: { label: 'Open Maintenance →', view: 'maintenance' },
+    items: maintOpen.slice(0, 8).map((r) => ({ name: r.title, sub: [r.location, r.category].filter(Boolean).join(' · '), badge: r.priority })) });
+  // Today's coverage: any slot scheduled below what's needed.
+  const shortSlots = db.prepare(`SELECT part, role, needed, (SELECT COUNT(*) FROM schedule_assignments a WHERE a.slot_id = s.id AND a.status = 'scheduled') sched
+    FROM schedule_slots s WHERE s.date = ?`).all(today).filter((s) => s.sched < s.needed);
+  tiles.push({ key: 'coverage', label: 'Shifts short today', n: shortSlots.length, sev: shortSlots.length ? 'high' : 'ok', view: 'maintenance' });
+  if (shortSlots.length) sections.push({ key: 'coverage', title: '👥 Coverage gaps today — pick up or fill', cta: { label: 'See who\'s on →', view: 'maintenance' },
+    items: shortSlots.map((s) => ({ name: `${s.part} · ${s.role}`, sub: `${s.sched} of ${s.needed} scheduled`, badge: `SHORT ${s.needed - s.sched}` })) });
+
   // Proactive alerts (the automations' output) surfaced on every shift screen.
   const alerts = db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all();
   res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins });

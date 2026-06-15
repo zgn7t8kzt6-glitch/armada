@@ -1507,6 +1507,16 @@ app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
     [[1, '24h'], [2, '48h'], [30, '30d']].forEach(([days, type]) =>
       ins.run(req.params.id, type, new Date(base + days * 864e5).toISOString().slice(0, 10), coord?.id || null, coord?.name || null));
   }
+  // Continuum reciprocity: a step-down to an approved partner is an outbound
+  // referral — feed the Partners board so we see who we send vs. who sends us.
+  const c = db.prepare(`SELECT aftercare_dest, aftercare_facility_id, next_loc, insurance FROM clients WHERE id = ?`).get(req.params.id);
+  if (c && c.aftercare_dest === 'Approved partner' && c.aftercare_facility_id &&
+      !db.prepare(`SELECT 1 FROM outbound_referrals WHERE client_id = ? AND facility_id = ? AND category = 'discharge'`).get(req.params.id, c.aftercare_facility_id)) {
+    const fname = db.prepare(`SELECT name FROM facilities WHERE id = ?`).get(c.aftercare_facility_id)?.name || '';
+    db.prepare(`INSERT INTO outbound_referrals (ref_date, category, department, referred_by, referred_by_name, client_id, facility_id, facility_name, loc_needed, reason, insurance, created_by)
+      VALUES (?, 'discharge', 'Clinical', ?, ?, ?, ?, ?, ?, 'continuum step-down', ?, ?)`)
+      .run(d, req.user.id, req.user.name, +req.params.id, c.aftercare_facility_id, fname, c.next_loc || null, c.insurance || null, req.user.id);
+  }
   audit({ user: req.user, action: 'DISCHARGE', entity: 'client', entity_id: +req.params.id, detail: status, ip: req.ip });
   res.json({ ok: true });
 });

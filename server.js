@@ -3709,7 +3709,9 @@ function kioskOk(req) {
 }
 app.get('/api/kiosk/data', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
-  const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 AND key IN ('experience','meals') ORDER BY sort`).all();
+  // All active surveys appear on the kiosk (experience, meals, discharge, and any
+  // custom survey added later) — clients can fill whichever applies to them.
+  const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
   for (const s of surveys) s.questions = db.prepare(`SELECT id, category, text, type FROM survey_questions WHERE survey_id = ? ORDER BY sort, id`).all(s.id);
   res.json({
     // The kiosk is on the unit and only weakly authenticated — expose preferred

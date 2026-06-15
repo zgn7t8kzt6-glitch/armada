@@ -2679,6 +2679,7 @@ async function loadReorders(){
 }
 async function markReorder(id,status){ try{ await api('/inventory/reorders/'+id,{method:'POST',body:JSON.stringify({status})}); loadInventory(); }catch(e){ alert(e.message); } }
 async function saveInvSettings(){ const v=$('inv_corp_email').value.trim(); try{ await api('/inventory/settings',{method:'POST',body:JSON.stringify({corporate_email:v})}); $('inv_corp_msg').textContent='✓ Saved'; }catch(e){ $('inv_corp_msg').textContent=e.message; } }
+async function sendOrderList(){ $('inv_corp_msg').textContent='Sending…'; try{ const r=await api('/inventory/reorders/send',{method:'POST'}); $('inv_corp_msg').textContent = r.sent?('✓ Sent '+r.count+' item(s) to '+r.to):('Not sent — '+(r.reason||'')); }catch(e){ $('inv_corp_msg').textContent=e.message; } }
 let INV_EDIT_ID=null;
 async function loadInvCatalog(){
   if(!$('invCatalog')) return;

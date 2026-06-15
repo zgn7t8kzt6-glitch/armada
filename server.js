@@ -241,8 +241,10 @@ function invStatus(qty, item) {
   if (qty <= (item.reorder_point || 0)) return 'low';
   return 'ok';
 }
+// Where reorder emails go. Defaults to the owner until a purchasing address is
+// set in Supplies → Manage (an email isn't a secret; the UI overrides this).
 function corporateEmail() {
-  return getState('inventory_corporate_email') || process.env.CORPORATE_EMAIL || '';
+  return (getState('inventory_corporate_email') || process.env.CORPORATE_EMAIL || 'shlomo@armadarecovery.com').trim();
 }
 // Raise (or refresh) a reorder request for an item. Dedupes on an open request so
 // corporate gets one email per shortage, not one per shift count. Returns true if
@@ -364,6 +366,31 @@ app.get('/api/inventory/reorders', requireAuth, (req, res) => {
   })) });
 });
 
+// Email the full current order list to corporate now (manual digest / test).
+app.post('/api/inventory/reorders/send', requireAuth, requireAdmin, async (req, res) => {
+  const to = corporateEmail();
+  if (!emailConfigured()) return res.status(400).json({ sent: false, reason: 'Email not connected — Settings → Email.' });
+  if (!to) return res.status(400).json({ sent: false, reason: 'No reorder email set — Supplies → Manage.' });
+  const rows = db.prepare(`SELECT r.qty_on_hand, r.level, i.name, i.department, i.unit, i.par_level
+    FROM reorder_requests r JOIN inventory_items i ON i.id = r.item_id WHERE r.status = 'open'
+    ORDER BY (r.level='out') DESC, i.department, i.name`).all();
+  const e = htmlEsc;
+  const byDept = {};
+  for (const r of rows) (byDept[r.department] = byDept[r.department] || []).push(r);
+  const body = rows.length ? Object.entries(byDept).map(([d, items]) => `<h3 style="margin:14px 0 4px">${e(d)}</h3>${items.map((r) => `<div>${r.level === 'out' ? '<b style="color:#b00">OUT</b>' : '<span style="color:#a60">low</span>'} — ${e(r.name)} · on hand <b>${r.qty_on_hand}</b>/${r.par_level} ${e(r.unit)} · <b>order ${Math.max(r.par_level - r.qty_on_hand, 1)} ${e(r.unit)}</b></div>`).join('')}`).join('')
+    : '<p>Nothing is flagged to order right now — every item is at or above its reorder point. (This confirms the reorder email is working.)</p>';
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
+    <h2 style="margin:0 0 2px">Armada — supplies to order</h2>
+    <p style="color:#666;margin:0 0 12px">${rows.length} item(s) at/below reorder point · ${new Date().toLocaleString('en-US', { timeZone: APP_TZ })}</p>
+    ${body}
+    <p style="color:#888;margin-top:16px;font-size:12px">Sent from Armada Care Standards — Supply Standards.</p></div>`;
+  try {
+    await sendEmail({ to, subject: `Armada supplies to order — ${rows.length} item(s)`, html });
+    db.prepare(`UPDATE reorder_requests SET emailed_at = datetime('now') WHERE status = 'open'`).run();
+    audit({ user: req.user, action: 'REORDER_DIGEST', detail: `${rows.length} items`, ip: req.ip });
+    res.json({ sent: true, to, count: rows.length });
+  } catch (err) { res.status(502).json({ sent: false, reason: err.message }); }
+});
 // Mark a reorder ordered / received.
 app.post('/api/inventory/reorders/:id', requireAuth, (req, res) => {
   const id = parseInt(req.params.id, 10);

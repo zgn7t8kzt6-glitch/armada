@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616F" />
+<link rel="stylesheet" href="/styles.css?v=20260616G" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -367,7 +367,7 @@
         <details><summary class="sans" style="cursor:pointer;font-weight:600">⚙ Manage catalog &amp; reorder email (admin)</summary>
           <div style="margin-top:12px">
             <label>Send reorder emails to (corporate / purchasing)</label>
-            <div class="toolbar" style="justify-content:flex-start"><input id="inv_corp_email" type="email" placeholder="orders@armadarecovery.com" style="min-width:260px"/><button class="btn btn-gold sans" onclick="saveInvSettings()">Save</button><span id="inv_corp_msg" class="hint" style="align-self:center"></span></div>
+            <div class="toolbar" style="justify-content:flex-start"><input id="inv_corp_email" type="email" placeholder="orders@armadarecovery.com" style="min-width:260px"/><button class="btn btn-gold sans" onclick="saveInvSettings()">Save</button><button class="btn btn-ghost sans" onclick="sendOrderList()">✉ Email order list now</button><span id="inv_corp_msg" class="hint" style="align-self:center"></span></div>
             <p class="sub sans" style="margin-top:6px">Email must be configured in Settings → Email for auto-orders to send. Critical items (Narcan, AED) also raise an on-call alert when out.</p>
             <hr style="border:none;border-top:1px solid var(--line);margin:14px 0"/>
             <h4 class="sans">Add / edit an item</h4>
@@ -1495,6 +1495,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616F"></script>
+<script src="/app.js?v=20260616G"></script>
 </body>
 </html>

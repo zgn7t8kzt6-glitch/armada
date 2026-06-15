@@ -762,10 +762,12 @@ app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res
   alert_detail: autoCfg('alert_detail', process.env.ALERT_INCLUDE_PHI === 'true' ? 'full' : 'locator'),
   meal_on: autoCfg('meal_on', 'on'),
   meal_hour: mealHour(),
+  survey_alert_on: autoCfg('survey_alert_on', 'on'),
+  survey_alert_to: surveyAlertTo(),
 }));
 app.post('/api/settings/automation', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
-  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour']) {
+  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour', 'survey_alert_on', 'survey_alert_to']) {
     if (b[k] !== undefined) setState('auto_' + k, String(b[k]).trim());
   }
   audit({ user: req.user, action: 'AUTO_CONFIG', ip: req.ip });
@@ -3565,11 +3567,47 @@ app.post('/api/surveys/:id/respond', requireAuth, (req, res) => {
     ins.run(rid, a.question_id, num, text);
   }
   surveyRecovery(req.body.client_id, answers);   // bad feedback → instant service recovery
+  notifySurveyResult(survey.id, req.body.client_id, answers);   // email leadership the rating + focus
   audit({ user: req.user, action: 'SURVEY', entity: 'survey', entity_id: survey.id, detail: req.body.client_id ? 'client ' + req.body.client_id : 'anonymous', ip: req.ip });
   res.json({ ok: true });
 });
 // Close the loop on the voice of the guest: a low score (or a 1-2 on any item)
 // raises a service-recovery alert so a leader checks in immediately.
+// Email leadership a summary every time a survey is completed: the rating and the
+// focus of improvement (lowest-scored areas + open comments). Fire-and-forget.
+const DEFAULT_SURVEY_ALERT_TO = 'shlomo@armadarecovery.com';
+function surveyAlertTo() { return (getState('survey_alert_to') || process.env.SURVEY_ALERT_TO || DEFAULT_SURVEY_ALERT_TO).trim(); }
+async function notifySurveyResult(surveyId, clientId, answers) {
+  if (autoCfg('survey_alert_on', 'on') === 'off') return;
+  const to = surveyAlertTo();
+  if (!to || !emailConfigured()) return;
+  const survey = db.prepare(`SELECT title FROM surveys WHERE id = ?`).get(surveyId);
+  if (!survey || !Array.isArray(answers)) return;
+  const qids = answers.map((a) => a.question_id).filter((x) => x != null);
+  const qmap = {};
+  if (qids.length) db.prepare(`SELECT id, text, type FROM survey_questions WHERE id IN (${qids.map(() => '?').join(',')})`).all(...qids).forEach((q) => { qmap[q.id] = q; });
+  const nums = answers.filter((a) => (a.num === 0 || a.num) && !Number.isNaN(Number(a.num))).map((a) => Number(a.num));
+  const avg = nums.length ? Math.round(nums.reduce((s, n) => s + n, 0) / nums.length * 10) / 10 : null;
+  const lowAreas = answers.filter((a) => (a.num === 0 || a.num) && Number(a.num) <= 3 && qmap[a.question_id])
+    .map((a) => ({ q: qmap[a.question_id].text, n: Number(a.num) })).sort((x, y) => x.n - y.n);
+  const comments = answers.filter((a) => a.text && String(a.text).trim() && qmap[a.question_id])
+    .map((a) => ({ q: qmap[a.question_id].text, t: String(a.text).trim() }));
+  const c = clientId ? db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(clientId) : null;
+  const who = c ? ((c.pref || c.name) + (c.room ? ' · Room ' + c.room : '')) : 'Anonymous';
+  const e = htmlEsc;
+  const ratingColor = avg == null ? '#666' : avg < 3.5 ? '#b00' : avg < 4.2 ? '#a60' : '#2d7a4f';
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
+    <h2 style="margin:0 0 2px">${e(survey.title)} — completed</h2>
+    <p style="color:#666;margin:0 0 12px">${e(who)}</p>
+    ${avg != null ? `<div style="font-size:34px;font-weight:700;color:${ratingColor};line-height:1">${avg} / 5</div><p style="color:#888;margin:2px 0 14px">overall rating</p>` : ''}
+    <h3 style="margin:14px 0 4px">Focus — what to improve</h3>
+    ${lowAreas.length ? `<div>${lowAreas.map((a) => `<div style="margin:3px 0"><b style="color:#b00">${a.n}/5</b> — ${e(a.q)}</div>`).join('')}</div>` : '<div style="color:#2d7a4f">No low-scored areas — nothing flagged.</div>'}
+    ${comments.length ? `<h3 style="margin:14px 0 4px">In their words</h3>${comments.map((cm) => `<div style="margin:3px 0;color:#444">• <span style="color:#888">${e(cm.q)}</span> — ${e(cm.t)}</div>`).join('')}` : ''}
+    <p style="color:#888;margin-top:16px;font-size:12px">Sent automatically by Armada Care Standards each time a survey is submitted.</p>
+  </div>`;
+  const subj = `Survey: ${survey.title} — ${avg != null ? avg + '/5' : 'completed'}${lowAreas.length ? ' · ' + lowAreas.length + ' area(s) to improve' : ''}`;
+  sendEmail({ to, subject: subj, html }).catch((err) => console.error('survey alert email:', err.message));
+}
 function surveyRecovery(clientId, answers) {
   if (!clientId || !Array.isArray(answers)) return;
   const nums = answers.map((a) => ((a.num === 0 || a.num) ? Number(a.num) : null)).filter((n) => n != null && !Number.isNaN(n));
@@ -3832,6 +3870,7 @@ app.post('/api/kiosk/survey', (req, res) => {
     ins.run(info.lastInsertRowid, a.question_id, (a.num === 0 || a.num) ? Number(a.num) : null, a.text?.trim() || null);
   }
   surveyRecovery(b.client_id, b.answers);   // the guest spoke — recover instantly if it's low
+  notifySurveyResult(survey.id, b.client_id, b.answers);   // email leadership the rating + focus
   res.json({ ok: true });
 });
 

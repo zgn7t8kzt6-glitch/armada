@@ -4252,6 +4252,16 @@ function mealFeedback() {
     .map((x) => ({ q: x.q, t: x.t }));
   return { responses, total, likedPct: Math.round(liked / total * 100), dislikedPct: Math.round(disliked / total * 100), comments };
 }
+// Kitchen supplies that are low/out (from the Supplies par levels) — so the same
+// brief flags what to restock, not just what to cook.
+function kitchenLowStock() {
+  const rows = db.prepare(`SELECT i.name, i.unit, i.par_level, i.reorder_point,
+      (SELECT qty FROM inventory_counts c WHERE c.item_id = i.id ORDER BY c.id DESC LIMIT 1) qty,
+      (SELECT status FROM inventory_counts c WHERE c.item_id = i.id ORDER BY c.id DESC LIMIT 1) status
+    FROM inventory_items i WHERE i.department = 'Kitchen' AND i.active = 1 ORDER BY i.sort, i.name`).all();
+  return rows.filter((r) => r.status === 'low' || r.status === 'out')
+    .map((r) => ({ name: r.name, unit: r.unit, par: r.par_level, qty: r.qty, status: r.status }));
+}
 function buildMealCount() {
   const today = appToday();
   const tomorrow = addDays(today, 1);
@@ -4262,9 +4272,10 @@ function buildMealCount() {
   const total = census + welcome;
   const dietary = dietaryBreakdown(active);
   const feedback = mealFeedback();
+  const kitchenLow = kitchenLowStock();
   const dtLabel = new Date(tomorrow + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
   const names = arrivals.map((a) => `${a.preferred_name || a.first_name || ''} ${a.last_name || ''}`.trim()).filter(Boolean);
-  return { date: tomorrow, dtLabel, census, welcome, total, portions: total, dietary, feedback, arrivals: names };
+  return { date: tomorrow, dtLabel, census, welcome, total, portions: total, dietary, feedback, kitchenLow, arrivals: names };
 }
 async function sendMealCount() {
   const to = mealRecipients();
@@ -4294,6 +4305,9 @@ async function sendMealCount() {
     </table>
     ${dietRows}
     ${fbRows}
+    ${m.kitchenLow && m.kitchenLow.length ? `
+    <h3 style="margin:18px 0 4px">Kitchen stock running low</h3>
+    <div>${m.kitchenLow.map((k) => `${k.status === 'out' ? '<span style="color:#b00"><b>OUT</b></span>' : '<span style="color:#a60">low</span>'} ${e(k.name)} <span style="color:#888">(${k.qty != null ? k.qty : '?'}/${k.par} ${e(k.unit)})</span>`).join('<br>')}</div>` : ''}
     <p style="color:#888;margin-top:16px;font-size:12px">Counts only — no client names — for privacy. Includes a welcome meal for each scheduled arrival. Sent automatically by Armada Care Standards.</p>
   </div>`;
   await sendEmail({ to, subject: `Armada kitchen brief — ${m.dtLabel}: ${m.portions} portions`, html });

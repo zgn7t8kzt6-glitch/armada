@@ -743,6 +743,7 @@ async function loadMealCount(){
       extra += `</div>`;
     }
     if(fb&&fb.comments&&fb.comments.length) extra += `<div style="margin-top:4px"><strong>Recent food notes:</strong> ${fb.comments.slice(0,3).map(c=>esc(c.t)).join(' · ')}</div>`;
+    if(m.kitchenLow&&m.kitchenLow.length) extra += `<div style="margin-top:4px"><strong>Kitchen low:</strong> ${m.kitchenLow.map(k=>`${k.status==='out'?'<span style="color:var(--danger)">OUT</span> ':''}${esc(k.name)}`).join(' · ')}</div>`;
     if($('mealExtra')) $('mealExtra').innerHTML = extra;
     if($('meal_to')) $('meal_to').value = m.to||'';
   }catch(e){}

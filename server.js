@@ -3648,13 +3648,28 @@ app.get('/api/surveys/due', requireAuth, (req, res) => {
 // and last response — the clean at-a-glance list to drill in or clear from.
 app.get('/api/surveys/overview', requireAuth, requireAdmin, (req, res) => {
   const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
-  res.json({ surveys: surveys.map((s) => {
+  // Average of scale/rating answers in a time window (since/until = SQLite modifiers, or null for open).
+  const winAvg = (id, since, until) => {
+    const conds = [`r.survey_id = ?`, `q.type IN ('scale','rating')`, `a.value_num IS NOT NULL`];
+    const args = [id];
+    if (since) { conds.push(`r.created_at >= datetime('now', ?)`); args.push(since); }
+    if (until) { conds.push(`r.created_at < datetime('now', ?)`); args.push(until); }
+    const row = db.prepare(`SELECT AVG(a.value_num) a, COUNT(DISTINCT r.id) n FROM survey_answers a
+      JOIN survey_responses r ON r.id = a.response_id JOIN survey_questions q ON q.id = a.question_id
+      WHERE ${conds.join(' AND ')}`).get(...args);
+    return { avg: row.a != null ? Math.round(row.a * 10) / 10 : null, n: row.n };
+  };
+  res.json({ target: 4.5, surveys: surveys.map((s) => {
     const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?`).get(s.id).n;
-    const avg = db.prepare(`SELECT AVG(a.value_num) a FROM survey_answers a JOIN survey_responses r ON r.id = a.response_id
-      JOIN survey_questions q ON q.id = a.question_id WHERE r.survey_id = ? AND q.type IN ('scale','rating') AND a.value_num IS NOT NULL`).get(s.id).a;
+    const all = winAvg(s.id, null, null);
+    const recent = winAvg(s.id, '-30 day', null);          // last 30 days
+    const prior = winAvg(s.id, '-60 day', '-30 day');      // the 30 before that
+    const trend = (recent.avg != null && prior.avg != null) ? Math.round((recent.avg - prior.avg) * 10) / 10 : null;
     const last = db.prepare(`SELECT MAX(created_at) m FROM survey_responses WHERE survey_id = ?`).get(s.id).m;
     return { id: s.id, key: s.key, title: s.title, description: s.description || '', responses,
-      avg: avg != null ? Math.round(avg * 10) / 10 : null, last: last ? String(last).slice(0, 10) : '' };
+      avg: all.avg, recentAvg: recent.avg, recentN: recent.n, priorAvg: prior.avg, trend,
+      dir: trend == null ? null : (trend > 0.05 ? 'up' : trend < -0.05 ? 'down' : 'flat'),
+      last: last ? String(last).slice(0, 10) : '' };
   }) });
 });
 // Results (admin): per-question aggregates + recent comments.

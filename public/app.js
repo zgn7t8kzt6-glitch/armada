@@ -3100,14 +3100,22 @@ function surveyTab(which){
   if($('svTabResults')) $('svTabResults').classList.toggle('active',res);
   if($('svTabGive')) $('svTabGive').classList.toggle('active',!res);
 }
+function surveyTrendBadge(s){
+  if(s.dir==null) return s.recentN?'<span class="hint">new</span>':'';
+  const c = s.dir==='up'?'#2d7a4f':s.dir==='down'?'var(--danger)':'var(--muted)';
+  const arrow = s.dir==='up'?'▲':s.dir==='down'?'▼':'→';
+  const sign = s.trend>0?'+':'';
+  return `<span style="color:${c};font-weight:700" title="last 30 days vs the prior 30">${arrow} ${sign}${s.trend}</span>`;
+}
 async function loadCmdSurveys(){
   if(!$('cmdSurveys')) return;
   let d; try{ d=await api('/surveys/overview'); }catch(e){ $('cmdSurveys').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
   const any = d.surveys.some(s=>s.responses);
   $('cmdSurveys').innerHTML = any ? `<div class="ret-cards">${d.surveys.map(s=>{
-      const low = s.avg!=null && s.avg<3.5;
-      return `<div class="ret-card ${low?'rc-warn':''}" style="cursor:pointer" onclick="openSurveyResults(${s.id})"><div class="n">${s.avg!=null?s.avg+'<span style="font-size:14px">/5</span>':'—'}</div><div class="l">${esc(s.title)} · ${s.responses} ›</div></div>`;
-    }).join('')}</div>` : '<div class="hint">No survey responses yet. Put the kiosk on the unit to start gathering them.</div>';
+      const score = s.recentAvg!=null?s.recentAvg:s.avg;
+      const low = score!=null && score<3.5;
+      return `<div class="ret-card ${low?'rc-warn':''}" style="cursor:pointer" onclick="openSurveyResults(${s.id})"><div class="n">${score!=null?score+'<span style="font-size:14px">/5</span>':'—'} ${surveyTrendBadge(s)}</div><div class="l">${esc(s.title)} · ${s.responses} ›</div></div>`;
+    }).join('')}</div><p class="hint" style="margin-top:6px">Score = last 30 days. ▲▼ vs the prior 30 days. Target ${d.target}/5.</p>` : '<div class="hint">No survey responses yet. Put the kiosk on the unit to start gathering them.</div>';
 }
 let PENDING_SURVEY=null;
 function openSurveyResults(id){ PENDING_SURVEY=id; show('surveys'); }
@@ -3116,7 +3124,7 @@ async function loadSurveyOverview(){
   let d; try{ d=await api('/surveys/overview'); }catch(e){ return; }
   $('surveyOverview').innerHTML = `<div class="card"><h3>Survey results</h3>
     <p class="sub sans">Tap <strong>View</strong> to see scores and comments. <strong>Clear</strong> erases trial/test data.</p>
-    ${d.surveys.map(s=>`<div class="todo"><div class="txt"><strong>${esc(s.title)}</strong> <span class="hint">· ${s.responses} response${s.responses===1?'':'s'}${s.avg!=null?' · avg '+s.avg+'/5':''}${s.last?' · last '+esc(s.last):''}</span></div>
+    ${d.surveys.map(s=>`<div class="todo"><div class="txt"><strong>${esc(s.title)}</strong> ${surveyTrendBadge(s)} <span class="hint">· ${s.responses} response${s.responses===1?'':'s'}${s.avg!=null?' · all-time '+s.avg+'/5':''}${s.recentAvg!=null?' · 30d '+s.recentAvg+'/5':''}${s.last?' · last '+esc(s.last):''}</span></div>
       <div style="display:flex;gap:6px">${s.responses?`<button class="btn btn-gold btn-sm sans" onclick="showSurveyResults(${s.id})">View</button><button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${s.id},${s.responses})">Clear</button>`:'<span class="hint" style="align-self:center">no responses yet</span>'}</div></div>`).join('')}</div>`;
 }
 function startDue(surveyId, clientId){

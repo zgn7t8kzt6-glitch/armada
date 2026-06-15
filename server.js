@@ -3497,6 +3497,10 @@ function buildMorningBrief() {
   let welcomed = 0, anticipated = 0, ccInc = 0;
   for (const c of active) { if (careCardStatus(c).complete) welcomed++; else ccInc++; if (delightSet.has(c.id)) anticipated++; }
   const served = active.length ? Math.round((welcomed + anticipated) / (active.length * 2) * 100) : 100;
+  const sv = db.prepare(`SELECT outcome, COUNT(*) n FROM saves WHERE created_at >= datetime('now','-7 day') GROUP BY outcome`).all();
+  const svBy = Object.fromEntries(sv.map((r) => [r.outcome, r.n]));
+  const svTotal = (svBy.Stayed || 0) + (svBy.Left || 0);
+  const saveLine = svTotal ? `${svBy.Stayed || 0} kept of ${svTotal} (${Math.round((svBy.Stayed || 0) / svTotal * 100)}% held)` : 'none logged';
   const locLine = Object.entries(byLoc).sort((a, b) => (LOC_RANK[b[0]] ?? -1) - (LOC_RANK[a[0]] ?? -1)).map(([k, n]) => `${k}: ${n}`).join(' · ');
   const dt = new Date().toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
   const card = (label, val, color) => `<td style="padding:10px 14px;text-align:center;border:1px solid #eae5da;border-radius:8px"><div style="font-size:26px;font-weight:700;color:${color || '#235056'}">${val}</div><div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6f7a75">${label}</div></td>`;
@@ -3511,7 +3515,7 @@ function buildMorningBrief() {
     ${list(atRisk, (x) => `<div>⚠ <strong>${esc(x.c.pref || x.c.name)}</strong>${x.c.room ? ' · ' + esc(x.c.room) : ''} — ${esc(x.a.level)}${x.a.best_play ? ': ' + esc(x.a.best_play) : ''}</div>`)}
     <h3 style="color:#235056;margin:18px 0 6px">Scheduled to arrive (${scheduled.length})</h3>
     ${list(scheduled, (s) => `<div>☀ ${esc(((s.preferred_name || s.first_name || '') + ' ' + (s.last_name || '')).trim())}</div>`)}
-    <p style="margin:18px 0 0;color:#6f7a75">${ccInc} Care Card(s) to finish · Three Steps of Service at ${served}%.</p>
+    <p style="margin:18px 0 0;color:#6f7a75">${ccInc} Care Card(s) to finish · Three Steps of Service at ${served}% · Saves this week: ${saveLine}.</p>
     <p style="margin:16px 0 0;font-size:12px;color:#9aa">Sent from Armada Care Standards. Open the app for the full Command Center.</p>
   </div>`;
   const text = `Armada Morning Brief — ${dt}\nCensus ${active.length} · Admits ${admitsToday} · Discharges ${dToday.length} · AMA ${amaToday} · Served ${served}%\nLOC: ${locLine}\nAt risk: ${atRisk.map((x) => (x.c.pref || x.c.name) + ' (' + x.a.level + ')').join('; ') || 'none'}\nScheduled: ${scheduled.map((s) => (s.preferred_name || s.first_name || '') + ' ' + (s.last_name || '')).join('; ') || 'none'}`;

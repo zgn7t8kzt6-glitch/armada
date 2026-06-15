@@ -2413,6 +2413,66 @@ app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
   } });
 });
 
+// Client Record search — find ANY client (active or discharged) by name/room,
+// then pull the complete record (incidents, pulses, notes, handoffs, check-ins,
+// requests, AMA reads, saves, activities, follow-ups) in one place. Built for
+// investigating what's actually documented on a client like a past discharge.
+app.get('/api/records/search', requireAuth, (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) return res.json({ results: [] });
+  const like = '%' + q.replace(/[%_]/g, '') + '%';
+  const rows = db.prepare(`SELECT id, name, pref, room, program, admit, discharge_status, discharge_date, active
+    FROM clients WHERE name LIKE ? COLLATE NOCASE OR pref LIKE ? COLLATE NOCASE OR room LIKE ? COLLATE NOCASE
+    ORDER BY (discharge_status IS NULL) DESC, COALESCE(discharge_date, admit) DESC LIMIT 25`).all(like, like, like);
+  res.json({ results: rows.map((c) => ({
+    id: c.id, name: c.pref || c.name, full: c.name, room: c.room || '', program: c.program || '',
+    status: c.discharge_status ? ('Discharged · ' + c.discharge_status) : 'Active',
+    discharged: !!c.discharge_status, admit: (c.admit || '').slice(0, 10), dischargeDate: (c.discharge_date || '').slice(0, 10),
+  })) });
+});
+
+app.get('/api/clients/:id/record', requireAuth, (req, res) => {
+  const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: c.id, detail: 'full record', ip: req.ip });
+  const at = (s) => String(s || '').slice(0, 16);
+  const safeTriggers = (t) => { try { return t ? JSON.parse(t) : []; } catch { return []; } };
+  const losDays = (c.admit && c.discharge_date) ? Math.max(0, Math.round((Date.parse(String(c.discharge_date).slice(0, 10)) - Date.parse(String(c.admit).slice(0, 10))) / 864e5)) : null;
+  res.json({ record: {
+    client: {
+      id: c.id, name: c.pref || c.name, full: c.name, room: c.room || '', program: c.program || '', loc: c.loc || '',
+      admit: (c.admit || '').slice(0, 10), sober: c.sober || '', case_manager: c.case_manager || '', therapist: c.therapist || '',
+      active: !!c.active && !c.discharge_status, los: losDays,
+      discharge_status: c.discharge_status || '', discharge_date: (c.discharge_date || '').slice(0, 10),
+      discharge_reason: c.discharge_reason || '', discharge_destination: c.discharge_destination || '',
+      discharge_improve: c.discharge_improve || '', discharge_followthrough: c.discharge_followthrough || '',
+      discharged_by_kipu: c.discharged_by_kipu || '',
+    },
+    incidents: db.prepare(`SELECT type, severity, description, action_taken, status, reported_by_name, created_at FROM incidents WHERE client_id = ? ORDER BY id DESC`).all(c.id)
+      .map((x) => ({ type: x.type, severity: x.severity, description: x.description, action: x.action_taken || '', status: x.status, by: x.reported_by_name || '', at: at(x.created_at) })),
+    pulses: db.prepare(`SELECT date, shift, concern, engagement, triggers, statements, note FROM pulses WHERE client_id = ? ORDER BY id DESC LIMIT 60`).all(c.id)
+      .map((p) => ({ date: p.date, shift: p.shift, concern: p.concern, engagement: p.engagement || '', triggers: safeTriggers(p.triggers), statements: p.statements || '', note: p.note || '' })),
+    notes: db.prepare(`SELECT text, author, source, flagged, flag_level, flag_summary, created_at FROM notes WHERE client_id = ? ORDER BY id DESC LIMIT 60`).all(c.id)
+      .map((n) => ({ text: n.text, author: n.author || '', source: n.source || '', flagged: !!n.flagged, level: n.flag_level || '', summary: n.flag_summary || '', at: at(n.created_at) })),
+    handoffs: db.prepare(`SELECT h.note, h.created_at, s.date, s.name FROM handoffs h JOIN shifts s ON s.id = h.shift_id WHERE h.client_id = ? ORDER BY h.id DESC LIMIT 40`).all(c.id)
+      .map((h) => ({ note: h.note, date: h.date, shift: h.name, at: at(h.created_at) })),
+    checkins: db.prepare(`SELECT question, answer, shift, by_name, created_at FROM client_checkins WHERE client_id = ? ORDER BY id DESC LIMIT 40`).all(c.id)
+      .map((x) => ({ question: x.question || '', answer: x.answer || '', shift: x.shift || '', by: x.by_name || '', at: at(x.created_at) })),
+    requests: db.prepare(`SELECT text, department, priority, status, created_at FROM requests WHERE client_id = ? ORDER BY id DESC LIMIT 40`).all(c.id)
+      .map((r) => ({ text: r.text, dept: r.department || '', priority: r.priority || '', status: r.status || '', at: at(r.created_at) })),
+    concerns: db.prepare(`SELECT text, status, created_at FROM concerns WHERE client_id = ? ORDER BY id DESC LIMIT 30`).all(c.id)
+      .map((x) => ({ text: x.text, status: x.status || '', at: at(x.created_at) })),
+    amaReads: db.prepare(`SELECT level, summary, created_at FROM ama_reads WHERE client_id = ? ORDER BY id DESC LIMIT 12`).all(c.id)
+      .map((a) => ({ level: a.level, summary: a.summary || '', at: at(a.created_at) })),
+    saves: db.prepare(`SELECT outcome, trigger, note, created_at FROM saves WHERE client_id = ? ORDER BY id DESC LIMIT 20`).all(c.id)
+      .map((s) => ({ outcome: s.outcome || '', trigger: s.trigger || '', note: s.note || '', at: at(s.created_at) })),
+    activities: db.prepare(`SELECT type, note, by_name, created_at FROM activities WHERE client_id = ? ORDER BY id DESC LIMIT 40`).all(c.id)
+      .map((a) => ({ type: a.type, note: a.note || '', by: a.by_name || '', at: at(a.created_at) })),
+    followups: db.prepare(`SELECT type, due_date, status FROM followups WHERE client_id = ? ORDER BY due_date DESC LIMIT 20`).all(c.id)
+      .map((f) => ({ type: f.type, due: f.due_date || '', status: f.status || '' })),
+  } });
+});
+
 function buildClientContext(c) {
   const names = [c.name, c.pref];
   const s = (x) => scrub(x, names);

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615K" />
+<link rel="stylesheet" href="/styles.css?v=20260615L" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -79,6 +79,7 @@
     <button data-view="library">Library / SOPs</button>
     <button data-view="standard" data-subview>Standard</button>
     <button data-view="clients">Clients</button>
+    <button data-view="records">Client Record</button>
     <button data-view="editor" data-subview>Care Card</button>
     <button data-view="assign" data-admin data-subview>Assign Staff</button>
     <button data-view="settings" data-admin>Settings</button>
@@ -396,6 +397,17 @@
           </div>
         </details>
       </div>
+    </section>
+
+    <!-- CLIENT RECORD SEARCH -->
+    <section id="records" class="view">
+      <div class="card">
+        <h3>Client Record</h3>
+        <p class="sub sans">Search any client — current or discharged — and see everything documented: incidents, pulse notes, documentation, handoffs, check-ins, requests, AMA reads, saves, and discharge details, in one place.</p>
+        <div class="handoff-add"><input id="rec_q" placeholder="Search by name or room…" oninput="recSearch()" autocomplete="off"/><button class="btn btn-ghost sans" onclick="recSearch()">Search</button></div>
+        <div id="recResults" style="margin-top:10px"></div>
+      </div>
+      <div id="recDetail"></div>
     </section>
 
     <!-- CONTINUUM OF CARE -->
@@ -1415,6 +1427,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615K"></script>
+<script src="/app.js?v=20260615L"></script>
 </body>
 </html>

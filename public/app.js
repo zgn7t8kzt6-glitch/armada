@@ -110,7 +110,7 @@ const GROUPS=[
 ];
 const GROUP_OF={
   dashboard:'today',today:'today',lineup:'today',arrivals:'today',
-  clients:'clients',editor:'clients',journey:'clients',family:'clients',
+  clients:'clients',editor:'clients',journey:'clients',family:'clients',records:'clients',
   report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',
   casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',continuum:'clinical',
   admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
@@ -170,6 +170,7 @@ function show(v){
   if(v==='coverage') loadCoverage();
   if(v==='schedule') loadSchedule();
   if(v==='clients') renderClients();
+  if(v==='records') loadRecords();
   if(v==='retention') loadRetention();
   if(v==='casemgmt') loadCaseMgmt();
   if(v==='continuum') loadContinuum();
@@ -2633,6 +2634,58 @@ async function loadMaintShift(){
     }).join('');
     return `<div style="margin-bottom:10px"><div class="sans" style="font-weight:600;color:var(--navy)">${p}</div><table class="tbl">${rows}</table></div>`;
   }).join('');
+}
+
+/* ---- Client Record search ---- */
+let REC_TIMER=null;
+function loadRecords(){ if($('rec_q')&&!$('rec_q').value){ $('recResults').innerHTML='<div class="hint">Start typing a name or room above.</div>'; $('recDetail').innerHTML=''; } }
+function recSearch(){ clearTimeout(REC_TIMER); REC_TIMER=setTimeout(doRecSearch, 220); }
+async function doRecSearch(){
+  const q=$('rec_q').value.trim();
+  if(q.length<2){ $('recResults').innerHTML='<div class="hint">Type at least 2 characters.</div>'; return; }
+  let d; try{ d=await api('/records/search?q='+encodeURIComponent(q)); }catch(e){ $('recResults').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  if(!d.results.length){ $('recResults').innerHTML='<div class="hint">No clients match “'+esc(q)+'”.</div>'; return; }
+  $('recResults').innerHTML = d.results.map(r=>`<button class="kbtn" style="margin:4px 0" onclick="openRecord(${r.id})">
+    <strong>${esc(r.name)}</strong>${r.room?' · '+esc(r.room):''} <span class="risk ${r.discharged?'risk-warn':'risk-low'}">${esc(r.status)}</span>
+    <div class="hint">${r.full&&r.full!==r.name?esc(r.full)+' · ':''}${r.program?esc(r.program)+' · ':''}admit ${esc(r.admit)||'—'}${r.dischargeDate?' · discharged '+esc(r.dischargeDate):''}</div></button>`).join('');
+}
+async function openRecord(id){
+  $('recDetail').innerHTML='<div class="card"><div class="hint">Loading record…</div></div>';
+  let d; try{ d=(await api('/clients/'+id+'/record')).record; }catch(e){ $('recDetail').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const c=d.client;
+  const feed=(title, rows, render, empty)=>`<details class="card" ${rows.length?'open':''}><summary class="sans" style="cursor:pointer;font-weight:600">${title} <span class="badge">${rows.length}</span></summary>${rows.length?'<div style="margin-top:10px">'+rows.map(render).join('')+'</div>':'<div class="hint" style="margin-top:8px">'+empty+'</div>'}</details>`;
+  const line=(at,body)=>`<div class="pc-note" style="border-left:3px solid var(--line);padding-left:10px;margin:8px 0">${body}${at?`<div class="hint">${esc(at)}</div>`:''}</div>`;
+  const sev=s=>`<span class="risk ${/critical|high/i.test(s)?'risk-high':/moderate|medium|elev/i.test(s)?'risk-warn':'risk-low'}">${esc(s)}</span>`;
+  const discharge = c.discharge_status ? `<div class="card" style="border-left:4px solid var(--danger)">
+      <h3 style="margin-top:0">Discharge</h3>
+      <div><strong>Status:</strong> ${esc(c.discharge_status)}${c.discharge_date?' · '+esc(c.discharge_date):''}${c.los!=null?' · LOS '+c.los+' days':''}</div>
+      ${c.discharge_reason?`<div style="margin-top:6px"><strong>Reason:</strong> ${esc(c.discharge_reason)}</div>`:''}
+      ${c.discharge_destination?`<div><strong>Went to:</strong> ${esc(c.discharge_destination)}</div>`:''}
+      ${c.discharge_improve?`<div style="margin-top:6px"><strong>What we could've done better:</strong> ${esc(c.discharge_improve)}</div>`:''}
+      ${c.discharge_followthrough?`<div><strong>Follow-through:</strong> ${esc(c.discharge_followthrough)}</div>`:''}
+      ${c.discharged_by_kipu?`<div class="hint">Discharged in Kipu by: ${esc(c.discharged_by_kipu)}</div>`:''}
+    </div>` : '';
+  $('recDetail').innerHTML = `
+    <div class="card">
+      <div class="cmd-hero-row"><div>
+        <h3 style="margin:0">${esc(c.name)} ${c.active?'<span class="risk risk-low">Active</span>':'<span class="risk risk-warn">Discharged</span>'}</h3>
+        <div class="hint">${c.full&&c.full!==c.name?esc(c.full)+' · ':''}${c.room?'Room '+esc(c.room)+' · ':''}${c.program?esc(c.program)+' · ':''}${c.loc?esc(c.loc)+' · ':''}admit ${esc(c.admit)||'—'}${c.los!=null?' · LOS '+c.los+'d':''}</div>
+        <div class="hint">${c.case_manager?'CM: '+esc(c.case_manager)+' · ':''}${c.therapist?'Therapist: '+esc(c.therapist):''}</div>
+      </div><button class="btn btn-ghost btn-sm sans" onclick="openJourney(${c.id})">Open Client 360 ↗</button></div>
+    </div>
+    ${discharge}
+    ${feed('🚩 Incidents', d.incidents, x=>line(x.at+(x.by?' · '+x.by:''), `${sev(x.severity)} <strong>${esc(x.type)}</strong> — ${esc(x.description)}${x.action?`<div class="hint">Action: ${esc(x.action)}</div>`:''}<div class="hint">${esc(x.status)}</div>`), 'No incidents logged.')}
+    ${feed('💓 Pulse notes', d.pulses, p=>line(p.date+' '+p.shift, `${sev(p.concern)} ${p.engagement?'<span class="badge">'+esc(p.engagement)+'</span> ':''}${p.triggers&&p.triggers.length?'<span class="hint">'+p.triggers.map(esc).join(', ')+'</span>':''}${p.statements?`<div>“${esc(p.statements)}”</div>`:''}${p.note?`<div>${esc(p.note)}</div>`:''}`), 'No pulse notes.')}
+    ${feed('📝 Documentation notes', d.notes, n=>line(n.at+(n.author?' · '+n.author:'')+(n.source?' · '+n.source:''), `${n.flagged?sev(n.level||'flag')+' ':''}${esc(n.text)}${n.summary?`<div class="hint">⚠ ${esc(n.summary)}</div>`:''}`), 'No documentation notes.')}
+    ${feed('🤝 Shift handoffs', d.handoffs, h=>line((h.date||'')+' '+(h.shift||''), esc(h.note)), 'No handoff notes.')}
+    ${feed('🗣️ Check-ins (rounds)', d.checkins, x=>line(x.at+(x.by?' · '+x.by:''), `${x.question?'<span class="hint">'+esc(x.question)+'</span><br>':''}${esc(x.answer)}`), 'No check-ins.')}
+    ${feed('🛎️ Requests', d.requests, r=>line(r.at, `${esc(r.text)} <span class="hint">${esc(r.dept)} · ${esc(r.status)}</span>`), 'No requests.')}
+    ${feed('⚠️ Concerns', d.concerns, x=>line(x.at, `${esc(x.text)} <span class="hint">${esc(x.status)}</span>`), 'No concerns.')}
+    ${feed('🚪 Saves (de-escalation)', d.saves, s=>line(s.at, `<strong>${esc(s.outcome)}</strong>${s.trigger?' · '+esc(s.trigger):''}${s.note?`<div>${esc(s.note)}</div>`:''}`), 'No save attempts.')}
+    ${feed('📈 AMA risk reads', d.amaReads, a=>line(a.at, `${sev(a.level)} ${esc(a.summary)}`), 'No AMA reads.')}
+    ${feed('🎯 Activities', d.activities, a=>line(a.at+(a.by?' · '+a.by:''), `${esc(a.type)}${a.note?' — '+esc(a.note):''}`), 'No activities logged.')}
+    ${feed('📞 Follow-ups', d.followups, f=>line('', `${esc(f.type)} · due ${esc(f.due)} · ${esc(f.status)}`), 'No follow-ups.')}`;
+  $('recDetail').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 /* ---- My Shift: role-tailored employee dashboard ---- */

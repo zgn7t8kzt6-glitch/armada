@@ -22,43 +22,49 @@
       linear-gradient(160deg,#fbf9f3 0%, var(--cream) 55%, #efeadf 100%);
     display:flex; flex-direction:column; min-height:100vh; overflow:hidden;
   }
-  header{ text-align:center; padding:5vh 4vw 1vh; }
-  .logo{ height:18vh; max-height:200px; width:auto; margin-bottom:2vh;
+  /* Header is now compact — the names are the star of the screen. */
+  header{ text-align:center; padding:4vh 4vw 0; }
+  .logo{ height:13vh; max-height:150px; width:auto; margin-bottom:1.4vh;
     filter:drop-shadow(0 6px 22px rgba(35,80,86,.18)); }
-  .eyebrow{ letter-spacing:.55em; text-transform:uppercase; font-size:1.3vw;
-    color:var(--gold); font-family:'Inter',system-ui,sans-serif; margin:0 0 1vh; font-weight:600 }
-  h1{ margin:0; font-size:4.6vw; font-weight:600; line-height:1.05; color:var(--teal) }
-  .sub{ margin:1.4vh 0 0; font-size:1.7vw; color:var(--teal-2); opacity:.9 }
-  /* gold gradient divider echoing the logo's sunrise */
-  .rule{ width:34vw; max-width:560px; height:3px; margin:2.4vh auto 0; border-radius:3px;
+  h1{ margin:0; font-size:3vw; font-weight:600; line-height:1.05; color:var(--teal) }
+  .sub{ margin:1vh 0 0; font-size:1.5vw; color:var(--teal-2); opacity:.9 }
+  .rule{ width:30vw; max-width:520px; height:3px; margin:1.8vh auto 0; border-radius:3px;
     background:linear-gradient(90deg, transparent, var(--gold), var(--aqua), transparent) }
-  main{ flex:1; display:flex; align-items:center; justify-content:center; padding:0 5vw 5vh; }
-  .names{ display:flex; flex-wrap:wrap; gap:2.2vh 2.2vw; justify-content:center; max-width:92vw }
-  .chip{
-    font-size:3vw; padding:1.5vh 3vw; border-radius:999px; color:var(--teal);
-    background:var(--paper); border:1.5px solid rgba(95,176,194,.55);
-    box-shadow:0 8px 26px rgba(35,80,86,.10);
-    display:flex; align-items:center; gap:1.3vw;
+
+  /* The hero: today's arrivals, large and unmistakable. */
+  main{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:1vh 4vw 4vh; }
+  .eyebrow{ letter-spacing:.5em; text-transform:uppercase; font-size:1.4vw;
+    color:var(--gold); font-family:'Inter',system-ui,sans-serif; font-weight:600; margin:0 0 3vh }
+  .names{ display:flex; flex-wrap:wrap; gap:2.4vh 3vw; justify-content:center; align-items:center; max-width:94vw }
+  .name{
+    position:relative;
+    font-size:clamp(2.2rem, 5.6vw, 6rem); font-weight:600; line-height:1.05; color:var(--teal);
+    padding:2.2vh 4vw; border-radius:2.2vh;
+    background:var(--paper); border:2px solid rgba(95,176,194,.45);
+    box-shadow:0 14px 40px rgba(35,80,86,.13);
+    display:flex; align-items:center; gap:1.6vw;
   }
-  .chip.arrived{ border-color:var(--sage); background:linear-gradient(180deg,#fff,#f4f8ef) }
-  .dot{ width:1.3vw; height:1.3vw; border-radius:50%;
+  .name .dot{ width:1.5vw; height:1.5vw; min-width:14px; min-height:14px; border-radius:50%;
     background:linear-gradient(160deg,var(--gold),var(--aqua)) }
-  .chip.arrived .dot{ background:var(--sage) }
-  .chip.arrived::after{ content:'✓'; color:var(--teal); font-size:2.4vw; margin-left:.4vw }
-  .empty{ font-size:2.4vw; color:var(--muted) }
-  footer{ text-align:center; padding:0 0 3.5vh; font-family:'Inter',system-ui,sans-serif;
+  .name.arrived{ border-color:var(--sage); background:linear-gradient(180deg,#fff,#f3f8ec) }
+  .name.arrived .dot{ background:var(--sage) }
+  .name.arrived .check{ color:var(--sage); font-size:.7em; margin-left:.5vw }
+  .empty{ font-size:2.6vw; color:var(--muted) }
+  footer{ text-align:center; padding:0 0 3vh; font-family:'Inter',system-ui,sans-serif;
     font-size:1vw; letter-spacing:.28em; text-transform:uppercase; color:var(--muted); opacity:.8 }
 </style>
 </head>
 <body>
   <header>
     <img class="logo" src="/logo.png" alt="Armada Recovery"/>
-    <p class="eyebrow">Today we welcome</p>
     <h1 id="welcomeLine">Welcome to Armada Recovery</h1>
     <p class="sub">You belong here. Your care begins the moment you walk in.</p>
     <div class="rule"></div>
   </header>
-  <main><div class="names" id="names"><div class="empty">Preparing today's welcome…</div></div></main>
+  <main>
+    <p class="eyebrow" id="eyebrow">Arriving today</p>
+    <div class="names" id="names"><div class="empty">Preparing today's welcome…</div></div>
+  </main>
   <footer>Armada Care Standards</footer>
 <script>
 async function refresh(){
@@ -68,8 +74,10 @@ async function refresh(){
     const d = await r.json();
     if(d.facility) document.getElementById('welcomeLine').textContent = 'Welcome to ' + d.facility;
     const box = document.getElementById('names');
-    if(!d.names || !d.names.length){ box.innerHTML='<div class="empty">No scheduled arrivals today.</div>'; return; }
-    box.innerHTML = d.names.map(n=>`<div class="chip${n.arrived?' arrived':''}"><span class="dot"></span>${(n.name||'').replace(/[<>&]/g,'')}</div>`).join('');
+    const eyebrow = document.getElementById('eyebrow');
+    if(!d.names || !d.names.length){ eyebrow.style.display='none'; box.innerHTML='<div class="empty">No scheduled arrivals today.</div>'; return; }
+    eyebrow.style.display='block';
+    box.innerHTML = d.names.map(n=>`<div class="name${n.arrived?' arrived':''}"><span class="dot"></span>${(n.name||'').replace(/[<>&]/g,'')}${n.arrived?'<span class="check">✓</span>':''}</div>`).join('');
   }catch(e){ /* keep the last good board on transient errors */ }
 }
 refresh(); setInterval(refresh, 30000);

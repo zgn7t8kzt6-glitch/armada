@@ -524,10 +524,37 @@ app.post('/api/maintenance/:id', requireAuth, (req, res) => {
 // Every meal the caterer delivers gets inspected against a standard: enough
 // portions for the census, all food groups present, and whether clients liked it.
 const MEAL_GROUPS = ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit', 'Dairy', 'Beverage'];
-const MEAL_REQUIRED = ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit'];   // a complete plate
 const MEALS_LIST = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+// A complete plate differs by meal — fruit at breakfast, full plate at lunch/
+// dinner, snacks held to no fixed standard (just logged).
+const MEAL_REQUIRED_BY = {
+  Breakfast: ['Protein', 'Grain/Carb', 'Fruit'],
+  Lunch: ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit'],
+  Dinner: ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit'],
+  Snack: [],
+};
+function requiredFor(meal) { return MEAL_REQUIRED_BY[meal] || ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit']; }
 function currentMeal() { const h = localHour(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : h < 20 ? 'Dinner' : 'Snack'; }
 function censusNow() { return db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n; }
+// 30-day caterer scorecard rollup — shared by the Meals view, the kitchen brief,
+// and the Command Center.
+function mealScorecard() {
+  const rows = db.prepare(`SELECT * FROM meal_checks WHERE date >= date('now','-30 day') ORDER BY date DESC, meal`).all();
+  const logged = rows.length;
+  const complete = rows.filter((r) => r.complete).length;
+  const liked = rows.filter((r) => r.liked === 'Liked').length;
+  const likedRated = rows.filter((r) => r.liked).length;
+  const short = rows.filter((r) => r.received != null && r.expected != null && r.received < r.expected).length;
+  const missCount = {};
+  for (const r of rows) { let g = []; try { g = JSON.parse(r.groups || '[]'); } catch { /* */ } requiredFor(r.meal).filter((x) => !g.includes(x)).forEach((x) => { missCount[x] = (missCount[x] || 0) + 1; }); }
+  const recentIssues = rows.filter((r) => r.issues).slice(0, 8).map((r) => ({ date: r.date, meal: r.meal, issue: r.issues }));
+  return {
+    logged, completePct: logged ? Math.round(complete / logged * 100) : null,
+    likedPct: likedRated ? Math.round(liked / likedRated * 100) : null, shortCount: short,
+    missing: Object.entries(missCount).sort((a, b) => b[1] - a[1]).map(([g, n]) => ({ group: g, n })),
+    recentIssues,
+  };
+}
 
 app.get('/api/meals/today', requireAuth, (req, res) => {
   const today = appToday();
@@ -535,14 +562,15 @@ app.get('/api/meals/today', requireAuth, (req, res) => {
   const checks = {};
   db.prepare(`SELECT * FROM meal_checks WHERE date = ?`).all(today).forEach((r) => { checks[r.meal] = r; });
   res.json({
-    date: today, current: currentMeal(), expected, groups: MEAL_GROUPS, required: MEAL_REQUIRED, meals: MEALS_LIST,
+    date: today, current: currentMeal(), expected, groups: MEAL_GROUPS, meals: MEALS_LIST,
     today: MEALS_LIST.map((m) => {
+      const req = requiredFor(m);
       const c = checks[m];
-      if (!c) return { meal: m, logged: false };
+      if (!c) return { meal: m, logged: false, required: req };
       let groups = []; try { groups = JSON.parse(c.groups || '[]'); } catch { /* */ }
-      return { meal: m, logged: true, expected: c.expected, received: c.received, groups, liked: c.liked || '',
+      return { meal: m, logged: true, required: req, expected: c.expected, received: c.received, groups, liked: c.liked || '',
         quality: c.quality, issues: c.issues || '', complete: !!c.complete, photo: c.photo || null, by: c.by_name || '',
-        missing: MEAL_REQUIRED.filter((g) => !groups.includes(g)) };
+        missing: req.filter((g) => !groups.includes(g)) };
     }),
   });
 });
@@ -557,7 +585,7 @@ app.post('/api/meals/check', requireAuth, async (req, res) => {
   const liked = ['Liked', 'OK', 'Disliked'].includes(b.liked) ? b.liked : null;
   const quality = (b.quality === 0 || b.quality) ? Math.max(1, Math.min(5, parseInt(b.quality, 10) || 0)) : null;
   let photo = null; if (b.photo) { try { photo = validPhoto(b.photo); } catch (e) { return res.status(400).json({ error: e.message }); } }
-  const missing = MEAL_REQUIRED.filter((g) => !groups.includes(g));
+  const missing = requiredFor(meal).filter((g) => !groups.includes(g));
   const enough = (received != null && expected != null) ? received >= expected : true;
   const complete = (missing.length === 0 && enough) ? 1 : 0;
   db.prepare(`INSERT INTO meal_checks (date, meal, expected, received, groups, liked, quality, issues, photo, complete, by_id, by_name)
@@ -578,24 +606,7 @@ app.post('/api/meals/check', requireAuth, async (req, res) => {
   res.json({ ok: true, complete: !!complete, enough, missing });
 });
 // Caterer scorecard — last 30 days of meal checks (held the standard?).
-app.get('/api/meals/scorecard', requireAuth, (req, res) => {
-  const rows = db.prepare(`SELECT * FROM meal_checks WHERE date >= date('now','-30 day') ORDER BY date DESC, meal`).all();
-  const logged = rows.length;
-  const complete = rows.filter((r) => r.complete).length;
-  const liked = rows.filter((r) => r.liked === 'Liked').length;
-  const likedRated = rows.filter((r) => r.liked).length;
-  const short = rows.filter((r) => r.received != null && r.expected != null && r.received < r.expected).length;
-  // Which food groups go missing most often.
-  const missCount = {};
-  for (const r of rows) { let g = []; try { g = JSON.parse(r.groups || '[]'); } catch { /* */ } MEAL_REQUIRED.filter((x) => !g.includes(x)).forEach((x) => { missCount[x] = (missCount[x] || 0) + 1; }); }
-  const recentIssues = rows.filter((r) => r.issues).slice(0, 8).map((r) => ({ date: r.date, meal: r.meal, issue: r.issues }));
-  res.json({
-    logged, completePct: logged ? Math.round(complete / logged * 100) : null,
-    likedPct: likedRated ? Math.round(liked / likedRated * 100) : null, shortCount: short,
-    missing: Object.entries(missCount).sort((a, b) => b[1] - a[1]).map(([g, n]) => ({ group: g, n })),
-    recentIssues,
-  });
-});
+app.get('/api/meals/scorecard', requireAuth, (req, res) => res.json(mealScorecard()));
 
 // Every Kipu discharge must have the in-app fond-farewell completed (Safe
 // Departure checklist + where they went). What's missing on a given discharge:
@@ -4491,9 +4502,10 @@ function buildMealCount() {
   const dietary = dietaryBreakdown(active);
   const feedback = mealFeedback();
   const kitchenLow = kitchenLowStock();
+  const scorecard = mealScorecard();
   const dtLabel = new Date(tomorrow + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
   const names = arrivals.map((a) => `${a.preferred_name || a.first_name || ''} ${a.last_name || ''}`.trim()).filter(Boolean);
-  return { date: tomorrow, dtLabel, census, welcome, total, portions: total, dietary, feedback, kitchenLow, arrivals: names };
+  return { date: tomorrow, dtLabel, census, welcome, total, portions: total, dietary, feedback, kitchenLow, scorecard, arrivals: names };
 }
 async function sendMealCount() {
   const to = mealRecipients();
@@ -4526,6 +4538,10 @@ async function sendMealCount() {
     ${m.kitchenLow && m.kitchenLow.length ? `
     <h3 style="margin:18px 0 4px">Kitchen stock running low</h3>
     <div>${m.kitchenLow.map((k) => `${k.status === 'out' ? '<span style="color:#b00"><b>OUT</b></span>' : '<span style="color:#a60">low</span>'} ${e(k.name)} <span style="color:#888">(${k.qty != null ? k.qty : '?'}/${k.par} ${e(k.unit)})</span>`).join('<br>')}</div>` : ''}
+    ${m.scorecard && m.scorecard.logged ? `
+    <h3 style="margin:18px 0 4px">Caterer scorecard (last 30 days)</h3>
+    <div>${m.scorecard.completePct != null ? `<b style="color:${m.scorecard.completePct < 90 ? '#a60' : '#2d7a4f'}">${m.scorecard.completePct}% met standard</b>` : ''}${m.scorecard.likedPct != null ? ` · ${m.scorecard.likedPct}% clients liked it` : ''}${m.scorecard.shortCount ? ` · <span style="color:#b00">${m.scorecard.shortCount} short deliver${m.scorecard.shortCount === 1 ? 'y' : 'ies'}</span>` : ''}</div>
+    ${m.scorecard.missing.length ? `<div style="color:#a60;margin-top:4px">Most-missed: ${m.scorecard.missing.map((x) => `${e(x.group)} (${x.n})`).join(' · ')}</div>` : ''}` : ''}
     <p style="color:#888;margin-top:16px;font-size:12px">Counts only — no client names — for privacy. Includes a welcome meal for each scheduled arrival. Sent automatically by Armada Care Standards.</p>
   </div>`;
   await sendEmail({ to, subject: `Armada kitchen brief — ${m.dtLabel}: ${m.portions} portions`, html });

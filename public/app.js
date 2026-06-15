@@ -772,6 +772,8 @@ async function loadMealCount(){
     }
     if(fb&&fb.comments&&fb.comments.length) extra += `<div style="margin-top:4px"><strong>Recent food notes:</strong> ${fb.comments.slice(0,3).map(c=>esc(c.t)).join(' · ')}</div>`;
     if(m.kitchenLow&&m.kitchenLow.length) extra += `<div style="margin-top:4px"><strong>Kitchen low:</strong> ${m.kitchenLow.map(k=>`${k.status==='out'?'<span style="color:var(--danger)">OUT</span> ':''}${esc(k.name)}`).join(' · ')}</div>`;
+    const sc=m.scorecard;
+    if(sc&&sc.logged) extra += `<div style="margin-top:4px"><strong>Caterer (30d):</strong> ${sc.completePct!=null?`<span style="color:${sc.completePct<90?'var(--danger)':'var(--good)'}">${sc.completePct}% met standard</span>`:''}${sc.likedPct!=null?' · '+sc.likedPct+'% liked':''}${sc.shortCount?' · <span style="color:var(--danger)">'+sc.shortCount+' short</span>':''}${sc.missing.length?' · most-missed: '+sc.missing.map(x=>esc(x.group)).join(', '):''} <a href="#" class="hint" onclick="show('meals');return false">open Meals ›</a></div>`;
     if($('mealExtra')) $('mealExtra').innerHTML = extra;
     if($('meal_to')) $('meal_to').value = m.to||'';
   }catch(e){}
@@ -2509,9 +2511,10 @@ function mealCard(m,d){
   const statusPill = !m.logged ? '<span class="risk risk-warn">not inspected</span>'
     : m.complete ? '<span class="risk risk-low">✓ complete</span>' : '<span class="risk risk-high">⚠ issue</span>';
   const chosen = m.groups||[];
+  const req0 = m.required||[];
   const groupChips = d.groups.map(g=>{
-    const on = chosen.includes(g); const req = d.required.includes(g);
-    return `<button type="button" class="meal-grp${on?' on':''}" data-meal="${m.meal}" data-grp="${esc(g)}" onclick="toggleGroup(this)">${on?'✓ ':''}${esc(g)}${req?' *':''}</button>`;
+    const on = chosen.includes(g); const req = req0.includes(g);
+    return `<button type="button" class="meal-grp${on?' on':''}" data-meal="${m.meal}" data-grp="${esc(g)}" data-req="${req?1:0}" onclick="toggleGroup(this)">${on?'✓ ':''}${esc(g)}${req?' *':''}</button>`;
   }).join('');
   const likeBtn=(v,lbl)=>`<button type="button" class="meal-like${m.liked===v?' on':''}" data-meal="${m.meal}" data-like="${v}" onclick="pickLike(this)">${lbl}</button>`;
   return `<details class="card" ${open?'open':''}>
@@ -2535,7 +2538,7 @@ function mealCard(m,d){
     </div>
   </details>`;
 }
-function toggleGroup(b){ b.classList.toggle('on'); b.textContent=(b.classList.contains('on')?'✓ ':'')+b.dataset.grp+(MEALS_DATA&&MEALS_DATA.required.includes(b.dataset.grp)?' *':''); }
+function toggleGroup(b){ b.classList.toggle('on'); b.textContent=(b.classList.contains('on')?'✓ ':'')+b.dataset.grp+(b.dataset.req==='1'?' *':''); }
 function pickLike(b){ b.parentNode.querySelectorAll('.meal-like').forEach(x=>x.classList.remove('on')); b.classList.add('on'); b.parentNode.dataset.val=b.dataset.like; }
 async function mealPhotoPick(meal,input){ const f=input.files&&input.files[0]; if(!f)return; try{ MEAL_PHOTO[meal]=await resizeImage(f,900,0.7); $('meal_thumb_'+meal).innerHTML=`<img src="${MEAL_PHOTO[meal]}" style="height:36px;border-radius:6px"/>`; }catch(e){} input.value=''; }
 async function saveMealCheck(meal){

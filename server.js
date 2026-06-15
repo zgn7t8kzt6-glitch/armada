@@ -4147,6 +4147,7 @@ function msUntilLocalHour(targetHour) {
 }
 function buildMorningBrief() {
   const today = appToday();
+  const esc = htmlEsc;   // escape user/PHI text in the HTML email
   const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
   const byLoc = {};
   for (const c of active) { const k = (c.loc && c.loc !== 'Unspecified') ? c.loc : (parseLoc(c.program) || 'Unspecified'); byLoc[k] = (byLoc[k] || 0) + 1; }

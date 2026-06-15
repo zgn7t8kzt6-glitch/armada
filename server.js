@@ -3324,8 +3324,14 @@ app.get('/api/saves', requireAuth, (req, res) => {
 });
 app.post('/api/saves', requireAuth, (req, res) => {
   const b = req.body || {};
+  const outcome = ['Stayed', 'Left'].includes(b.outcome) ? b.outcome : 'Pending';
   const info = db.prepare(`INSERT INTO saves (client_id, trigger, note, outcome, by_id, by_name) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(b.client_id || null, b.trigger || null, b.note || null, ['Stayed', 'Left'].includes(b.outcome) ? b.outcome : 'Pending', req.user.id, req.user.name);
+    .run(b.client_id || null, b.trigger || null, b.note || null, outcome, req.user.id, req.user.name);
+  // The Second Save: if they left despite the attempt, queue the warm-door
+  // follow-up call (24h) — many come back if the door is open. Deduped.
+  if (outcome === 'Left' && b.client_id && !db.prepare(`SELECT 1 FROM followups WHERE client_id = ? AND type = 'second-save' AND status = 'Pending'`).get(b.client_id)) {
+    db.prepare(`INSERT INTO followups (client_id, type, due_date) VALUES (?, 'second-save', date('now','+1 day'))`).run(b.client_id);
+  }
   audit({ user: req.user, action: 'SAVE', entity: 'client', entity_id: b.client_id ? +b.client_id : null, ip: req.ip });
   res.json({ ok: true, id: info.lastInsertRowid });
 });

@@ -729,10 +729,21 @@ async function saveAutomation(){
 async function loadMealCount(){
   if(!$('mealPreview')) return;
   try{ const m=await api('/command/meals');
+    const fb=m.feedback;
     $('mealPreview').innerHTML = `
-      <div class="ret-card"><div class="n">${m.total}</div><div class="l">Meals tomorrow</div></div>
+      <div class="ret-card"><div class="n">${m.portions!=null?m.portions:m.total}</div><div class="l">Portions tomorrow</div></div>
       <div class="ret-card"><div class="n">${m.census}</div><div class="l">Current residents</div></div>
-      <div class="ret-card"><div class="n">${m.welcome}</div><div class="l">Welcome meals</div></div>`;
+      <div class="ret-card"><div class="n">${m.welcome}</div><div class="l">Welcome meals</div></div>
+      ${fb&&fb.total?`<div class="ret-card"><div class="n">${fb.likedPct}%</div><div class="l">Liked food (2d)</div></div>`:''}`;
+    const d=m.dietary;
+    let extra='';
+    if(d&&(d.diets.length||d.allergies.length)){
+      extra += `<div><strong>Dietary:</strong> ${d.diets.length?d.diets.map(x=>esc(x.label)+' ×'+x.n).join(' · '):'none flagged'}`;
+      if(d.allergies.length) extra += ` <span style="color:var(--danger)">⚠ Allergies: ${d.allergies.map(x=>esc(x.label)+(x.n>1?' (×'+x.n+')':'')).join(' · ')}</span>`;
+      extra += `</div>`;
+    }
+    if(fb&&fb.comments&&fb.comments.length) extra += `<div style="margin-top:4px"><strong>Recent food notes:</strong> ${fb.comments.slice(0,3).map(c=>esc(c.t)).join(' · ')}</div>`;
+    if($('mealExtra')) $('mealExtra').innerHTML = extra;
     if($('meal_to')) $('meal_to').value = m.to||'';
   }catch(e){}
 }

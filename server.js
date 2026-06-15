@@ -4210,42 +4210,94 @@ async function sendMorningBrief() {
 // Tomorrow's meal count for the caterer + kitchen lead. Total to prepare =
 // current census (everyone here) + tomorrow's scheduled arrivals (welcome meals).
 // We can't reliably know who discharges tomorrow, so census is the safe floor.
+// Dietary requirements across the active house — counts by type + allergy
+// types, NO client names (the email goes to an external caterer). Enough to prep
+// safely without disclosing who.
+function dietaryBreakdown(active) {
+  const tally = {}; const add = (k) => { tally[k] = (tally[k] || 0) + 1; };
+  const allergySet = {};
+  for (const c of active) {
+    const txt = `${c.prefs || ''} ${c.diagnosis || ''}`.toLowerCase();
+    if (/vegan/.test(txt)) add('Vegan');
+    else if (/vegetarian/.test(txt)) add('Vegetarian');
+    if (/gluten|celiac/.test(txt)) add('Gluten-free');
+    if (/diabet/.test(txt)) add('Diabetic');
+    if (/kosher/.test(txt)) add('Kosher');
+    if (/halal/.test(txt)) add('Halal');
+    if (/renal/.test(txt)) add('Renal');
+    if (/puree/.test(txt)) add('Pureed');
+    if (/lactose|dairy[- ]?free/.test(txt)) add('Dairy-free');
+    if (c.allergies && c.allergies.trim()) { const a = c.allergies.trim(); allergySet[a] = (allergySet[a] || 0) + 1; }
+  }
+  return {
+    diets: Object.entries(tally).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ label: k, n })),
+    allergies: Object.entries(allergySet).map(([k, n]) => ({ label: k, n })),
+  };
+}
+// Last 2 days of Meal & Food survey feedback: % who liked vs. didn't, plus the
+// open comments (what to send more of / what to fix).
+function mealFeedback() {
+  const s = db.prepare(`SELECT id FROM surveys WHERE key = 'meals'`).get();
+  if (!s) return null;
+  const nums = db.prepare(`SELECT a.value_num v FROM survey_answers a JOIN survey_responses r ON r.id = a.response_id
+    WHERE r.survey_id = ? AND a.value_num IS NOT NULL AND r.created_at >= datetime('now','-2 day')`).all(s.id);
+  const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ? AND created_at >= datetime('now','-2 day')`).get(s.id).n;
+  const total = nums.length;
+  if (!responses || !total) return { responses, total: 0 };
+  const liked = nums.filter((x) => x.v >= 4).length;
+  const disliked = nums.filter((x) => x.v <= 2).length;
+  const comments = db.prepare(`SELECT a.value_text t, q.text q FROM survey_answers a JOIN survey_responses r ON r.id = a.response_id
+    JOIN survey_questions q ON q.id = a.question_id
+    WHERE r.survey_id = ? AND a.value_text IS NOT NULL AND a.value_text != '' AND r.created_at >= datetime('now','-2 day') ORDER BY a.id DESC LIMIT 6`).all(s.id)
+    .map((x) => ({ q: x.q, t: x.t }));
+  return { responses, total, likedPct: Math.round(liked / total * 100), dislikedPct: Math.round(disliked / total * 100), comments };
+}
 function buildMealCount() {
   const today = appToday();
   const tomorrow = addDays(today, 1);
-  const active = db.prepare(`SELECT pref, name, prefs FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const active = db.prepare(`SELECT pref, name, prefs, allergies, diagnosis FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
   const census = active.length;
   const arrivals = db.prepare(`SELECT preferred_name, first_name, last_name FROM expected_arrivals WHERE scheduled_date = ? AND status IN ('expected','arrived')`).all(tomorrow);
   const welcome = arrivals.length;
   const total = census + welcome;
-  // Dietary flags we can derive from care-card prefs (best-effort, for the caterer).
-  const diet = (re) => active.filter((c) => re.test(c.prefs || '')).length;
-  const veg = diet(/vegetarian|vegan/i);
-  const gf = diet(/gluten|celiac/i);
+  const dietary = dietaryBreakdown(active);
+  const feedback = mealFeedback();
   const dtLabel = new Date(tomorrow + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
   const names = arrivals.map((a) => `${a.preferred_name || a.first_name || ''} ${a.last_name || ''}`.trim()).filter(Boolean);
-  return { date: tomorrow, dtLabel, census, welcome, total, veg, gf, arrivals: names };
+  return { date: tomorrow, dtLabel, census, welcome, total, portions: total, dietary, feedback, arrivals: names };
 }
 async function sendMealCount() {
   const to = mealRecipients();
   if (!emailConfigured()) return { sent: false, reason: 'email not connected' };
   if (!to) return { sent: false, reason: 'no recipients (set the caterer + Asher in Command → Meal count)' };
   const m = buildMealCount();
-  const dietLine = (m.veg || m.gf) ? `<tr><td style="padding:4px 14px 4px 0;color:#666">Dietary (from care cards)</td><td>${m.veg ? `${m.veg} vegetarian/vegan` : ''}${m.veg && m.gf ? ' · ' : ''}${m.gf ? `${m.gf} gluten-free` : ''}</td></tr>` : '';
+  const e = htmlEsc;
+  const d = m.dietary;
+  const dietRows = (d.diets.length || d.allergies.length) ? `
+    <h3 style="margin:18px 0 4px">Dietary requirements</h3>
+    ${d.diets.length ? `<div>${d.diets.map((x) => `${e(x.label)} × <b>${x.n}</b>`).join(' · ')}</div>` : '<div style="color:#888">No special diets flagged.</div>'}
+    ${d.allergies.length ? `<div style="margin-top:6px;color:#b00"><b>⚠ Allergies:</b> ${d.allergies.map((x) => `${e(x.label)}${x.n > 1 ? ` (×${x.n})` : ''}`).join(' · ')}</div>` : ''}` : '';
+  const fb = m.feedback;
+  const fbRows = (fb && fb.responses) ? `
+    <h3 style="margin:18px 0 4px">Last 2 days' food feedback</h3>
+    <div>${fb.total ? `<b style="color:#2d7a4f">${fb.likedPct}% liked it</b> · <b style="color:#b00">${fb.dislikedPct}% didn't</b> · ` : ''}${fb.responses} response${fb.responses === 1 ? '' : 's'}</div>
+    ${fb.comments && fb.comments.length ? `<div style="margin-top:6px;color:#444">${fb.comments.map((c) => `<div style="margin:3px 0">• <span style="color:#888">${e(c.q)}</span> — ${e(c.t)}</div>`).join('')}</div>` : ''}` : `
+    <h3 style="margin:18px 0 4px">Last 2 days' food feedback</h3><div style="color:#888">No meal surveys submitted yet — put the kiosk on the unit to gather this.</div>`;
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
-    <h2 style="margin:0 0 2px">Meals to prepare — ${m.dtLabel}</h2>
-    <p style="color:#666;margin:0 0 14px">Armada Recovery · daily count for the kitchen</p>
-    <div style="font-size:40px;font-weight:700;color:#1a1a1a;line-height:1">${m.total} meals</div>
+    <h2 style="margin:0 0 2px">Meals to prepare — ${e(m.dtLabel)}</h2>
+    <p style="color:#666;margin:0 0 14px">Armada Recovery · daily kitchen brief</p>
+    <div style="font-size:40px;font-weight:700;color:#1a1a1a;line-height:1">${m.portions} portions</div>
     <table style="border-collapse:collapse;margin-top:12px">
       <tr><td style="padding:4px 14px 4px 0;color:#666">Current residents</td><td><b>${m.census}</b></td></tr>
-      <tr><td style="padding:4px 14px 4px 0;color:#666">Welcome meals (arriving ${m.dtLabel.split(',')[0]})</td><td><b>${m.welcome}</b>${m.arrivals.length ? ` — ${m.arrivals.join(', ')}` : ''}</td></tr>
-      ${dietLine}
-      <tr><td style="padding:8px 14px 4px 0;color:#666;border-top:1px solid #eee"><b>Total to prepare</b></td><td style="border-top:1px solid #eee;padding-top:8px"><b>${m.total}</b></td></tr>
+      <tr><td style="padding:4px 14px 4px 0;color:#666">Welcome meals (arriving ${e(m.dtLabel.split(',')[0])})</td><td><b>${m.welcome}</b>${m.arrivals.length ? ` — ${e(m.arrivals.join(', '))}` : ''}</td></tr>
+      <tr><td style="padding:8px 14px 4px 0;color:#666;border-top:1px solid #eee"><b>Total portions</b></td><td style="border-top:1px solid #eee;padding-top:8px"><b>${m.portions}</b></td></tr>
     </table>
-    <p style="color:#888;margin-top:16px;font-size:12px">Includes a welcome meal for each scheduled new arrival. Sent automatically by Armada Care Standards.</p>
+    ${dietRows}
+    ${fbRows}
+    <p style="color:#888;margin-top:16px;font-size:12px">Counts only — no client names — for privacy. Includes a welcome meal for each scheduled arrival. Sent automatically by Armada Care Standards.</p>
   </div>`;
-  await sendEmail({ to, subject: `Armada meal count — ${m.dtLabel}: ${m.total} meals`, html });
-  return { sent: true, to, total: m.total, census: m.census, welcome: m.welcome };
+  await sendEmail({ to, subject: `Armada kitchen brief — ${m.dtLabel}: ${m.portions} portions`, html });
+  return { sent: true, to, total: m.portions, census: m.census, welcome: m.welcome };
 }
 // Default kitchen recipient (Asher) until/unless someone sets it in the app
 // (Command → Meal count). An email address isn't a secret; the app UI overrides.

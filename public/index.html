@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615X" />
+<link rel="stylesheet" href="/styles.css?v=20260615Y" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -827,10 +827,17 @@
           <div><label>Consumer Key (Client ID)</label><input id="sf_client_id" placeholder="3MVG9…"/></div>
           <div><label>Consumer Secret <span class="hint" style="font-weight:400">(blank = keep saved)</span></label><input id="sf_client_secret" type="password" placeholder="••••••••"/></div>
         </div>
+        <h4 class="sans" style="margin:14px 0 4px">Schedule facility filter</h4>
+        <p class="sub sans" style="margin:0 0 8px">Only pull the arrivals schedule for one site (e.g. Armada Detox of Akron). Leave blank to pull all facilities. Use <strong>Diagnose schedule</strong> below to see the available facility fields &amp; their exact values.</p>
+        <div class="grid2">
+          <div><label>Facility field (Opportunity)</label><input id="sf_facility_field" placeholder="e.g. Facility__c"/></div>
+          <div><label>Facility value</label><input id="sf_facility_value" placeholder="e.g. Armada Detox of Akron"/></div>
+        </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:10px">
           <button class="btn btn-gold sans" onclick="saveSfConfig()">Save</button>
           <button class="btn btn-ghost sans" onclick="testSf()">Test connection</button>
           <button class="btn btn-ghost sans" onclick="sfSyncNow()">Sync referral data now</button>
+          <button class="btn btn-ghost sans" onclick="sfDiagnoseSchedule()">Diagnose schedule</button>
           <button class="btn btn-ghost sans" onclick="sfAutomap()">Auto-detect referral object</button>
           <button class="btn btn-ghost sans" onclick="sfDiscover()">Discover objects</button>
           <span id="sf_msg" class="hint" style="align-self:center"></span>
@@ -1463,6 +1470,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615X"></script>
+<script src="/app.js?v=20260615Y"></script>
 </body>
 </html>

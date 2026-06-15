@@ -26,7 +26,8 @@ export function sfConfigured() {
   return Boolean(scfg('instance_url', 'SF_INSTANCE_URL') && scfg('client_id', 'SF_CLIENT_ID') && scfg('client_secret', 'SF_CLIENT_SECRET'));
 }
 export function sfStatus() {
-  return { configured: sfConfigured(), instanceUrl: scfg('instance_url', 'SF_INSTANCE_URL'), hasSecret: !!scfg('client_secret', 'SF_CLIENT_SECRET'), apiVersion: scfg('api_version', 'SF_API_VERSION') || 'v60.0' };
+  return { configured: sfConfigured(), instanceUrl: scfg('instance_url', 'SF_INSTANCE_URL'), hasSecret: !!scfg('client_secret', 'SF_CLIENT_SECRET'), apiVersion: scfg('api_version', 'SF_API_VERSION') || 'v60.0',
+    facilityField: scfg('facility_field', 'SF_FACILITY_FIELD'), facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') };
 }
 
 function sfBase() {
@@ -280,10 +281,16 @@ export async function sfSyncArrivals(db) {
   // in; CloseDate = the planned admit date. Configurable per org.
   const stages = (process.env.SF_SCHEDULE_STAGES || 'Admission Scheduled')
     .split(',').map((s) => `'${s.trim().replace(/'/g, '')}'`).join(',');
+  // Optional facility scope: only pull Opportunities for one site (e.g. Armada
+  // Detox of Akron). Set the field + value in Settings → Salesforce (the
+  // diagnostic lists the candidate fields and their values to choose from).
+  const facField = scfg('facility_field', 'SF_FACILITY_FIELD');
+  const facValue = scfg('facility_value', 'SF_FACILITY_VALUE');
+  const facClause = (facField && facValue) ? ` AND ${facField} = '${String(facValue).replace(/'/g, "\\'")}'` : '';
   const soql = process.env.SF_ARRIVALS_SOQL || `
     SELECT Id, Name, StageName, CloseDate, Admission_Date__c, CreatedDate
     FROM Opportunity
-    WHERE IsClosed = false AND StageName IN (${stages})
+    WHERE IsClosed = false AND StageName IN (${stages})${facClause}
     ORDER BY Admission_Date__c ASC NULLS LAST`;
   const records = await sfQueryAll(soql);
 

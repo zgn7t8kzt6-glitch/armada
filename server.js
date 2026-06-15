@@ -3118,6 +3118,7 @@ app.post('/api/salesforce/config', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
   const set = (k, v) => { if (v !== undefined) setState('sf_' + k, (v == null ? '' : String(v)).trim()); };
   set('instance_url', b.instance_url); set('client_id', b.client_id); set('api_version', b.api_version);
+  set('facility_field', b.facility_field); set('facility_value', b.facility_value);
   if (b.client_secret) set('client_secret', b.client_secret);   // only overwrite if provided
   audit({ user: req.user, action: 'SF_CONFIG', ip: req.ip });
   res.json({ ok: true, status: sfStatus() });

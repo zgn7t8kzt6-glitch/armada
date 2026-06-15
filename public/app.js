@@ -646,15 +646,37 @@ async function loadSfConfig(){
     if($('sf_instance_url')) $('sf_instance_url').value=c.instanceUrl||'';
     if($('sf_api_version')) $('sf_api_version').value=c.apiVersion||'v60.0';
     if($('sf_client_secret')) $('sf_client_secret').placeholder = c.hasSecret?'•••••• (saved)':'consumer secret';
+    if($('sf_facility_field')) $('sf_facility_field').value=c.facilityField||'';
+    if($('sf_facility_value')) $('sf_facility_value').value=c.facilityValue||'';
   }catch(e){}
 }
 async function saveSfConfig(){
   $('sf_msg').textContent='Saving…';
-  const body={ instance_url:$('sf_instance_url').value, api_version:$('sf_api_version').value, client_id:$('sf_client_id').value };
+  const body={ instance_url:$('sf_instance_url').value, api_version:$('sf_api_version').value, client_id:$('sf_client_id').value,
+    facility_field:$('sf_facility_field').value, facility_value:$('sf_facility_value').value };
   if($('sf_client_secret').value) body.client_secret=$('sf_client_secret').value;
   try{ const r=await api('/salesforce/config',{method:'POST',body:JSON.stringify(body)}); $('sf_msg').textContent='✓ Saved'+(r.status&&r.status.configured?' (configured)':''); $('sf_client_secret').value=''; loadSfConfig(); }
   catch(e){ $('sf_msg').textContent='Error: '+e.message; }
 }
+async function sfDiagnoseSchedule(){
+  $('sf_msg').textContent='Diagnosing…';
+  let d; try{ d=await api('/arrivals/diagnose'); }catch(e){ $('sf_msg').textContent=e.message; return; }
+  $('sf_msg').textContent='';
+  const fields=d.oppFacilityFields||[]; const vals=d.facilityValues||{};
+  let html='<div class="card" style="margin-top:8px"><h4 class="sans">Facility fields on Opportunity</h4>';
+  if(!fields.length){ html+='<div class="hint">No obvious facility/location field found. Use “Discover objects” to inspect, or paste a field name manually.</div>'; }
+  else {
+    html += fields.map(f=>{
+      const fv=(vals[f.name]||[]);
+      return `<div class="todo" style="display:block"><div><strong>${esc(f.name)}</strong> <span class="hint">${esc(f.label||'')} · ${esc(f.type||'')}</span></div>
+        ${fv.length?`<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">${fv.map(v=>`<button class="btn btn-ghost btn-sm sans" onclick="pickFacility('${esc(f.name).replace(/'/g,"\\'")}','${esc(String(v.value)).replace(/'/g,"\\'")}')">${esc(String(v.value))} <span class="hint">(${v.count})</span></button>`).join('')}</div>`:'<div class="hint">no values returned</div>'}</div>`;
+    }).join('');
+    html += '<p class="hint" style="margin-top:6px">Click a value to set the filter, then <strong>Save</strong>. The schedule re-pulls automatically; to apply now go to <strong>Front Desk → Pull from Salesforce</strong>.</p>';
+  }
+  html+='</div>';
+  $('sf_discover').innerHTML = html;
+}
+function pickFacility(field, value){ if($('sf_facility_field'))$('sf_facility_field').value=field; if($('sf_facility_value'))$('sf_facility_value').value=value; $('sf_msg').textContent='Set — click Save'; window.scrollTo({top:0}); }
 async function testSf(){
   $('sf_msg').textContent='Testing…';
   try{ const r=await api('/salesforce/test',{method:'POST'}); $('sf_msg').innerHTML='✓ Connected — Salesforce reachable.'; }

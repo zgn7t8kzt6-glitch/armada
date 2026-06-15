@@ -716,7 +716,6 @@ async function loadAutomation(){
     set('au_brief_hour',a.brief_hour); set('au_brief_on',a.brief_on); set('au_recovery_max',a.recovery_max); set('au_welcome_auto',a.welcome_auto); set('au_alert_detail',a.alert_detail);
     set('au_meal_on',a.meal_on); set('au_meal_hour',a.meal_hour);
   }catch(e){}
-  loadMealCount();
 }
 async function saveAutomation(){
   $('au_msg').textContent='Saving…';
@@ -1771,7 +1770,7 @@ async function loadVoice(){
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
-  loadMoments(); loadVoice();
+  loadMoments(); loadVoice(); loadMealCount();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});

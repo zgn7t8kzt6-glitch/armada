@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615O" />
+<link rel="stylesheet" href="/styles.css?v=20260615P" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -230,6 +230,15 @@
           <span id="censusAsOf" class="hint"></span>
         </div>
         <div id="cmdCensus"></div>
+      </div>
+      <!-- Daily meal/kitchen brief -->
+      <div class="card">
+        <h3>🍽️ Daily meal count — caterer &amp; kitchen (Asher)</h3>
+        <p class="sub sans">Each morning we email tomorrow's portions (current residents + a welcome meal per scheduled arrival), dietary requirements, last 2 days' food feedback, and low kitchen stock.</p>
+        <div id="mealPreview" class="ret-cards"></div>
+        <div id="mealExtra" class="sans" style="margin-top:8px"></div>
+        <label>Send to (caterer, Asher — comma-separated emails)</label>
+        <div class="toolbar" style="justify-content:flex-start"><input id="meal_to" type="text" placeholder="caterer@…, asher@armadarecovery.com" style="min-width:300px"/><button class="btn btn-gold sans" onclick="saveMealRecipients()">Save recipients</button><button class="btn btn-ghost sans" onclick="sendMealNow()">Send now</button><span id="meal_msg" class="hint" style="align-self:center"></span></div>
       </div>
       <!-- Care Cards: collapsed (open to fill) -->
       <details class="card" id="momentsCard">
@@ -702,14 +711,6 @@
           <div><label>Meal count email hour (0–23)</label><input id="au_meal_hour" type="number" min="0" max="23"/></div>
         </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:12px"><button class="btn btn-gold sans" onclick="saveAutomation()">Save automation</button><span id="au_msg" class="hint" style="align-self:center"></span></div>
-      </div>
-      <div class="card">
-        <h3>🍽️ Daily meal count — caterer &amp; kitchen (Asher)</h3>
-        <p class="sub sans">Each morning we email how many meals to prepare for tomorrow: current residents + a welcome meal for every scheduled new arrival.</p>
-        <div id="mealPreview" class="ret-cards"></div>
-        <div id="mealExtra" class="sans" style="margin-top:8px"></div>
-        <label>Send to (caterer, Asher — comma-separated emails)</label>
-        <div class="toolbar" style="justify-content:flex-start"><input id="meal_to" type="text" placeholder="caterer@…, asher@armadarecovery.com" style="min-width:300px"/><button class="btn btn-gold sans" onclick="saveMealRecipients()">Save recipients</button><button class="btn btn-ghost sans" onclick="sendMealNow()">Send now</button><span id="meal_msg" class="hint" style="align-self:center"></span></div>
       </div>
       <div class="card">
         <h3>Approved referral partners</h3>
@@ -1428,6 +1429,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615O"></script>
+<script src="/app.js?v=20260615P"></script>
 </body>
 </html>

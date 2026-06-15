@@ -16,7 +16,7 @@ import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog } from './src/seed.js';
+import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -25,6 +25,7 @@ ensureAdmin();
 if (process.env.SEED_SAMPLE === 'true') ensureSampleData();
 ensureExampleClient12A();
 ensureInventoryCatalog();
+try { const added = ensureInventoryItems(); if (added) console.log(`[inventory] added ${added} item(s) from the building-walk list`); } catch (e) { console.error('[inventory] ensureItems:', e.message); }
 // Default census recipient so a test send reaches the right person out of the box.
 if (!getState('census_email_to')) setState('census_email_to', process.env.CENSUS_EMAIL_TO || 'shlomo@armadarecovery.com');
 // One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.
@@ -301,8 +302,18 @@ app.get('/api/inventory', requireAuth, (req, res) => {
     });
   }
   const openReorders = db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'open'`).get().n;
+  // Per-department check status: was anything counted today, and when last?
+  const checkHour = +autoCfg('inv_check_hour', 14);
+  const checkOn = autoCfg('inv_check_on', 'on') !== 'off';
+  const pastCutoff = localHour() >= checkHour;
+  const deptStatus = (d) => {
+    const last = db.prepare(`SELECT MAX(c.created_at) m FROM inventory_counts c JOIN inventory_items i ON i.id = c.item_id WHERE i.department = ?`).get(d).m;
+    const countedToday = last && String(last).slice(0, 10) === appToday();
+    return { countedToday, overdue: checkOn && !countedToday && pastCutoff, lastAt: last ? String(last).slice(0, 16) : '' };
+  };
   res.json({
-    shift, departments: INV_DEPTS.filter((d) => depts[d]).map((d) => ({ name: d, items: depts[d] })),
+    shift, checkHour, checkOn,
+    departments: INV_DEPTS.filter((d) => depts[d]).map((d) => ({ name: d, items: depts[d], ...deptStatus(d) })),
     stats: { low, out, criticalOut, openReorders, items: items.length },
     corporateEmail: corporateEmail() ? corporateEmail().replace(/(.{2}).*(@.*)/, '$1•••$2') : '',
     emailReady: emailConfigured(),
@@ -858,10 +869,12 @@ app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res
   survey_alert_to: surveyAlertTo(),
   scorecard_on: autoCfg('scorecard_on', 'on'),
   scorecard_day: autoCfg('scorecard_day', 1),
+  inv_check_on: autoCfg('inv_check_on', 'on'),
+  inv_check_hour: +autoCfg('inv_check_hour', 14),
 }));
 app.post('/api/settings/automation', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
-  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour', 'survey_alert_on', 'survey_alert_to', 'scorecard_on', 'scorecard_day']) {
+  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour', 'survey_alert_on', 'survey_alert_to', 'scorecard_on', 'scorecard_day', 'inv_check_on', 'inv_check_hour']) {
     if (b[k] !== undefined) setState('auto_' + k, String(b[k]).trim());
   }
   audit({ user: req.user, action: 'AUTO_CONFIG', ip: req.ip });
@@ -2240,6 +2253,18 @@ function runFlowAutomations() {
     const sla = r.priority === 'Urgent' ? 4 : r.priority === 'High' ? 24 : 72;
     if (ageH > sla) createAlert(null, 'maint_overdue_' + r.id, r.priority === 'Urgent' ? 'High' : 'Elevated',
       `Maintenance OVERDUE (${Math.floor(ageH)}h): ${r.title}${r.location ? ' @ ' + r.location : ''} · ${r.priority}/${r.category}. Still unaddressed — assign and fix.`);
+  }
+
+  // Inventory-check accountability: each department should be counted daily by the
+  // cutoff hour. Past the cutoff with nothing counted today → alert (once/day/dept).
+  if (autoCfg('inv_check_on', 'on') !== 'off' && localHour() >= +autoCfg('inv_check_hour', 14)) {
+    for (const d of INV_DEPTS) {
+      const hasItems = db.prepare(`SELECT 1 FROM inventory_items WHERE department = ? AND active = 1 LIMIT 1`).get(d);
+      if (!hasItems) continue;
+      const last = db.prepare(`SELECT MAX(c.created_at) m FROM inventory_counts c JOIN inventory_items i ON i.id = c.item_id WHERE i.department = ?`).get(d).m;
+      const countedToday = last && String(last).slice(0, 10) === today;
+      if (!countedToday) createAlert(null, 'inv_check_' + d, 'Elevated', `${d} supplies not counted today (due by ${(+autoCfg('inv_check_hour', 14))}:00). Run the shift inventory check.`);
+    }
   }
   return { kits, follows };
 }

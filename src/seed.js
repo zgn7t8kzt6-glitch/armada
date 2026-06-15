@@ -215,6 +215,84 @@ export function ensureInventoryCatalog() {
     ins.run(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], i));
 }
 
+// Items found on a building walk — added to whatever catalog already exists,
+// ONLY if an item with that name isn't already there (so it never duplicates and
+// never wipes live edits). Par levels are sensible starting points to tune in-app.
+const INVENTORY_EXTRA = [
+  // Med room / med pass
+  ['Medical', 'Med Pass', '0.5 oz soufflé cups', 'sleeve', 8, 3, 0, 0],
+  ['Medical', 'Med Pass', '1 oz graduated medication cups', 'sleeve', 8, 3, 0, 0],
+  ['Medical', 'Med Pass', '3 oz water cups', 'sleeve', 10, 3, 0, 0],
+  ['Medical', 'Med Pass', 'Pill crushing pouches', 'box', 4, 2, 0, 0],
+  ['Medical', 'Med Pass', 'Drug Buster disposal system', 'each', 3, 1, 1, 0],
+  ['Medical', 'Med Pass', 'CPR mask', 'each', 3, 1, 1, 0],
+  // OTC meds & comfort (expiry-tracked)
+  ['Medical', 'OTC / Comfort', 'Tylenol (acetaminophen)', 'bottle', 4, 2, 1, 1],
+  ['Medical', 'OTC / Comfort', 'Tums', 'bottle', 4, 2, 1, 1],
+  ['Medical', 'OTC / Comfort', 'Maalox', 'bottle', 3, 1, 0, 1],
+  ['Medical', 'OTC / Comfort', 'Milk of Magnesia', 'bottle', 3, 1, 0, 1],
+  ['Medical', 'OTC / Comfort', 'MiraLAX', 'bottle', 3, 1, 0, 1],
+  ['Medical', 'OTC / Comfort', 'Antacid + gas relief', 'bottle', 3, 1, 0, 1],
+  ['Medical', 'OTC / Comfort', 'Mucus relief / nasal decongestant', 'box', 3, 1, 0, 1],
+  ['Medical', 'OTC / Comfort', 'Cough drops', 'bag', 4, 2, 0, 1],
+  ['Medical', 'OTC / Comfort', 'Nicotine gum', 'box', 6, 2, 1, 1],
+  ['Medical', 'OTC / Comfort', 'Nicotine patches', 'box', 6, 2, 1, 1],
+  ['Medical', 'OTC / Comfort', 'Vaseline', 'jar', 3, 1, 0, 0],
+  ['Medical', 'OTC / Comfort', 'Baking soda', 'box', 3, 1, 0, 0],
+  ['Medical', 'OTC / Comfort', 'Hydrocortisone cream', 'tube', 3, 1, 0, 1],
+  // Wound care / first aid
+  ['Medical', 'First Aid', 'Medical tape', 'roll', 6, 2, 0, 0],
+  ['Medical', 'First Aid', '4x4 nonwoven gauze pads', 'box', 6, 2, 1, 0],
+  ['Medical', 'First Aid', 'Conforming stretch gauze bandage', 'box', 4, 2, 0, 0],
+  // Hydration & nutrition
+  ['Kitchen', 'Hydration & Nutrition', 'Ginger ale', 'case', 4, 1, 0, 0],
+  ['Kitchen', 'Hydration & Nutrition', 'Protein boost — chocolate', 'case', 4, 2, 0, 0],
+  ['Kitchen', 'Hydration & Nutrition', 'Protein boost — vanilla', 'case', 4, 2, 0, 0],
+  ['Kitchen', 'Hydration & Nutrition', 'Protein shakes', 'case', 4, 2, 0, 0],
+  ['Kitchen', 'Hydration & Nutrition', 'Jello', 'case', 4, 1, 0, 0],
+  ['Kitchen', 'Hydration & Nutrition', 'Yogurt (assorted)', 'case', 4, 1, 0, 1],
+  ['Kitchen', 'Hydration & Nutrition', 'Orange juice', 'case', 4, 1, 0, 1],
+  ['Kitchen', 'Hydration & Nutrition', 'Milk', 'case', 4, 1, 1, 1],
+  // Nurse beverage station
+  ['Kitchen', 'Nurse Station', 'Splenda', 'box', 3, 1, 0, 0],
+  // Pantry / condiments
+  ['Kitchen', 'Pantry', 'Peanut butter', 'jar', 3, 1, 0, 0],
+  ['Kitchen', 'Pantry', 'Jelly', 'jar', 3, 1, 0, 0],
+  ['Kitchen', 'Pantry', 'Butter', 'case', 3, 1, 0, 1],
+  ['Kitchen', 'Pantry', 'Garlic powder', 'each', 2, 1, 0, 0],
+  // Personal care / hygiene
+  ['Housekeeping', 'Toiletries', 'Nail clippers', 'each', 8, 2, 0, 0],
+  ['Housekeeping', 'Clothing', 'Adult underwear (assorted, for anyone)', 'pack', 8, 2, 0, 0],
+  ['Housekeeping', 'Toiletries', 'Tampons', 'box', 6, 2, 1, 0],
+  ['Housekeeping', 'Toiletries', 'Earplugs', 'box', 6, 2, 0, 0],
+  ['Housekeeping', 'Toiletries', 'Kleenex tissues', 'case', 6, 2, 0, 0],
+  ['Front Desk', 'Welcome', 'Dignity kit bags', 'pack', 6, 2, 0, 0],
+  // Housekeeping & laundry
+  ['Housekeeping', 'Cleaning', 'Febreze', 'bottle', 4, 1, 0, 0],
+  ['Housekeeping', 'Cleaning', 'Lysol spray', 'can', 6, 2, 1, 0],
+  // Office / front desk
+  ['Front Desk', 'Office', 'Scissors', 'each', 4, 1, 0, 0],
+  ['Front Desk', 'Office', 'Markers', 'pack', 3, 1, 0, 0],
+  ['Front Desk', 'Office', 'Sharpies', 'pack', 3, 1, 0, 0],
+  ['Front Desk', 'Office', 'Highlighters', 'pack', 3, 1, 0, 0],
+  ['Front Desk', 'Office', 'Staples', 'box', 3, 1, 0, 0],
+  ['Front Desk', 'Office', 'Paper clips', 'box', 3, 1, 0, 0],
+  ['Front Desk', 'Office', 'Sticky notes', 'pack', 4, 1, 0, 0],
+  // Facilities
+  ['Safety', 'Environment', 'Culligan water filters', 'each', 4, 2, 1, 0],
+  ['Safety', 'Environment', 'Lighters (large)', 'each', 4, 2, 0, 0],
+];
+export function ensureInventoryItems() {
+  const has = db.prepare(`SELECT 1 FROM inventory_items WHERE name = ? COLLATE NOCASE LIMIT 1`);
+  const max = db.prepare(`SELECT COALESCE(MAX(sort), 0) m FROM inventory_items`).get().m;
+  const ins = db.prepare(`INSERT INTO inventory_items
+    (department, category, name, unit, par_level, reorder_point, critical, track_expiry, sort)
+    VALUES (?,?,?,?,?,?,?,?,?)`);
+  let n = 0;
+  INVENTORY_EXTRA.forEach((r) => { if (!has.get(r[2])) { ins.run(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], max + 1 + n); n++; } });
+  return n;
+}
+
 // Allow `npm run seed` to set up admin + sample data locally.
 if (import.meta.url === `file://${process.argv[1]}`) {
   ensureAdmin();

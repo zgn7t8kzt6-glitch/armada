@@ -778,6 +778,7 @@ async function loadAutomation(){
     set('au_meal_on',a.meal_on); set('au_meal_hour',a.meal_hour);
     set('au_survey_alert_on',a.survey_alert_on); set('au_survey_alert_to',a.survey_alert_to);
     set('au_scorecard_on',a.scorecard_on); set('au_scorecard_day',a.scorecard_day);
+    set('au_inv_check_on',a.inv_check_on); set('au_inv_check_hour',a.inv_check_hour);
   }catch(e){}
 }
 async function saveAutomation(){
@@ -786,7 +787,8 @@ async function saveAutomation(){
     brief_hour:$('au_brief_hour').value, brief_on:$('au_brief_on').value, recovery_max:$('au_recovery_max').value, welcome_auto:$('au_welcome_auto').value, alert_detail:$('au_alert_detail').value,
     meal_on:$('au_meal_on').value, meal_hour:$('au_meal_hour').value,
     survey_alert_on:$('au_survey_alert_on').value, survey_alert_to:$('au_survey_alert_to').value,
-    scorecard_on:$('au_scorecard_on').value, scorecard_day:$('au_scorecard_day').value };
+    scorecard_on:$('au_scorecard_on').value, scorecard_day:$('au_scorecard_day').value,
+    inv_check_on:$('au_inv_check_on').value, inv_check_hour:$('au_inv_check_hour').value };
   try{ await api('/settings/automation',{method:'POST',body:JSON.stringify(body)}); $('au_msg').textContent='✓ Saved'; }
   catch(e){ $('au_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
@@ -2620,8 +2622,16 @@ async function loadInventory(){
   $('invTabs').innerHTML = depts.map(n=>{
     const dd=d.departments.find(x=>x.name===n);
     const short = dd.items.filter(i=>i.status==='low'||i.status==='out').length;
-    return `<button class="itab ${n===INV_DEPT?'active':''}" onclick="setInvDept('${n.replace(/'/g,"\\'")}')">${esc(n)}${short?` <span class="badge badge-danger">${short}</span>`:''}</button>`;
+    const dot = dd.countedToday?'✓ ':(dd.overdue?'⏰ ':'');
+    return `<button class="itab ${n===INV_DEPT?'active':''}" onclick="setInvDept('${n.replace(/'/g,"\\'")}')">${dot}${esc(n)}${short?` <span class="badge badge-danger">${short}</span>`:''}</button>`;
   }).join('');
+  // Inventory-check status banner for the selected department
+  if($('invCheckBar')){
+    const dd=d.departments.find(x=>x.name===INV_DEPT);
+    if(!d.checkOn||!dd){ $('invCheckBar').innerHTML=''; }
+    else if(dd.countedToday){ $('invCheckBar').innerHTML=`<div class="pc-note" style="border-left:3px solid var(--good)">✓ ${esc(INV_DEPT)} counted today${dd.lastAt?' · '+esc(dd.lastAt):''}.</div>`; }
+    else { const due=`${d.checkHour}:00`; $('invCheckBar').innerHTML=`<div class="pc-note" style="border-left:3px solid ${dd.overdue?'var(--danger)':'var(--gold)'}">${dd.overdue?'⏰ OVERDUE':'⏳ Due'} — count ${esc(INV_DEPT)} by ${due}. ${dd.overdue?'This shift missed the inventory check.':''}</div>`; }
+  }
   renderInvBoard();
   loadReorders();
   if($('inv_corp_email')) $('inv_corp_email').placeholder = d.corporateEmail || 'orders@armadarecovery.com';

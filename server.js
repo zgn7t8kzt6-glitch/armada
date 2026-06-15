@@ -1540,9 +1540,10 @@ function runFlowAutomations() {
   const hasFollow = db.prepare(`SELECT 1 FROM followups WHERE client_id = ? AND type = ?`);
   const insFollow = db.prepare(`INSERT INTO followups (client_id, type, due_date) VALUES (?, ?, ?)`);
   let kits = 0, follows = 0;
+  const FOLLOW_CADENCE = [['24h', 1], ['48h', 2], ['30d', 30]];
   for (const c of recentDisch) {
     if (!hasKit.get(c.id)) { insKit.run(c.id, `+${DIGNITY_DUE_HOURS} hours`, DIGNITY_ROLE); createAlert(c.id, 'dignity', 'Normal', `${c.pref || c.name} — Dignity Kit for a safe departure`); kits++; }
-    if (!hasFollow.get(c.id, '48h')) { insFollow.run(c.id, '48h', addDays(today, 2)); follows++; }
+    for (const [type, days] of FOLLOW_CADENCE) { if (!hasFollow.get(c.id, type)) { insFollow.run(c.id, type, addDays(today, days)); follows++; } }
     if (/ama|against medical/i.test(c.discharge_status || '')) createAlert(c.id, 'concern', 'Elevated', `${c.pref || c.name} left AMA — run the Save debrief: what could we have done better?`);
   }
   const newAdmits = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) = ?`).all(today);

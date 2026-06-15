@@ -1577,9 +1577,13 @@ async function loadRounds(){
   }).join('');
   $('roundsAccount').innerHTML = (d.byPerson||[]).length ? d.byPerson.map(p=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(p.k)}</strong></div><span class="chip">${p.n} checks</span></div>`).join('') : '<div class="hint">No checks logged today yet.</div>';
   if(ME&&ME.role==='admin'){ try{ const es=await api('/rounds/escalation'); $('roundsEscalateRow').innerHTML=`<label class="trg" style="display:inline-flex"><input type="checkbox" ${es.on?'checked':''} onchange="setRoundsEscalation(this.checked)"/> Text the on-call leader when a client goes overdue ${es.smsReady?'':'<span class="hint">(connect Texting first)</span>'}</label>`; }catch(e){} }
+  loadShiftQuestions();
   // Live: refresh every 45s so the clocks stay honest.
   if($('rounds').classList.contains('active')) roundsTimer=setTimeout(loadRounds, 45000);
 }
+async function loadShiftQuestions(){ if(!($('sq_text')&&ME&&ME.role==='admin')) return; try{ const q=await api('/checkins/questions'); if(!$('sq_text').value) $('sq_text').value=q.text||''; }catch(e){} }
+async function saveShiftQuestions(){ try{ await api('/checkins/questions',{method:'POST',body:JSON.stringify({text:$('sq_text').value})}); $('sq_msg').textContent='✓ Saved'; loadRounds(); }catch(e){ $('sq_msg').textContent=e.message; } }
+async function resetShiftQuestions(){ try{ await api('/checkins/questions',{method:'POST',body:JSON.stringify({text:''})}); $('sq_text').value=''; const q=await api('/checkins/questions'); $('sq_text').value=q.text||''; $('sq_msg').textContent='✓ Reset to defaults'; loadRounds(); }catch(e){ $('sq_msg').textContent=e.message; } }
 async function roundAsk(id, name){ const answer=prompt('Their answer to this shift\'s question'+(name?' — '+name:'')+':\n(needs become requests automatically)'); if(answer===null) return; try{ await api('/checkins',{method:'POST',body:JSON.stringify({client_id:id,answer})}); loadRounds(); }catch(e){ alert(e.message); } }
 async function roundCheck(id, status){ await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:status||'ok'})}); loadRounds(); }
 async function roundConcern(id){ const note=prompt('What did you observe? (logs a safety concern)'); if(note===null) return; await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:'concern',note})}); loadRounds(); }

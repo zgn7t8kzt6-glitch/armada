@@ -152,7 +152,11 @@ const SHIFT_QUESTIONS = [
 ];
 const SHIFTS_LIST = ['Morning', 'Day', 'Evening', 'Night'];
 function currentShift() { const h = localHour(); if (h >= 6 && h < 12) return 'Morning'; if (h >= 12 && h < 17) return 'Day'; if (h >= 17 && h < 22) return 'Evening'; return 'Night'; }
-function currentQuestion() { const idx = (Math.floor(Date.now() / 864e5) * 4 + SHIFTS_LIST.indexOf(currentShift())) % SHIFT_QUESTIONS.length; return SHIFT_QUESTIONS[(idx + SHIFT_QUESTIONS.length) % SHIFT_QUESTIONS.length]; }
+// Leadership can customize the rotation (Settings/Rounds); falls back to the defaults.
+function shiftQuestions() { const c = getState('shift_questions'); if (c && c.trim()) { const a = c.split('\n').map((s) => s.trim()).filter(Boolean); if (a.length) return a; } return SHIFT_QUESTIONS; }
+function currentQuestion() { const q = shiftQuestions(); const idx = (Math.floor(Date.now() / 864e5) * 4 + SHIFTS_LIST.indexOf(currentShift())) % q.length; return q[(idx + q.length) % q.length]; }
+app.get('/api/checkins/questions', requireAuth, requireAdmin, (req, res) => res.json({ text: (getState('shift_questions') || SHIFT_QUESTIONS.join('\n')), custom: !!(getState('shift_questions') || '').trim(), current: currentQuestion() }));
+app.post('/api/checkins/questions', requireAuth, requireAdmin, (req, res) => { setState('shift_questions', (req.body?.text || '').trim()); res.json({ ok: true, current: currentQuestion() }); });
 app.post('/api/checkins', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.client_id) return res.status(400).json({ error: 'client_id required' });
   const shift = currentShift(), question = currentQuestion(), answer = (b.answer || '').trim();

@@ -159,12 +159,25 @@ export async function sendEmail({ subject, html, to }) {
   const key = ecfg('resend_key', 'RESEND_API_KEY');
   if (!key) throw new Error('Email not configured. Add SMTP (your mailbox) or a Resend key in Settings → Email.');
   const from = ecfg('from', 'REPORT_FROM') || 'Armada Care <onboarding@resend.dev>';
-  const r = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: dest, subject, html }),
-  });
-  if (!r.ok) throw new Error('Email send failed: ' + (await r.text()).slice(0, 200));
+  // Resend caps requests/second; on a 429, wait and retry (respecting Retry-After)
+  // up to 4 times so quick successive sends don't fail.
+  let lastBody = '';
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to: dest, subject, html }),
+    });
+    if (r.ok) return;
+    lastBody = (await r.text()).slice(0, 200);
+    if (r.status === 429 && attempt < 4) {
+      const retryAfter = +r.headers.get('retry-after') || 0;
+      await new Promise((res) => setTimeout(res, retryAfter ? retryAfter * 1000 : 600 * (attempt + 1)));
+      continue;
+    }
+    break;
+  }
+  throw new Error('Email send failed: ' + lastBody);
 }
 
 export function smsConfigured() { return Boolean(ecfg('sms_sid', 'TWILIO_SID') && ecfg('sms_token', 'TWILIO_TOKEN') && ecfg('sms_from', 'TWILIO_FROM')); }

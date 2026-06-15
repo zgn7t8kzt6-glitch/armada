@@ -2646,7 +2646,27 @@ app.get('/api/clients/:id/record', requireAuth, (req, res) => {
       .map((a) => ({ type: a.type, note: a.note || '', by: a.by_name || '', at: at(a.created_at) })),
     followups: db.prepare(`SELECT type, due_date, status FROM followups WHERE client_id = ? ORDER BY due_date DESC LIMIT 20`).all(c.id)
       .map((f) => ({ type: f.type, due: f.due_date || '', status: f.status || '' })),
+    sessions: db.prepare(`SELECT id, type, topic, note, homework, homework_done, by_name, created_at FROM client_sessions WHERE client_id = ? ORDER BY id DESC LIMIT 20`).all(c.id)
+      .map((sn) => ({ id: sn.id, type: sn.type, topic: sn.topic || '', note: sn.note || '', homework: sn.homework || '', homeworkDone: !!sn.homework_done, by: sn.by_name || '', at: String(sn.created_at).slice(0, 16) })),
   } });
+});
+// Log a 1:1 / group session with optional homework (material for next session).
+app.post('/api/clients/:id/session', requireAuth, (req, res) => {
+  const c = db.prepare(`SELECT id FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  const type = b.type === 'Group' ? 'Group' : '1:1';
+  if (!(b.note || '').trim() && !(b.topic || '').trim() && !(b.homework || '').trim()) return res.status(400).json({ error: 'Add a topic, note, or homework' });
+  const id = db.prepare(`INSERT INTO client_sessions (client_id, type, topic, note, homework, by_id, by_name) VALUES (?,?,?,?,?,?,?)`)
+    .run(c.id, type, (b.topic || '').trim() || null, (b.note || '').trim() || null, (b.homework || '').trim() || null, req.user.id, req.user.name).lastInsertRowid;
+  audit({ user: req.user, action: 'SESSION', entity: 'client', entity_id: c.id, detail: type, ip: req.ip });
+  res.json({ ok: true, id });
+});
+// Mark a session's homework complete (or not).
+app.post('/api/sessions/:id/homework', requireAuth, (req, res) => {
+  const done = req.body?.done === false ? 0 : 1;
+  db.prepare(`UPDATE client_sessions SET homework_done = ?, homework_done_at = CASE WHEN ? THEN datetime('now') ELSE NULL END WHERE id = ?`).run(done, done, req.params.id);
+  res.json({ ok: true });
 });
 
 function buildClientContext(c) {
@@ -2866,12 +2886,19 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const followups = db.prepare(`SELECT f.id, f.due_date, f.type, c.pref, c.name, c.id cid FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' AND f.assignee_id = ? ORDER BY f.due_date`).all(req.user.id);
     // 6) LOC review — past the anticipated step-down date but still here.
     const locReview = caseload.filter((c) => c.anticipated_dc && String(c.anticipated_dc).slice(0, 10) <= today);
+    // 7) 1:1s — clients not seen 1:1 within the cadence (default 7 days); + open homework.
+    const sessDays = +autoCfg('session_days', 7);
+    const lastSess = db.prepare(`SELECT MAX(created_at) m FROM client_sessions WHERE client_id = ? AND type = '1:1'`);
+    const sessionsDue = caseload.filter((c) => { const m = lastSess.get(c.id).m; return !m || (Date.now() - Date.parse(String(m).replace(' ', 'T') + 'Z')) > sessDays * 864e5; });
+    const homeworkOpen = db.prepare(`SELECT s.homework, c.id cid, c.pref, c.name FROM client_sessions s JOIN clients c ON c.id = s.client_id WHERE s.homework IS NOT NULL AND s.homework != '' AND s.homework_done = 0 AND c.active = 1 AND c.discharge_status IS NULL ORDER BY s.id DESC`).all();
+    const myHomework = mine.length ? homeworkOpen.filter((h) => caseload.some((c) => c.id === h.cid)) : homeworkOpen;
     northStar = { label: 'Intake assessments done on time (24h)', value: assessedPct + '%', sev: assessOverdue.length ? 'high' : assess.length ? 'warn' : 'ok' };
     tiles = [
       { key: 'caseload', label: 'My caseload', n: caseload.length, sev: 'ok' },
       { key: 'assess', label: 'Assessments due (24h)', n: assess.length, sev: assessOverdue.length ? 'high' : assess.length ? 'warn' : 'ok' },
       { key: 'risk', label: 'At risk — the Save', n: risk.length, sev: risk.length ? 'high' : 'ok', view: 'retention' },
       { key: 'tasks', label: 'Appointments to set up', n: myTasks.length, sev: myTasks.length ? 'warn' : 'ok', view: 'casemgmt' },
+      { key: 'sessions', label: '1:1s due', n: sessionsDue.length, sev: sessionsDue.length ? 'warn' : 'ok' },
       { key: 'planning', label: 'Discharge & ride to arrange', n: planNeeds.length, sev: planNeeds.length ? 'high' : 'ok', view: 'continuum' },
       { key: 'followups', label: 'Follow-up calls due', n: followups.length, sev: followups.length ? 'high' : 'ok', view: 'mytasks' },
     ];
@@ -2883,7 +2910,8 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'planning', title: '🚪 Discharge arrangements & transport to set up', cta: { label: 'Open Continuum →', view: 'continuum' }, items: planning.map((c) => item(c, (c.aftercare_dest && c.aftercare_dest !== 'Undecided' ? '→ ' + c.aftercare_dest : 'NO destination set — arrange it + a ride') + (c.anticipated_dc ? ' · by ' + String(c.anticipated_dc).slice(0, 10) : ''), (!c.aftercare_dest || c.aftercare_dest === 'Undecided') ? 'PLAN' : '')) });
     if (locReview.length) sections.push({ key: 'loc', title: '🔁 LOC review — past the planned step-down, update Kipu & notify the team', items: locReview.map((c) => item(c, (c.loc || '') + (c.next_loc ? ' → ' + c.next_loc : ''))) });
     sections.push({ key: 'followups', title: 'Follow-up calls due', cta: { label: 'Open My Tasks →', view: 'mytasks' }, items: followups.map((f) => ({ id: f.cid, name: f.pref || f.name, sub: (f.type || '') + ' · due ' + (f.due_date || '') })) });
-    sections.push({ key: 'groups', title: '👥 Groups & 1:1s — facilitate, then enter notes promptly', items: [{ name: 'Log group notes & 1:1 sessions in Kipu the same day', sub: 'Give each 1:1 client material to complete before the next session.' }] });
+    sections.push({ key: 'sessions', title: `🗣️ 1:1s due — no session in ${sessDays} days`, cta: { label: 'Open Client Record to log →', view: 'records' }, items: sessionsDue.map((c) => item(c, 'due for a 1:1 — make time and give them material for next time')) });
+    if (myHomework.length) sections.push({ key: 'homework', title: '📚 Homework outstanding — material assigned, not yet done', cta: { label: 'Open Client Record →', view: 'records' }, items: myHomework.map((h) => ({ id: h.cid, name: h.pref || h.name, sub: h.homework })) });
   } else if (jr === 'Front Desk') {
     subtitle = 'The warm welcome — greet every arrival by name.';
     const arr = db.prepare(`SELECT preferred_name, first_name, last_name, status, referral_source FROM expected_arrivals WHERE scheduled_date = ? ORDER BY status`).all(today);

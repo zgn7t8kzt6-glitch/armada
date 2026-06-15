@@ -456,6 +456,21 @@ CREATE TABLE IF NOT EXISTS task_comments (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_task_comments ON task_comments(task_id);
+
+-- 1:1 / group sessions with homework — the clinical "make time + give material"
+-- loop. Each session records the topic, a note, and material assigned to complete
+-- before the next session; clients overdue for a 1:1 surface on the dashboard.
+CREATE TABLE IF NOT EXISTS client_sessions (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT '1:1',          -- 1:1 | Group
+  topic TEXT, note TEXT,
+  homework TEXT,                             -- material to complete before next session
+  homework_done INTEGER NOT NULL DEFAULT 0, homework_done_at TEXT,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_client_sessions ON client_sessions(client_id, created_at);
 CREATE TABLE IF NOT EXISTS saves (
   id INTEGER PRIMARY KEY,
   client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,

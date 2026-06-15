@@ -2850,7 +2850,27 @@ async function openRecord(id){
         </div>
       </details>
     </div>
+    <div class="card" style="border-left:4px solid var(--aqua,#5fb0c2)">
+      <details id="recSessForm"><summary class="sans" style="cursor:pointer;font-weight:600">🗣️ Log a 1:1 / group session with ${esc(c.name)}</summary>
+        <div style="margin-top:12px">
+          <div class="grid2">
+            <div class="field"><label>Type</label><select id="rec_s_type"><option>1:1</option><option>Group</option></select></div>
+            <div class="field"><label>Topic</label><input id="rec_s_topic" placeholder="e.g. coping skills, Step 4, triggers"/></div>
+          </div>
+          <div class="field"><label>Session note</label><textarea id="rec_s_note" rows="3" placeholder="What you covered, how they're doing, follow-ups."></textarea></div>
+          <div class="field"><label>Material / homework for next session (optional)</label><textarea id="rec_s_hw" rows="2" placeholder="e.g. complete the relapse-prevention worksheet, write 3 triggers"></textarea></div>
+          <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="recLogSession(${c.id})">Save session</button><span id="rec_s_msg" class="hint" style="align-self:center"></span></div>
+        </div>
+      </details>
+    </div>
     ${discharge}
+    <details class="card" ${(d.sessions&&d.sessions.length)?'open':''}><summary class="sans" style="cursor:pointer;font-weight:600">🗣️ Sessions &amp; homework <span class="badge">${(d.sessions||[]).length}</span></summary>
+      ${(d.sessions&&d.sessions.length)?'<div style="margin-top:10px">'+d.sessions.map(s=>`<div class="pc-note" style="border-left:3px solid var(--line);padding-left:10px;margin:8px 0">
+        <strong>${esc(s.type)}</strong>${s.topic?' · '+esc(s.topic):''} <span class="hint">${esc(s.at)}${s.by?' · '+esc(s.by):''}</span>
+        ${s.note?`<div>${esc(s.note)}</div>`:''}
+        ${s.homework?`<div style="margin-top:4px">📚 <strong>Homework:</strong> ${esc(s.homework)} ${s.homeworkDone?'<span class="risk risk-low">done</span>':`<button class="btn btn-ghost btn-sm sans" onclick="markHomework(${s.id},${c.id})">Mark done</button>`}</div>`:''}
+      </div>`).join('')+'</div>':'<div class="hint" style="margin-top:8px">No sessions logged yet.</div>'}
+    </details>
     ${feed('🚩 Incidents', d.incidents, x=>line(x.at+(x.by?' · '+x.by:''), `${sev(x.severity)} <strong>${esc(x.type)}</strong> — ${esc(x.description)}${x.action?`<div class="hint">Action: ${esc(x.action)}</div>`:''}<div class="hint">${esc(x.status)}</div>`), 'No incidents logged.')}
     ${feed('💓 Pulse notes', d.pulses, p=>line(p.date+' '+p.shift, `${sev(p.concern)} ${p.engagement?'<span class="badge">'+esc(p.engagement)+'</span> ':''}${p.triggers&&p.triggers.length?'<span class="hint">'+p.triggers.map(esc).join(', ')+'</span>':''}${p.statements?`<div>“${esc(p.statements)}”</div>`:''}${p.note?`<div>${esc(p.note)}</div>`:''}`), 'No pulse notes.')}
     ${feed('📝 Documentation notes', d.notes, n=>line(n.at+(n.author?' · '+n.author:'')+(n.source?' · '+n.source:''), `${n.flagged?sev(n.level||'flag')+' ':''}${esc(n.text)}${n.summary?`<div class="hint">⚠ ${esc(n.summary)}</div>`:''}`), 'No documentation notes.')}
@@ -2873,6 +2893,14 @@ async function recFileIncident(id){
     openRecord(id);   // reload — the new incident shows in the Incidents section
   }catch(e){ $('rec_in_msg').textContent=e.message; }
 }
+async function recLogSession(id){
+  const note=$('rec_s_note').value.trim(), topic=$('rec_s_topic').value.trim(), hw=$('rec_s_hw').value.trim();
+  if(!note&&!topic&&!hw){ $('rec_s_msg').textContent='Add a topic, note, or homework.'; return; }
+  $('rec_s_msg').textContent='Saving…';
+  try{ await api('/clients/'+id+'/session',{method:'POST',body:JSON.stringify({type:$('rec_s_type').value, topic, note, homework:hw})}); openRecord(id); }
+  catch(e){ $('rec_s_msg').textContent=e.message; }
+}
+async function markHomework(sid, cid){ try{ await api('/sessions/'+sid+'/homework',{method:'POST',body:JSON.stringify({done:true})}); openRecord(cid); }catch(e){ alert(e.message); } }
 
 /* ---- My Shift: role-tailored employee dashboard ---- */
 function dashScrollTo(key){ const el=$('dash-'+key); if(!el) return; el.scrollIntoView({behavior:'smooth',block:'start'}); el.style.transition='box-shadow .3s'; el.style.boxShadow='0 0 0 2px var(--gold)'; setTimeout(()=>{el.style.boxShadow='';},1300); }

@@ -1719,6 +1719,7 @@ async function loadCommand(){
        </div>
        <div class="toolbar no-print" style="justify-content:flex-start;margin-top:8px">
          <button class="btn btn-gold btn-sm sans" onclick="emailCensus()">✉ Email census now</button>
+         <button class="btn btn-ghost btn-sm sans" onclick="emailBrief()">☀ Send morning brief</button>
          <button class="btn btn-ghost btn-sm sans" onclick="censusRecipients()">Recipients…</button>
          <span id="censusMsg" class="hint" style="align-self:center"></span>
        </div>`;
@@ -1809,6 +1810,11 @@ async function sendoutAdd(){
 async function emailCensus(){
   $('censusMsg').textContent='Sending…';
   try{ const r=await api('/command/census/email',{method:'POST'}); $('censusMsg').textContent = r.sent?('✓ Emailed to '+r.to):('Not sent — '+(r.reason||'email not configured')); }
+  catch(e){ $('censusMsg').textContent='Error: '+e.message; }
+}
+async function emailBrief(){
+  $('censusMsg').textContent='Sending morning brief…';
+  try{ const r=await api('/command/brief',{method:'POST'}); $('censusMsg').textContent = r.sent?('✓ Brief emailed to '+r.to):('Not sent — '+(r.reason||'email not configured')); }
   catch(e){ $('censusMsg').textContent='Error: '+e.message; }
 }
 async function censusRecipients(){

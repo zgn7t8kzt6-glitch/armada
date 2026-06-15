@@ -305,6 +305,9 @@ app.post('/api/command/census/email', requireAuth, requireAdmin, async (req, res
 });
 app.get('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => res.json({ to: getState('census_email_to') || '', emailReady: emailConfigured() }));
 app.post('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => { setState('census_email_to', (req.body?.to || '').trim()); res.json({ ok: true }); });
+app.post('/api/command/brief', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await sendMorningBrief()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
 
 // ---- Email setup (in-app, no Render env editing). Secrets stored server-side;
 // never returned to the client. ----
@@ -3368,6 +3371,67 @@ function runDailyCutoff() {
   setTimeout(runDailyCutoff, msUntilLocalMidnight());  // re-arm for the next midnight
 }
 setTimeout(runDailyCutoff, msUntilLocalMidnight());
+
+// ---- Morning leadership brief: the day's numbers, emailed before the shift ----
+function msUntilLocalHour(targetHour) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US',
+    { timeZone: APP_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    .formatToParts(new Date()).filter((p) => p.type !== 'literal').map((p) => [p.type, +p.value]));
+  const h = parts.hour === 24 ? 0 : parts.hour;
+  const secsIntoDay = h * 3600 + parts.minute * 60 + parts.second;
+  let delta = targetHour * 3600 - secsIntoDay;
+  if (delta <= 0) delta += 86400;
+  return delta * 1000 + 5000;
+}
+function buildMorningBrief() {
+  const today = appToday();
+  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const byLoc = {};
+  for (const c of active) { const k = (c.loc && c.loc !== 'Unspecified') ? c.loc : (parseLoc(c.program) || 'Unspecified'); byLoc[k] = (byLoc[k] || 0) + 1; }
+  const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
+  const dToday = db.prepare(`SELECT pref, name, discharge_status FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
+  const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
+  const atRisk = active.map((c) => ({ c, a: latestAmaRead(c.id) })).filter((x) => x.a && (x.a.level === 'High' || x.a.level === 'Elevated'));
+  const scheduled = db.prepare(`SELECT preferred_name, first_name, last_name FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).all(today);
+  const delightSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM delights WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
+  let welcomed = 0, anticipated = 0, ccInc = 0;
+  for (const c of active) { if (careCardStatus(c).complete) welcomed++; else ccInc++; if (delightSet.has(c.id)) anticipated++; }
+  const served = active.length ? Math.round((welcomed + anticipated) / (active.length * 2) * 100) : 100;
+  const locLine = Object.entries(byLoc).sort((a, b) => (LOC_RANK[b[0]] ?? -1) - (LOC_RANK[a[0]] ?? -1)).map(([k, n]) => `${k}: ${n}`).join(' · ');
+  const dt = new Date().toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
+  const card = (label, val, color) => `<td style="padding:10px 14px;text-align:center;border:1px solid #eae5da;border-radius:8px"><div style="font-size:26px;font-weight:700;color:${color || '#235056'}">${val}</div><div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6f7a75">${label}</div></td>`;
+  const list = (arr, fmt) => arr.length ? arr.map(fmt).join('') : '<div style="color:#6f7a75">None.</div>';
+  const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;color:#1b2825">
+    <h2 style="color:#235056;margin:0 0 2px">Armada — Morning Brief</h2><div style="color:#6f7a75;margin-bottom:16px">${dt}</div>
+    <table style="border-collapse:separate;border-spacing:8px"><tr>
+      ${card('Census', active.length)}${card('Admits today', admitsToday)}${card('Discharges', dToday.length)}${card('AMA', amaToday, amaToday ? '#c06a52' : '#235056')}${card('Served %', served + '%', served >= 80 ? '#2f7a4f' : '#9a6a1f')}
+    </tr></table>
+    <p style="margin:14px 0 4px"><strong>By level of care:</strong> ${locLine || '—'}</p>
+    <h3 style="color:#235056;margin:18px 0 6px">Watch today — at risk (${atRisk.length})</h3>
+    ${list(atRisk, (x) => `<div>⚠ <strong>${esc(x.c.pref || x.c.name)}</strong>${x.c.room ? ' · ' + esc(x.c.room) : ''} — ${esc(x.a.level)}${x.a.best_play ? ': ' + esc(x.a.best_play) : ''}</div>`)}
+    <h3 style="color:#235056;margin:18px 0 6px">Scheduled to arrive (${scheduled.length})</h3>
+    ${list(scheduled, (s) => `<div>☀ ${esc(((s.preferred_name || s.first_name || '') + ' ' + (s.last_name || '')).trim())}</div>`)}
+    <p style="margin:18px 0 0;color:#6f7a75">${ccInc} Care Card(s) to finish · Three Steps of Service at ${served}%.</p>
+    <p style="margin:16px 0 0;font-size:12px;color:#9aa">Sent from Armada Care Standards. Open the app for the full Command Center.</p>
+  </div>`;
+  const text = `Armada Morning Brief — ${dt}\nCensus ${active.length} · Admits ${admitsToday} · Discharges ${dToday.length} · AMA ${amaToday} · Served ${served}%\nLOC: ${locLine}\nAt risk: ${atRisk.map((x) => (x.c.pref || x.c.name) + ' (' + x.a.level + ')').join('; ') || 'none'}\nScheduled: ${scheduled.map((s) => (s.preferred_name || s.first_name || '') + ' ' + (s.last_name || '')).join('; ') || 'none'}`;
+  return { subject: `Armada Morning Brief — ${dt} · ${active.length} census, ${atRisk.length} at risk`, html, text };
+}
+async function sendMorningBrief() {
+  const to = (getState('brief_email_to') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '').trim();
+  if (!emailConfigured()) return { sent: false, reason: 'email not connected' };
+  if (!to) return { sent: false, reason: 'no recipients' };
+  const b = buildMorningBrief();
+  await sendEmail({ to, subject: b.subject, html: b.html, text: b.text });
+  return { sent: true, to };
+}
+function runMorningBrief() {
+  if (process.env.MORNING_BRIEF !== 'false') {
+    sendMorningBrief().then((r) => { if (r.sent) console.log('[brief] morning brief emailed to', r.to); else console.log('[brief] skipped:', r.reason); }).catch((e) => console.error('[brief]', e.message));
+  }
+  setTimeout(runMorningBrief, msUntilLocalHour(+(process.env.MORNING_BRIEF_HOUR || 7)));
+}
+setTimeout(runMorningBrief, msUntilLocalHour(+(process.env.MORNING_BRIEF_HOUR || 7)));
 
 // Keep the front-desk arrivals board fresh through the day (Salesforce pull +
 // Kipu reconcile) without anyone clicking refresh.

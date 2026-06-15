@@ -281,10 +281,10 @@ export async function sfSyncArrivals(db) {
   const stages = (process.env.SF_SCHEDULE_STAGES || 'Admission Scheduled')
     .split(',').map((s) => `'${s.trim().replace(/'/g, '')}'`).join(',');
   const soql = process.env.SF_ARRIVALS_SOQL || `
-    SELECT Id, Name, StageName, CloseDate, CreatedDate
+    SELECT Id, Name, StageName, CloseDate, Admission_Date__c, CreatedDate
     FROM Opportunity
     WHERE IsClosed = false AND StageName IN (${stages})
-    ORDER BY CloseDate ASC NULLS LAST`;
+    ORDER BY Admission_Date__c ASC NULLS LAST`;
   const records = await sfQueryAll(soql);
 
   const find = db.prepare(`SELECT id, status FROM expected_arrivals WHERE sf_lead_id = ?`);
@@ -308,7 +308,7 @@ export async function sfSyncArrivals(db) {
   db.exec('BEGIN');
   try {
     for (const r of records) {
-      const sched = (r.CloseDate || '').slice(0, 10) || null;
+      const sched = (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || null;
       if (!sched) continue;
       const { first, last } = parseName(r.Name);
       const vals = [first || null, last || null, first || null, null, null, sched, r.StageName || null, null, null];

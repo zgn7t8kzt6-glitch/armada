@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615r" />
+<link rel="stylesheet" href="/styles.css?v=20260615s" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -561,6 +561,7 @@
         </div>
         <div class="grid2">
           <div><label>Auto-draft welcome plans</label><select id="au_welcome_auto"><option value="on">On</option><option value="off">Off</option></select></div>
+          <div><label>On-call alert detail <span class="hint" style="font-weight:400">(in SMS/email)</span></label><select id="au_alert_detail"><option value="locator">Name + room (recommended)</option><option value="minimal">No identifier (most private)</option><option value="full">Full message</option></select></div>
         </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:12px"><button class="btn btn-gold sans" onclick="saveAutomation()">Save automation</button><span id="au_msg" class="hint" style="align-self:center"></span></div>
       </div>
@@ -1264,6 +1265,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615r"></script>
+<script src="/app.js?v=20260615s"></script>
 </body>
 </html>

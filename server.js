@@ -317,10 +317,11 @@ app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res
   brief_on: autoCfg('brief_on', 'on'),
   recovery_max: autoCfg('recovery_max', 3),
   welcome_auto: autoCfg('welcome_auto', 'on'),
+  alert_detail: autoCfg('alert_detail', process.env.ALERT_INCLUDE_PHI === 'true' ? 'full' : 'locator'),
 }));
 app.post('/api/settings/automation', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
-  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto']) {
+  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail']) {
     if (b[k] !== undefined) setState('auto_' + k, String(b[k]).trim());
   }
   audit({ user: req.user, action: 'AUTO_CONFIG', ip: req.ip });
@@ -573,9 +574,19 @@ function createAlert(client_id, kind, level, message) {
   if (dup) return;
   db.prepare(`INSERT INTO alerts (client_id, kind, level, message) VALUES (?, ?, ?, ?)`).run(client_id || null, kind, level || null, message);
   if (level === 'High' || level === 'Critical') {
-    // PHI-free by default — the detailed message stays in the app (behind login).
-    const phiFree = process.env.ALERT_INCLUDE_PHI !== 'true';
-    notifyOnCall(phiFree ? `${level} alert — a client needs attention now. Open Armada to view (details kept in-app for privacy).` : message);
+    // How much to put in the SMS/email (an insecure channel). Default 'locator':
+    // first name + room so the on-call leader knows WHO and WHERE, without the
+    // clinical detail. 'minimal' = no identifier; 'full' = the whole message.
+    const mode = autoCfg('alert_detail', process.env.ALERT_INCLUDE_PHI === 'true' ? 'full' : 'locator');
+    let msg;
+    if (mode === 'full') msg = message;
+    else if (mode === 'minimal') msg = `${level} alert — a client needs attention now. Open Armada to view (details kept in-app for privacy).`;
+    else {
+      const c = client_id ? db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(client_id) : null;
+      const who = c ? ((c.pref || (c.name || '').split(/\s+/)[0] || 'a client') + (c.room ? ` · Room ${c.room}` : '')) : 'a client';
+      msg = `${level} alert — ${who} needs attention now. Open Armada for details. Go to them in person.`;
+    }
+    notifyOnCall(msg);
   }
 }
 

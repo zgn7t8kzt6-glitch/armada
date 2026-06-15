@@ -701,13 +701,13 @@ async function loadAutomation(){
   try{ const a=await api('/settings/automation');
     const set=(id,v)=>{ const el=$(id); if(el) el.value = v; };
     set('au_detox_min',a.detox_min); set('au_default_min',a.default_min); set('au_carecard_min',a.carecard_min);
-    set('au_brief_hour',a.brief_hour); set('au_brief_on',a.brief_on); set('au_recovery_max',a.recovery_max); set('au_welcome_auto',a.welcome_auto);
+    set('au_brief_hour',a.brief_hour); set('au_brief_on',a.brief_on); set('au_recovery_max',a.recovery_max); set('au_welcome_auto',a.welcome_auto); set('au_alert_detail',a.alert_detail);
   }catch(e){}
 }
 async function saveAutomation(){
   $('au_msg').textContent='Saving…';
   const body={ detox_min:$('au_detox_min').value, default_min:$('au_default_min').value, carecard_min:$('au_carecard_min').value,
-    brief_hour:$('au_brief_hour').value, brief_on:$('au_brief_on').value, recovery_max:$('au_recovery_max').value, welcome_auto:$('au_welcome_auto').value };
+    brief_hour:$('au_brief_hour').value, brief_on:$('au_brief_on').value, recovery_max:$('au_recovery_max').value, welcome_auto:$('au_welcome_auto').value, alert_detail:$('au_alert_detail').value };
   try{ await api('/settings/automation',{method:'POST',body:JSON.stringify(body)}); $('au_msg').textContent='✓ Saved'; }
   catch(e){ $('au_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }

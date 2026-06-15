@@ -730,7 +730,13 @@ async function sendCensusEmail(reportDate = appToday()) {
   return { sent: true, to };
 }
 app.post('/api/command/census/email', requireAuth, requireAdmin, async (req, res) => {
-  try { const r = await sendCensusEmail(); res.json(r); } catch (e) { res.status(502).json({ error: e.message }); }
+  // Optional scope: 'yesterday' (the end-of-day summary, same as the midnight run)
+  // or an explicit YYYY-MM-DD. Default is today (a live mid-day snapshot).
+  let reportDate = appToday();
+  const b = req.body || {};
+  if (b.scope === 'yesterday') reportDate = addDays(appToday(), -1);
+  else if (typeof b.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) reportDate = b.date;
+  try { const r = await sendCensusEmail(reportDate); res.json({ ...r, date: reportDate }); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => res.json({ to: getState('census_email_to') || '', emailReady: emailConfigured() }));
 app.post('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => { setState('census_email_to', (req.body?.to || '').trim()); res.json({ ok: true }); });

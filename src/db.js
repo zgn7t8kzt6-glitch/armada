@@ -635,6 +635,29 @@ CREATE TABLE IF NOT EXISTS reorder_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_reorder_status ON reorder_requests(status, item_id);
 
+-- MAINTENANCE / WORK ORDERS — staff report a fix, it routes to the right owner,
+-- and nothing falls through the cracks. Open items show on a shared board; aging
+-- High/Urgent items escalate so they're never silently ignored.
+CREATE TABLE IF NOT EXISTS maintenance_requests (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  location TEXT,                            -- room / area
+  category TEXT NOT NULL DEFAULT 'General', -- Plumbing | Electrical | HVAC | Appliance | Furniture | Safety/Security | IT/Tech | Cleaning/Biohazard | General
+  priority TEXT NOT NULL DEFAULT 'Normal',  -- Low | Normal | High | Urgent
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'open',       -- open | in_progress | resolved | closed
+  reported_by_id INTEGER REFERENCES users(id),
+  reported_by TEXT,
+  assigned_to TEXT,                         -- person/vendor working it
+  resolution TEXT,                          -- what was done
+  emailed_at TEXT,
+  resolved_at TEXT, resolved_by TEXT,
+  escalated_at TEXT,                        -- last aging-escalation (dedupe)
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_maint_status ON maintenance_requests(status, priority);
+
 -- Scheduling: a staffing need (one row per part×role on a date, with how many needed).
 CREATE TABLE IF NOT EXISTS schedule_slots (
   id INTEGER PRIMARY KEY,

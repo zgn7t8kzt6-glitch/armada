@@ -395,6 +395,90 @@ app.post('/api/inventory/settings', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── MAINTENANCE / WORK ORDERS ───────────────────────────────────────────────
+// Staff report a fix from anywhere; it routes to the maintenance owner and lands
+// on a shared board so nothing goes unaddressed or un-communicated.
+const htmlEsc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+const MAINT_CATEGORIES = ['Plumbing', 'Electrical', 'HVAC', 'Appliance', 'Furniture', 'Safety/Security', 'IT/Tech', 'Cleaning/Biohazard', 'General'];
+const MAINT_PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
+function maintenanceEmail() { return getState('maintenance_email') || process.env.MAINTENANCE_EMAIL || ''; }
+async function emailMaintenance(r) {
+  const to = maintenanceEmail();
+  if (!to || !emailConfigured()) return false;
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
+    <h2 style="margin:0 0 2px">${r.priority === 'Urgent' ? '🚨 ' : ''}Maintenance request — ${htmlEsc(r.title)}</h2>
+    <p style="color:#${r.priority === 'Urgent' ? 'b00' : r.priority === 'High' ? 'a60' : '666'};font-weight:bold;margin:0 0 12px">${r.priority} · ${htmlEsc(r.category)}</p>
+    <table style="border-collapse:collapse">
+      <tr><td style="padding:3px 12px 3px 0;color:#666">Location</td><td><b>${htmlEsc(r.location || '—')}</b></td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#666">Reported by</td><td>${htmlEsc(r.reported_by || 'Staff')}</td></tr>
+      ${r.description ? `<tr><td style="padding:3px 12px 3px 0;color:#666;vertical-align:top">Details</td><td>${htmlEsc(r.description)}</td></tr>` : ''}
+    </table>
+    <p style="color:#888;margin-top:14px">Sent automatically by Armada Care Standards — Maintenance. Track it in the app.</p>
+  </div>`;
+  try { await sendEmail({ to, subject: `Armada maintenance — ${r.title} (${r.priority})`, html }); return true; }
+  catch (e) { console.error('maintenance email:', e.message); return false; }
+}
+// Shared board + KPIs. Visible to all staff (requireAuth) so everyone can see
+// what's open and nothing is invisible.
+app.get('/api/maintenance', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT * FROM maintenance_requests WHERE status != 'closed' OR updated_at >= datetime('now','-7 day') ORDER BY
+    CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'resolved' THEN 2 ELSE 3 END,
+    CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, created_at DESC`).all();
+  const map = (r) => ({ id: r.id, title: r.title, location: r.location || '', category: r.category, priority: r.priority,
+    description: r.description || '', status: r.status, reportedBy: r.reported_by || '', assignedTo: r.assigned_to || '',
+    resolution: r.resolution || '', at: String(r.created_at).slice(0, 16),
+    ageH: Math.floor((Date.now() - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z')) / 3.6e6) });
+  const open = rows.filter((r) => r.status === 'open');
+  const stats = {
+    open: open.length,
+    inProgress: rows.filter((r) => r.status === 'in_progress').length,
+    urgentOpen: open.filter((r) => r.priority === 'Urgent' || r.priority === 'High').length,
+    resolvedWeek: db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status IN ('resolved','closed') AND updated_at >= datetime('now','-7 day')`).get().n,
+    overdue: open.filter((r) => (Date.now() - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z')) / 3.6e6 > (r.priority === 'Urgent' ? 4 : r.priority === 'High' ? 24 : 72)).length,
+  };
+  res.json({ requests: rows.map(map), stats, categories: MAINT_CATEGORIES, priorities: MAINT_PRIORITIES,
+    maintenanceEmail: maintenanceEmail() ? maintenanceEmail().replace(/(.{2}).*(@.*)/, '$1•••$2') : '', emailReady: emailConfigured() });
+});
+// Anyone can file a request.
+app.post('/api/maintenance', requireAuth, async (req, res) => {
+  const b = req.body || {};
+  const title = (b.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'A short title is required' });
+  const category = MAINT_CATEGORIES.includes(b.category) ? b.category : 'General';
+  const priority = MAINT_PRIORITIES.includes(b.priority) ? b.priority : 'Normal';
+  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, reported_by_id, reported_by) VALUES (?,?,?,?,?,?,?)`)
+    .run(title, (b.location || '').trim() || null, category, priority, (b.description || '').trim() || null, req.user.id, req.user.name).lastInsertRowid;
+  const r = db.prepare(`SELECT * FROM maintenance_requests WHERE id = ?`).get(id);
+  audit({ user: req.user, action: 'MAINT_NEW', entity_id: id, detail: `${title} (${priority}/${category})`, ip: req.ip });
+  // Urgent or any Safety/Security item escalates to the on-call leader immediately.
+  if (priority === 'Urgent' || category === 'Safety/Security') {
+    createAlert(null, 'maint_' + id, priority === 'Urgent' ? 'High' : 'Elevated', `Maintenance ${priority}: ${title}${r.location ? ' @ ' + r.location : ''} (${category}). Reported by ${req.user.name}.`);
+  }
+  if (await emailMaintenance(r)) db.prepare(`UPDATE maintenance_requests SET emailed_at = datetime('now') WHERE id = ?`).run(id);
+  res.json({ ok: true, id });
+});
+app.post('/api/maintenance/settings', requireAuth, requireAdmin, (req, res) => {
+  setState('maintenance_email', (req.body?.maintenance_email || '').trim());
+  audit({ user: req.user, action: 'MAINT_SETTINGS', ip: req.ip });
+  res.json({ ok: true });
+});
+// Update status / assignment / resolution. Any staff can claim or resolve.
+app.post('/api/maintenance/:id', requireAuth, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const r = db.prepare(`SELECT * FROM maintenance_requests WHERE id = ?`).get(id);
+  if (!r) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  const status = ['open', 'in_progress', 'resolved', 'closed'].includes(b.status) ? b.status : r.status;
+  const assigned = b.assigned_to !== undefined ? ((b.assigned_to || '').trim() || null) : r.assigned_to;
+  const resolution = b.resolution !== undefined ? ((b.resolution || '').trim() || null) : r.resolution;
+  const resolving = (status === 'resolved' || status === 'closed') && r.status !== 'resolved' && r.status !== 'closed';
+  db.prepare(`UPDATE maintenance_requests SET status=?, assigned_to=?, resolution=?, updated_at=datetime('now'),
+    resolved_at=CASE WHEN ? THEN datetime('now') ELSE resolved_at END, resolved_by=CASE WHEN ? THEN ? ELSE resolved_by END WHERE id=?`)
+    .run(status, assigned, resolution, resolving ? 1 : 0, resolving ? 1 : 0, req.user.name, id);
+  audit({ user: req.user, action: 'MAINT_UPDATE', entity_id: id, detail: status, ip: req.ip });
+  res.json({ ok: true });
+});
+
 // Every Kipu discharge must have the in-app fond-farewell completed (Safe
 // Departure checklist + where they went). What's missing on a given discharge:
 function dischargeMissing(c) {
@@ -1963,6 +2047,16 @@ function runFlowAutomations() {
   for (const c of recentAdmits) {
     if (hasTasks.get(c.id)) continue;
     for (const [cat, it] of ONBOARDING_TASKS) insTask.run(c.id, cat, it);
+  }
+
+  // Maintenance aging-escalation: an open work order past its SLA (Urgent 4h,
+  // High 24h, else 72h) escalates to the on-call leader so nothing is silently
+  // forgotten. Deduped — escalates at most once a day per request.
+  for (const r of db.prepare(`SELECT id, title, location, category, priority, reported_by, created_at FROM maintenance_requests WHERE status = 'open'`).all()) {
+    const ageH = (Date.now() - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z')) / 3.6e6;
+    const sla = r.priority === 'Urgent' ? 4 : r.priority === 'High' ? 24 : 72;
+    if (ageH > sla) createAlert(null, 'maint_overdue_' + r.id, r.priority === 'Urgent' ? 'High' : 'Elevated',
+      `Maintenance OVERDUE (${Math.floor(ageH)}h): ${r.title}${r.location ? ' @ ' + r.location : ''} · ${r.priority}/${r.category}. Still unaddressed — assign and fix.`);
   }
   return { kits, follows };
 }

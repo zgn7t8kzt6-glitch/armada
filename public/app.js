@@ -114,7 +114,7 @@ const GROUP_OF={
   report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',
   casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',continuum:'clinical',
   admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
-  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',inventory:'team',
+  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',inventory:'team',maintenance:'team',
   training:'learn',library:'learn',standard:'learn',
   command:'command',compliance:'command',accountability:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
@@ -177,6 +177,7 @@ function show(v){
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
+  if(v==='maintenance') loadMaintenance();
   if(v==='arrivals') loadArrivals();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
@@ -2530,6 +2531,72 @@ async function saveInvItem(){
   const body={ id:INV_EDIT_ID, name:$('inv_i_name').value.trim(), department:$('inv_i_dept').value, category:$('inv_i_cat').value.trim(), unit:$('inv_i_unit').value.trim()||'each', par_level:$('inv_i_par').value, reorder_point:$('inv_i_re').value, critical:$('inv_i_crit').checked, track_expiry:$('inv_i_exp').checked };
   if(!body.name){ $('inv_i_msg').textContent='Name required'; return; }
   try{ await api('/inventory/items',{method:'POST',body:JSON.stringify(body)}); $('inv_i_msg').textContent='✓ Saved'; resetInvItem(); loadInvCatalog(); }catch(e){ $('inv_i_msg').textContent=e.message; }
+}
+
+/* ---- Maintenance / work orders + who's on shift ---- */
+let MAINT_DATA=null;
+async function loadMaintenance(){
+  let d; try{ d=await api('/maintenance'); }catch(e){ $('maintBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  MAINT_DATA=d;
+  const s=d.stats;
+  $('maintKpis').innerHTML = `
+    <div class="ret-card ${s.urgentOpen?'rc-high':''}"><div class="n">${s.urgentOpen}</div><div class="l">Urgent / high open</div></div>
+    <div class="ret-card ${s.open?'rc-warn':''}"><div class="n">${s.open}</div><div class="l">Open</div></div>
+    <div class="ret-card"><div class="n">${s.inProgress}</div><div class="l">In progress</div></div>
+    <div class="ret-card ${s.overdue?'rc-high':''}"><div class="n">${s.overdue}</div><div class="l">Past SLA</div></div>
+    <div class="ret-card"><div class="n">${s.resolvedWeek}</div><div class="l">Fixed this week</div></div>`;
+  // fill selects once
+  if($('mt_cat')&&!$('mt_cat').options.length) $('mt_cat').innerHTML = d.categories.map(c=>`<option>${esc(c)}</option>`).join('');
+  if($('mt_pri')&&!$('mt_pri').options.length){ $('mt_pri').innerHTML = d.priorities.map(p=>`<option ${p==='Normal'?'selected':''}>${esc(p)}</option>`).join(''); }
+  if($('mt_owner_email')) $('mt_owner_email').placeholder = d.maintenanceEmail || 'maintenance@armadarecovery.com';
+  renderMaintBoard();
+  loadMaintShift();
+}
+function priPill(p){ const c=p==='Urgent'?'var(--danger)':p==='High'?'#c98a14':p==='Low'?'var(--muted)':'var(--navy)'; return `<span class="risk" style="background:${c}1a;color:${c};border:1px solid ${c}55">${esc(p)}</span>`; }
+function renderMaintBoard(){
+  if(!MAINT_DATA) return;
+  const act=MAINT_DATA.requests.filter(r=>r.status==='open'||r.status==='in_progress');
+  if(!act.length){ $('maintBoard').innerHTML='<div class="hint">Nothing open — all caught up. 🎉</div>'; return; }
+  $('maintBoard').innerHTML = act.map(r=>{
+    const overdue = r.status==='open' && r.ageH > (r.priority==='Urgent'?4:r.priority==='High'?24:72);
+    return `<div class="card" style="margin:8px 0;${overdue?'border-left:4px solid var(--danger)':r.priority==='Urgent'?'border-left:4px solid var(--danger)':''}">
+      <div class="cmd-hero-row">
+        <div><strong>${esc(r.title)}</strong> ${priPill(r.priority)} <span class="badge">${esc(r.category)}</span>${overdue?' <span class="badge badge-danger">past SLA</span>':''}
+          <div class="hint">${r.location?esc(r.location)+' · ':''}reported by ${esc(r.reportedBy)||'staff'} · ${r.ageH}h ago${r.assignedTo?' · assigned: '+esc(r.assignedTo):''}</div>
+          ${r.description?`<div class="sans" style="margin-top:4px">${esc(r.description)}</div>`:''}</div>
+        <div style="text-align:right">${r.status==='open'?`<button class="btn btn-sm btn-ghost sans" onclick="maintStatus(${r.id},'in_progress')">Start</button>`:''} <button class="btn btn-sm btn-gold sans" onclick="maintResolve(${r.id})">Resolve</button></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function submitMaintenance(){
+  const title=$('mt_title').value.trim(); if(!title){ $('mt_msg').textContent='Add a short title'; return; }
+  const body={ title, location:$('mt_loc').value.trim(), category:$('mt_cat').value, priority:$('mt_pri').value, description:$('mt_desc').value.trim() };
+  $('mt_msg').textContent='Submitting…';
+  try{ await api('/maintenance',{method:'POST',body:JSON.stringify(body)}); $('mt_msg').textContent='✓ Logged & routed'; ['mt_title','mt_loc','mt_desc'].forEach(x=>$(x).value=''); loadMaintenance(); }
+  catch(e){ $('mt_msg').textContent=e.message; }
+}
+async function maintStatus(id,status){ try{ await api('/maintenance/'+id,{method:'POST',body:JSON.stringify({status})}); loadMaintenance(); }catch(e){ alert(e.message); } }
+async function maintResolve(id){ const r=prompt('What was done? (optional)','')||''; try{ await api('/maintenance/'+id,{method:'POST',body:JSON.stringify({status:'resolved',resolution:r})}); loadMaintenance(); }catch(e){ alert(e.message); } }
+async function saveMaintEmail(){ const v=$('mt_owner_email').value.trim(); try{ await api('/maintenance/settings',{method:'POST',body:JSON.stringify({maintenance_email:v})}); $('mt_owner_msg').textContent='✓ Saved'; }catch(e){ $('mt_owner_msg').textContent=e.message; } }
+async function loadMaintShift(){
+  let d; try{ d=await api('/staffing'); }catch(e){ $('maintShift').innerHTML='<div class="hint">Shift schedule unavailable.</div>'; return; }
+  const parts=['Morning','Day','Evening','Night'];
+  const byPart={}; (d.slots||[]).forEach(s=>{ (byPart[s.part]=byPart[s.part]||[]).push(s); });
+  const has=parts.some(p=>byPart[p]);
+  if(!has){ $('maintShift').innerHTML='<div class="hint">No shifts scheduled for today yet.</div>'; return; }
+  $('maintShift').innerHTML = parts.filter(p=>byPart[p]).map(p=>{
+    const slots=byPart[p];
+    const rows=slots.map(s=>{
+      const on=s.assignments.filter(a=>a.status==='scheduled');
+      const off=s.assignments.filter(a=>a.status==='called_off');
+      const names = on.map(a=>esc(a.user_name)).join(', ')||'<span class="hint">unfilled</span>';
+      const offTxt = off.length?` <span class="risk risk-warn" title="called off">✗ ${off.map(a=>esc(a.user_name)+(a.calloff_reason?' ('+esc(a.calloff_reason)+')':'')).join(', ')}</span>`:'';
+      const gap = !s.covered?` <span class="badge badge-danger">short ${s.needed-on.length}</span>`:'';
+      return `<tr><td><strong>${esc(s.role)}</strong></td><td>${names}${offTxt}${gap}</td></tr>`;
+    }).join('');
+    return `<div style="margin-bottom:10px"><div class="sans" style="font-weight:600;color:var(--navy)">${p}</div><table class="tbl">${rows}</table></div>`;
+  }).join('');
 }
 
 /* ---- My Shift: role-tailored employee dashboard ---- */

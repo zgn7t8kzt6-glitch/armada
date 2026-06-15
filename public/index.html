@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615E" />
+<link rel="stylesheet" href="/styles.css?v=20260615F" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -72,6 +72,7 @@
     <button data-view="accountability" data-admin data-subview>Accountability</button>
     <button data-view="team">Team</button>
     <button data-view="inventory">Supplies</button>
+    <button data-view="maintenance">Maintenance</button>
     <button data-view="coverage" data-subview>Coverage</button>
     <button data-view="schedule" data-admin>Staffing</button>
     <button data-view="training">Training</button>
@@ -351,6 +352,38 @@
               <span id="inv_i_msg" class="hint" style="align-self:center"></span>
             </div>
             <div id="invCatalog" style="margin-top:12px"></div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- MAINTENANCE / WORK ORDERS + who's on shift -->
+    <section id="maintenance" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Maintenance &amp; Operations</h3><p class="sub sans">Report a fix from anywhere — it routes to the right owner and lands here so nothing goes unaddressed. Everyone can see what's open and who's on shift.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadMaintenance()">Refresh</button>
+        </div>
+        <div id="maintKpis" class="ret-cards"></div>
+      </div>
+      <div class="card">
+        <h3>🛠️ Report a fix</h3>
+        <div class="grid2">
+          <div class="field"><label>What needs fixing</label><input id="mt_title" placeholder="e.g. Room 204 toilet won't stop running"/></div>
+          <div class="field"><label>Location</label><input id="mt_loc" placeholder="Room / area"/></div>
+          <div class="field"><label>Category</label><select id="mt_cat"></select></div>
+          <div class="field"><label>Priority</label><select id="mt_pri"></select></div>
+        </div>
+        <div class="field"><label>Details (optional)</label><textarea id="mt_desc" rows="2" placeholder="Anything that helps whoever fixes it"></textarea></div>
+        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="submitMaintenance()">Submit request</button><span id="mt_msg" class="hint" style="align-self:center"></span></div>
+      </div>
+      <div class="card"><h3>Open &amp; in progress</h3><div id="maintBoard"></div></div>
+      <div class="card"><h3>👥 Who's on shift today</h3><p class="sub sans">Live coverage and call-offs — so everyone knows who's working.</p><div id="maintShift"></div></div>
+      <div class="card" data-admin>
+        <details><summary class="sans" style="cursor:pointer;font-weight:600">⚙ Route new requests to (admin)</summary>
+          <div style="margin-top:10px"><label>Email maintenance owner on every new request</label>
+            <div class="toolbar" style="justify-content:flex-start"><input id="mt_owner_email" type="email" placeholder="maintenance@armadarecovery.com" style="min-width:260px"/><button class="btn btn-gold sans" onclick="saveMaintEmail()">Save</button><span id="mt_owner_msg" class="hint" style="align-self:center"></span></div>
+            <p class="sub sans" style="margin-top:6px">Urgent and Safety/Security requests also raise an on-call alert. Open items past SLA (Urgent 4h, High 24h, else 72h) auto-escalate so nothing is forgotten.</p>
           </div>
         </details>
       </div>
@@ -1366,6 +1399,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615E"></script>
+<script src="/app.js?v=20260615F"></script>
 </body>
 </html>

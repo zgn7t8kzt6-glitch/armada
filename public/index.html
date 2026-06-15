@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615W" />
+<link rel="stylesheet" href="/styles.css?v=20260615X" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -244,8 +244,8 @@
       <!-- Survey results summary -->
       <div class="card">
         <div class="cmd-hero-row"><div><h3 style="margin:0">📊 Survey results</h3><p class="sub sans">How clients rate us — tap a survey for the full breakdown.</p></div>
-          <button class="btn btn-ghost btn-sm sans" onclick="show('surveys')">Open Surveys ↗</button></div>
-        <div id="cmdSurveys"></div>
+          <div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm sans" onclick="sendScorecard()">✉ Send scorecard</button><button class="btn btn-ghost btn-sm sans" onclick="show('surveys')">Open Surveys ↗</button></div></div>
+        <div id="cmdSurveys"></div><span id="scorecardMsg" class="hint"></span>
       </div>
       <!-- Care Cards: collapsed (open to fill) -->
       <details class="card" id="momentsCard">
@@ -720,6 +720,10 @@
         <div class="grid2">
           <div><label>Email me every completed survey</label><select id="au_survey_alert_on"><option value="on">On</option><option value="off">Off</option></select></div>
           <div><label>Survey emails go to</label><input id="au_survey_alert_to" type="text" placeholder="you@armadarecovery.com"/></div>
+        </div>
+        <div class="grid2">
+          <div><label>Monthly survey scorecard email</label><select id="au_scorecard_on"><option value="on">On</option><option value="off">Off</option></select></div>
+          <div><label>Scorecard day of month (1–28)</label><input id="au_scorecard_day" type="number" min="1" max="28"/></div>
         </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:12px"><button class="btn btn-gold sans" onclick="saveAutomation()">Save automation</button><span id="au_msg" class="hint" style="align-self:center"></span></div>
       </div>
@@ -1459,6 +1463,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615W"></script>
+<script src="/app.js?v=20260615X"></script>
 </body>
 </html>

@@ -750,6 +750,10 @@ app.post('/api/command/meals/recipients', requireAuth, requireAdmin, (req, res) 
 app.post('/api/command/meals/send', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await sendMealCount()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Survey scorecard: preview the data, or send the monthly email now.
+app.post('/api/command/scorecard/send', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await sendSurveyScorecard()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
 // Tunable automation thresholds — adjust the behavior we ship without a redeploy.
 app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res.json({
   detox_min: autoCfg('detox_min', process.env.OBS_DETOX_MIN || 30),
@@ -764,10 +768,12 @@ app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res
   meal_hour: mealHour(),
   survey_alert_on: autoCfg('survey_alert_on', 'on'),
   survey_alert_to: surveyAlertTo(),
+  scorecard_on: autoCfg('scorecard_on', 'on'),
+  scorecard_day: autoCfg('scorecard_day', 1),
 }));
 app.post('/api/settings/automation', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
-  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour', 'survey_alert_on', 'survey_alert_to']) {
+  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour', 'survey_alert_on', 'survey_alert_to', 'scorecard_on', 'scorecard_day']) {
     if (b[k] !== undefined) setState('auto_' + k, String(b[k]).trim());
   }
   audit({ user: req.user, action: 'AUTO_CONFIG', ip: req.ip });
@@ -3644,32 +3650,50 @@ app.get('/api/surveys/due', requireAuth, (req, res) => {
   res.json({ due });
 });
 
+// Avg of scale/rating answers for a survey within a time window (SQLite 'now'
+// modifiers, or null for open-ended). Shared by the overview + the scorecard.
+function surveyWindowAvg(id, since, until) {
+  const conds = [`r.survey_id = ?`, `q.type IN ('scale','rating')`, `a.value_num IS NOT NULL`];
+  const args = [id];
+  if (since) { conds.push(`r.created_at >= datetime('now', ?)`); args.push(since); }
+  if (until) { conds.push(`r.created_at < datetime('now', ?)`); args.push(until); }
+  const row = db.prepare(`SELECT AVG(a.value_num) a, COUNT(DISTINCT r.id) n FROM survey_answers a
+    JOIN survey_responses r ON r.id = a.response_id JOIN survey_questions q ON q.id = a.question_id
+    WHERE ${conds.join(' AND ')}`).get(...args);
+  return { avg: row.a != null ? Math.round(row.a * 10) / 10 : null, n: row.n };
+}
+// Avg scale/rating score per calendar month for the last 6 months (for sparklines
+// + the scorecard). Returns 6 slots oldest→newest, null where no responses.
+function surveyMonthlySeries(surveyId, months = 6) {
+  const rows = db.prepare(`SELECT strftime('%Y-%m', r.created_at) ym, AVG(a.value_num) a
+    FROM survey_answers a JOIN survey_responses r ON r.id = a.response_id JOIN survey_questions q ON q.id = a.question_id
+    WHERE r.survey_id = ? AND q.type IN ('scale','rating') AND a.value_num IS NOT NULL
+      AND r.created_at >= datetime('now', ?) GROUP BY ym`).all(surveyId, `-${months} month`);
+  const byMonth = Object.fromEntries(rows.map((r) => [r.ym, r.a]));
+  const out = [];
+  const now = new Date();
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    out.push({ m: key, avg: byMonth[key] != null ? Math.round(byMonth[key] * 10) / 10 : null });
+  }
+  return out;
+}
 // Results overview (admin): every survey with its response count, overall score,
 // and last response — the clean at-a-glance list to drill in or clear from.
 app.get('/api/surveys/overview', requireAuth, requireAdmin, (req, res) => {
   const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
-  // Average of scale/rating answers in a time window (since/until = SQLite modifiers, or null for open).
-  const winAvg = (id, since, until) => {
-    const conds = [`r.survey_id = ?`, `q.type IN ('scale','rating')`, `a.value_num IS NOT NULL`];
-    const args = [id];
-    if (since) { conds.push(`r.created_at >= datetime('now', ?)`); args.push(since); }
-    if (until) { conds.push(`r.created_at < datetime('now', ?)`); args.push(until); }
-    const row = db.prepare(`SELECT AVG(a.value_num) a, COUNT(DISTINCT r.id) n FROM survey_answers a
-      JOIN survey_responses r ON r.id = a.response_id JOIN survey_questions q ON q.id = a.question_id
-      WHERE ${conds.join(' AND ')}`).get(...args);
-    return { avg: row.a != null ? Math.round(row.a * 10) / 10 : null, n: row.n };
-  };
   res.json({ target: 4.5, surveys: surveys.map((s) => {
     const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?`).get(s.id).n;
-    const all = winAvg(s.id, null, null);
-    const recent = winAvg(s.id, '-30 day', null);          // last 30 days
-    const prior = winAvg(s.id, '-60 day', '-30 day');      // the 30 before that
+    const all = surveyWindowAvg(s.id, null, null);
+    const recent = surveyWindowAvg(s.id, '-30 day', null);          // last 30 days
+    const prior = surveyWindowAvg(s.id, '-60 day', '-30 day');      // the 30 before that
     const trend = (recent.avg != null && prior.avg != null) ? Math.round((recent.avg - prior.avg) * 10) / 10 : null;
     const last = db.prepare(`SELECT MAX(created_at) m FROM survey_responses WHERE survey_id = ?`).get(s.id).m;
     return { id: s.id, key: s.key, title: s.title, description: s.description || '', responses,
       avg: all.avg, recentAvg: recent.avg, recentN: recent.n, priorAvg: prior.avg, trend,
       dir: trend == null ? null : (trend > 0.05 ? 'up' : trend < -0.05 ? 'down' : 'flat'),
-      last: last ? String(last).slice(0, 10) : '' };
+      spark: surveyMonthlySeries(s.id), last: last ? String(last).slice(0, 10) : '' };
   }) });
 });
 // Results (admin): per-question aggregates + recent comments.
@@ -3690,7 +3714,24 @@ app.get('/api/surveys/:id/results', requireAuth, requireAdmin, (req, res) => {
       q.count = q.comments.length;
     }
   }
-  res.json({ survey, responses, questions });
+  // Who submitted each response — named when the client picked their name on the
+  // kiosk, otherwise Anonymous. Lets leadership see who said what.
+  const submissions = db.prepare(`SELECT r.id, r.created_at, c.pref, c.name, c.room, u.name staff,
+      (SELECT AVG(value_num) FROM survey_answers a WHERE a.response_id = r.id AND a.value_num IS NOT NULL) avg
+    FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id LEFT JOIN users u ON u.id = r.submitted_by
+    WHERE r.survey_id = ? ORDER BY r.id DESC LIMIT 60`).all(survey.id)
+    .map((r) => ({ id: r.id, who: (r.pref || r.name) ? ((r.pref || r.name) + (r.room ? ' · ' + r.room : '')) : 'Anonymous',
+      named: !!(r.pref || r.name), by: r.staff || '', at: String(r.created_at).slice(0, 16),
+      avg: r.avg != null ? Math.round(r.avg * 10) / 10 : null }));
+  res.json({ survey, responses, questions, submissions });
+});
+// Answers for ONE response (admin) — drill into a single client's submission.
+app.get('/api/surveys/response/:rid', requireAuth, requireAdmin, (req, res) => {
+  const r = db.prepare(`SELECT r.id, r.created_at, c.pref, c.name, c.room FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id WHERE r.id = ?`).get(req.params.rid);
+  if (!r) return res.status(404).json({ error: 'Not found' });
+  const answers = db.prepare(`SELECT q.text, q.type, a.value_num, a.value_text FROM survey_answers a JOIN survey_questions q ON q.id = a.question_id WHERE a.response_id = ? ORDER BY q.sort, q.id`).all(req.params.rid)
+    .map((a) => ({ q: a.text, val: a.value_num != null ? a.value_num + '/5' : (a.value_text || '') }));
+  res.json({ who: (r.pref || r.name) ? ((r.pref || r.name) + (r.room ? ' · ' + r.room : '')) : 'Anonymous', at: String(r.created_at).slice(0, 16), answers });
 });
 // Erase a survey's responses (admin) — for clearing trial/test data before going
 // live. Answers cascade-delete with the response rows.
@@ -4183,6 +4224,14 @@ function runDailyCutoff() {
     // Email the end-of-day census/activity for the day that JUST ENDED (yesterday),
     // not the fresh empty day — so intakes/discharges/LOC changes are real.
     sendCensusEmail(yesterday).then((r) => { if (r.sent) console.log('[cutoff] census emailed to', r.to); }).catch((e) => console.error('[cutoff] census email:', e.message));
+    // Monthly survey scorecard — on the configured day of the month, once.
+    if (autoCfg('scorecard_on', 'on') !== 'off') {
+      const dom = new Date().toLocaleString('en-US', { timeZone: APP_TZ, day: 'numeric' });
+      if (+dom === +autoCfg('scorecard_day', 1) && getState('scorecard_sent_month') !== today.slice(0, 7)) {
+        setState('scorecard_sent_month', today.slice(0, 7));
+        sendSurveyScorecard().then((r) => { if (r.sent) console.log('[scorecard] emailed to', r.to); }).catch((e) => console.error('[scorecard]', e.message));
+      }
+    }
   } catch (e) { console.error('[cutoff] failed:', e.message); }
   setTimeout(runDailyCutoff, msUntilLocalMidnight());  // re-arm for the next midnight
 }
@@ -4403,6 +4452,43 @@ function runMealCount() {
 }
 setTimeout(runMealCount, msUntilLocalHour(mealHour()));
 
+// Monthly survey scorecard: every survey's score, trend vs prior month, target,
+// and a 6-month mini-trend — the Horst "read the direction" email.
+function buildSurveyScorecard() {
+  const surveys = db.prepare(`SELECT id, title FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
+  const target = 4.5;
+  const e = htmlEsc;
+  const monLabel = (ym) => { const [y, m] = ym.split('-'); return new Date(+y, +m - 1, 1).toLocaleDateString('en-US', { month: 'short' }); };
+  const rows = surveys.map((s) => {
+    const recent = surveyWindowAvg(s.id, '-30 day', null);
+    const prior = surveyWindowAvg(s.id, '-60 day', '-30 day');
+    const trend = (recent.avg != null && prior.avg != null) ? Math.round((recent.avg - prior.avg) * 10) / 10 : null;
+    return { title: s.title, recent: recent.avg, n: recent.n, trend, series: surveyMonthlySeries(s.id) };
+  });
+  const arrow = (t) => t == null ? '<span style="color:#888">— new</span>'
+    : t > 0.05 ? `<span style="color:#2d7a4f">▲ +${t}</span>` : t < -0.05 ? `<span style="color:#b00">▼ ${t}</span>` : '<span style="color:#888">→ flat</span>';
+  const sparkText = (series) => series.map((p) => p.avg != null ? `${monLabel(p.m)} ${p.avg}` : `${monLabel(p.m)} –`).join('  ·  ');
+  const dt = new Date().toLocaleDateString('en-US', { timeZone: APP_TZ, month: 'long', year: 'numeric' });
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:600px">
+    <h2 style="margin:0 0 2px">Survey Scorecard — ${dt}</h2>
+    <p style="color:#666;margin:0 0 14px">How clients rate us. Target ${target}/5. Score = last 30 days; arrow vs the 30 before.</p>
+    ${rows.map((r) => `<div style="border-top:1px solid #eee;padding:10px 0">
+      <div style="font-size:16px"><b>${e(r.title)}</b></div>
+      <div style="font-size:26px;font-weight:700;color:${r.recent == null ? '#888' : r.recent < 3.5 ? '#b00' : r.recent < target ? '#a60' : '#2d7a4f'}">${r.recent != null ? r.recent + '/5' : '—'} <span style="font-size:15px">${arrow(r.trend)}</span> <span style="font-size:13px;color:#888">(${r.n} in 30d)</span></div>
+      <div style="color:#777;font-size:13px;margin-top:2px">${sparkText(r.series)}</div>
+    </div>`).join('')}
+    <p style="color:#888;margin-top:16px;font-size:12px">Sent monthly by Armada Care Standards. Read it at the lineup — react to every ▼ and celebrate every ▲.</p>
+  </div>`;
+  return { subject: `Armada Survey Scorecard — ${dt}`, html };
+}
+async function sendSurveyScorecard() {
+  const to = surveyAlertTo();
+  if (!emailConfigured()) return { sent: false, reason: 'email not connected' };
+  if (!to) return { sent: false, reason: 'no recipients' };
+  const r = buildSurveyScorecard();
+  await sendEmail({ to, subject: r.subject, html: r.html });
+  return { sent: true, to };
+}
 function briefHour() { return +autoCfg('brief_hour', process.env.MORNING_BRIEF_HOUR || 7); }
 function runMorningBrief() {
   if (autoCfg('brief_on', process.env.MORNING_BRIEF === 'false' ? 'off' : 'on') !== 'off') {

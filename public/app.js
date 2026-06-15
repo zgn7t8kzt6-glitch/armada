@@ -718,6 +718,7 @@ async function loadAutomation(){
     set('au_brief_hour',a.brief_hour); set('au_brief_on',a.brief_on); set('au_recovery_max',a.recovery_max); set('au_welcome_auto',a.welcome_auto); set('au_alert_detail',a.alert_detail);
     set('au_meal_on',a.meal_on); set('au_meal_hour',a.meal_hour);
     set('au_survey_alert_on',a.survey_alert_on); set('au_survey_alert_to',a.survey_alert_to);
+    set('au_scorecard_on',a.scorecard_on); set('au_scorecard_day',a.scorecard_day);
   }catch(e){}
 }
 async function saveAutomation(){
@@ -725,7 +726,8 @@ async function saveAutomation(){
   const body={ detox_min:$('au_detox_min').value, default_min:$('au_default_min').value, carecard_min:$('au_carecard_min').value,
     brief_hour:$('au_brief_hour').value, brief_on:$('au_brief_on').value, recovery_max:$('au_recovery_max').value, welcome_auto:$('au_welcome_auto').value, alert_detail:$('au_alert_detail').value,
     meal_on:$('au_meal_on').value, meal_hour:$('au_meal_hour').value,
-    survey_alert_on:$('au_survey_alert_on').value, survey_alert_to:$('au_survey_alert_to').value };
+    survey_alert_on:$('au_survey_alert_on').value, survey_alert_to:$('au_survey_alert_to').value,
+    scorecard_on:$('au_scorecard_on').value, scorecard_day:$('au_scorecard_day').value };
   try{ await api('/settings/automation',{method:'POST',body:JSON.stringify(body)}); $('au_msg').textContent='✓ Saved'; }
   catch(e){ $('au_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
@@ -3100,6 +3102,15 @@ function surveyTab(which){
   if($('svTabResults')) $('svTabResults').classList.toggle('active',res);
   if($('svTabGive')) $('svTabGive').classList.toggle('active',!res);
 }
+function sparkSvg(series, w, h){
+  w=w||120; h=h||26;
+  const pts=[];
+  (series||[]).forEach((p,i)=>{ if(p.avg==null) return; const n=series.length; const x=n>1?(i/(n-1))*(w-4)+2:w/2; const y=h-3-((p.avg-1)/4)*(h-6); pts.push([x,y]); });
+  if(!pts.length) return '<span class="hint">no trend yet</span>';
+  const line=pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const dots=pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="1.7" fill="var(--gold)"/>`).join('');
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="6-month trend">${pts.length>1?`<polyline points="${line}" fill="none" stroke="var(--gold)" stroke-width="1.6"/>`:''}${dots}</svg>`;
+}
 function surveyTrendBadge(s){
   if(s.dir==null) return s.recentN?'<span class="hint">new</span>':'';
   const c = s.dir==='up'?'#2d7a4f':s.dir==='down'?'var(--danger)':'var(--muted)';
@@ -3114,17 +3125,18 @@ async function loadCmdSurveys(){
   $('cmdSurveys').innerHTML = any ? `<div class="ret-cards">${d.surveys.map(s=>{
       const score = s.recentAvg!=null?s.recentAvg:s.avg;
       const low = score!=null && score<3.5;
-      return `<div class="ret-card ${low?'rc-warn':''}" style="cursor:pointer" onclick="openSurveyResults(${s.id})"><div class="n">${score!=null?score+'<span style="font-size:14px">/5</span>':'—'} ${surveyTrendBadge(s)}</div><div class="l">${esc(s.title)} · ${s.responses} ›</div></div>`;
-    }).join('')}</div><p class="hint" style="margin-top:6px">Score = last 30 days. ▲▼ vs the prior 30 days. Target ${d.target}/5.</p>` : '<div class="hint">No survey responses yet. Put the kiosk on the unit to start gathering them.</div>';
+      return `<div class="ret-card ${low?'rc-warn':''}" style="cursor:pointer" onclick="openSurveyResults(${s.id})"><div class="n">${score!=null?score+'<span style="font-size:14px">/5</span>':'—'} ${surveyTrendBadge(s)}</div><div style="margin:2px 0">${sparkSvg(s.spark,110,22)}</div><div class="l">${esc(s.title)} · ${s.responses} ›</div></div>`;
+    }).join('')}</div><p class="hint" style="margin-top:6px">Score = last 30 days. ▲▼ vs the prior 30 days. Line = 6-month trend. Target ${d.target}/5.</p>` : '<div class="hint">No survey responses yet. Put the kiosk on the unit to start gathering them.</div>';
 }
 let PENDING_SURVEY=null;
 function openSurveyResults(id){ PENDING_SURVEY=id; show('surveys'); }
+async function sendScorecard(){ if($('scorecardMsg'))$('scorecardMsg').textContent='Sending…'; try{ const r=await api('/command/scorecard/send',{method:'POST'}); if($('scorecardMsg'))$('scorecardMsg').textContent = r.sent?('✓ Scorecard emailed to '+r.to):('Not sent — '+(r.reason||'')); }catch(e){ if($('scorecardMsg'))$('scorecardMsg').textContent=e.message; } }
 async function loadSurveyOverview(){
   if(!$('surveyOverview')) return;
   let d; try{ d=await api('/surveys/overview'); }catch(e){ return; }
   $('surveyOverview').innerHTML = `<div class="card"><h3>Survey results</h3>
     <p class="sub sans">Tap <strong>View</strong> to see scores and comments. <strong>Clear</strong> erases trial/test data.</p>
-    ${d.surveys.map(s=>`<div class="todo"><div class="txt"><strong>${esc(s.title)}</strong> ${surveyTrendBadge(s)} <span class="hint">· ${s.responses} response${s.responses===1?'':'s'}${s.avg!=null?' · all-time '+s.avg+'/5':''}${s.recentAvg!=null?' · 30d '+s.recentAvg+'/5':''}${s.last?' · last '+esc(s.last):''}</span></div>
+    ${d.surveys.map(s=>`<div class="todo"><div class="txt"><strong>${esc(s.title)}</strong> ${surveyTrendBadge(s)} <span style="margin-left:8px">${sparkSvg(s.spark,90,20)}</span> <span class="hint">· ${s.responses} response${s.responses===1?'':'s'}${s.avg!=null?' · all-time '+s.avg+'/5':''}${s.recentAvg!=null?' · 30d '+s.recentAvg+'/5':''}${s.last?' · last '+esc(s.last):''}</span></div>
       <div style="display:flex;gap:6px">${s.responses?`<button class="btn btn-gold btn-sm sans" onclick="showSurveyResults(${s.id})">View</button><button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${s.id},${s.responses})">Clear</button>`:'<span class="hint" style="align-self:center">no responses yet</span>'}</div></div>`).join('')}</div>`;
 }
 function startDue(surveyId, clientId){
@@ -3183,7 +3195,7 @@ async function showSurveyResults(id){
   if(!id) return;
   let data;
   try { data = await api('/surveys/'+id+'/results'); } catch(e){ $('surveyArea').innerHTML='<div class="empty">'+e.message+'</div>'; return; }
-  const { survey, responses, questions } = data;
+  const { survey, responses, questions, submissions } = data;
   let cat='', html='';
   questions.forEach(q=>{
     if(q.category && q.category!==cat){ cat=q.category; html+=`<div class="sv-cat">${esc(cat)}</div>`; }
@@ -3201,8 +3213,15 @@ async function showSurveyResults(id){
   });
   $('surveyArea').innerHTML = `<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(survey.title)} — results</h3>
     <p class="sub sans">${responses} response${responses===1?'':'s'}. Scores under 3.5 are flagged. Low "feel cared for" scores are an early AMA signal.</p></div>
-    ${responses?`<button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${survey.id}, ${responses})" title="Erase all responses (e.g. trial data)">🗑 Clear ${responses} response${responses===1?'':'s'}</button>`:''}</div>${html}</div>`;
+    ${responses?`<button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${survey.id}, ${responses})" title="Erase all responses (e.g. trial data)">🗑 Clear ${responses} response${responses===1?'':'s'}</button>`:''}</div>${html}</div>
+    ${submissions&&submissions.length?`<div class="card"><h3>Who responded</h3>
+      <p class="sub sans">Named when the client chose their name; otherwise Anonymous. Tap a named one to read their answers.</p>
+      ${submissions.map(r=>`<div class="todo"><div class="txt"><strong>${esc(r.who)}</strong> ${r.avg!=null?`<span class="risk ${r.avg<3.5?'risk-high':'risk-low'}">${r.avg}/5</span>`:''} <span class="hint">· ${esc(r.at)}${r.by?' · entered by '+esc(r.by):''}</span></div>${r.named?`<button class="btn btn-ghost btn-sm sans" onclick="viewResponse(${r.id})">View</button>`:''}</div>`).join('')}</div>`:''}`;
   $('surveyArea').scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function viewResponse(rid){
+  let d; try{ d=await api('/surveys/response/'+rid); }catch(e){ alert(e.message); return; }
+  alert(d.who+' · '+d.at+'\n\n'+d.answers.map(a=>'• '+a.q+'\n   '+(a.val||'—')).join('\n\n'));
 }
 async function clearSurveyResponses(id, n){
   if(!confirm(`Erase all ${n} response(s) for this survey? This permanently deletes the trial/test data and can't be undone.`)) return;

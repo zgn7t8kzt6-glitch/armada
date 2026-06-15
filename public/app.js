@@ -10,7 +10,10 @@ const today = () => new Date().toISOString().slice(0,10);
 
 async function api(path, opts={}) {
   const r = await fetch('/api'+path, { headers:{'Content-Type':'application/json'}, ...opts });
-  if (r.status === 401) { showLogin(); throw new Error('auth'); }
+  // A 401 on a normal call means the session lapsed — bounce to login. But on the
+  // login calls themselves, let the real message ("Invalid username or password")
+  // through instead of the generic 'auth'.
+  if (r.status === 401 && !path.startsWith('/login')) { showLogin(); throw new Error('auth'); }
   const data = await r.json().catch(()=>({}));
   if (!r.ok) throw new Error(data.error || 'Error');
   return data;

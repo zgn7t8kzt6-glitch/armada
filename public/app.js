@@ -1435,6 +1435,9 @@ async function diagnoseSchedule(){
     if(d.upcoming&&d.upcoming.length){ html += `<div class="cmd-sub">Future-dated leads (Date_Looking_to_Admit ≥ today)</div>`+d.upcoming.map(u=>`<div class="pc-note">☀ <strong>${esc(u.name)}</strong> · ${esc(u.date)} · ${esc(u.status||'')}${u.converted?' · admitted':''}</div>`).join(''); }
     if(d.pipelineByStatus){ html += `<div class="cmd-sub">Live pipeline — Leads not yet admitted, by status</div>`+(d.pipelineByStatus.length?d.pipelineByStatus.map(s=>`<div class="pc-note"><strong>${esc(s.status)}</strong> — ${s.count}</div>`).join(''):'<div class="pc-note">None.</div>'); }
     if(d.recentPipeline&&d.recentPipeline.length){ html += `<div class="cmd-sub">Most recent not-yet-admitted leads</div>`+d.recentPipeline.map(r=>`<div class="pc-note">${esc(r.name)} · status: ${esc(r.status||'—')} · admit date: ${esc(r.admitDate)} <span class="hint">(created ${esc(r.created)})</span></div>`).join(''); }
+    if(d.oppByStage){ html += `<div class="cmd-sub">⭐ OPPORTUNITIES — open, by stage (the likely real schedule)</div>`+(d.oppByStage.length?d.oppByStage.map(s=>`<div class="pc-note"><strong>${esc(s.stage)}</strong> — ${s.count}</div>`).join(''):'<div class="pc-note">None open.</div>'); }
+    if(d.recentOpps&&d.recentOpps.length){ html += `<div class="cmd-sub">Recent open opportunities</div>`+d.recentOpps.map(o=>`<div class="pc-note"><strong>${esc(o.name)}</strong> · stage: ${esc(o.stage||'—')} · close date: ${esc(o.closeDate||'—')} <span class="hint">(created ${esc(o.created)})</span></div>`).join(''); }
+    if(d.oppDateFields&&d.oppDateFields.length){ html += `<div class="cmd-sub">Opportunity date fields</div><div class="pc-note">${d.oppDateFields.map(esc).join(' · ')}</div>`; }
     html += '</div>';
     box.innerHTML=html;
   }catch(e){ box.innerHTML='<div class="card"><span style="color:var(--danger)">'+esc(e.message)+'</span></div>'; }

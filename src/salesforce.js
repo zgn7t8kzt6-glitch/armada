@@ -337,6 +337,17 @@ export async function sfArrivalsDiagnose(nameQuery) {
     const p = await sfQuery(`SELECT FirstName, LastName, Status, Date_Looking_to_Admit__c, CreatedDate FROM Lead WHERE IsConverted = false ORDER BY CreatedDate DESC LIMIT 10`);
     out.recentPipeline = (p.records || []).map((r) => ({ name: ((r.FirstName || '') + ' ' + (r.LastName || '')).trim(), status: r.Status || '', admitDate: (r.Date_Looking_to_Admit__c || '').slice(0, 10) || '(blank)', created: (r.CreatedDate || '').slice(0, 10) }));
   } catch (e) { /* pipeline sample optional */ }
+  // Converted leads spin off Opportunities — the likely real admission schedule.
+  try {
+    const g = await sfQuery(`SELECT StageName, COUNT(Id) c FROM Opportunity WHERE IsClosed = false GROUP BY StageName ORDER BY COUNT(Id) DESC`);
+    out.oppByStage = (g.records || []).map((r) => ({ stage: r.StageName || '(none)', count: r.c }));
+  } catch (e) { out.oppError = e.message; }
+  try {
+    const o = await sfQuery(`SELECT Name, StageName, CloseDate, CreatedDate FROM Opportunity WHERE IsClosed = false ORDER BY CreatedDate DESC LIMIT 10`);
+    out.recentOpps = (o.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', closeDate: (r.CloseDate || '').slice(0, 10), created: (r.CreatedDate || '').slice(0, 10) }));
+  } catch (e) { /* opp sample optional */ }
+  try { const d = await sfDescribe('Opportunity'); out.oppDateFields = d.fields.filter((f) => /date|datetime/i.test(f.type)).map((f) => f.name); }
+  catch (e) { /* describe optional */ }
   const nq = (nameQuery || '').trim();
   if (nq) {
     const q = nq.replace(/['\\%_]/g, '');

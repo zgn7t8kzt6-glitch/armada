@@ -174,6 +174,28 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 CREATE INDEX IF NOT EXISTS idx_activities_client ON activities(client_id, created_at);
 
+-- Contingency-management points: an evidence-based, lawful way to reinforce
+-- therapeutic ENGAGEMENT (activities, groups, milestones) with modest rewards.
+-- A signed ledger (earn +, redeem -); balance = SUM for the client.
+CREATE TABLE IF NOT EXISTS point_ledger (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  points INTEGER NOT NULL,
+  reason TEXT,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_points_client ON point_ledger(client_id);
+-- The reward catalog (modest, therapeutic, non-cash by design).
+CREATE TABLE IF NOT EXISTS rewards (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  cost INTEGER NOT NULL DEFAULT 10,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+
 -- Wow Stories / moments-of-care recognition (the Daily Lineup culture).
 CREATE TABLE IF NOT EXISTS wows (
   id INTEGER PRIMARY KEY,
@@ -763,6 +785,20 @@ function seedAkronStandard() {
   }
 }
 seedAkronStandard();
+
+// Seed a modest, therapeutic, non-cash reward catalog (contingency management).
+// Edit/disable freely in the app; nothing here is cash or a clinical privilege.
+function seedRewards() {
+  if (db.prepare(`SELECT COUNT(*) n FROM rewards`).get().n) return;
+  const items = [
+    ['Premium coffee or tea', 4], ['Special snack of choice', 5], ['Pick movie night film', 5],
+    ['Extra art supplies', 10], ['New journal or book', 10], ['Lead an activity / mentor a peer', 8],
+    ['Gym gear (water bottle, towel)', 15], ['Personal care item (modest)', 12], ['Front-of-line at a meal', 3],
+  ];
+  const ins = db.prepare(`INSERT INTO rewards (name, cost, sort) VALUES (?, ?, ?)`);
+  items.forEach(([n, c], i) => ins.run(n, c, i));
+}
+seedRewards();
 
 // ---- Real document content (extracted from the uploaded Akron/Armada .docx
 // files) lives in library-content.json. Upsert it into the Library: update the

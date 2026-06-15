@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615p" />
+<link rel="stylesheet" href="/styles.css?v=20260615q" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -56,6 +56,7 @@
     <button data-view="concierge">Concierge</button>
     <button data-view="dignity" data-subview>Dignity Kits</button>
     <button data-view="rounds">Rounds</button>
+    <button data-view="engagement">Engagement</button>
     <button data-view="program">Program</button>
     <button data-view="incidents" data-subview>Incidents</button>
     <button data-view="casemgmt">Case Mgmt</button>
@@ -277,6 +278,29 @@
           <div><h4 style="margin:0 0 4px">Staffing — today</h4><p class="sub sans" style="margin:0 0 8px">Coverage against need, plus call-offs to backfill.</p><div id="cmdStaffing"></div></div>
         </div>
       </details>
+    </section>
+
+    <!-- ENGAGEMENT & REWARDS -->
+    <section id="engagement" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Engagement &amp; Rewards</h3><p class="sub sans">Boredom is a top AMA driver. Log activities, reward therapeutic engagement (contingency management), and see who's disengaged.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadEngagement()">Refresh</button>
+        </div>
+        <div id="engKpis" class="ret-cards"></div>
+      </div>
+      <div class="card"><h3>No activity today — encourage them</h3><div id="engDisengaged"></div></div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:300px"><h3>Points leaderboard 🏆</h3><div id="engBoard"></div></div>
+        <div class="card" style="flex:1;min-width:300px">
+          <h3>Rewards 🎁</h3>
+          <div class="grid2"><div><label>Client</label><select id="rw_client"></select></div><div><label>Reward</label><select id="rw_reward"></select></div></div>
+          <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="redeemReward()">Redeem</button><span id="rw_msg" class="hint" style="align-self:center"></span></div>
+          <div id="rewardList" style="margin-top:10px"></div>
+          <div class="toolbar no-print" style="justify-content:flex-start;margin-top:8px" data-admin><input id="rw_new" placeholder="New reward"/><input id="rw_cost" type="number" placeholder="pts" style="width:90px"/><button class="btn btn-ghost btn-sm sans" onclick="addReward()">+ Add reward</button></div>
+        </div>
+      </div>
+      <div class="card no-print" style="background:#faf6ee;border-left:4px solid var(--gold)"><p class="sub sans" style="margin:0">⚖ <strong>Compliance note (not legal advice):</strong> This is a contingency-management program — reward <em>therapeutic engagement</em> (activities, groups, milestones), never enrollment, staying, or referrals. Keep rewards <strong>modest and non-cash</strong>. Have your Medical/Clinical Director and compliance approve the catalog and point values, and follow your state's rules and federal anti-kickback / patient-brokering law. Never use clinical privileges (medications, smoke breaks, level of care) as rewards.</p></div>
     </section>
 
     <!-- DOCUMENTATION COMPLIANCE (admin) -->
@@ -1244,6 +1268,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615p"></script>
+<script src="/app.js?v=20260615q"></script>
 </body>
 </html>

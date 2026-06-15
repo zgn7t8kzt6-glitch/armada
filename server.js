@@ -1559,8 +1559,42 @@ function runFlowAutomations() {
       if (!matchedIds.has(c.id) && !schedNames.has(normName(c.name))) createAlert(c.id, 'unscheduled', 'Normal', `${c.pref || c.name} admitted without a scheduled record — set their admit date in Salesforce.`);
     }
   } catch { /* arrivals optional */ }
+
+  // Acuity-driven safety-check cadence: set the observation interval once from
+  // the level of care (detox/withdrawal = tightest). Only fills it when unset,
+  // so manual overrides and step-down relaxations are preserved.
+  const setIv = db.prepare(`UPDATE clients SET obs_interval = ? WHERE id = ?`);
+  for (const c of db.prepare(`SELECT id, loc, program FROM clients WHERE active = 1 AND discharge_status IS NULL AND obs_interval IS NULL`).all()) {
+    setIv.run(obsIntervalForLoc(c.loc || c.program), c.id);
+  }
+
+  // Auto-onboarding: every admit gets its standard case-management checklist, so
+  // nothing gets missed and Case Mgmt / accountability populate themselves.
+  const recentAdmits = db.prepare(`SELECT id FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) >= date('now','-3 day')`).all();
+  const hasTasks = db.prepare(`SELECT 1 FROM case_tasks WHERE client_id = ? LIMIT 1`);
+  const insTask = db.prepare(`INSERT INTO case_tasks (client_id, category, item, source) VALUES (?, ?, ?, 'auto')`);
+  for (const c of recentAdmits) {
+    if (hasTasks.get(c.id)) continue;
+    for (const [cat, it] of ONBOARDING_TASKS) insTask.run(c.id, cat, it);
+  }
   return { kits, follows };
 }
+// Recommended safety-check cadence (minutes) by level of care.
+function obsIntervalForLoc(loc) {
+  const l = String(loc || '');
+  if (/3\.?7|3\.?2|\bwm\b|withdrawal|detox/i.test(l)) return +(process.env.OBS_DETOX_MIN || 30);   // medical/clinical withdrawal
+  return +(process.env.OBS_DEFAULT_MIN || 60);                                                      // residential / lower acuity
+}
+// The standard case-management onboarding checklist, created on every admit.
+const ONBOARDING_TASKS = [
+  ['Insurance / Financial', 'Verify insurance & authorization'],
+  ['Communication', 'Confirm therapist & case manager assigned'],
+  ['Medical / Dental', 'Biopsychosocial assessment completed'],
+  ['Aftercare / Housing', 'Treatment plan started'],
+  ['Aftercare / Housing', 'Aftercare / housing plan opened'],
+  ['ID / Documents', 'Collect ID & documents'],
+  ['Family / Support', 'Emergency contact & family confirmed'],
+];
 // New admit → welcome ready: draft the welcome/first-72h plan from policy for
 // fresh admits that don't have one yet. Capped per run and fails fast on the AI
 // daily limit so it never blows the token budget. Disable with WELCOME_AUTO=false.

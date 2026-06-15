@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615H" />
+<link rel="stylesheet" href="/styles.css?v=20260615I" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -376,13 +376,18 @@
         </div>
         <div class="field"><label>Details (optional)</label><textarea id="mt_desc" rows="2" placeholder="Anything that helps whoever fixes it"></textarea></div>
         <div class="toolbar" style="justify-content:flex-start;align-items:center">
-          <label class="btn btn-ghost sans" style="cursor:pointer;margin:0">📷 Add photo<input type="file" accept="image/*" capture="environment" style="display:none" onchange="maintPhotoPick(this)"/></label>
-          <span id="mt_photoThumb"></span>
+          <label class="btn btn-ghost sans" style="cursor:pointer;margin:0">📷 Add photos<input type="file" accept="image/*" capture="environment" multiple style="display:none" onchange="maintPhotoPick(this)"/></label>
+          <span id="mt_photoThumb" style="display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center"></span>
           <button class="btn btn-gold sans" onclick="submitMaintenance()">Submit request</button><span id="mt_msg" class="hint" style="align-self:center"></span>
         </div>
       </div>
       <div class="card"><h3>Open &amp; in progress</h3><div id="maintBoard"></div></div>
       <div class="card"><h3>👥 Who's on shift today</h3><p class="sub sans">Live coverage and call-offs — so everyone knows who's working.</p><div id="maintShift"></div></div>
+      <div class="card">
+        <details ontoggle="if(this.open)loadMaintHistory()"><summary class="sans" style="cursor:pointer;font-weight:600">✅ Resolved history (last 30 days)</summary>
+          <div id="maintHistory" style="margin-top:10px"></div>
+        </details>
+      </div>
       <div class="card" data-admin>
         <details><summary class="sans" style="cursor:pointer;font-weight:600">⚙ Route new requests to (admin)</summary>
           <div style="margin-top:10px"><label>Email maintenance owner on every new request</label>
@@ -1403,6 +1408,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615H"></script>
+<script src="/app.js?v=20260615I"></script>
 </body>
 </html>

@@ -34,7 +34,7 @@ try { db.prepare(`DELETE FROM alerts WHERE kind IN ('risk', 'concern') AND statu
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '1mb' }));   // 1mb headroom for client-resized photo uploads
+app.use(express.json({ limit: '5mb' }));   // headroom for client-resized photo uploads (several per work order)
 app.use(cookies);
 
 // Basic security headers
@@ -418,6 +418,19 @@ async function emailMaintenance(r) {
   try { await sendEmail({ to, subject: `Armada maintenance — ${r.title} (${r.priority})`, html }); return true; }
   catch (e) { console.error('maintenance email:', e.message); return false; }
 }
+// Validate a client-resized photo data URL. Returns the string or throws.
+function validPhoto(p) {
+  if (!/^data:image\/(jpeg|png|webp);base64,/.test(p)) throw new Error('Photo must be a JPEG/PNG/WebP image.');
+  if (p.length > 1100000) throw new Error('Photo too large — it should be auto-resized; try again.');
+  return p;
+}
+// All photos for a request: the multi-photo table, plus any legacy single photo.
+function photosFor(id, legacy) {
+  const rows = db.prepare(`SELECT id, photo, by_name, created_at FROM maintenance_photos WHERE request_id = ? ORDER BY id`).all(id)
+    .map((p) => ({ pid: p.id, photo: p.photo, by: p.by_name || '', at: String(p.created_at).slice(0, 16) }));
+  if (legacy) rows.unshift({ pid: 0, photo: legacy, by: '', at: '' });   // pid 0 = legacy column
+  return rows;
+}
 // Shared board + KPIs. Visible to all staff (requireAuth) so everyone can see
 // what's open and nothing is invisible.
 app.get('/api/maintenance', requireAuth, (req, res) => {
@@ -426,7 +439,7 @@ app.get('/api/maintenance', requireAuth, (req, res) => {
     CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, created_at DESC`).all();
   const map = (r) => ({ id: r.id, title: r.title, location: r.location || '', category: r.category, priority: r.priority,
     description: r.description || '', status: r.status, reportedBy: r.reported_by || '', assignedTo: r.assigned_to || '',
-    resolution: r.resolution || '', photo: r.photo || null, at: String(r.created_at).slice(0, 16),
+    resolution: r.resolution || '', photos: photosFor(r.id, r.photo), at: String(r.created_at).slice(0, 16),
     ageH: Math.floor((Date.now() - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z')) / 3.6e6) });
   const open = rows.filter((r) => r.status === 'open');
   const stats = {
@@ -446,14 +459,13 @@ app.post('/api/maintenance', requireAuth, async (req, res) => {
   if (!title) return res.status(400).json({ error: 'A short title is required' });
   const category = MAINT_CATEGORIES.includes(b.category) ? b.category : 'General';
   const priority = MAINT_PRIORITIES.includes(b.priority) ? b.priority : 'Normal';
-  let photo = null;
-  if (b.photo) {
-    if (!/^data:image\/(jpeg|png|webp);base64,/.test(b.photo)) return res.status(400).json({ error: 'Photo must be a JPEG/PNG/WebP image.' });
-    if (b.photo.length > 900000) return res.status(400).json({ error: 'Photo too large — it should be auto-resized; try again.' });
-    photo = b.photo;
-  }
-  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, photo, reported_by_id, reported_by) VALUES (?,?,?,?,?,?,?,?)`)
-    .run(title, (b.location || '').trim() || null, category, priority, (b.description || '').trim() || null, photo, req.user.id, req.user.name).lastInsertRowid;
+  // Accept one (legacy `photo`) or many (`photos[]`), capped at 6.
+  const photos = (Array.isArray(b.photos) ? b.photos : (b.photo ? [b.photo] : [])).slice(0, 6);
+  try { photos.forEach(validPhoto); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, reported_by_id, reported_by) VALUES (?,?,?,?,?,?,?)`)
+    .run(title, (b.location || '').trim() || null, category, priority, (b.description || '').trim() || null, req.user.id, req.user.name).lastInsertRowid;
+  const insPhoto = db.prepare(`INSERT INTO maintenance_photos (request_id, photo, by_id, by_name) VALUES (?,?,?,?)`);
+  for (const p of photos) insPhoto.run(id, p, req.user.id, req.user.name);
   const r = db.prepare(`SELECT * FROM maintenance_requests WHERE id = ?`).get(id);
   audit({ user: req.user, action: 'MAINT_NEW', entity_id: id, detail: `${title} (${priority}/${category})`, ip: req.ip });
   // Urgent or any Safety/Security item escalates to the on-call leader immediately.
@@ -466,6 +478,29 @@ app.post('/api/maintenance', requireAuth, async (req, res) => {
 app.post('/api/maintenance/settings', requireAuth, requireAdmin, (req, res) => {
   setState('maintenance_email', (req.body?.maintenance_email || '').trim());
   audit({ user: req.user, action: 'MAINT_SETTINGS', ip: req.ip });
+  res.json({ ok: true });
+});
+// Resolved / closed history (last 30 days) — the record that it got handled.
+app.get('/api/maintenance/history', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT * FROM maintenance_requests WHERE status IN ('resolved','closed') AND updated_at >= datetime('now','-30 day') ORDER BY updated_at DESC`).all();
+  res.json({ history: rows.map((r) => ({ id: r.id, title: r.title, location: r.location || '', category: r.category, priority: r.priority,
+    status: r.status, reportedBy: r.reported_by || '', resolution: r.resolution || '', resolvedBy: r.resolved_by || '',
+    resolvedAt: r.resolved_at ? String(r.resolved_at).slice(0, 16) : String(r.updated_at).slice(0, 16),
+    photos: photosFor(r.id, r.photo) })) });
+});
+// Add a photo to an existing request (document progress / the fix).
+app.post('/api/maintenance/:id/photo', requireAuth, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!db.prepare(`SELECT 1 FROM maintenance_requests WHERE id = ?`).get(id)) return res.status(404).json({ error: 'Not found' });
+  if (db.prepare(`SELECT COUNT(*) n FROM maintenance_photos WHERE request_id = ?`).get(id).n >= 6) return res.status(400).json({ error: 'Up to 6 photos per request.' });
+  let photo; try { photo = validPhoto(req.body?.photo || ''); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const pid = db.prepare(`INSERT INTO maintenance_photos (request_id, photo, by_id, by_name) VALUES (?,?,?,?)`).run(id, photo, req.user.id, req.user.name).lastInsertRowid;
+  db.prepare(`UPDATE maintenance_requests SET updated_at = datetime('now') WHERE id = ?`).run(id);
+  res.json({ ok: true, pid });
+});
+// Remove a photo from a request.
+app.delete('/api/maintenance/:id/photo/:pid', requireAuth, (req, res) => {
+  db.prepare(`DELETE FROM maintenance_photos WHERE id = ? AND request_id = ?`).run(+req.params.pid, +req.params.id);
   res.json({ ok: true });
 });
 // Update status / assignment / resolution. Any staff can claim or resolve.
@@ -2697,6 +2732,16 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   tiles.push({ key: 'coverage', label: 'Shifts short today', n: shortSlots.length, sev: shortSlots.length ? 'high' : 'ok', view: 'maintenance' });
   if (shortSlots.length) sections.push({ key: 'coverage', title: '👥 Coverage gaps today — pick up or fill', cta: { label: 'See who\'s on →', view: 'maintenance' },
     items: shortSlots.map((s) => ({ name: `${s.part} · ${s.role}`, sub: `${s.sched} of ${s.needed} scheduled`, badge: `SHORT ${s.needed - s.sched}` })) });
+  // Who's on THIS shift right now (by name), so everyone knows their teammates.
+  const part = currentShift();
+  const onShift = db.prepare(`SELECT s.role, a.user_name FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
+    WHERE s.date = ? AND s.part = ? AND a.status = 'scheduled' ORDER BY s.role, a.user_name`).all(today, part);
+  const byRole = {};
+  for (const a of onShift) (byRole[a.role] = byRole[a.role] || []).push(a.user_name);
+  tiles.push({ key: 'onshift', label: `On shift now (${part})`, n: onShift.length, sev: 'ok', view: 'maintenance' });
+  sections.push({ key: 'onshift', title: `👥 On shift now — ${part}`, cta: { label: 'Full shift board →', view: 'maintenance' },
+    items: Object.keys(byRole).length ? Object.entries(byRole).map(([role, names]) => ({ name: role, sub: names.join(', ') }))
+      : [{ name: 'No one scheduled for this shift yet', sub: 'Set the lineup in Staffing.' }] });
 
   // Proactive alerts (the automations' output) surfaced on every shift screen.
   const alerts = db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all();

@@ -2564,31 +2564,50 @@ function renderMaintBoard(){
         <div><strong>${esc(r.title)}</strong> ${priPill(r.priority)} <span class="badge">${esc(r.category)}</span>${overdue?' <span class="badge badge-danger">past SLA</span>':''}
           <div class="hint">${r.location?esc(r.location)+' · ':''}reported by ${esc(r.reportedBy)||'staff'} · ${r.ageH}h ago${r.assignedTo?' · assigned: '+esc(r.assignedTo):''}</div>
           ${r.description?`<div class="sans" style="margin-top:4px">${esc(r.description)}</div>`:''}
-          ${r.photo?`<img src="${r.photo}" alt="" style="height:64px;border-radius:8px;margin-top:6px;cursor:pointer;border:1px solid var(--line)" onclick='maintLightbox(this.src)'/>`:''}</div>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            ${(r.photos||[]).map(p=>`<span style="position:relative;display:inline-block"><img src="${p.photo}" alt="" style="height:60px;border-radius:8px;cursor:pointer;border:1px solid var(--line)" onclick='maintLightbox(this.src)'/>${p.pid?`<a href="#" onclick="delMaintPhoto(${r.id},${p.pid});return false" style="position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:16px;height:16px;line-height:16px;text-align:center;font-size:11px;text-decoration:none">×</a>`:''}</span>`).join('')}
+            ${(r.photos||[]).length<6?`<label class="hint" style="cursor:pointer;border:1px dashed var(--line);border-radius:8px;padding:6px 9px">＋ photo<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addMaintPhoto(${r.id}, this)"/></label>`:''}
+          </div></div>
         <div style="text-align:right">${r.status==='open'?`<button class="btn btn-sm btn-ghost sans" onclick="maintStatus(${r.id},'in_progress')">Start</button>`:''} <button class="btn btn-sm btn-gold sans" onclick="maintResolve(${r.id})">Resolve</button></div>
       </div>
     </div>`;
   }).join('');
 }
-let MAINT_PHOTO=null;
+let MAINT_PHOTOS=[];
 async function maintPhotoPick(input){
-  const file=input.files && input.files[0]; if(!file){ return; }
+  const files=Array.from(input.files||[]); if(!files.length){ return; }
   $('mt_msg').textContent='Processing photo…';
-  try{ MAINT_PHOTO = await resizeImage(file, 900, 0.7);
-    $('mt_photoThumb').innerHTML = `<img src="${MAINT_PHOTO}" alt="" style="height:40px;border-radius:6px;vertical-align:middle;cursor:pointer" onclick="maintLightbox(MAINT_PHOTO)"/> <a href="#" class="hint" onclick="clearMaintPhoto();return false">remove</a>`;
-    $('mt_msg').textContent='';
-  }catch(e){ $('mt_msg').textContent='Could not read photo'; }
-  input.value='';
+  for(const f of files){ if(MAINT_PHOTOS.length>=6){ break; } try{ MAINT_PHOTOS.push(await resizeImage(f, 900, 0.7)); }catch(e){} }
+  renderMaintPhotoThumbs(); $('mt_msg').textContent = MAINT_PHOTOS.length>=6?'Max 6 photos':''; input.value='';
 }
-function clearMaintPhoto(){ MAINT_PHOTO=null; $('mt_photoThumb').innerHTML=''; }
-function maintLightbox(src){ let o=$('maintLb'); if(!o){ o=document.createElement('div'); o.id='maintLb'; o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out'; o.onclick=()=>o.remove(); document.body.appendChild(o); } o.innerHTML=`<img src="${src}" style="max-width:92%;max-height:92%;border-radius:8px"/>`; }
+function renderMaintPhotoThumbs(){
+  $('mt_photoThumb').innerHTML = MAINT_PHOTOS.map((p,i)=>`<span style="position:relative;display:inline-block"><img src="${p}" alt="" style="height:40px;border-radius:6px;cursor:pointer" onclick="maintLightbox('${'i'+i}')"/><a href="#" onclick="removeMaintPhoto(${i});return false" style="position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:16px;height:16px;line-height:16px;text-align:center;font-size:11px;text-decoration:none">×</a></span>`).join('');
+}
+function removeMaintPhoto(i){ MAINT_PHOTOS.splice(i,1); renderMaintPhotoThumbs(); }
+function clearMaintPhoto(){ MAINT_PHOTOS=[]; $('mt_photoThumb').innerHTML=''; }
+function maintLightbox(src){ if(typeof src==='string'&&src.startsWith('i')) src=MAINT_PHOTOS[+src.slice(1)]; let o=$('maintLb'); if(!o){ o=document.createElement('div'); o.id='maintLb'; o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out'; o.onclick=()=>o.remove(); document.body.appendChild(o); } o.innerHTML=`<img src="${src}" style="max-width:92%;max-height:92%;border-radius:8px"/>`; }
 async function submitMaintenance(){
   const title=$('mt_title').value.trim(); if(!title){ $('mt_msg').textContent='Add a short title'; return; }
   const body={ title, location:$('mt_loc').value.trim(), category:$('mt_cat').value, priority:$('mt_pri').value, description:$('mt_desc').value.trim() };
-  if(MAINT_PHOTO) body.photo=MAINT_PHOTO;
+  if(MAINT_PHOTOS.length) body.photos=MAINT_PHOTOS;
   $('mt_msg').textContent='Submitting…';
   try{ await api('/maintenance',{method:'POST',body:JSON.stringify(body)}); $('mt_msg').textContent='✓ Logged & routed'; ['mt_title','mt_loc','mt_desc'].forEach(x=>$(x).value=''); clearMaintPhoto(); loadMaintenance(); }
   catch(e){ $('mt_msg').textContent=e.message; }
+}
+async function addMaintPhoto(id, input){
+  const file=input.files && input.files[0]; if(!file){ return; }
+  try{ const photo=await resizeImage(file, 900, 0.7); await api('/maintenance/'+id+'/photo',{method:'POST',body:JSON.stringify({photo})}); loadMaintenance(); }
+  catch(e){ alert(e.message); }
+  input.value='';
+}
+async function delMaintPhoto(id, pid){ if(!confirm('Remove this photo?')) return; try{ await api('/maintenance/'+id+'/photo/'+pid,{method:'DELETE'}); loadMaintenance(); }catch(e){ alert(e.message); } }
+async function loadMaintHistory(){
+  let d; try{ d=await api('/maintenance/history'); }catch(e){ $('maintHistory').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  if(!d.history.length){ $('maintHistory').innerHTML='<div class="hint">Nothing resolved in the last 30 days.</div>'; return; }
+  $('maintHistory').innerHTML = `<table class="tbl"><tr><th>Item</th><th>Resolved</th><th>By</th><th>Notes</th></tr>${d.history.map(r=>`<tr>
+    <td><strong>${esc(r.title)}</strong> ${priPill(r.priority)}<div class="hint">${r.location?esc(r.location)+' · ':''}${esc(r.category)} · reported by ${esc(r.reportedBy)||'staff'}</div>${r.photos&&r.photos.length?`<div style="margin-top:4px;display:flex;gap:4px">${r.photos.map(p=>`<img src="${p.photo}" style="height:34px;border-radius:5px;cursor:pointer" onclick='maintLightbox(this.src)'/>`).join('')}</div>`:''}</td>
+    <td class="hint">${esc(r.resolvedAt)}</td><td class="hint">${esc(r.resolvedBy)||'—'}</td><td>${r.resolution?esc(r.resolution):'<span class="hint">—</span>'}</td>
+  </tr>`).join('')}</table>`;
 }
 async function maintStatus(id,status){ try{ await api('/maintenance/'+id,{method:'POST',body:JSON.stringify({status})}); loadMaintenance(); }catch(e){ alert(e.message); } }
 async function maintResolve(id){ const r=prompt('What was done? (optional)','')||''; try{ await api('/maintenance/'+id,{method:'POST',body:JSON.stringify({status:'resolved',resolution:r})}); loadMaintenance(); }catch(e){ alert(e.message); } }

@@ -942,7 +942,17 @@ addColumn('clients', 'aftercare_dest', 'TEXT');        // continuum: planned nex
 addColumn('clients', 'aftercare_facility_id', 'INTEGER'); // if Partner, which approved facility
 addColumn('facilities', 'preferred', 'INTEGER');       // 1 = approved reciprocal partner CMs may refer to
 addColumn('clients', 'discharged_by_kipu', 'TEXT');    // who did the discharge in Kipu (best-effort), for accountability
-addColumn('maintenance_requests', 'photo', 'TEXT');    // optional work-order photo (client-resized JPEG data URL)
+addColumn('maintenance_requests', 'photo', 'TEXT');    // (legacy single photo — superseded by maintenance_photos)
+// Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
+db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
+  id INTEGER PRIMARY KEY,
+  request_id INTEGER NOT NULL REFERENCES maintenance_requests(id) ON DELETE CASCADE,
+  photo TEXT NOT NULL,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_maint_photos ON maintenance_photos(request_id);`);
 // Case-management needs the team should help with, pulled from the notes + manual.
 db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   id INTEGER PRIMARY KEY,

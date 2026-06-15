@@ -1987,8 +1987,13 @@ app.post('/api/followups/:id', requireAuth, (req, res) => {
 /* ---------------- Assigned tasks ("tasks per employee") + My Tasks ---------------- */
 app.get('/api/my-tasks', requireAuth, (req, res) => {
   const calls = db.prepare(`SELECT f.id, f.type, f.due_date, c.pref, c.name, c.id cid FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' AND f.assignee_id = ? ORDER BY f.due_date`).all(req.user.id);
-  const tasks = db.prepare(`SELECT t.*, c.pref FROM assigned_tasks t LEFT JOIN clients c ON c.id = t.client_id WHERE t.status = 'Open' AND t.assignee_id = ? ORDER BY (t.due_date IS NULL), t.due_date, t.id`).all(req.user.id);
-  res.json({ calls, tasks, today: new Date().toISOString().slice(0, 10) });
+  const cc = db.prepare(`SELECT COUNT(*) n, MAX(created_at) last FROM task_comments WHERE task_id = ?`);
+  const decorate = (t) => { const x = cc.get(t.id); return { ...t, comments: x.n, lastComment: x.last ? String(x.last).slice(0, 16) : '' }; };
+  const tasks = db.prepare(`SELECT t.*, c.pref FROM assigned_tasks t LEFT JOIN clients c ON c.id = t.client_id WHERE t.status = 'Open' AND t.assignee_id = ? ORDER BY (t.due_date IS NULL), t.due_date, t.id`).all(req.user.id).map(decorate);
+  // Tasks I assigned to others (so I see their responses + can follow up). Last 21 days incl. recently done.
+  const assignedByMe = db.prepare(`SELECT t.*, c.pref FROM assigned_tasks t LEFT JOIN clients c ON c.id = t.client_id
+    WHERE t.assigned_by_id = ? AND (t.status = 'Open' OR t.done_at >= datetime('now','-21 day')) ORDER BY (t.status='Open') DESC, (t.due_date IS NULL), t.due_date, t.id`).all(req.user.id).map(decorate);
+  res.json({ calls, tasks, assignedByMe, today: new Date().toISOString().slice(0, 10) });
 });
 app.get('/api/all-tasks', requireAuth, requireAdmin, (req, res) => {
   res.json({
@@ -1999,11 +2004,34 @@ app.get('/api/all-tasks', requireAuth, requireAdmin, (req, res) => {
 app.post('/api/assigned-tasks', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.assignee_id || !b.title?.trim()) return res.status(400).json({ error: 'Pick a teammate and a task' });
   const u = db.prepare(`SELECT name FROM users WHERE id = ?`).get(b.assignee_id);
-  db.prepare(`INSERT INTO assigned_tasks (title, detail, client_id, assignee_id, assignee_name, assigned_by, source, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(b.title.trim(), b.detail || null, b.client_id || null, b.assignee_id, u?.name || null, req.user.name, b.source || 'manual', b.due_date || null);
+  db.prepare(`INSERT INTO assigned_tasks (title, detail, client_id, assignee_id, assignee_name, assigned_by, assigned_by_id, source, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(b.title.trim(), b.detail || null, b.client_id || null, b.assignee_id, u?.name || null, req.user.name, req.user.id, b.source || 'manual', b.due_date || null);
+  res.json({ ok: true });
+});
+// The thread on a task — visible to the assignee, the assigner, or an admin.
+app.get('/api/assigned-tasks/:id', requireAuth, (req, res) => {
+  const t = db.prepare(`SELECT t.*, c.pref FROM assigned_tasks t LEFT JOIN clients c ON c.id = t.client_id WHERE t.id = ?`).get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && t.assignee_id !== req.user.id && t.assigned_by_id !== req.user.id) return res.status(403).json({ error: 'Not your task' });
+  const comments = db.prepare(`SELECT by_name, text, created_at FROM task_comments WHERE task_id = ? ORDER BY id`).all(t.id)
+    .map((x) => ({ by: x.by_name || '', text: x.text, at: String(x.created_at).slice(0, 16) }));
+  res.json({ task: { id: t.id, title: t.title, detail: t.detail || '', assignee: t.assignee_name || '', by: t.assigned_by || '', due: t.due_date || '', status: t.status, client: t.pref || '' }, comments });
+});
+// Respond / follow up on a task. Either party (assignee or assigner) can post.
+app.post('/api/assigned-tasks/:id/comment', requireAuth, (req, res) => {
+  const t = db.prepare(`SELECT id, assignee_id, assigned_by_id FROM assigned_tasks WHERE id = ?`).get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Not found' });
+  if (req.user.role !== 'admin' && t.assignee_id !== req.user.id && t.assigned_by_id !== req.user.id) return res.status(403).json({ error: 'Not your task' });
+  const text = (req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Write a reply' });
+  db.prepare(`INSERT INTO task_comments (task_id, by_id, by_name, text) VALUES (?,?,?,?)`).run(t.id, req.user.id, req.user.name, text);
+  audit({ user: req.user, action: 'TASK_COMMENT', entity_id: t.id, ip: req.ip });
   res.json({ ok: true });
 });
 app.post('/api/assigned-tasks/:id/done', requireAuth, (req, res) => {
+  // Optional closing note from the assignee becomes the final reply.
+  const note = (req.body?.note || '').trim();
+  if (note) db.prepare(`INSERT INTO task_comments (task_id, by_id, by_name, text) VALUES (?,?,?,?)`).run(req.params.id, req.user.id, req.user.name, '✓ Completed — ' + note);
   db.prepare(`UPDATE assigned_tasks SET status = 'Done', done_at = datetime('now') WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
 });

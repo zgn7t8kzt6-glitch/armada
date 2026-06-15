@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616C" />
+<link rel="stylesheet" href="/styles.css?v=20260616D" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -696,7 +696,10 @@
 
     <!-- MY TASKS -->
     <section id="mytasks" class="view">
-      <div class="card"><h3>My Tasks</h3><p class="sub sans">Your required to-dos — aftercare calls you own and anything a teammate assigned you. Not optional.</p><div id="myTasksList"></div></div>
+      <div class="card"><h3>My Tasks</h3><p class="sub sans">Your required to-dos — aftercare calls you own and anything a teammate assigned you. Reply to follow up; mark done when complete.</p><div id="myTasksList"></div></div>
+      <div class="card" id="byMeCard" style="display:none">
+        <h3>Tasks I assigned</h3><p class="sub sans">Tasks you handed to teammates — see their responses and follow up here.</p><div id="byMeList"></div>
+      </div>
       <div class="card">
         <h3>Assign a task / tag a teammate</h3>
         <p class="sub sans">Hand a task to someone with accountability — it lands in their My Tasks. (Keep client details out of free text; this is for follow-through, not chat.)</p>
@@ -1487,6 +1490,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616C"></script>
+<script src="/app.js?v=20260616D"></script>
 </body>
 </html>

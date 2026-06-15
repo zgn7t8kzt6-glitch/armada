@@ -446,8 +446,16 @@ CREATE TABLE IF NOT EXISTS assigned_tasks (
   due_date TEXT, status TEXT NOT NULL DEFAULT 'Open',
   created_at TEXT NOT NULL DEFAULT (datetime('now')), done_at TEXT
 );
-
--- The Save (PAUSE) tracker — de-escalation attempts and whether they stayed.
+-- Replies/follow-up on an assigned task — a thread between assigner and assignee.
+CREATE TABLE IF NOT EXISTS task_comments (
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES assigned_tasks(id) ON DELETE CASCADE,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_comments ON task_comments(task_id);
 CREATE TABLE IF NOT EXISTS saves (
   id INTEGER PRIMARY KEY,
   client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
@@ -967,6 +975,7 @@ addColumn('clients', 'aftercare_facility_id', 'INTEGER'); // if Partner, which a
 addColumn('facilities', 'preferred', 'INTEGER');       // 1 = approved reciprocal partner CMs may refer to
 addColumn('clients', 'discharged_by_kipu', 'TEXT');    // who did the discharge in Kipu (best-effort), for accountability
 addColumn('maintenance_requests', 'photo', 'TEXT');    // (legacy single photo — superseded by maintenance_photos)
+addColumn('assigned_tasks', 'assigned_by_id', 'INTEGER'); // who created the task, so they can see responses
 // Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
 db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
   id INTEGER PRIMARY KEY,

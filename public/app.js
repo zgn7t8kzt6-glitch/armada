@@ -569,13 +569,46 @@ async function trainingStatus(){
 }
 
 /* ---- my tasks / assigned tasks ---- */
+function taskCard(t, role){
+  // role: 'mine' (assigned to me — can reply + done) or 'byme' (I assigned — can reply/follow up)
+  const meta = role==='mine' ? `from ${esc(t.assigned_by||'')}` : `to ${esc(t.assignee_name||'')}`;
+  const cbadge = t.comments ? `<span class="badge">${t.comments} ${t.comments==1?'reply':'replies'}</span>` : '';
+  const doneBtn = (role==='mine' && t.status==='Open') ? `<button class="btn btn-gold btn-sm sans" onclick="doneTask(${t.id})">Mark done</button>` : (t.status!=='Open'?'<span class="risk risk-low">done</span>':'');
+  return `<details class="todo" style="display:block">
+    <summary style="cursor:pointer;list-style:none">✅ <strong>${esc(t.title)}</strong>${t.pref?' · '+esc(t.pref):''}${t.due_date?' · due '+esc(t.due_date):''} <span class="hint">${meta}</span> ${cbadge} ${t.status!=='Open'?'<span class="risk risk-low">done</span>':''}</summary>
+    ${t.detail?'<div class="hint" style="margin:6px 0">'+esc(t.detail)+'</div>':''}
+    <div id="thread_${t.id}" class="task-thread" style="margin:8px 0"><div class="hint">Loading…</div></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px"><input id="reply_${t.id}" placeholder="Reply / follow up…" style="flex:1;min-width:160px"/><button class="btn btn-ghost btn-sm sans" onclick="replyTask(${t.id})">Send</button>${doneBtn}</div>
+  </details>`;
+}
+async function loadTaskThread(id){
+  const box=$('thread_'+id); if(!box) return;
+  try{ const d=await api('/assigned-tasks/'+id); box.innerHTML = d.comments.length
+    ? d.comments.map(c=>`<div class="pc-note" style="margin:4px 0"><strong>${esc(c.by)}</strong> <span class="hint">${esc(c.at)}</span><div>${esc(c.text)}</div></div>`).join('')
+    : '<div class="hint">No replies yet — be the first to follow up.</div>'; }
+  catch(e){ box.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; }
+}
+async function replyTask(id){
+  const inp=$('reply_'+id); const text=inp?inp.value.trim():''; if(!text) return;
+  try{ await api('/assigned-tasks/'+id+'/comment',{method:'POST',body:JSON.stringify({text})}); if(inp) inp.value=''; loadTaskThread(id); }
+  catch(e){ alert(e.message); }
+}
 async function loadMyTasks(){
-  const { calls, tasks, today } = await api('/my-tasks');
+  const { calls, tasks, assignedByMe, today } = await api('/my-tasks');
   const callRows = calls.map(c=>`<div class="todo"><div class="txt">🤝 <strong>${esc(c.pref||c.name)}</strong> — ${esc(c.type)} aftercare call · due ${esc(c.due_date)} ${c.due_date<=today?'<span class="risk risk-high">due</span>':''}</div>
     <button class="btn btn-ghost btn-sm sans" onclick="doneCall(${c.id},'Done')">Done</button><button class="btn btn-ghost btn-sm sans" onclick="doneCall(${c.id},'Unreachable')">No answer</button></div>`).join('');
-  const taskRows = tasks.map(t=>`<div class="todo"><div class="txt">✅ ${esc(t.title)}${t.pref?' · '+esc(t.pref):''}${t.due_date?' · due '+esc(t.due_date):''} <span class="hint">from ${esc(t.assigned_by||'')}</span>${t.detail?'<div class="hint">'+esc(t.detail)+'</div>':''}</div>
-    <button class="btn btn-ghost btn-sm sans" onclick="doneTask(${t.id})">Done</button></div>`).join('');
+  const taskRows = tasks.map(t=>taskCard(t,'mine')).join('');
   $('myTasksList').innerHTML = (callRows+taskRows) || '<div class="pc-note">Nothing assigned to you. 🎉</div>';
+  // Tasks I assigned to others
+  if($('byMeCard')){
+    if(assignedByMe && assignedByMe.length){ $('byMeCard').style.display='block'; $('byMeList').innerHTML = assignedByMe.map(t=>taskCard(t,'byme')).join(''); }
+    else $('byMeCard').style.display='none';
+  }
+  // Lazy-load each thread when its row is opened (and once on render for any with replies).
+  document.querySelectorAll('#mytasks details.todo').forEach(d=>{
+    const id=(d.querySelector('[id^="thread_"]')||{}).id; if(!id) return; const tid=id.split('_')[1];
+    d.addEventListener('toggle', ()=>{ if(d.open) loadTaskThread(tid); }, {once:false});
+  });
   await fillClientSelect($('at_client'),'No client');
   try { const { staff } = await api('/staff'); const opts = staff.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
     $('at_to').innerHTML = '<option value="">Pick teammate…</option>'+opts;
@@ -585,7 +618,7 @@ async function loadMyTasks(){
       at.map(t=>`<div class="pc-note">✅ ${esc(t.title)} · <strong>${esc(t.assignee_name||'')}</strong>${t.due_date?' · due '+esc(t.due_date):''}</div>`).join('')) || '<div class="hint">No open team tasks.</div>'; }catch(e){} }
 }
 async function doneCall(id,status){ await api('/followups/'+id,{method:'POST',body:JSON.stringify({status})}); loadMyTasks(); }
-async function doneTask(id){ await api('/assigned-tasks/'+id+'/done',{method:'POST'}); loadMyTasks(); }
+async function doneTask(id){ const note=prompt('Mark done. Add a closing note for whoever assigned it (optional):','')||''; await api('/assigned-tasks/'+id+'/done',{method:'POST',body:JSON.stringify({note})}); loadMyTasks(); }
 async function assignTask(){
   if(!$('at_to').value||!$('at_title').value.trim()){ alert('Pick a teammate and enter a task.'); return; }
   await api('/assigned-tasks',{method:'POST',body:JSON.stringify({assignee_id:$('at_to').value,title:$('at_title').value,client_id:$('at_client').value||null,due_date:$('at_due').value||null})});

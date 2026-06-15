@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615S" />
+<link rel="stylesheet" href="/styles.css?v=20260615T" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1049,17 +1049,35 @@
     <!-- SURVEYS -->
     <section id="surveys" class="view">
       <div class="card no-print">
-        <h3>Surveys</h3>
-        <p class="sub sans">Hear directly from clients — the Ritz way. Hand a tablet to the client, or fill it in together.</p>
-        <div class="controls">
-          <div class="field"><label>Survey</label><select id="sv_select"></select></div>
-          <div class="field"><label>Client (optional)</label><select id="sv_client"></select></div>
-          <button class="btn btn-gold sans" onclick="startSurvey()">Start survey</button>
-          <button class="btn btn-ghost sans" data-admin onclick="showSurveyResults()">View results</button>
+        <div class="cmd-hero-row">
+          <div><h3 style="margin:0">Surveys</h3><p class="sub sans">Hear directly from clients — the Ritz way.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadSurveys()">Refresh</button>
+        </div>
+        <div class="itabs" style="margin-top:8px">
+          <button class="itab active" id="svTabResults" data-admin onclick="surveyTab('results')">📊 Results</button>
+          <button class="itab" id="svTabGive" onclick="surveyTab('give')">📝 Give a survey</button>
         </div>
       </div>
-      <div id="surveyDue"></div>
-      <div id="surveyArea"></div>
+
+      <!-- RESULTS tab -->
+      <div id="svResultsPanel" data-admin>
+        <div id="surveyOverview"></div>
+        <div id="surveyArea"></div>
+      </div>
+
+      <!-- GIVE tab -->
+      <div id="svGivePanel" style="display:none">
+        <div class="card no-print">
+          <p class="sub sans">Hand a tablet to the client, or fill it in together. (For self-service, use the locked <strong>Client Kiosk</strong>.)</p>
+          <div class="controls">
+            <div class="field"><label>Survey</label><select id="sv_select"></select></div>
+            <div class="field"><label>Client (optional)</label><select id="sv_client"></select></div>
+            <button class="btn btn-gold sans" onclick="startSurvey()">Start survey</button>
+          </div>
+        </div>
+        <div id="surveyDue"></div>
+        <div id="surveyGiveArea"></div>
+      </div>
     </section>
 
     <!-- CLIENTS -->
@@ -1431,6 +1449,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615S"></script>
+<script src="/app.js?v=20260615T"></script>
 </body>
 </html>

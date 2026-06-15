@@ -3073,11 +3073,12 @@ async function genShiftBriefing(){
 let SURVEYS = [];
 async function loadSurveys(){
   const { surveys } = await api('/surveys'); SURVEYS = surveys;
-  $('sv_select').innerHTML = surveys.map(s=>`<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  if($('sv_select')) $('sv_select').innerHTML = surveys.map(s=>`<option value="${s.id}">${esc(s.title)}</option>`).join('');
   try { const { clients } = await api('/clients');
-    $('sv_client').innerHTML = '<option value="">Anonymous</option>' + clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}</option>`).join('');
+    if($('sv_client')) $('sv_client').innerHTML = '<option value="">Anonymous</option>' + clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}</option>`).join('');
   } catch(e){}
-  $('surveyArea').innerHTML = '<div class="empty">Pick a survey and press Start.</div>';
+  if($('surveyGiveArea')) $('surveyGiveArea').innerHTML = '<div class="empty">Pick a survey and press Start.</div>';
+  if($('surveyArea')) $('surveyArea').innerHTML = '';
   try {
     const { due } = await api('/surveys/due');
     $('surveyDue').innerHTML = due.length ? `<div class="card"><h3>Surveys to offer</h3>
@@ -3085,12 +3086,31 @@ async function loadSurveys(){
       ${due.map(d=>`<div class="todo"><div class="txt"><strong>${esc(d.client)}</strong> — ${esc(d.title)} <span class="hint">· ${esc(d.reason)}</span></div>
         <button class="btn btn-gold btn-sm sans" onclick="startDue(${d.survey_id},${d.client_id})">Offer now</button></div>`).join('')}</div>` : '';
   } catch(e){ $('surveyDue').innerHTML=''; }
+  const isAdmin = ME && ME.role==='admin';
+  if(isAdmin) loadSurveyOverview();
+  surveyTab(isAdmin?'results':'give');
+}
+function surveyTab(which){
+  const res = which==='results' && ME && ME.role==='admin';
+  if($('svResultsPanel')) $('svResultsPanel').style.display = res?'':'none';
+  if($('svGivePanel')) $('svGivePanel').style.display = res?'none':'';
+  if($('svTabResults')) $('svTabResults').classList.toggle('active',res);
+  if($('svTabGive')) $('svTabGive').classList.toggle('active',!res);
+}
+async function loadSurveyOverview(){
+  if(!$('surveyOverview')) return;
+  let d; try{ d=await api('/surveys/overview'); }catch(e){ return; }
+  $('surveyOverview').innerHTML = `<div class="card"><h3>Survey results</h3>
+    <p class="sub sans">Tap <strong>View</strong> to see scores and comments. <strong>Clear</strong> erases trial/test data.</p>
+    ${d.surveys.map(s=>`<div class="todo"><div class="txt"><strong>${esc(s.title)}</strong> <span class="hint">· ${s.responses} response${s.responses===1?'':'s'}${s.avg!=null?' · avg '+s.avg+'/5':''}${s.last?' · last '+esc(s.last):''}</span></div>
+      <div style="display:flex;gap:6px">${s.responses?`<button class="btn btn-gold btn-sm sans" onclick="showSurveyResults(${s.id})">View</button><button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${s.id},${s.responses})">Clear</button>`:'<span class="hint" style="align-self:center">no responses yet</span>'}</div></div>`).join('')}</div>`;
 }
 function startDue(surveyId, clientId){
+  surveyTab('give');
   $('sv_select').value = surveyId;
   $('sv_client').value = clientId || '';
   startSurvey();
-  $('surveyArea').scrollIntoView({behavior:'smooth'});
+  if($('surveyGiveArea')) $('surveyGiveArea').scrollIntoView({behavior:'smooth'});
 }
 async function gotoSurvey(key, clientId){
   show('surveys');                       // route through the group router (fixes sidebar highlight/visibility)
@@ -3121,24 +3141,24 @@ function startSurvey(){
     html+=`<div class="sq" data-qid="${q.id}" data-type="${q.type}">
       <div class="sq-q">${esc(q.text)}</div>${qInput(q)}</div>`;
   });
-  $('surveyArea').innerHTML = `<div class="card"><h3>${esc(s.title)}</h3>
+  $('surveyGiveArea').innerHTML = `<div class="card"><h3>${esc(s.title)}</h3>
     <p class="sub sans">${esc(s.description||'')}</p>${html}
     <div class="toolbar" style="margin-top:16px"><button class="btn btn-primary sans" onclick="submitSurvey(${s.id})">Submit survey</button></div>
     <div id="svMsg" class="hint"></div></div>`;
 }
 async function submitSurvey(id){
   const answers = [];
-  document.querySelectorAll('#surveyArea .sq').forEach(sq=>{
+  document.querySelectorAll('#surveyGiveArea .sq').forEach(sq=>{
     const qid = +sq.dataset.qid, type = sq.dataset.type;
     if(type==='text'){ const t=sq.querySelector('.sq-text').value.trim(); if(t) answers.push({question_id:qid, text:t}); }
     else { const opts=sq.querySelector('.sv-opts'); if(opts && opts.dataset.val!=null) answers.push({question_id:qid, num:+opts.dataset.val}); }
   });
   if(!answers.length){ $('svMsg').textContent='Please answer at least one question.'; return; }
   await api('/surveys/'+id+'/respond',{method:'POST',body:JSON.stringify({client_id:$('sv_client').value||null, answers})});
-  $('surveyArea').innerHTML = '<div class="card"><h3>Thank you 💚</h3><p class="sans">Your responses were recorded. They help us care for everyone better.</p><button class="btn btn-ghost sans" onclick="loadSurveys()">Done</button></div>';
+  $('surveyGiveArea').innerHTML = '<div class="card"><h3>Thank you 💚</h3><p class="sans">Your responses were recorded. They help us care for everyone better.</p><button class="btn btn-ghost sans" onclick="loadSurveys()">Done</button></div>';
 }
-async function showSurveyResults(){
-  const id = $('sv_select').value;
+async function showSurveyResults(id){
+  if(!id) return;
   let data;
   try { data = await api('/surveys/'+id+'/results'); } catch(e){ $('surveyArea').innerHTML='<div class="empty">'+e.message+'</div>'; return; }
   const { survey, responses, questions } = data;
@@ -3160,10 +3180,11 @@ async function showSurveyResults(){
   $('surveyArea').innerHTML = `<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(survey.title)} — results</h3>
     <p class="sub sans">${responses} response${responses===1?'':'s'}. Scores under 3.5 are flagged. Low "feel cared for" scores are an early AMA signal.</p></div>
     ${responses?`<button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${survey.id}, ${responses})" title="Erase all responses (e.g. trial data)">🗑 Clear ${responses} response${responses===1?'':'s'}</button>`:''}</div>${html}</div>`;
+  $('surveyArea').scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function clearSurveyResponses(id, n){
   if(!confirm(`Erase all ${n} response(s) for this survey? This permanently deletes the trial/test data and can't be undone.`)) return;
-  try{ const r=await api('/surveys/'+id+'/clear',{method:'POST'}); alert('✓ Cleared '+r.cleared+' response(s).'); showSurveyResults(); }
+  try{ const r=await api('/surveys/'+id+'/clear',{method:'POST'}); if($('surveyArea')) $('surveyArea').innerHTML=''; loadSurveyOverview(); alert('✓ Cleared '+r.cleared+' response(s).'); }
   catch(e){ alert(e.message); }
 }
 

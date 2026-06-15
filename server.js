@@ -3606,6 +3606,19 @@ app.get('/api/surveys/due', requireAuth, (req, res) => {
   res.json({ due });
 });
 
+// Results overview (admin): every survey with its response count, overall score,
+// and last response — the clean at-a-glance list to drill in or clear from.
+app.get('/api/surveys/overview', requireAuth, requireAdmin, (req, res) => {
+  const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
+  res.json({ surveys: surveys.map((s) => {
+    const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?`).get(s.id).n;
+    const avg = db.prepare(`SELECT AVG(a.value_num) a FROM survey_answers a JOIN survey_responses r ON r.id = a.response_id
+      JOIN survey_questions q ON q.id = a.question_id WHERE r.survey_id = ? AND q.type IN ('scale','rating') AND a.value_num IS NOT NULL`).get(s.id).a;
+    const last = db.prepare(`SELECT MAX(created_at) m FROM survey_responses WHERE survey_id = ?`).get(s.id).m;
+    return { id: s.id, key: s.key, title: s.title, description: s.description || '', responses,
+      avg: avg != null ? Math.round(avg * 10) / 10 : null, last: last ? String(last).slice(0, 10) : '' };
+  }) });
+});
 // Results (admin): per-question aggregates + recent comments.
 app.get('/api/surveys/:id/results', requireAuth, requireAdmin, (req, res) => {
   const survey = db.prepare(`SELECT * FROM surveys WHERE id = ?`).get(req.params.id);

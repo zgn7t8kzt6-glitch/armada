@@ -315,3 +315,27 @@ export async function sfSyncArrivals(db) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   return { pulled, created, updated };
 }
+
+// Why isn't someone on the schedule? Reports whether matching Leads carry a
+// scheduled admit date (the field that drives the board), plus the overall
+// count of Leads that have one at all and the next upcoming.
+export async function sfArrivalsDiagnose(nameQuery) {
+  const out = {};
+  try { const t = await sfQuery(`SELECT COUNT() FROM Lead WHERE Date_Looking_to_Admit__c != null`); out.leadsWithAdmitDate = t.totalSize ?? null; }
+  catch (e) { out.countError = e.message; }
+  try {
+    const up = await sfQuery(`SELECT FirstName, LastName, Date_Looking_to_Admit__c, Status, IsConverted FROM Lead WHERE Date_Looking_to_Admit__c >= TODAY ORDER BY Date_Looking_to_Admit__c ASC LIMIT 10`);
+    out.upcoming = (up.records || []).map((r) => ({ name: ((r.FirstName || '') + ' ' + (r.LastName || '')).trim(), date: (r.Date_Looking_to_Admit__c || '').slice(0, 10), status: r.Status, converted: !!r.IsConverted }));
+  } catch (e) { out.upcomingError = e.message; }
+  const nq = (nameQuery || '').trim();
+  if (nq) {
+    const q = nq.replace(/['\\%_]/g, '');
+    const r = await sfQuery(`SELECT FirstName, LastName, Date_Looking_to_Admit__c, Status, IsConverted, CreatedDate, Patient_ID__c FROM Lead WHERE Name LIKE '%${q}%' ORDER BY CreatedDate DESC LIMIT 10`);
+    out.matches = (r.records || []).map((x) => ({
+      name: ((x.FirstName || '') + ' ' + (x.LastName || '')).trim(),
+      admitDate: (x.Date_Looking_to_Admit__c || '').slice(0, 10) || '(blank — that is why they were not scheduled)',
+      status: x.Status || '', converted: !!x.IsConverted, created: (x.CreatedDate || '').slice(0, 10), patientId: x.Patient_ID__c || '',
+    }));
+  }
+  return out;
+}

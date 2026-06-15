@@ -1421,6 +1421,22 @@ async function setArrival(id,status){
 async function setArrivalNote(id,note){
   try{ await api('/arrivals/'+id+'/status',{method:'POST',body:JSON.stringify({status:'no_show',follow_up:note})}); }catch(e){}
 }
+async function diagnoseSchedule(){
+  const name = prompt('Whose schedule are we checking? (e.g. Brandon) — leave blank for the overall picture:','')||'';
+  const box=$('arrivalsDiag'); box.innerHTML='<div class="card">Checking Salesforce…</div>';
+  try{
+    const d=await api('/arrivals/diagnose?name='+encodeURIComponent(name));
+    let html='<div class="card"><h3 style="margin:0 0 6px">Schedule diagnostic</h3>';
+    html += `<div class="pc-note">Leads with a scheduled admit date in Salesforce: <strong>${d.leadsWithAdmitDate!=null?d.leadsWithAdmitDate:'—'}</strong></div>`;
+    if(d.matches){
+      html += `<div class="cmd-sub">Matches for "${esc(name)}"</div>`;
+      html += d.matches.length ? d.matches.map(m=>`<div class="pc-note"><strong>${esc(m.name)}</strong> — admit date: <strong>${esc(m.admitDate)}</strong> · status: ${esc(m.status||'—')} · ${m.converted?'converted (admitted)':'not converted'}${m.patientId?' · patient id '+esc(m.patientId):''} <span class="hint">(lead created ${esc(m.created)})</span></div>`).join('') : '<div class="pc-note">No Lead found by that name in Salesforce.</div>';
+    }
+    if(d.upcoming&&d.upcoming.length){ html += `<div class="cmd-sub">Next scheduled (Salesforce)</div>`+d.upcoming.map(u=>`<div class="pc-note">☀ <strong>${esc(u.name)}</strong> · ${esc(u.date)} · ${esc(u.status||'')}${u.converted?' · admitted':''}</div>`).join(''); }
+    html += '</div>';
+    box.innerHTML=html;
+  }catch(e){ box.innerHTML='<div class="card"><span style="color:var(--danger)">'+esc(e.message)+'</span></div>'; }
+}
 async function arrivalsSync(){
   $('arrivals_msg').textContent='Pulling from Salesforce…';
   try{ const r=await api('/arrivals/sync',{method:'POST'}); $('arrivals_msg').textContent=`✓ ${r.pulled} scheduled · ${r.matched} already arrived (Kipu).`; loadArrivals(); }

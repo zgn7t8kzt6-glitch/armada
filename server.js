@@ -10,7 +10,7 @@ import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates } from './src/kipu.js';
-import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals } from './src/salesforce.js';
+import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
@@ -2514,6 +2514,13 @@ app.post('/api/arrivals/sync', requireAuth, async (req, res) => {
     const rec = reconcileArrivals();
     audit({ user: req.user, action: 'ARRIVALS_SYNC', detail: `${r.pulled} pulled, ${rec.matched} arrived`, ip: req.ip });
     res.json({ ...r, ...rec });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Diagnose why someone isn't on the schedule — looks up their Salesforce Lead.
+app.get('/api/arrivals/diagnose', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (!sfConfigured()) return res.status(400).json({ error: 'Salesforce not connected.' });
+    res.json(await sfArrivalsDiagnose(req.query.name || ''));
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Today's (or a given day's) board, split by status.

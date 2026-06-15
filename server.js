@@ -3731,6 +3731,9 @@ function buildMorningBrief() {
   const planned = active.filter((c) => c.aftercare_dest && c.aftercare_dest !== 'Undecided').length;
   const toArmada = active.filter((c) => c.aftercare_dest === 'Armada Outpatient').length;
   const contLine = active.length ? `${Math.round(planned / active.length * 100)}% have a next-step plan · ${toArmada} headed to Armada Outpatient` : 'no active clients';
+  // Discharge accountability: Kipu discharges in the last 7 days with no in-app form.
+  const dcOpen = db.prepare(`SELECT departure_steps, aftercare_dest, discharge_reason, discharge_improve FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-7 day')`).all()
+    .filter((c) => dischargeMissing(c).length).length;
   const locLine = Object.entries(byLoc).sort((a, b) => (LOC_RANK[b[0]] ?? -1) - (LOC_RANK[a[0]] ?? -1)).map(([k, n]) => `${k}: ${n}`).join(' · ');
   const dt = new Date().toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
   const card = (label, val, color) => `<td style="padding:10px 14px;text-align:center;border:1px solid #eae5da;border-radius:8px"><div style="font-size:26px;font-weight:700;color:${color || '#235056'}">${val}</div><div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6f7a75">${label}</div></td>`;
@@ -3748,6 +3751,7 @@ function buildMorningBrief() {
     <p style="margin:18px 0 0;color:#6f7a75">${ccInc} Care Card(s) to finish · Three Steps of Service at ${served}% · Saves this week: ${saveLine}.</p>
     <p style="margin:6px 0 0;color:#6f7a75">Engagement: ${engLine}.</p>
     <p style="margin:6px 0 0;color:#6f7a75">Continuum: ${contLine}.</p>
+    ${dcOpen ? `<p style="margin:6px 0 0;color:#c06a52"><strong>⚠ ${dcOpen} Kipu discharge(s) without the in-app form completed</strong> — see Continuum.</p>` : ''}
     <p style="margin:16px 0 0;font-size:12px;color:#9aa">Sent from Armada Care Standards. Open the app for the full Command Center.</p>
   </div>`;
   const text = `Armada Morning Brief — ${dt}\nCensus ${active.length} · Admits ${admitsToday} · Discharges ${dToday.length} · AMA ${amaToday} · Served ${served}%\nLOC: ${locLine}\nAt risk: ${atRisk.map((x) => (x.c.pref || x.c.name) + ' (' + x.a.level + ')').join('; ') || 'none'}\nScheduled: ${scheduled.map((s) => (s.preferred_name || s.first_name || '') + ' ' + (s.last_name || '')).join('; ') || 'none'}`;

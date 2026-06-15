@@ -308,6 +308,24 @@ app.post('/api/command/census/recipients', requireAuth, requireAdmin, (req, res)
 app.post('/api/command/brief', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await sendMorningBrief()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Tunable automation thresholds — adjust the behavior we ship without a redeploy.
+app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res.json({
+  detox_min: autoCfg('detox_min', process.env.OBS_DETOX_MIN || 30),
+  default_min: autoCfg('default_min', process.env.OBS_DEFAULT_MIN || 60),
+  carecard_min: autoCfg('carecard_min', CARECARD_DUE_MIN),
+  brief_hour: briefHour(),
+  brief_on: autoCfg('brief_on', 'on'),
+  recovery_max: autoCfg('recovery_max', 3),
+  welcome_auto: autoCfg('welcome_auto', 'on'),
+}));
+app.post('/api/settings/automation', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto']) {
+    if (b[k] !== undefined) setState('auto_' + k, String(b[k]).trim());
+  }
+  audit({ user: req.user, action: 'AUTO_CONFIG', ip: req.ip });
+  res.json({ ok: true });
+});
 
 // ---- Email setup (in-app, no Render env editing). Secrets stored server-side;
 // never returned to the client. ----
@@ -1553,7 +1571,7 @@ function runFlowAutomations() {
   for (const c of newAdmits) {
     if (!careCardStatus(c).complete) {
       const mins = careCardMinsSinceAdmit(c);
-      if (mins != null && mins > CARECARD_DUE_MIN) createAlert(c.id, 'carecard', 'Elevated', `${c.pref || c.name} — Care Card not complete (${Math.floor(mins / 60)}h ${mins % 60}m since admit). Fill it within the hour.`);
+      if (mins != null && mins > +autoCfg('carecard_min', CARECARD_DUE_MIN)) createAlert(c.id, 'carecard', 'Elevated', `${c.pref || c.name} — Care Card not complete (${Math.floor(mins / 60)}h ${mins % 60}m since admit). Fill it within the hour.`);
     }
   }
   try {
@@ -1601,11 +1619,13 @@ function runFlowAutomations() {
   }
   return { kits, follows };
 }
+// Runtime-tunable automation settings (Settings → Automation), state first then env.
+function autoCfg(key, def) { const v = getState('auto_' + key); return (v != null && v !== '') ? v : def; }
 // Recommended safety-check cadence (minutes) by level of care.
 function obsIntervalForLoc(loc) {
   const l = String(loc || '');
-  if (/3\.?7|3\.?2|\bwm\b|withdrawal|detox/i.test(l)) return +(process.env.OBS_DETOX_MIN || 30);   // medical/clinical withdrawal
-  return +(process.env.OBS_DEFAULT_MIN || 60);                                                      // residential / lower acuity
+  if (/3\.?7|3\.?2|\bwm\b|withdrawal|detox/i.test(l)) return +autoCfg('detox_min', process.env.OBS_DETOX_MIN || 30);   // medical/clinical withdrawal
+  return +autoCfg('default_min', process.env.OBS_DEFAULT_MIN || 60);                                                    // residential / lower acuity
 }
 // The standard case-management onboarding checklist, created on every admit.
 const ONBOARDING_TASKS = [
@@ -1621,7 +1641,7 @@ const ONBOARDING_TASKS = [
 // fresh admits that don't have one yet. Capped per run and fails fast on the AI
 // daily limit so it never blows the token budget. Disable with WELCOME_AUTO=false.
 async function autoWelcomePlans() {
-  if (!claudeConfigured() || process.env.WELCOME_AUTO === 'false') return;
+  if (!claudeConfigured() || autoCfg('welcome_auto', process.env.WELCOME_AUTO === 'false' ? 'off' : 'on') === 'off') return;
   const cap = +(process.env.WELCOME_AUTO_MAX || 3);
   const need = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL
     AND (welcome_plan IS NULL OR welcome_plan = '') AND substr(admit,1,10) >= date('now','-2 day')
@@ -2872,7 +2892,7 @@ function surveyRecovery(clientId, answers) {
   if (!nums.length) return;
   const avg = nums.reduce((s, n) => s + n, 0) / nums.length;
   const low = nums.some((n) => n <= 2);
-  if (avg > 3 && !low) return;
+  if (avg > +autoCfg('recovery_max', 3) && !low) return;
   const c = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(clientId);
   const nm = c ? (c.pref || c.name) : ('client ' + clientId);
   createAlert(clientId, 'recovery', (avg <= 2 || low) ? 'High' : 'Elevated', `${nm} — low experience score (${avg.toFixed(1)}/5). Service recovery: a leader should check in now.`);
@@ -3463,13 +3483,14 @@ async function sendMorningBrief() {
   await sendEmail({ to, subject: b.subject, html: b.html, text: b.text });
   return { sent: true, to };
 }
+function briefHour() { return +autoCfg('brief_hour', process.env.MORNING_BRIEF_HOUR || 7); }
 function runMorningBrief() {
-  if (process.env.MORNING_BRIEF !== 'false') {
+  if (autoCfg('brief_on', process.env.MORNING_BRIEF === 'false' ? 'off' : 'on') !== 'off') {
     sendMorningBrief().then((r) => { if (r.sent) console.log('[brief] morning brief emailed to', r.to); else console.log('[brief] skipped:', r.reason); }).catch((e) => console.error('[brief]', e.message));
   }
-  setTimeout(runMorningBrief, msUntilLocalHour(+(process.env.MORNING_BRIEF_HOUR || 7)));
+  setTimeout(runMorningBrief, msUntilLocalHour(briefHour()));
 }
-setTimeout(runMorningBrief, msUntilLocalHour(+(process.env.MORNING_BRIEF_HOUR || 7)));
+setTimeout(runMorningBrief, msUntilLocalHour(briefHour()));
 
 // Keep the front-desk arrivals board fresh through the day (Salesforce pull +
 // Kipu reconcile) without anyone clicking refresh.

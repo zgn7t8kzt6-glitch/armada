@@ -1432,7 +1432,9 @@ async function diagnoseSchedule(){
       html += `<div class="cmd-sub">Matches for "${esc(name)}"</div>`;
       html += d.matches.length ? d.matches.map(m=>`<div class="pc-note"><strong>${esc(m.name)}</strong> — admit date: <strong>${esc(m.admitDate)}</strong> · status: ${esc(m.status||'—')} · ${m.converted?'converted (admitted)':'not converted'}${m.patientId?' · patient id '+esc(m.patientId):''} <span class="hint">(lead created ${esc(m.created)})</span></div>`).join('') : '<div class="pc-note">No Lead found by that name in Salesforce.</div>';
     }
-    if(d.upcoming&&d.upcoming.length){ html += `<div class="cmd-sub">Next scheduled (Salesforce)</div>`+d.upcoming.map(u=>`<div class="pc-note">☀ <strong>${esc(u.name)}</strong> · ${esc(u.date)} · ${esc(u.status||'')}${u.converted?' · admitted':''}</div>`).join(''); }
+    if(d.upcoming&&d.upcoming.length){ html += `<div class="cmd-sub">Future-dated leads (Date_Looking_to_Admit ≥ today)</div>`+d.upcoming.map(u=>`<div class="pc-note">☀ <strong>${esc(u.name)}</strong> · ${esc(u.date)} · ${esc(u.status||'')}${u.converted?' · admitted':''}</div>`).join(''); }
+    if(d.pipelineByStatus){ html += `<div class="cmd-sub">Live pipeline — Leads not yet admitted, by status</div>`+(d.pipelineByStatus.length?d.pipelineByStatus.map(s=>`<div class="pc-note"><strong>${esc(s.status)}</strong> — ${s.count}</div>`).join(''):'<div class="pc-note">None.</div>'); }
+    if(d.recentPipeline&&d.recentPipeline.length){ html += `<div class="cmd-sub">Most recent not-yet-admitted leads</div>`+d.recentPipeline.map(r=>`<div class="pc-note">${esc(r.name)} · status: ${esc(r.status||'—')} · admit date: ${esc(r.admitDate)} <span class="hint">(created ${esc(r.created)})</span></div>`).join(''); }
     html += '</div>';
     box.innerHTML=html;
   }catch(e){ box.innerHTML='<div class="card"><span style="color:var(--danger)">'+esc(e.message)+'</span></div>'; }

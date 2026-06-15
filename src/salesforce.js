@@ -327,6 +327,16 @@ export async function sfArrivalsDiagnose(nameQuery) {
     const up = await sfQuery(`SELECT FirstName, LastName, Date_Looking_to_Admit__c, Status, IsConverted FROM Lead WHERE Date_Looking_to_Admit__c >= TODAY ORDER BY Date_Looking_to_Admit__c ASC LIMIT 10`);
     out.upcoming = (up.records || []).map((r) => ({ name: ((r.FirstName || '') + ' ' + (r.LastName || '')).trim(), date: (r.Date_Looking_to_Admit__c || '').slice(0, 10), status: r.Status, converted: !!r.IsConverted }));
   } catch (e) { out.upcomingError = e.message; }
+  // The live pipeline: Leads NOT yet admitted (converted), by status — this is
+  // the real "scheduled to come in" cohort if the date field isn't forward-looking.
+  try {
+    const g = await sfQuery(`SELECT Status, COUNT(Id) c FROM Lead WHERE IsConverted = false GROUP BY Status ORDER BY COUNT(Id) DESC`);
+    out.pipelineByStatus = (g.records || []).map((r) => ({ status: r.Status || '(none)', count: r.c }));
+  } catch (e) { out.pipelineError = e.message; }
+  try {
+    const p = await sfQuery(`SELECT FirstName, LastName, Status, Date_Looking_to_Admit__c, CreatedDate FROM Lead WHERE IsConverted = false ORDER BY CreatedDate DESC LIMIT 10`);
+    out.recentPipeline = (p.records || []).map((r) => ({ name: ((r.FirstName || '') + ' ' + (r.LastName || '')).trim(), status: r.Status || '', admitDate: (r.Date_Looking_to_Admit__c || '').slice(0, 10) || '(blank)', created: (r.CreatedDate || '').slice(0, 10) }));
+  } catch (e) { /* pipeline sample optional */ }
   const nq = (nameQuery || '').trim();
   if (nq) {
     const q = nq.replace(/['\\%_]/g, '');

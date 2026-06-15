@@ -520,6 +520,83 @@ app.post('/api/maintenance/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── MEAL SERVICE (the Ritz receiving inspection, done by techs) ──────────────
+// Every meal the caterer delivers gets inspected against a standard: enough
+// portions for the census, all food groups present, and whether clients liked it.
+const MEAL_GROUPS = ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit', 'Dairy', 'Beverage'];
+const MEAL_REQUIRED = ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit'];   // a complete plate
+const MEALS_LIST = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+function currentMeal() { const h = localHour(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : h < 20 ? 'Dinner' : 'Snack'; }
+function censusNow() { return db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n; }
+
+app.get('/api/meals/today', requireAuth, (req, res) => {
+  const today = appToday();
+  const expected = censusNow();
+  const checks = {};
+  db.prepare(`SELECT * FROM meal_checks WHERE date = ?`).all(today).forEach((r) => { checks[r.meal] = r; });
+  res.json({
+    date: today, current: currentMeal(), expected, groups: MEAL_GROUPS, required: MEAL_REQUIRED, meals: MEALS_LIST,
+    today: MEALS_LIST.map((m) => {
+      const c = checks[m];
+      if (!c) return { meal: m, logged: false };
+      let groups = []; try { groups = JSON.parse(c.groups || '[]'); } catch { /* */ }
+      return { meal: m, logged: true, expected: c.expected, received: c.received, groups, liked: c.liked || '',
+        quality: c.quality, issues: c.issues || '', complete: !!c.complete, photo: c.photo || null, by: c.by_name || '',
+        missing: MEAL_REQUIRED.filter((g) => !groups.includes(g)) };
+    }),
+  });
+});
+// Log/inspect a meal delivery (techs). Upserts one row per meal per day.
+app.post('/api/meals/check', requireAuth, async (req, res) => {
+  const b = req.body || {};
+  const meal = MEALS_LIST.includes(b.meal) ? b.meal : currentMeal();
+  const today = appToday();
+  const groups = Array.isArray(b.groups) ? b.groups.filter((g) => MEAL_GROUPS.includes(g)) : [];
+  const received = (b.received === 0 || b.received) ? Math.max(0, parseInt(b.received, 10) || 0) : null;
+  const expected = (b.expected === 0 || b.expected) ? Math.max(0, parseInt(b.expected, 10) || 0) : censusNow();
+  const liked = ['Liked', 'OK', 'Disliked'].includes(b.liked) ? b.liked : null;
+  const quality = (b.quality === 0 || b.quality) ? Math.max(1, Math.min(5, parseInt(b.quality, 10) || 0)) : null;
+  let photo = null; if (b.photo) { try { photo = validPhoto(b.photo); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  const missing = MEAL_REQUIRED.filter((g) => !groups.includes(g));
+  const enough = (received != null && expected != null) ? received >= expected : true;
+  const complete = (missing.length === 0 && enough) ? 1 : 0;
+  db.prepare(`INSERT INTO meal_checks (date, meal, expected, received, groups, liked, quality, issues, photo, complete, by_id, by_name)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(date, meal) DO UPDATE SET expected=excluded.expected, received=excluded.received, groups=excluded.groups,
+      liked=excluded.liked, quality=excluded.quality, issues=excluded.issues, photo=COALESCE(excluded.photo, meal_checks.photo),
+      complete=excluded.complete, by_id=excluded.by_id, by_name=excluded.by_name, updated_at=datetime('now')`)
+    .run(today, meal, expected, received, JSON.stringify(groups), liked, quality, (b.issues || '').trim() || null, photo, complete, req.user.id, req.user.name);
+  audit({ user: req.user, action: 'MEAL_CHECK', detail: `${meal} ${complete ? 'OK' : 'ISSUE'}`, ip: req.ip });
+  // A short or incomplete delivery is a defect — flag it so the caterer is held to standard.
+  if (!complete) {
+    const parts = [];
+    if (!enough) parts.push(`short ${expected - received} portion(s) (${received}/${expected})`);
+    if (missing.length) parts.push(`missing ${missing.join(', ')}`);
+    if (b.issues) parts.push(String(b.issues).trim());
+    createAlert(null, `meal_${today}_${meal}`, 'Elevated', `${meal} delivery issue — ${parts.join(' · ')}. Logged by ${req.user.name}.`);
+  }
+  res.json({ ok: true, complete: !!complete, enough, missing });
+});
+// Caterer scorecard — last 30 days of meal checks (held the standard?).
+app.get('/api/meals/scorecard', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT * FROM meal_checks WHERE date >= date('now','-30 day') ORDER BY date DESC, meal`).all();
+  const logged = rows.length;
+  const complete = rows.filter((r) => r.complete).length;
+  const liked = rows.filter((r) => r.liked === 'Liked').length;
+  const likedRated = rows.filter((r) => r.liked).length;
+  const short = rows.filter((r) => r.received != null && r.expected != null && r.received < r.expected).length;
+  // Which food groups go missing most often.
+  const missCount = {};
+  for (const r of rows) { let g = []; try { g = JSON.parse(r.groups || '[]'); } catch { /* */ } MEAL_REQUIRED.filter((x) => !g.includes(x)).forEach((x) => { missCount[x] = (missCount[x] || 0) + 1; }); }
+  const recentIssues = rows.filter((r) => r.issues).slice(0, 8).map((r) => ({ date: r.date, meal: r.meal, issue: r.issues }));
+  res.json({
+    logged, completePct: logged ? Math.round(complete / logged * 100) : null,
+    likedPct: likedRated ? Math.round(liked / likedRated * 100) : null, shortCount: short,
+    missing: Object.entries(missCount).sort((a, b) => b[1] - a[1]).map(([g, n]) => ({ group: g, n })),
+    recentIssues,
+  });
+});
+
 // Every Kipu discharge must have the in-app fond-farewell completed (Safe
 // Departure checklist + where they went). What's missing on a given discharge:
 function dischargeMissing(c) {
@@ -2803,6 +2880,20 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       const inDays = Math.round((base + m * 864e5 - Date.now()) / 864e5);
       if (inDays === 0 || inDays === 1) milestones.push({ id: c.id, name: c.pref || c.name, label: `${m} day${m > 1 ? 's' : ''} clean`, today: inDays === 0 });
     }
+  }
+  // Meal service — for the roles that serve/stock food (techs + kitchen): prompt
+  // to inspect the current meal delivery if it hasn't been checked yet.
+  if (jr === 'BHT / Tech' || jr === 'Kitchen' || jr === '' || jr === 'Team') {
+    const meal = currentMeal();
+    const chk = db.prepare(`SELECT complete, received, expected FROM meal_checks WHERE date = ? AND meal = ?`).get(today, meal);
+    const needsCheck = !chk;
+    tiles.push({ key: 'meal', label: `${meal} delivery`, n: needsCheck ? 'Check' : (chk.complete ? '✓' : '⚠'), sev: needsCheck ? 'warn' : (chk.complete ? 'ok' : 'high'), view: 'meals' });
+    sections.push({ key: 'meal', title: `🍽️ ${meal} — inspect the caterer's delivery`,
+      cta: { label: 'Open meal check →', view: 'meals' },
+      items: [needsCheck
+        ? { name: `${meal} not checked yet`, sub: `Confirm enough portions (${censusNow()} on the unit) and all food groups, then log it.`, badge: 'TO DO' }
+        : (chk.complete ? { name: `${meal} ✓ inspected`, sub: `${chk.received ?? '?'} of ${chk.expected ?? '?'} portions · complete` }
+          : { name: `${meal} flagged`, sub: 'Short or missing a food group — see the meal check', badge: 'ISSUE' })] });
   }
   // Operations layer — on every role's shift screen so nothing operational is
   // invisible: open maintenance work orders, and whether today's shifts are short.

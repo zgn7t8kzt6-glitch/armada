@@ -111,7 +111,7 @@ const GROUPS=[
 const GROUP_OF={
   dashboard:'today',today:'today',lineup:'today',arrivals:'today',
   clients:'clients',editor:'clients',journey:'clients',family:'clients',records:'clients',
-  report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',
+  report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',meals:'care',
   casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',continuum:'clinical',
   admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
   mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',inventory:'team',maintenance:'team',
@@ -178,6 +178,7 @@ function show(v){
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
+  if(v==='meals') loadMeals();
   if(v==='maintenance') loadMaintenance();
   if(v==='arrivals') loadArrivals();
   if(v==='outcomes') loadOutcomes();
@@ -2487,6 +2488,78 @@ function renderEngStaff(){
   const rows = ENG_RANGE==='month'?ENG_STAFF.month:ENG_STAFF.week;
   const medal=i=>['🥇','🥈','🥉'][i]||(i+1)+'.';
   $('engStaff').innerHTML = rows.length ? `<table class="tbl"><tr><th>Staff</th><th>Activities</th><th>Clients engaged</th></tr>${rows.map((r,i)=>`<tr><td>${medal(i)} <strong>${esc(r.by_name)}</strong></td><td>${r.n}</td><td>${r.clients}</td></tr>`).join('')}</table>` : '<div class="hint">No activities logged yet this '+ENG_RANGE+'. Log one from the disengaged list above.</div>';
+}
+
+/* ---- The Table: meal service / caterer delivery inspection ---- */
+let MEALS_DATA=null, MEAL_PHOTO={};
+async function loadMeals(){
+  let d; try{ d=await api('/meals/today'); }catch(e){ $('mealsToday').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  MEALS_DATA=d;
+  const done=d.today.filter(m=>m.logged).length, issues=d.today.filter(m=>m.logged&&!m.complete).length;
+  $('mealsKpis').innerHTML = `
+    <div class="ret-card"><div class="n">${d.expected}</div><div class="l">On the unit (portions)</div></div>
+    <div class="ret-card ${done<d.today.length?'rc-warn':''}"><div class="n">${done}/${d.today.length}</div><div class="l">Meals inspected today</div></div>
+    <div class="ret-card ${issues?'rc-high':''}"><div class="n">${issues}</div><div class="l">Flagged today</div></div>`;
+  $('mealsToday').innerHTML = d.today.map(m=>mealCard(m,d)).join('');
+  loadMealsScore();
+}
+function mealCard(m,d){
+  const cur = m.meal===d.current;
+  const open = cur && !m.logged;   // auto-open the current uninspected meal
+  const statusPill = !m.logged ? '<span class="risk risk-warn">not inspected</span>'
+    : m.complete ? '<span class="risk risk-low">✓ complete</span>' : '<span class="risk risk-high">⚠ issue</span>';
+  const chosen = m.groups||[];
+  const groupChips = d.groups.map(g=>{
+    const on = chosen.includes(g); const req = d.required.includes(g);
+    return `<button type="button" class="meal-grp${on?' on':''}" data-meal="${m.meal}" data-grp="${esc(g)}" onclick="toggleGroup(this)">${on?'✓ ':''}${esc(g)}${req?' *':''}</button>`;
+  }).join('');
+  const likeBtn=(v,lbl)=>`<button type="button" class="meal-like${m.liked===v?' on':''}" data-meal="${m.meal}" data-like="${v}" onclick="pickLike(this)">${lbl}</button>`;
+  return `<details class="card" ${open?'open':''}>
+    <summary class="sans" style="cursor:pointer;font-weight:600">${esc(m.meal)} ${statusPill} ${cur?'<span class="badge">now</span>':''} ${m.logged?`<span class="hint">· ${m.received??'?'}/${m.expected??'?'} portions${m.by?' · '+esc(m.by):''}</span>`:''}</summary>
+    <div style="margin-top:12px">
+      <div class="grid2">
+        <div class="field"><label>Portions needed (on the unit)</label><input type="number" id="meal_exp_${m.meal}" min="0" value="${m.expected!=null?m.expected:d.expected}"/></div>
+        <div class="field"><label>Portions delivered</label><input type="number" id="meal_rec_${m.meal}" min="0" value="${m.received!=null?m.received:''}" placeholder="count what arrived"/></div>
+      </div>
+      <label>Food groups delivered <span class="hint">(* = required for a complete plate)</span></label>
+      <div id="meal_grps_${m.meal}" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px">${groupChips}</div>
+      <label>Did clients like it?</label>
+      <div id="meal_like_${m.meal}" style="display:flex;gap:6px;margin:4px 0 12px">${likeBtn('Liked','👍 Liked')}${likeBtn('OK','😐 OK')}${likeBtn('Disliked','👎 No')}</div>
+      <div class="field"><label>Issues / what was missing (optional)</label><textarea id="meal_iss_${m.meal}" rows="2" placeholder="e.g. only 18 trays for 22 · no vegetable · chicken undercooked">${esc(m.issues||'')}</textarea></div>
+      <div class="toolbar" style="justify-content:flex-start;align-items:center">
+        <label class="btn btn-ghost btn-sm sans" style="cursor:pointer;margin:0">📷 Photo<input type="file" accept="image/*" capture="environment" style="display:none" onchange="mealPhotoPick('${m.meal}',this)"/></label>
+        <span id="meal_thumb_${m.meal}">${m.photo?`<img src="${m.photo}" style="height:36px;border-radius:6px;cursor:pointer" onclick="maintLightbox(this.src)"/>`:''}</span>
+        <button class="btn btn-gold sans" onclick="saveMealCheck('${m.meal}')">Save inspection</button>
+        <span id="meal_msg_${m.meal}" class="hint" style="align-self:center"></span>
+      </div>
+    </div>
+  </details>`;
+}
+function toggleGroup(b){ b.classList.toggle('on'); b.textContent=(b.classList.contains('on')?'✓ ':'')+b.dataset.grp+(MEALS_DATA&&MEALS_DATA.required.includes(b.dataset.grp)?' *':''); }
+function pickLike(b){ b.parentNode.querySelectorAll('.meal-like').forEach(x=>x.classList.remove('on')); b.classList.add('on'); b.parentNode.dataset.val=b.dataset.like; }
+async function mealPhotoPick(meal,input){ const f=input.files&&input.files[0]; if(!f)return; try{ MEAL_PHOTO[meal]=await resizeImage(f,900,0.7); $('meal_thumb_'+meal).innerHTML=`<img src="${MEAL_PHOTO[meal]}" style="height:36px;border-radius:6px"/>`; }catch(e){} input.value=''; }
+async function saveMealCheck(meal){
+  const grps=[...document.querySelectorAll(`#meal_grps_${meal} .meal-grp.on`)].map(b=>b.dataset.grp);
+  const likeWrap=$('meal_like_'+meal); const liked=likeWrap?likeWrap.dataset.val:'';
+  const body={ meal, expected:$('meal_exp_'+meal).value, received:$('meal_rec_'+meal).value, groups:grps, liked:liked||undefined, issues:$('meal_iss_'+meal).value };
+  if(MEAL_PHOTO[meal]) body.photo=MEAL_PHOTO[meal];
+  $('meal_msg_'+meal).textContent='Saving…';
+  try{ const r=await api('/meals/check',{method:'POST',body:JSON.stringify(body)});
+    $('meal_msg_'+meal).textContent = r.complete?'✓ Complete':('⚠ '+([r.enough?'':'short on portions', r.missing.length?'missing '+r.missing.join(', '):''].filter(Boolean).join(' · ')||'logged'));
+    delete MEAL_PHOTO[meal]; loadMeals();
+  }catch(e){ $('meal_msg_'+meal).textContent=e.message; }
+}
+async function loadMealsScore(){
+  let s; try{ s=await api('/meals/scorecard'); }catch(e){ return; }
+  if(!s.logged){ $('mealsScore').innerHTML='<div class="hint">No meals inspected in the last 30 days yet.</div>'; return; }
+  $('mealsScore').innerHTML = `<div class="ret-cards">
+      <div class="ret-card ${s.completePct!=null&&s.completePct<90?'rc-warn':''}"><div class="n">${s.completePct!=null?s.completePct+'%':'—'}</div><div class="l">Met the standard</div></div>
+      <div class="ret-card"><div class="n">${s.likedPct!=null?s.likedPct+'%':'—'}</div><div class="l">Clients liked it</div></div>
+      <div class="ret-card ${s.shortCount?'rc-high':''}"><div class="n">${s.shortCount}</div><div class="l">Short deliveries</div></div>
+      <div class="ret-card"><div class="n">${s.logged}</div><div class="l">Meals inspected</div></div>
+    </div>
+    ${s.missing.length?`<p class="sans" style="margin-top:8px"><strong>Most-missed food groups:</strong> ${s.missing.map(m=>esc(m.group)+' ('+m.n+')').join(' · ')}</p>`:''}
+    ${s.recentIssues.length?`<div style="margin-top:8px"><strong class="sans">Recent issues</strong>${s.recentIssues.map(i=>`<div class="pc-note">${esc(i.date)} ${esc(i.meal)} — ${esc(i.issue)}</div>`).join('')}</div>`:''}`;
 }
 
 /* ---- Supply Standards: shift inventory + reorder ---- */

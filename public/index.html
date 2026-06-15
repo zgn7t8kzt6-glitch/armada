@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615Y" />
+<link rel="stylesheet" href="/styles.css?v=20260615Z" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -58,6 +58,7 @@
     <button data-view="rounds">Rounds</button>
     <button data-view="engagement">Engagement</button>
     <button data-view="program">Program</button>
+    <button data-view="meals">Meals</button>
     <button data-view="incidents" data-subview>Incidents</button>
     <button data-view="casemgmt">Case Mgmt</button>
     <button data-view="continuum">Continuum</button>
@@ -327,6 +328,22 @@
           <div class="itabs" style="margin:0;border:none"><button class="itab active" id="engTabWeek" onclick="setEngRange('week')">This week</button><button class="itab" id="engTabMonth" onclick="setEngRange('month')">This month</button></div>
         </div>
         <div id="engStaff"></div>
+      </div>
+    </section>
+
+    <!-- MEAL SERVICE (the Table — caterer delivery inspection) -->
+    <section id="meals" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>The Table — meal service</h3><p class="sub sans">When the caterer delivers, inspect it before it reaches a client: enough portions, every food group, and how it landed. We never short or shortchange a client's plate.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadMeals()">Refresh</button>
+        </div>
+        <div id="mealsKpis" class="ret-cards"></div>
+      </div>
+      <div id="mealsToday"></div>
+      <div class="card">
+        <div class="cmd-hero-row"><div><h3>📋 Caterer scorecard (30 days)</h3><p class="sub sans">Are they holding the standard? Track it tight.</p></div></div>
+        <div id="mealsScore"></div>
       </div>
     </section>
 
@@ -1470,6 +1487,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615Y"></script>
+<script src="/app.js?v=20260615Z"></script>
 </body>
 </html>

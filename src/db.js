@@ -658,6 +658,30 @@ CREATE TABLE IF NOT EXISTS maintenance_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_maint_status ON maintenance_requests(status, priority);
 
+-- MEAL SERVICE — the Ritz receiving inspection. Every meal the caterer delivers
+-- is checked by the tech serving it: enough portions vs. census, all food groups
+-- present (protein/carb/veg/fruit…), and whether clients liked it. One row per
+-- meal per day (upsert). Feeds a caterer scorecard so standards stay tight.
+CREATE TABLE IF NOT EXISTS meal_checks (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,                       -- YYYY-MM-DD
+  meal TEXT NOT NULL,                       -- Breakfast | Lunch | Dinner | Snack
+  expected INTEGER,                         -- portions we needed (census + welcome)
+  received INTEGER,                         -- portions actually delivered
+  groups TEXT,                              -- JSON array of food groups present
+  liked TEXT,                               -- Liked | OK | Disliked
+  quality INTEGER,                          -- 1–5 (optional)
+  issues TEXT,                              -- what was wrong / missing
+  photo TEXT,                               -- optional delivery photo (data URL)
+  complete INTEGER NOT NULL DEFAULT 0,      -- 1 = met portions + all required groups
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(date, meal)
+);
+CREATE INDEX IF NOT EXISTS idx_meal_checks ON meal_checks(date, meal);
+
 -- Scheduling: a staffing need (one row per part×role on a date, with how many needed).
 CREATE TABLE IF NOT EXISTS schedule_slots (
   id INTEGER PRIMARY KEY,

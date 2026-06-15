@@ -2341,21 +2341,24 @@ function renderAttentionList(t){
       <div class="txt">${icon[a.kind]||'•'} ${esc(a.text)}</div>
       ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}</div>`).join('') : '<div class="pc-note">✓ All clear. Touch every client, deliver every personal touch.</div>';
 }
-/* ---- Engagement & Rewards ---- */
+/* ---- Engagement: client engagement tracking + STAFF rewards ---- */
+let ENG_RANGE='week', ENG_STAFF=null;
 async function loadEngagement(){
-  let e, r; try{ [e, r] = await Promise.all([api('/engagement'), api('/rewards')]); }catch(ex){ if($('engBoard')) $('engBoard').innerHTML='<div class="hint">'+esc(ex.message)+'</div>'; return; }
+  let e, s; try{ [e, s] = await Promise.all([api('/engagement'), api('/engagement/staff')]); }catch(ex){ if($('engStaff')) $('engStaff').innerHTML='<div class="hint">'+esc(ex.message)+'</div>'; return; }
+  ENG_STAFF=s;
   $('engKpis').innerHTML = `<div class="ret-card"><div class="n">${e.pctEngaged!=null?e.pctEngaged+'%':'—'}</div><div class="l">Engaged today</div></div>`+
-    `<div class="ret-card ${e.disengaged.length?'rc-warn':''}"><div class="n">${e.disengaged.length}</div><div class="l">Disengaged</div></div>`+
-    `<div class="ret-card"><div class="n">${r.pointsPerActivity}</div><div class="l">Points / activity</div></div>`;
+    `<div class="ret-card ${e.disengaged.length?'rc-warn':''}"><div class="n">${e.disengaged.length}</div><div class="l">Not engaged today</div></div>`+
+    `<div class="ret-card"><div class="n">${s.total}</div><div class="l">Activities logged (all-time)</div></div>`;
   $('engDisengaged').innerHTML = e.disengaged.length ? e.disengaged.map(c=>`<div class="todo"><div class="txt"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}${c.interests?'<div class="hint">💛 loves: '+esc(c.interests)+'</div>':'<div class="hint">no interests set — ask &amp; add to Care Card</div>'}</div><button class="btn btn-gold btn-sm sans" onclick="dashLogActivity(${c.id}, ${JSON.stringify(c.name).replace(/"/g,'&quot;')})">Log activity</button></div>`).join('') : '<div class="pc-note">✓ Everyone engaged today.</div>';
-  $('engBoard').innerHTML = r.leaderboard.length ? `<table class="tbl"><tr><th>Client</th><th>Points</th><th>This week</th></tr>${r.leaderboard.map(c=>`<tr><td>${esc(c.name)}</td><td><strong>${c.points}</strong></td><td>${c.weekEarned}</td></tr>`).join('')}</table>` : '<div class="hint">No points yet — log activities to start.</div>';
-  $('rw_client').innerHTML = r.leaderboard.map(c=>`<option value="${c.id}">${esc(c.name)} (${c.points} pts)</option>`).join('');
-  $('rw_reward').innerHTML = r.rewards.filter(x=>x.active).map(x=>`<option value="${x.id}">${esc(x.name)} — ${x.cost} pts</option>`).join('');
-  $('rewardList').innerHTML = r.rewards.map(x=>`<div class="pc-note">${x.active?'':'<span class="hint">(off) </span>'}<strong>${esc(x.name)}</strong> — ${x.cost} pts ${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="toggleReward(${x.id})">${x.active?'Disable':'Enable'}</button>`:''}</div>`).join('');
+  renderEngStaff();
 }
-async function redeemReward(){ const cid=$('rw_client').value, rid=$('rw_reward').value; if(!cid||!rid)return; try{ const r=await api('/rewards/redeem',{method:'POST',body:JSON.stringify({client_id:cid,reward_id:rid})}); $('rw_msg').textContent='✓ Redeemed — balance now '+r.balance+' pts.'; loadEngagement(); }catch(e){ $('rw_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
-async function addReward(){ if(!$('rw_new').value.trim())return; try{ await api('/rewards',{method:'POST',body:JSON.stringify({name:$('rw_new').value,cost:$('rw_cost').value})}); $('rw_new').value=$('rw_cost').value=''; loadEngagement(); }catch(e){ alert(e.message); } }
-async function toggleReward(id){ try{ await api('/rewards/'+id+'/toggle',{method:'POST'}); loadEngagement(); }catch(e){ alert(e.message); } }
+function setEngRange(r){ ENG_RANGE=r; $('engTabWeek').classList.toggle('active',r==='week'); $('engTabMonth').classList.toggle('active',r==='month'); renderEngStaff(); }
+function renderEngStaff(){
+  if(!ENG_STAFF) return;
+  const rows = ENG_RANGE==='month'?ENG_STAFF.month:ENG_STAFF.week;
+  const medal=i=>['🥇','🥈','🥉'][i]||(i+1)+'.';
+  $('engStaff').innerHTML = rows.length ? `<table class="tbl"><tr><th>Staff</th><th>Activities</th><th>Clients engaged</th></tr>${rows.map((r,i)=>`<tr><td>${medal(i)} <strong>${esc(r.by_name)}</strong></td><td>${r.n}</td><td>${r.clients}</td></tr>`).join('')}</table>` : '<div class="hint">No activities logged yet this '+ENG_RANGE+'. Log one from the disengaged list above.</div>';
+}
 
 /* ---- My Shift: role-tailored employee dashboard ---- */
 function dashScrollTo(key){ const el=$('dash-'+key); if(!el) return; el.scrollIntoView({behavior:'smooth',block:'start'}); el.style.transition='box-shadow .3s'; el.style.boxShadow='0 0 0 2px var(--gold)'; setTimeout(()=>{el.style.boxShadow='';},1300); }

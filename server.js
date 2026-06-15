@@ -1746,55 +1746,21 @@ app.post('/api/staff-pulse', requireAuth, (req, res) => {
 // music room / gym / art room / arcade and surface who's disengaged.
 const AMENITIES = ['Music room', 'Gym', 'Art room', 'Arcade', 'Outdoors', 'Games', 'Movies', 'Reading'];
 app.get('/api/amenities', requireAuth, (req, res) => res.json({ amenities: AMENITIES }));
-function clientPoints(id) { return db.prepare(`SELECT COALESCE(SUM(points),0) p FROM point_ledger WHERE client_id = ?`).get(id).p; }
-function awardPoints(clientId, points, reason, user) {
-  if (!clientId || !points) return;
-  db.prepare(`INSERT INTO point_ledger (client_id, points, reason, by_id, by_name) VALUES (?,?,?,?,?)`)
-    .run(clientId, points, reason || null, user?.id ?? null, user?.name || 'System');
-}
 app.post('/api/activities', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.client_id || !b.type) return res.status(400).json({ error: 'Missing client or activity' });
   db.prepare(`INSERT INTO activities (client_id, type, note, by_id, by_name) VALUES (?,?,?,?,?)`)
     .run(b.client_id, String(b.type).slice(0, 60), (b.note || '').trim() || null, req.user.id, req.user.name);
-  // Contingency-management reward: engagement earns points.
-  const pts = +autoCfg('points_per_activity', process.env.POINTS_PER_ACTIVITY || 10);
-  if (pts > 0) awardPoints(+b.client_id, pts, `Activity: ${b.type}`, req.user);
+  // The credit goes to the STAFF member who got the client engaged — it counts
+  // toward their engagement score and the monthly Care Champion.
   audit({ user: req.user, action: 'ACTIVITY', entity: 'client', entity_id: +b.client_id, detail: b.type, ip: req.ip });
-  res.json({ ok: true, balance: clientPoints(+b.client_id) });
-});
-// Engagement rewards (contingency management): catalog, balances, redemption.
-app.get('/api/rewards', requireAuth, (req, res) => {
-  const rewards = db.prepare(`SELECT id, name, cost, active FROM rewards ORDER BY active DESC, sort, cost`).all();
-  const leaderboard = db.prepare(`SELECT c.id, c.pref, c.name, COALESCE(SUM(p.points),0) pts,
-      (SELECT COALESCE(SUM(p2.points),0) FROM point_ledger p2 WHERE p2.client_id = c.id AND p2.points > 0 AND p2.created_at >= datetime('now','-7 day')) weekEarned
-    FROM clients c LEFT JOIN point_ledger p ON p.client_id = c.id
-    WHERE c.active = 1 AND c.discharge_status IS NULL GROUP BY c.id ORDER BY pts DESC`).all()
-    .map((r) => ({ id: r.id, name: r.pref || r.name, points: r.pts, weekEarned: r.weekEarned }));
-  res.json({ rewards, leaderboard, pointsPerActivity: +autoCfg('points_per_activity', process.env.POINTS_PER_ACTIVITY || 10) });
-});
-app.post('/api/points', requireAuth, (req, res) => {
-  const b = req.body || {}; if (!b.client_id || !b.points) return res.status(400).json({ error: 'Missing client or points' });
-  awardPoints(+b.client_id, Math.round(+b.points), (b.reason || '').trim() || 'Awarded', req.user);
-  audit({ user: req.user, action: 'POINTS', entity: 'client', entity_id: +b.client_id, detail: `${b.points}`, ip: req.ip });
-  res.json({ ok: true, balance: clientPoints(+b.client_id) });
-});
-app.post('/api/rewards', requireAuth, requireAdmin, (req, res) => {
-  const b = req.body || {}; if (!b.name?.trim()) return res.status(400).json({ error: 'Missing name' });
-  db.prepare(`INSERT INTO rewards (name, cost) VALUES (?, ?)`).run(b.name.trim(), Math.max(1, +b.cost || 10));
   res.json({ ok: true });
 });
-app.post('/api/rewards/:id/toggle', requireAuth, requireAdmin, (req, res) => {
-  db.prepare(`UPDATE rewards SET active = 1 - active WHERE id = ?`).run(req.params.id);
-  res.json({ ok: true });
-});
-app.post('/api/rewards/redeem', requireAuth, (req, res) => {
-  const b = req.body || {}; const reward = db.prepare(`SELECT * FROM rewards WHERE id = ? AND active = 1`).get(b.reward_id);
-  if (!b.client_id || !reward) return res.status(400).json({ error: 'Missing client or reward' });
-  const bal = clientPoints(+b.client_id);
-  if (bal < reward.cost) return res.status(400).json({ error: `Not enough points (${bal}/${reward.cost})` });
-  awardPoints(+b.client_id, -reward.cost, `Redeemed: ${reward.name}`, req.user);
-  audit({ user: req.user, action: 'REDEEM', entity: 'client', entity_id: +b.client_id, detail: reward.name, ip: req.ip });
-  res.json({ ok: true, balance: clientPoints(+b.client_id) });
+// Staff engagement leaderboard: who got the most clients into activities. This
+// is what we reward — recognition for the team that fights boredom.
+app.get('/api/engagement/staff', requireAuth, (req, res) => {
+  const span = (d) => db.prepare(`SELECT by_name, COUNT(*) n, COUNT(DISTINCT client_id) clients FROM activities
+    WHERE by_name IS NOT NULL AND created_at >= datetime('now','-${d} day') GROUP BY by_name ORDER BY n DESC`).all();
+  res.json({ week: span(7), month: span(30), total: db.prepare(`SELECT COUNT(*) n FROM activities`).get().n });
 });
 // Engagement board: per active client — interests, last activity, count this
 // week — plus who hasn't engaged today (the boredom/AMA risk to encourage).
@@ -3564,7 +3530,8 @@ function maybeCrownChampion(today) {
       SELECT u.name user_name FROM pulses p JOIN users u ON u.id = p.author_id WHERE p.date >= ? AND p.date < ?
       UNION ALL SELECT by_name FROM delights WHERE created_at >= ? AND created_at < ? AND by_name IS NOT NULL
       UNION ALL SELECT by_name FROM wows WHERE created_at >= ? AND created_at < ? AND by_name IS NOT NULL
-    ) GROUP BY user_name ORDER BY n DESC LIMIT 1`).get(lastStart, thisStart, lastStart, thisStart, lastStart, thisStart);
+      UNION ALL SELECT by_name FROM activities WHERE created_at >= ? AND created_at < ? AND by_name IS NOT NULL
+    ) GROUP BY user_name ORDER BY n DESC LIMIT 1`).get(lastStart, thisStart, lastStart, thisStart, lastStart, thisStart, lastStart, thisStart);
   setState('champion_announced:' + lastMonth, '1');
   if (!champ || !champ.user_name) return;
   const monthName = new Date(lastStart + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });

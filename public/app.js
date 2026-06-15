@@ -2351,7 +2351,16 @@ async function loadEngagement(){
     `<div class="ret-card ${e.disengaged.length?'rc-warn':''}"><div class="n">${e.disengaged.length}</div><div class="l">Not engaged today</div></div>`+
     `<div class="ret-card"><div class="n">${s.total}</div><div class="l">Activities logged (all-time)</div></div>`;
   $('engDisengaged').innerHTML = e.disengaged.length ? e.disengaged.map(c=>`<div class="todo"><div class="txt"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''}${c.interests?'<div class="hint">💛 loves: '+esc(c.interests)+'</div>':'<div class="hint">no interests set — ask &amp; add to Care Card</div>'}</div><button class="btn btn-gold btn-sm sans" onclick="dashLogActivity(${c.id}, ${JSON.stringify(c.name).replace(/"/g,'&quot;')})">Log activity</button></div>`).join('') : '<div class="pc-note">✓ Everyone engaged today.</div>';
+  // Group/session logger
+  if($('grp_type')){ $('grp_type').innerHTML = AMENITIES.concat(['Group therapy','Outing']).map(a=>`<option>${esc(a)}</option>`).join(''); }
+  if($('grp_clients')){ $('grp_clients').innerHTML = (e.rows||[]).map(c=>`<label class="sans" style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:8px;padding:5px 9px;cursor:pointer"><input type="checkbox" value="${c.id}"/> ${esc(c.name)}${c.room?' <span class="hint">'+esc(c.room)+'</span>':''}</label>`).join(''); }
   renderEngStaff();
+}
+async function logGroup(){
+  const type=$('grp_type').value; const ids=[...document.querySelectorAll('#grp_clients input:checked')].map(x=>+x.value);
+  if(!type||!ids.length){ $('grp_msg').textContent='Pick an activity and at least one client.'; return; }
+  try{ const r=await api('/activities/bulk',{method:'POST',body:JSON.stringify({type, client_ids:ids})}); $('grp_msg').textContent='✓ Logged '+r.logged+' attendee(s).'; loadEngagement(); }
+  catch(e){ $('grp_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 function setEngRange(r){ ENG_RANGE=r; $('engTabWeek').classList.toggle('active',r==='week'); $('engTabMonth').classList.toggle('active',r==='month'); renderEngStaff(); }
 function renderEngStaff(){

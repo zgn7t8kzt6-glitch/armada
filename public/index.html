@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260615t" />
+<link rel="stylesheet" href="/styles.css?v=20260615u" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -290,6 +290,13 @@
         <div id="engKpis" class="ret-cards"></div>
       </div>
       <div class="card"><h3>No activity today — encourage them</h3><div id="engDisengaged"></div></div>
+      <div class="card">
+        <h3>Log a group / session 👥</h3>
+        <p class="sub sans">Ran a music, gym, art, or arcade session? Pick it and check who came — one tap logs them all and credits you.</p>
+        <div style="max-width:280px"><label>Activity</label><select id="grp_type"></select></div>
+        <div id="grp_clients" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px"></div>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:10px"><button class="btn btn-gold sans" onclick="logGroup()">Log attendance</button><span id="grp_msg" class="hint" style="align-self:center"></span></div>
+      </div>
       <div class="card">
         <div class="cmd-hero-row">
           <div><h3>Staff Engagement Leaderboard 🏆</h3><p class="sub sans">Who got the most clients into activities — this is what we reward. Recognition for the team that fights boredom; every activity also counts toward the monthly Care Champion.</p></div>
@@ -1265,6 +1272,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260615t"></script>
+<script src="/app.js?v=20260615u"></script>
 </body>
 </html>

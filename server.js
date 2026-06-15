@@ -1766,6 +1766,15 @@ app.post('/api/activities', requireAuth, (req, res) => {
   audit({ user: req.user, action: 'ACTIVITY', entity: 'client', entity_id: +b.client_id, detail: b.type, ip: req.ip });
   res.json({ ok: true });
 });
+// Group attendance: log a whole session's attendees in one shot.
+app.post('/api/activities/bulk', requireAuth, (req, res) => {
+  const b = req.body || {}; const ids = Array.isArray(b.client_ids) ? b.client_ids.map(Number).filter(Boolean) : [];
+  if (!b.type || !ids.length) return res.status(400).json({ error: 'Pick an activity and at least one client' });
+  const ins = db.prepare(`INSERT INTO activities (client_id, type, note, by_id, by_name) VALUES (?,?,?,?,?)`);
+  let n = 0; for (const id of ids) { ins.run(id, String(b.type).slice(0, 60), (b.note || '').trim() || null, req.user.id, req.user.name); n++; }
+  audit({ user: req.user, action: 'ACTIVITY_BULK', detail: `${b.type} x${n}`, ip: req.ip });
+  res.json({ ok: true, logged: n });
+});
 // Staff engagement leaderboard: who got the most clients into activities. This
 // is what we reward — recognition for the team that fights boredom.
 app.get('/api/engagement/staff', requireAuth, (req, res) => {

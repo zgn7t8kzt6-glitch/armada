@@ -160,6 +160,20 @@ CREATE TABLE IF NOT EXISTS delights (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Activity / amenity engagement: which clients are actually using the music
+-- room, gym, art room, arcade, etc. Boredom is a top AMA driver, so we track
+-- utilization and surface who is disengaged.
+CREATE TABLE IF NOT EXISTS activities (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  note TEXT,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_activities_client ON activities(client_id, created_at);
+
 -- Wow Stories / moments-of-care recognition (the Daily Lineup culture).
 CREATE TABLE IF NOT EXISTS wows (
   id INTEGER PRIMARY KEY,
@@ -832,6 +846,7 @@ addColumn('clients', 'obs_interval', 'INTEGER');       // per-client observation
 addColumn('clients', 'summary', 'TEXT');               // AI at-a-glance snapshot (kept fresh)
 addColumn('clients', 'summary_at', 'TEXT');            // when the snapshot was last updated
 addColumn('clients', 'likes', 'TEXT');                 // what the client likes/enjoys (AI, kept fresh)
+addColumn('clients', 'interests', 'TEXT');             // amenities/activities they love (Care Card) — drives engagement
 // Case-management needs the team should help with, pulled from the notes + manual.
 db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   id INTEGER PRIMARY KEY,

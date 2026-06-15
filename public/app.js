@@ -281,9 +281,23 @@ async function dischargeClient(){
     show('clients');
   }
 }
-const FF = ['name','pref','room','program','admit','admit_time','sober','therapist','case_manager','referral_source','touch','prefs','goals','triggers','safety','support','anchor_why','welcome_plan','aftercare_plan'];
+const FF = ['name','pref','room','program','admit','admit_time','sober','therapist','case_manager','referral_source','touch','prefs','goals','triggers','safety','support','anchor_why','interests','welcome_plan','aftercare_plan'];
+const AMENITIES = ['Music room','Gym','Art room','Arcade','Outdoors','Games','Movies','Reading'];
+function renderInterestChips(){
+  const box=$('interestChips'); if(!box) return;
+  const cur = ($('f_interests').value||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  box.innerHTML = AMENITIES.map(a=>{ const on=cur.includes(a.toLowerCase());
+    return `<button type="button" class="btn ${on?'btn-gold':'btn-ghost'} btn-sm sans" style="margin:2px" onclick="toggleInterest('${esc(a)}')">${on?'✓ ':''}${esc(a)}</button>`; }).join('');
+}
+function toggleInterest(a){
+  let cur = ($('f_interests').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const i = cur.findIndex(x=>x.toLowerCase()===a.toLowerCase());
+  if(i>=0) cur.splice(i,1); else cur.push(a);
+  $('f_interests').value = cur.join(', '); renderInterestChips();
+}
 function fillForm(c){
   FF.forEach(f => $('f_'+f).value = c[f]||'');
+  renderInterestChips();
   // Identity comes from Kipu (single source of truth) — lock those fields; staff
   // edit the hospitality/preferences fields only.
   const fromKipu = !!c.kipu_id;
@@ -1671,6 +1685,7 @@ async function cmdFlowPanel(key){
   else if(key==='admits'){ const a=d.flow.admitsTodayList||[]; html=`<h3>Admits today (${a.length})</h3>`+(a.length?a.map(x=>`<div class="pc-note">☀ <strong>${esc(x.name)}</strong>${x.loc?' · '+esc(x.loc):''}</div>`).join(''):'<div class="hint">No admits today.</div>'); }
   else if(key==='dcToday'){ const a=d.flow.dischargesTodayList||[]; html=`<h3>Discharges today (${a.length}) — click to open the chart</h3>`+(a.length?a.map(row).join(''):'<div class="hint">No discharges today.</div>'); }
   else if(key==='dc7d'){ const a=d.flow.dischargesRecentList||[]; html=`<h3>Recent discharges (${a.length}) — click to open the chart</h3>`+(a.length?a.map(row).join(''):'<div class="hint">No recent discharges.</div>'); }
+  else if(key==='engage'){ const a=(d.engagement&&d.engagement.disengaged)||[]; html=`<h3>No activity today (${a.length}) — boredom is an AMA risk; encourage them</h3>`+(a.length?a.map(x=>`<div class="pc-note" onclick="editClient(${x.id})" style="cursor:pointer"><strong>${esc(x.name)}</strong>${x.room?' <span class="hint">· '+esc(x.room)+'</span>':''}${x.interests?'<div class="hint">💛 loves: '+esc(x.interests)+'</div>':'<div class="hint">no interests set</div>'}</div>`).join(''):'<div class="pc-note">✓ Everyone engaged today.</div>'); }
   else if(key==='carecards'){
     host.innerHTML='<div class="hint">Loading care cards…</div>'; mark();
     let cc; try{ cc=await api('/carecards'); }catch(e){ host.innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; return; }
@@ -1716,6 +1731,7 @@ async function loadCommand(){
     <div class="ret-card ${d.staffing.gaps.length?'rc-high':''}" onclick="show('schedule')" style="cursor:pointer"><div class="n">${d.staffing.pct!=null?d.staffing.pct+'%':'—'}</div><div class="l">Covered today ›</div></div>
     <div class="ret-card ${d.documentation.gaps.length?'rc-warn':''}" onclick="show('compliance')" style="cursor:pointer"><div class="n">${d.documentation.gaps.length}</div><div class="l">Notes to finish ›</div></div>
     ${d.rounds?`<div class="ret-card ${d.rounds.overdue?'rc-high':''}" onclick="show('rounds')" style="cursor:pointer"><div class="n">${d.rounds.overdue}</div><div class="l">Rounds overdue ›</div></div>`:''}
+    ${d.engagement?`<div class="ret-card ${d.engagement.disengaged.length?'rc-warn':''}" ${clk('engage')}><div class="n">${d.engagement.pct!=null?d.engagement.pct+'%':'—'}</div><div class="l">Engaged today ›</div></div>`:''}
     ${d.careCards?`<div class="ret-card ${d.careCards.overdue?'rc-high':(d.careCards.incomplete?'rc-warn':'')}" ${clk('carecards')}><div class="n">${d.careCards.incomplete}</div><div class="l">Care cards to fill ›</div></div>`:''}`;
 
   // Midnight Census — mirrors the nightly census email
@@ -2374,9 +2390,9 @@ async function loadDashboard(){
       ${nudges.map((n,i)=>`<div class="todo"><div class="txt">✨ ${esc(n.text)}</div><button class="btn btn-gold btn-sm sans" onclick="markDelivered(${n.id}, ${JSON.stringify(n.text).replace(/"/g,'&quot;')}, this)">✓ Delivered</button></div>`).join('')}
     </div>` : '';
   $('dashSections').innerHTML = (d.sections||[]).map(s=>{
-    const items = (s.items&&s.items.length) ? s.items.map(it=>`<div class="todo" ${it.id?`onclick="openJourney(${it.id})" style="cursor:pointer"`:''}>
+    const items = (s.items&&s.items.length) ? s.items.map(it=>`<div class="todo" ${it.id&&!it.act?`onclick="openJourney(${it.id})" style="cursor:pointer"`:''}>
         <div class="txt">${it.badge?`<span class="risk ${/high|ama|allergy|no-show|out/i.test(it.badge)?'risk-high':'risk-elev'}">${esc(it.badge)}</span> `:''}<strong>${esc(it.name)}</strong>${it.room?' <span class="hint">· '+esc(it.room)+'</span>':''}${it.sub?'<div class="hint">'+esc(it.sub)+'</div>':''}</div>
-        ${it.id?'<span class="hint">›</span>':''}</div>`).join('') : '<div class="pc-note">✓ Nothing here right now.</div>';
+        ${it.act?`<button class="btn btn-gold btn-sm sans" onclick="dashLogActivity(${it.id}, ${JSON.stringify(it.name).replace(/"/g,'&quot;')})">Log activity</button>`:(it.id?'<span class="hint">›</span>':'')}</div>`).join('') : '<div class="pc-note">✓ Nothing here right now.</div>';
     const cta = s.cta?`<div class="toolbar" style="margin-top:8px;justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="show('${s.cta.view}')">${esc(s.cta.label)}</button></div>`:'';
     return `<div class="card" id="dash-${esc(s.key)}"><h3>${esc(s.title)}</h3>${items}${cta}</div>`;
   }).join('');
@@ -2387,6 +2403,16 @@ async function loadDashboard(){
 }
 async function dashJoinFocus(btn){
   try{ await api('/focus',{method:'POST',body:JSON.stringify({})}); if(btn){ btn.textContent='✓ On it'; btn.disabled=true; } }catch(e){ alert(e.message); }
+}
+async function dashLogActivity(id, name){
+  const list = AMENITIES.map((a,i)=>`${i+1}. ${a}`).join('\n');
+  const pick = prompt(`Log an activity for ${name}:\n\n${list}\n\nEnter a number or type the activity:`); if(pick===null) return;
+  const idx = parseInt(pick,10);
+  const type = (!isNaN(idx) && AMENITIES[idx-1]) ? AMENITIES[idx-1] : pick.trim();
+  if(!type) return;
+  try{ await api('/activities',{method:'POST',body:JSON.stringify({client_id:id, type})});
+    if($('dashboard')&&$('dashboard').classList.contains('active')) loadDashboard(); }
+  catch(e){ alert(e.message); }
 }
 async function celebrate(id, label, btn){
   try{ await api('/delights',{method:'POST',body:JSON.stringify({client_id:id, text:'Celebrated their '+label+' milestone 🎉'})});

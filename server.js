@@ -408,7 +408,7 @@ app.get('/api/clients/:id/chart/:evalId', requireAuth, async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
-const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'admit_time', 'sober', 'therapist', 'case_manager', 'referral_source', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'anchor_why', 'welcome_plan', 'aftercare_plan'];
+const CLIENT_FIELDS = ['name', 'pref', 'room', 'program', 'admit', 'admit_time', 'sober', 'therapist', 'case_manager', 'referral_source', 'touch', 'prefs', 'goals', 'triggers', 'safety', 'support', 'anchor_why', 'interests', 'welcome_plan', 'aftercare_plan'];
 
 function saveTasks(clientId, tasks = []) {
   db.prepare(`DELETE FROM tasks WHERE client_id = ?`).run(clientId);
@@ -879,7 +879,7 @@ const isDetoxProgram = (p) => /detox|withdrawal|\bwm\b|3\.?2|3\.?7/i.test(p || '
 
 app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
-  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, next_loc, anticipated_dc FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, next_loc, anticipated_dc, interests FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
 
   // Flow
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
@@ -983,6 +983,11 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   for (const c of ccRows) { const st = careCardStatus(c); if (st.complete) ccComplete++; else { const m = careCardMinsSinceAdmit(c); if (m != null && m > CARECARD_DUE_MIN) ccOverdue++; } }
   const careCards = { total: ccRows.length, complete: ccComplete, incomplete: ccRows.length - ccComplete, overdue: ccOverdue, dueMin: CARECARD_DUE_MIN };
 
+  // Engagement — how many clients did an activity today (boredom = AMA risk).
+  const engSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM activities WHERE substr(created_at,1,10) = ?`).all(today).map((r) => r.client_id));
+  const engDisengaged = active.filter((c) => !engSet.has(c.id)).map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room, interests: c.interests || '' }));
+  const engagement = { total: active.length, engaged: active.length - engDisengaged.length, disengaged: engDisengaged, pct: active.length ? Math.round((active.length - engDisengaged.length) / active.length * 100) : null };
+
   // Observation-rounds compliance: how many clients are within their check window.
   const obsRows = db.prepare(`SELECT c.obs_interval, (SELECT ts FROM obs_checks o WHERE o.client_id = c.id ORDER BY o.id DESC LIMIT 1) last FROM clients c WHERE c.active = 1 AND c.discharge_status IS NULL`).all();
   const nowMs = Date.now();
@@ -1019,6 +1024,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     staffing: { needed, scheduled, gaps, callOffsToday, pct: needed ? Math.round(scheduled / needed * 100) : null },
     careCards,
     rounds,
+    engagement,
     checklist: { total: chk?.total || 0, done: chk?.done || 0 },
   });
 });
@@ -1736,6 +1742,32 @@ app.post('/api/staff-pulse', requireAuth, (req, res) => {
     .run(req.user.id, req.body?.load || null, req.body?.note || null, new Date().toISOString().slice(0, 10));
   res.json({ ok: true });
 });
+// Amenity engagement — boredom is a top AMA driver, so we track who's using the
+// music room / gym / art room / arcade and surface who's disengaged.
+const AMENITIES = ['Music room', 'Gym', 'Art room', 'Arcade', 'Outdoors', 'Games', 'Movies', 'Reading'];
+app.get('/api/amenities', requireAuth, (req, res) => res.json({ amenities: AMENITIES }));
+app.post('/api/activities', requireAuth, (req, res) => {
+  const b = req.body || {}; if (!b.client_id || !b.type) return res.status(400).json({ error: 'Missing client or activity' });
+  db.prepare(`INSERT INTO activities (client_id, type, note, by_id, by_name) VALUES (?,?,?,?,?)`)
+    .run(b.client_id, String(b.type).slice(0, 60), (b.note || '').trim() || null, req.user.id, req.user.name);
+  audit({ user: req.user, action: 'ACTIVITY', entity: 'client', entity_id: +b.client_id, detail: b.type, ip: req.ip });
+  res.json({ ok: true });
+});
+// Engagement board: per active client — interests, last activity, count this
+// week — plus who hasn't engaged today (the boredom/AMA risk to encourage).
+app.get('/api/engagement', requireAuth, (req, res) => {
+  const active = db.prepare(`SELECT id, pref, name, room, interests FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const lastBy = db.prepare(`SELECT client_id, MAX(created_at) last FROM activities GROUP BY client_id`).all().reduce((a, r) => (a[r.client_id] = r.last, a), {});
+  const weekBy = db.prepare(`SELECT client_id, COUNT(*) n FROM activities WHERE created_at >= datetime('now','-7 day') GROUP BY client_id`).all().reduce((a, r) => (a[r.client_id] = r.n, a), {});
+  const today = appToday();
+  const rows = active.map((c) => {
+    const last = lastBy[c.id] || null;
+    const engagedToday = last && String(last).slice(0, 10) === today;
+    return { id: c.id, name: c.pref || c.name, room: c.room || '', interests: c.interests || '', lastActivity: last ? String(last).slice(0, 10) : null, week: weekBy[c.id] || 0, engagedToday };
+  });
+  const engaged = rows.filter((r) => r.engagedToday).length;
+  res.json({ total: active.length, engagedToday: engaged, pctEngaged: active.length ? Math.round(engaged / active.length * 100) : null, disengaged: rows.filter((r) => !r.engagedToday), rows });
+});
 // Save outcomes summary (the existing saves table: outcome Stayed/Left/Pending).
 app.get('/api/saves/stats', requireAuth, (req, res) => {
   const days = Math.min(365, Math.max(7, +req.query.days || 90));
@@ -1972,10 +2004,11 @@ function anticipationNudges(clients, hour) {
   const evening = hour >= 17 || hour < 6;
   const morning = hour >= 6 && hour < 11;
   for (const c of clients) {
-    const blob = [c.prefs, c.likes, c.touch, c.support, c.goals].filter(Boolean).join(' ').toLowerCase();
+    const blob = [c.prefs, c.likes, c.touch, c.support, c.goals, c.interests].filter(Boolean).join(' ').toLowerCase();
     const name = c.pref || c.name;
     const seen = new Set();
     const push = (text, key) => { if (seen.has(key)) return; seen.add(key); out.push({ id: c.id, name, text, key }); };
+    if (c.interests && c.interests.trim()) push(`${name} loves ${c.interests.split(',')[0].trim()} — get them there today.`, 'amenity');
     if (blob) {
       if (/coffee/.test(blob) && morning) push(`Bring ${name} their morning coffee.`, 'coffee');
       else if (/\btea\b/.test(blob)) push(`Offer ${name} a tea.`, 'tea');
@@ -2143,6 +2176,11 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'watch', title: 'Watch tonight — at risk of leaving (run the Save)', items: atRisk.map((x) => item(x.c, x.c.anchor_why ? 'why they came: ' + x.c.anchor_why : '', x.lvl)) });
     sections.push({ key: 'touches', title: "Anticipate — personal touches to deliver", items: personalTouches.map((c) => item(c, c.touch || c.prefs || '')) });
     sections.push({ key: 'rounds', title: 'Safety checks due', items: overdue.map((c) => item(c, 'overdue for a check')), cta: { label: 'Open Rounds →', view: 'rounds' } });
+    // Engagement: who hasn't done an activity today — boredom is an AMA driver.
+    const engagedSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM activities WHERE substr(created_at,1,10) = ?`).all(today).map((r) => r.client_id));
+    const notEngaged = active.filter((c) => !engagedSet.has(c.id));
+    tiles.push({ key: 'engage', label: 'Encourage engagement', n: notEngaged.length, sev: notEngaged.length ? 'warn' : 'ok' });
+    sections.push({ key: 'engage', title: 'Encourage engagement — no activity today (boredom is an AMA risk)', items: notEngaged.map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', sub: c.interests ? '💛 loves: ' + c.interests : 'no interests set — ask & add to their Care Card', act: true })) });
     // Listening loop on the frontline: who's due for an experience survey this week.
     const expS = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get();
     if (expS) {

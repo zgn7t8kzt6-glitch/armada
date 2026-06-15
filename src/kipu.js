@@ -287,7 +287,7 @@ export async function kipuSyncRoster() {
   let created = 0, matched = 0;
   const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ?`);
   const byName = db.prepare(`SELECT id, loc, active FROM clients WHERE name = ? OR pref = ?`);
-  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, dob, diagnosis, insurance, phone, pronouns, language, mrn, payment_method, next_loc, anticipated_dc, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
+  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, payment_method, next_loc, anticipated_dc, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
   const admRef = db.prepare(`SELECT referral_source FROM admissions WHERE referral_source IS NOT NULL AND referral_source != '' AND (name = ? OR name = ?) ORDER BY id DESC LIMIT 1`);
   // Flow-event recorder: one row per real transition, so re-running the sync
   // never double-counts. parseLoc → a known ASAM code, or null if unspecified.
@@ -366,7 +366,19 @@ export async function kipuSyncRoster() {
     let room = pick(p, 'bed_name', 'room', 'bed', 'bed_name_full');
     // Demographics the census DOES carry — map them straight through.
     const flat = (v) => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v != null ? String(v) : null);
+    // Allergies may be a string, a list of strings, or a list of objects — pull
+    // the human-readable allergen name out of whichever shape Kipu returns.
+    const flatAllergies = (v) => {
+      if (v == null) return null;
+      const names = (Array.isArray(v) ? v : [v]).map((a) => {
+        if (a == null) return '';
+        if (typeof a === 'object') return a.name || a.allergen || a.allergy || a.label || a.description || a.value || '';
+        return String(a);
+      }).map((s) => String(s).trim()).filter(Boolean);
+      return names.length ? [...new Set(names)].join(', ') : null;
+    };
     const dob = flat(pick(p, 'dob', 'date_of_birth'));
+    const allergies = flatAllergies(pick(p, 'allergies', 'allergy', 'allergies_list', 'drug_allergies', 'patient_allergies', 'known_allergies'));
     const diagnosis = flat(pick(p, 'diagnosis_codes', 'diagnoses', 'diagnosis'));
     const insurance = flat(pick(p, 'insurance_company', 'insurance', 'insurance_name'));
     const phone = flat(pick(p, 'phone', 'phone_number', 'mobile'));
@@ -445,6 +457,7 @@ export async function kipuSyncRoster() {
         referral_source = COALESCE(NULLIF(referral_source,''), ?),
         dob = COALESCE(NULLIF(dob,''), ?),
         diagnosis = COALESCE(NULLIF(diagnosis,''), ?),
+        allergies = COALESCE(NULLIF(allergies,''), ?),
         insurance = COALESCE(NULLIF(insurance,''), ?),
         phone = COALESCE(NULLIF(phone,''), ?),
         pronouns = COALESCE(NULLIF(pronouns,''), ?),
@@ -458,7 +471,7 @@ export async function kipuSyncRoster() {
         discharge_reason = COALESCE(NULLIF(discharge_reason,''), ?),
         active = ?
         WHERE id = ?`).run(kid || null, admit, admitTime, therapist, caseMgr, room, program, refSource,
-          dob, diagnosis, insurance, phone, pronouns, language, mrn, paymentMethod,
+          dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, paymentMethod,
           nextLoc, anticipatedDc,
           discharged ? (dischStatus ? String(dischStatus) : 'Discharged') : null,
           discharged ? (dischDate ? String(dischDate).slice(0, 10) : null) : null,
@@ -467,7 +480,7 @@ export async function kipuSyncRoster() {
     } else if (!discharged) {
       // Only create rows for currently-active patients.
       const info = ins.run(name, p.first_name || name, room, program, newLoc, admit, admitTime, therapist, caseMgr, refSource,
-        dob, diagnosis, insurance, phone, pronouns, language, mrn, paymentMethod, nextLoc, anticipatedDc, kid || null);
+        dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, paymentMethod, nextLoc, anticipatedDc, kid || null);
       // Record an admission event only for genuinely new intakes (admitted today
       // or yesterday) — never for the initial baseline import of the standing
       // census, which would inflate past days with a one-time spike.

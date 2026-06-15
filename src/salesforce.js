@@ -351,8 +351,22 @@ export async function sfArrivalsDiagnose(nameQuery) {
     const o = await sfQuery(`SELECT Name, StageName, CloseDate, CreatedDate FROM Opportunity WHERE IsClosed = false ORDER BY CreatedDate DESC LIMIT 10`);
     out.recentOpps = (o.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', closeDate: (r.CloseDate || '').slice(0, 10), created: (r.CreatedDate || '').slice(0, 10) }));
   } catch (e) { /* opp sample optional */ }
-  try { const d = await sfDescribe('Opportunity'); out.oppDateFields = d.fields.filter((f) => /date|datetime/i.test(f.type)).map((f) => f.name); }
-  catch (e) { /* describe optional */ }
+  try {
+    const d = await sfDescribe('Opportunity');
+    out.oppDateFields = d.fields.filter((f) => /date|datetime/i.test(f.type)).map((f) => f.name);
+    // Find the facility/location field so we can scope the schedule to one site,
+    // and show how the scheduled opps split across its values.
+    const cands = d.fields.filter((f) => /facility|location|program|site|center|building|campus|branch|detox|office/i.test((f.name || '') + ' ' + (f.label || '')));
+    out.oppFacilityFields = cands.map((f) => ({ name: f.name, label: f.label, type: f.type }));
+    out.facilityValues = {};
+    for (const f of cands) {
+      if (!['string', 'picklist'].includes(f.type)) continue;
+      try {
+        const q = await sfQuery(`SELECT ${f.name} v, COUNT(Id) c FROM Opportunity WHERE IsClosed = false AND StageName = 'Admission Scheduled' GROUP BY ${f.name} ORDER BY COUNT(Id) DESC LIMIT 12`);
+        out.facilityValues[f.name] = (q.records || []).map((r) => ({ value: r.v, count: r.c }));
+      } catch (e) { /* field not groupable */ }
+    }
+  } catch (e) { /* describe optional */ }
   const nq = (nameQuery || '').trim();
   if (nq) {
     const q = nq.replace(/['\\%_]/g, '');

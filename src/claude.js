@@ -3,6 +3,7 @@
 // staff review and edit every suggestion before it's saved.
 import Anthropic from '@anthropic-ai/sdk';
 import { STANDARD_PRIMER } from './standard.js';
+import { getState } from './db.js';
 
 // Every Claude feature is grounded in The Armada Standard.
 const G = STANDARD_PRIMER + '\n\n';
@@ -20,9 +21,16 @@ export const MODEL = process.env.AI_MODEL || (PROVIDER === 'bedrock'
   ? (process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-opus-4-5-20251101-v1:0')
   : 'claude-opus-4-8');
 
+// Anthropic API key resolves from the in-app setting first (Settings → AI), then
+// the env var — same pattern as the email config — so an admin can connect Claude
+// without server access. (Bedrock auth stays env/instance-role only.)
+export function anthropicKey() { return getState('ai_anthropic_key') || process.env.ANTHROPIC_API_KEY || ''; }
+
 // Lazily build a client for the active provider (Bedrock SDK is only imported
 // when actually used, so the dependency is optional on the Anthropic path).
 let _client = null;
+// Drop the cached client so a newly-saved key takes effect without a restart.
+export function resetAiClient() { _client = null; }
 async function getClient() {
   if (_client) return _client;
   if (PROVIDER === 'bedrock') {
@@ -42,7 +50,8 @@ async function getClient() {
     if (session) opts.awsSessionToken = session;
     _client = new AnthropicBedrock(opts);
   } else {
-    _client = new Anthropic(); // reads ANTHROPIC_API_KEY
+    const key = anthropicKey();
+    _client = key ? new Anthropic({ apiKey: key }) : new Anthropic(); // falls back to ANTHROPIC_API_KEY
   }
   return _client;
 }
@@ -141,7 +150,7 @@ export function claudeConfigured() {
       process.env.AWS_PROFILE || process.env.AWS_DEFAULT_REGION
     );
   }
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(anthropicKey());
 }
 
 // Evidence-informed AMA (against-medical-advice / early dropout) warning signs.

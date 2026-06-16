@@ -17,7 +17,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, anthropicKey, resetAiClient } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -2097,6 +2097,24 @@ app.get('/api/audit', requireAuth, requireAdmin, (req, res) => {
 app.get('/api/ai/health', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await aiHealth()); }
   catch (e) { res.status(500).json({ ok: false, error: e.message, provider: aiProvider() }); }
+});
+
+// Read/set the Anthropic API key from inside the app (Settings → AI), so an admin
+// can connect Claude without server access. The key itself is never returned —
+// only whether one is set, and from which source. Bedrock uses AWS creds, not this.
+app.get('/api/ai/config', requireAuth, requireAdmin, (req, res) => {
+  res.json({ provider: aiProvider(), hasKey: !!anthropicKey(),
+    fromState: !!getState('ai_anthropic_key'), fromEnv: !!process.env.ANTHROPIC_API_KEY });
+});
+app.post('/api/ai/config', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.anthropic_key !== undefined) {
+    const v = String(b.anthropic_key || '').trim();
+    setState('ai_anthropic_key', v);   // empty string clears it (falls back to env)
+    resetAiClient();                   // rebuild the client with the new key
+  }
+  audit({ user: req.user, action: 'AI_CONFIG', ip: req.ip });
+  res.json({ ok: true, hasKey: !!anthropicKey() });
 });
 
 app.get('/api/meta', requireAuth, (req, res) => res.json({ shifts: SHIFTS, jobRoles: JOB_ROLES, claude: claudeConfigured(), kipu: kipuConfigured(), kipuWeb: getState('kipu_web') || process.env.KIPU_WEB_URL || '', amaTriggers: AMA_TRIGGERS, departments: DEPARTMENTS, scheduleTypes: SCHEDULE_TYPES, kioskCode: req.user.role === 'admin' ? kioskCode() : undefined, deidentify: DEID }));

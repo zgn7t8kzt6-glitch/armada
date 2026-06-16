@@ -902,6 +902,7 @@ async function loadSettings(){
     <div class="ret-card"><div class="n" style="font-size:18px">${st.emailReady?'✓':'—'}</div><div class="l">Email ${st.emailReady?'':'(RESEND_API_KEY)'}</div></div>
     <div class="ret-card"><div class="n" style="font-size:18px">${st.smsReady?'✓':'—'}</div><div class="l">SMS ${st.smsReady?'':'(Twilio)'}</div></div>`;
   $('aiHealthWrap').innerHTML = `<button class="btn btn-ghost btn-sm sans" onclick="runAiHealth()">Run AI health check</button> <span id="aiHealthResult" class="hint"></span>`;
+  loadAiConfig(st);
   const ac=st.aftercareCoordinator;
   $('acc_user').innerHTML='<option value="">— none —</option>'+st.staff.map(s=>`<option value="${s.id}" ${ac&&ac.id===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
   $('oc_email').value=st.oncallEmail||''; $('oc_phone').value=st.oncallPhone||''; if($('oc_email_alerts')) $('oc_email_alerts').checked=!!st.oncallEmailAlerts;
@@ -921,6 +922,35 @@ async function runAiHealth(){
       + diag
       + (r.error?`<div class="hint" style="color:var(--danger)">${esc(r.error)}</div>`:'');
   }catch(e){ el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+async function loadAiConfig(st){
+  const wrap=$('aiKeyWrap'), h=$('ai_health'); if(!wrap) return;
+  // Bedrock uses AWS creds (env/instance role), not an in-app key — hide the field there.
+  if(st && st.aiProvider==='bedrock'){ wrap.innerHTML=''; if(h) h.style.display='none'; return; }
+  let cfg={}; try{ cfg=await api('/ai/config'); }catch(e){}
+  if(h){
+    if(cfg.hasKey){ h.style.background='#eaf7ee'; h.style.color='#2d7a4f';
+      h.innerHTML='✓ Claude is connected'+(cfg.fromState?' (key saved in app)':' (key from server env)')+'. AI features are on.'; }
+    else { h.style.background='#fdecea'; h.style.color='#b00';
+      h.innerHTML='⚠ Claude is not connected — AI briefs, Care Cards, and recaps are off. Paste an Anthropic API key below to turn them on.'; }
+    h.style.display='';
+  }
+  wrap.innerHTML='<label>Anthropic API key '
+    +'<span class="hint" style="font-weight:400">(starts with sk-ant- ; get one at console.anthropic.com → API Keys)</span></label>'
+    +'<div class="toolbar" style="gap:6px"><input id="ai_key" style="flex:1" placeholder="'+(cfg.hasKey?'•••••• (saved — paste to replace)':'sk-ant-…')+'"/>'
+    +'<button class="btn btn-gold sans" onclick="saveAiKey()">Save key</button></div>'
+    +'<div id="ai_key_msg" class="hint" style="margin-top:4px"></div>';
+}
+async function saveAiKey(){
+  const v=$('ai_key')?$('ai_key').value.trim():''; const m=$('ai_key_msg');
+  if(!v){ if(m) m.textContent='Paste a key first (or it stays unchanged).'; return; }
+  if(m) m.textContent='Saving…';
+  try{ await api('/ai/config',{method:'POST',body:JSON.stringify({anthropic_key:v})});
+    if(m) m.textContent='Saving… running health check…';
+    META.claude=true;                        // optimistic — surfaces AI buttons immediately
+    await loadSettings();                     // refresh status tiles + banner
+    runAiHealth();                            // verify the live connection
+  }catch(e){ if(m) m.textContent='Error: '+esc(e.message); }
 }
 async function kipuTest(){ $('kipuResult').textContent='Testing…'; try{ const r=await api('/kipu/test',{method:'POST'}); $('kipuResult').innerHTML='<span style="color:var(--good)">✓ Connected'+(r.sampleCount!=null?' · '+r.sampleCount+' clients visible':'')+'</span>'; }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuSync(){ $('kipuResult').textContent='Syncing…'; try{ const r=await api('/kipu/sync',{method:'POST'}); $('kipuResult').textContent=`Synced from Kipu: ${r.activeNow} active clients (${r.created} new, ${r.matched} updated, ${r.deactivated} no longer active, ${r.importedDischarges||0} discharges imported). Census returned ${r.total} records. Reading notes for snapshots & risk in the background…`; }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }

@@ -251,7 +251,7 @@ const INVENTORY_EXTRA = [
   ['Kitchen', 'Nurse Station', 'Splenda', 'box', 3, 1, 0, 0],
   // Pantry / condiments
   ['Kitchen', 'Pantry', 'Peanut butter', 'jar', 3, 1, 0, 0],
-  ['Kitchen', 'Pantry', 'Jelly', 'jar', 3, 1, 0, 0],
+  // Jelly lives in the nourishment list (box of 200 packets, GP564) — not here.
   ['Kitchen', 'Pantry', 'Butter', 'case', 3, 1, 0, 1],
   ['Kitchen', 'Pantry', 'Garlic powder', 'each', 2, 1, 0, 0],
   // Personal care / hygiene
@@ -464,8 +464,8 @@ const NOURISHMENT = [
   ['Cereal', 'Frosted Flakes (sugary — cap qty)', 'case', 2, 1, 0, '26312', 'Craving release valve; alt: Fruit Whirls 26318'],
   ['Condiments & Disposables', 'Sweetener packets', 'box', 4, 1, 0, null, null],
   ['Condiments & Disposables', 'Sugar-free syrup', 'case', 2, 1, 0, '10772', null],
-  ['Condiments & Disposables', 'Jelly', 'case', 3, 1, 0, 'GP564', 'Regular'],
-  ['Condiments & Disposables', 'Jelly, diet / sugar-free', 'case', 3, 1, 0, null, 'Sugar-free — confirm PFS code with source.'],
+  ['Condiments & Disposables', 'Jelly', 'box (200 packets)', 2, 1, 0, 'GP564', 'Regular — delivered in 200-packet boxes'],
+  ['Condiments & Disposables', 'Jelly, diet / sugar-free', 'box (200 packets)', 2, 1, 0, null, 'Sugar-free, 200-packet boxes — confirm PFS code with source.'],
   ['Condiments & Disposables', 'Cream cheese', 'case', 3, 1, 1, 'BW730', null],
   // Off-guide adds — NOT on the PFS guide, source separately.
   ['Comfort & Recovery', 'Chicken broth', 'case', 6, 2, 0, null, 'Off-guide — source. Biggest savory gap.'],

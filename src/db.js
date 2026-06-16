@@ -1134,6 +1134,17 @@ if (getState('nourish_dedup_v1') !== 'done') {
   dupNames.forEach((n) => upd.run(n));
   setState('nourish_dedup_v1', 'done');
 }
+// One-time: jelly is delivered in 200-packet boxes, so the unit + par need to match
+// the real delivery (was 'case', par 3). ensureNourishment only backfills SKU, never
+// touches unit/par on existing items, so fix the live rows here. Guarded so a manual
+// in-app par tweak isn't overwritten on every boot.
+if (getState('jelly_par_v1') !== 'done') {
+  const jelly = db.prepare(
+    `UPDATE inventory_items SET unit = 'box (200 packets)', par_level = 2, reorder_point = 1 WHERE name = ? COLLATE NOCASE`,
+  );
+  ['Jelly', 'Jelly, diet / sugar-free'].forEach((n) => jelly.run(n));
+  setState('jelly_par_v1', 'done');
+}
 // Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
 db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
   id INTEGER PRIMARY KEY,

@@ -126,7 +126,7 @@ const GROUP_OF={
   // Team — culture, recognition, learning, tasks
   mytasks:'team',messages:'team',team:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
-  inventory:'facility',maintenance:'facility',coverage:'facility',schedule:'facility',assign:'facility',staffmodel:'facility',
+  inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
   command:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
@@ -195,6 +195,7 @@ function show(v){
   if(v==='meals') loadMeals();
   if(v==='dischargepage') loadDischargePage();
   if(v==='maintenance') loadMaintenance();
+  if(v==='operations') loadOps();
   if(v==='arrivals') loadArrivals();
   if(v==='arrivalcheck') loadArrivalTasks();
   if(v==='outcomes') loadOutcomes();
@@ -2864,6 +2865,59 @@ async function saveInvItem(){
   if(!body.name){ $('inv_i_msg').textContent='Name required'; return; }
   try{ await api('/inventory/items',{method:'POST',body:JSON.stringify(body)}); $('inv_i_msg').textContent='✓ Saved'; resetInvItem(); loadInvCatalog(); }catch(e){ $('inv_i_msg').textContent=e.message; }
 }
+
+/* ---- Operations: environment, handoff, CEO rescues, projects (DOO systems) ---- */
+let OPS=null;
+const ENV_AREAS=[['beds','Beds made'],['rooms','Rooms clean'],['common','Common areas'],['kitchen','Kitchen reset']];
+const HO_AREAS=[['stock','Stock at par'],['beds','Beds made'],['kitchen','Kitchen reset'],['smokes','Smokes prepped']];
+async function loadOps(){
+  let d; try{ d=await api('/ops'); }catch(e){ $('opsKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  OPS=d; const x=d.extras;
+  $('opsKpis').innerHTML = `
+    <div class="ret-card ${!x.env.pass?'rc-warn':''}"><div class="n">${x.env.logged}</div><div class="l">Env checks today ${x.env.pass?'✓':''}</div></div>
+    <div class="ret-card ${!x.handoff.pass?'rc-warn':''}"><div class="n">${x.handoff.logged}</div><div class="l">Handoffs today ${x.handoff.pass?'✓':''}</div></div>
+    <div class="ret-card ${x.rescues.week?'rc-high':''}"><div class="n">${x.rescues.week}</div><div class="l">CEO rescues (wk)</div></div>
+    <div class="ret-card ${x.projects.overdue?'rc-high':''}"><div class="n">${x.projects.overdue}</div><div class="l">Projects overdue</div></div>`;
+  // shift selects
+  if($('env_shift')&&!$('env_shift').options.length){ $('env_shift').innerHTML=d.shifts.map(s=>`<option ${s===d.current?'selected':''}>${esc(s)}</option>`).join(''); }
+  if($('ho_shift')&&!$('ho_shift').options.length){ $('ho_shift').innerHTML=d.shifts.map(s=>`<option ${s===d.current?'selected':''}>${esc(s)}</option>`).join(''); }
+  renderEnvChecks(); renderHoChecks();
+  // today's logs
+  $('env_today').innerHTML = d.shifts.filter(s=>d.env[s]).map(s=>{const e=d.env[s];const all=e.beds&&e.rooms&&e.common&&e.kitchen;return `<div class="pc-note">${all?'✓':'⚠'} <strong>${esc(s)}</strong> ${ENV_AREAS.map(a=>e[a[0]]?'':'✗'+a[1]).filter(Boolean).join(' ')||'all clear'}${e.defects?' · '+esc(e.defects):''} <span class="hint">${esc(e.by_name||'')}</span></div>`;}).join('')||'<div class="hint">No environment checks logged today.</div>';
+  $('ho_today').innerHTML = d.shifts.filter(s=>d.ho[s]).map(s=>{const h=d.ho[s];const all=h.stock&&h.beds&&h.kitchen&&h.smokes;return `<div class="pc-note">${all?'✓':'⚠'} <strong>${esc(s)}</strong> ${HO_AREAS.map(a=>h[a[0]]?'':'✗'+a[1]).filter(Boolean).join(' ')||'complete'} <span class="hint">${esc(h.by_name||'')}</span></div>`;}).join('')||'<div class="hint">No handoffs logged today.</div>';
+  // rescues
+  $('rescue_list').innerHTML = d.rescues.length ? d.rescues.map(r=>`<div class="todo"><div class="txt">🆘 ${esc(r.what)} <span class="hint">${esc(r.by)} · ${esc(r.at)}</span></div>${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="delRescue(${r.id})">✕</button>`:''}</div>`).join('') : '<div class="hint">No CEO rescues logged. 🎉 That\'s the goal.</div>';
+  // projects
+  $('pj_list').innerHTML = d.projects.length ? d.projects.map(p=>projectCard(p)).join('') : '<div class="hint">No projects yet — add one above.</div>';
+}
+function renderEnvChecks(){ const sh=$('env_shift').value; const e=(OPS&&OPS.env[sh])||{}; $('env_checks').innerHTML=ENV_AREAS.map(a=>`<button type="button" class="meal-grp ${e[a[0]]?'on':''}" data-k="${a[0]}" onclick="this.classList.toggle('on')">${esc(a[1])}</button>`).join(''); $('env_defects').value=e.defects||''; }
+function renderHoChecks(){ const sh=$('ho_shift').value; const h=(OPS&&OPS.ho[sh])||{}; $('ho_checks').innerHTML=HO_AREAS.map(a=>`<button type="button" class="meal-grp ${h[a[0]]?'on':''}" data-k="${a[0]}" onclick="this.classList.toggle('on')">${esc(a[1])}</button>`).join(''); $('ho_note').value=h.note||''; }
+async function saveEnv(){ const body={shift:$('env_shift').value,defects:$('env_defects').value}; document.querySelectorAll('#env_checks .meal-grp.on').forEach(b=>body[b.dataset.k]=1); $('env_msg').textContent='Saving…'; try{ await api('/ops/environment',{method:'POST',body:JSON.stringify(body)}); $('env_msg').textContent='✓ Saved'; loadOps(); }catch(e){ $('env_msg').textContent=e.message; } }
+async function saveHandoff(){ const body={shift:$('ho_shift').value,note:$('ho_note').value}; document.querySelectorAll('#ho_checks .meal-grp.on').forEach(b=>body[b.dataset.k]=1); $('ho_msg').textContent='Saving…'; try{ await api('/ops/handoff',{method:'POST',body:JSON.stringify(body)}); $('ho_msg').textContent='✓ Saved'; loadOps(); }catch(e){ $('ho_msg').textContent=e.message; } }
+async function logRescue(){ const what=$('rescue_what').value.trim(); if(!what)return; try{ await api('/ops/rescue',{method:'POST',body:JSON.stringify({what})}); $('rescue_what').value=''; loadOps(); }catch(e){ alert(e.message); } }
+async function delRescue(id){ try{ await api('/ops/rescue/'+id,{method:'DELETE'}); loadOps(); }catch(e){ alert(e.message); } }
+function projectCard(p){
+  const stColor=p.status==='Done'?'risk-low':p.status==='Blocked'?'risk-high':'risk-warn';
+  return `<details class="card" style="margin:8px 0;${p.overdue?'border-left:4px solid var(--danger)':''}"><summary class="sans" style="cursor:pointer;font-weight:600">${esc(p.name)} <span class="risk ${stColor}">${esc(p.status)}</span>${p.overdue?' <span class="badge badge-danger">overdue</span>':''} <span class="hint">${p.owner?esc(p.owner)+' · ':''}${p.due?'due '+esc(p.due):'no date'}${p.pct!=null?' · '+p.pct+'%':''}</span></summary>
+    <div style="margin-top:10px">
+      <div class="grid3">
+        <div class="field"><label>Owner</label><input id="pj_o_${p.id}" value="${esc(p.owner)}"/></div>
+        <div class="field"><label>Due</label><input id="pj_d_${p.id}" type="date" value="${esc(p.due)}"/></div>
+        <div class="field"><label>Status</label><select id="pj_s_${p.id}">${['Planned','In progress','Blocked','Done'].map(s=>`<option ${s===p.status?'selected':''}>${s}</option>`).join('')}</select></div>
+      </div>
+      <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="saveProject(${p.id})">Save</button>${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="delProject(${p.id})">Delete</button>`:''}</div>
+      <div style="margin-top:8px"><strong class="sans" style="font-size:13px">Checklist</strong>
+        ${(p.checklist||[]).map((c,i)=>`<label class="trg" style="display:flex;gap:8px"><input type="checkbox" ${c.done?'checked':''} onchange="toggleProjItem(${p.id},${i})"/> <span style="${c.done?'text-decoration:line-through;color:var(--muted)':''}">${esc(c.t)}</span> <a href="#" class="hint" onclick="rmProjItem(${p.id},${i});return false" style="margin-left:auto">✕</a></label>`).join('')||'<div class="hint">No items yet.</div>'}
+        <div class="handoff-add" style="margin-top:6px"><input id="pj_ci_${p.id}" placeholder="Add a checklist item…"/><button class="btn btn-ghost btn-sm sans" onclick="addProjItem(${p.id})">+ Add</button></div>
+      </div>
+    </div></details>`;
+}
+async function addProject(){ const name=$('pj_name').value.trim(); if(!name){ $('pj_msg').textContent='Name required'; return; } try{ await api('/projects',{method:'POST',body:JSON.stringify({name,owner:$('pj_owner').value,due_date:$('pj_due').value})}); ['pj_name','pj_owner','pj_due'].forEach(x=>$(x).value=''); $('pj_msg').textContent='✓ Added'; loadOps(); }catch(e){ $('pj_msg').textContent=e.message; } }
+async function saveProject(id){ try{ await api('/projects',{method:'POST',body:JSON.stringify({id,owner:$('pj_o_'+id).value,due_date:$('pj_d_'+id).value,status:$('pj_s_'+id).value})}); loadOps(); }catch(e){ alert(e.message); } }
+async function delProject(id){ if(!confirm('Delete this project?'))return; try{ await api('/projects/'+id,{method:'DELETE'}); loadOps(); }catch(e){ alert(e.message); } }
+async function addProjItem(id){ const inp=$('pj_ci_'+id); const t=inp?inp.value.trim():''; if(!t)return; try{ await api('/projects/'+id+'/checklist',{method:'POST',body:JSON.stringify({add:t})}); loadOps(); }catch(e){ alert(e.message); } }
+async function toggleProjItem(id,i){ try{ await api('/projects/'+id+'/checklist',{method:'POST',body:JSON.stringify({toggle:i})}); loadOps(); }catch(e){ alert(e.message); } }
+async function rmProjItem(id,i){ try{ await api('/projects/'+id+'/checklist',{method:'POST',body:JSON.stringify({remove:i})}); loadOps(); }catch(e){ alert(e.message); } }
 
 /* ---- Maintenance / work orders + who's on shift ---- */
 let MAINT_DATA=null;

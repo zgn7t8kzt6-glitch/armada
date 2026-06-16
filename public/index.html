@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616N" />
+<link rel="stylesheet" href="/styles.css?v=20260616O" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -77,6 +77,7 @@
     <button data-view="team">Team</button>
     <button data-view="inventory">Supplies</button>
     <button data-view="maintenance">Maintenance</button>
+    <button data-view="operations" data-admin>Operations</button>
     <button data-view="coverage" data-subview>Coverage</button>
     <button data-view="schedule" data-admin>Staffing</button>
     <button data-view="staffmodel" data-admin data-subview>Staffing Model</button>
@@ -488,6 +489,53 @@
             <p class="sub sans" style="margin-top:6px">Urgent and Safety/Security requests also raise an on-call alert. Open items past SLA (Urgent 4h, High 24h, else 72h) auto-escalate so nothing is forgotten.</p>
           </div>
         </details>
+      </div>
+    </section>
+
+    <!-- OPERATIONS — the DOO systems: environment, handoff, CEO rescues, projects -->
+    <section id="operations" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Operations</h3><p class="sub sans">The systems that make the building run on its own — environment, handoff, projects. Run them daily and the scorecard stays green.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadOps()">Refresh</button>
+        </div>
+        <div id="opsKpis" class="ret-cards"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:300px">
+          <h3>🧹 Environment walk — this shift</h3>
+          <p class="sub sans">Beds made, rooms & common areas clean, kitchen reset. Log it each shift.</p>
+          <div class="field" style="max-width:160px"><label>Shift</label><select id="env_shift" onchange="renderEnvChecks()"></select></div>
+          <div id="env_checks" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0"></div>
+          <div class="field"><label>Defects found (optional)</label><textarea id="env_defects" rows="2" placeholder="Anything not to standard — log it with an owner in Maintenance"></textarea></div>
+          <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="saveEnv()">Save environment check</button><span id="env_msg" class="hint" style="align-self:center"></span></div>
+          <div id="env_today" style="margin-top:8px"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:300px">
+          <h3>🤝 Shift handoff — prepped for the next shift</h3>
+          <p class="sub sans">No shift hands the next a mess: stock, beds, kitchen, smokes prepped before change of shift.</p>
+          <div class="field" style="max-width:160px"><label>Shift</label><select id="ho_shift" onchange="renderHoChecks()"></select></div>
+          <div id="ho_checks" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0"></div>
+          <div class="field"><label>Handoff note (optional)</label><textarea id="ho_note" rows="2" placeholder="Anything the next shift needs to know"></textarea></div>
+          <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="saveHandoff()">Save handoff</button><span id="ho_msg" class="hint" style="align-self:center"></span></div>
+          <div id="ho_today" style="margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>🆘 CEO rescues <span class="hint" style="font-weight:400">— zero is the goal</span></h3>
+        <p class="sub sans">Log it any time the CEO had to fix or source something operational. The count IS the metric: a system that holds means no rescues.</p>
+        <div class="handoff-add"><input id="rescue_what" placeholder="What did the CEO have to fix/source? e.g. bought milk, called a plumber"/><button class="btn btn-gold sans" onclick="logRescue()">Log rescue</button></div>
+        <div id="rescue_list" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <div class="cmd-hero-row"><div><h3>🏗️ Project Tracker</h3><p class="sub sans">Buildouts & initiatives with an owner, a date, a checklist, and a status — not a mental to-do list.</p></div></div>
+        <div class="grid3">
+          <div class="field"><label>Project</label><input id="pj_name" placeholder="e.g. Gym buildout"/></div>
+          <div class="field"><label>Owner</label><input id="pj_owner" placeholder="Who owns it"/></div>
+          <div class="field"><label>Due date</label><input id="pj_due" type="date"/></div>
+        </div>
+        <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="addProject()">Add project</button><span id="pj_msg" class="hint" style="align-self:center"></span></div>
+        <div id="pj_list" style="margin-top:10px"></div>
       </div>
     </section>
 
@@ -1587,6 +1635,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616N"></script>
+<script src="/app.js?v=20260616O"></script>
 </body>
 </html>

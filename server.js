@@ -2868,20 +2868,19 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const closurePct = closedRows.length ? Math.round(in24 / closedRows.length * 100) : null;
     // The 2-week fit scorecard — pass = the system held on its own.
     const pass = (b) => b ? 'PASS' : 'MISS';
+    const ox = opsExtras();
     const live = [
       { ok: outItems.length === 0, name: 'Nothing ran "out"', sub: outItems.length ? `${outItems.length} item(s) OUT, ${lowItems.length} low` : `Zero stockouts · ${lowItems.length} low` },
       { ok: snackOut === 0 && (mealSc.completePct == null || mealSc.completePct >= 90), name: 'Meals on time + snacks 24/7', sub: `Caterer ${mealSc.completePct == null ? '—' : mealSc.completePct + '%'} met · snacks ${snackOut ? 'OUT' : 'stocked'}` },
+      { ok: ox.env.logged > 0 && ox.env.pass, name: 'Beds made + building clean every shift', sub: ox.env.logged ? `${ox.env.logged} shift check(s)${ox.env.pass ? ' · all pass' : ' · gaps'}` : 'Not checked today — log the Environment walk' },
       { ok: shortToday === 0 && (staffSc.week == null || staffSc.week >= 95), name: 'Shifts covered ahead of time', sub: `${staffSc.week == null ? '—' : staffSc.week + '%'} staffed (wk) · ${shortToday} short today` },
       { ok: mOverdue.length === 0, name: 'Defects closed within 24h', sub: `${closurePct == null ? '—' : closurePct + '%'} in 24h · ${mOverdue.length} overdue` },
-    ];
-    const pendingSystems = [
-      { name: 'Beds made + building clean every shift', sub: 'Needs the per-shift Environment check (build pending)' },
-      { name: 'Handoff completed every shift', sub: 'Needs the operational Handoff checklist (build pending)' },
-      { name: 'No CEO rescues', sub: 'Needs the CEO-rescue log (build pending)' },
-      { name: 'Projects advanced on their dates', sub: 'Needs the Project Tracker (build pending)' },
+      { ok: ox.handoff.logged > 0 && ox.handoff.pass, name: 'Handoff completed every shift', sub: ox.handoff.logged ? `${ox.handoff.logged} shift handoff(s)${ox.handoff.pass ? ' · complete' : ' · incomplete'}` : 'No handoff logged today' },
+      { ok: ox.rescues.pass, name: 'No CEO rescues', sub: `${ox.rescues.week} CEO rescue(s) this week` },
+      { ok: ox.projects.pass, name: 'Projects advanced on their dates', sub: `${ox.projects.open} open · ${ox.projects.overdue} overdue` },
     ];
     const passing = live.filter((x) => x.ok).length;
-    northStar = { label: 'Ops systems holding', value: `${passing}/${live.length}`, sev: passing === live.length ? 'ok' : passing >= live.length - 1 ? 'warn' : 'high' };
+    northStar = { label: 'Ops systems holding', value: `${passing}/${live.length}`, sev: passing === live.length ? 'ok' : passing >= live.length - 2 ? 'warn' : 'high' };
     tiles = [
       { key: 'supplies', label: 'Stockouts', n: outItems.length, sev: outItems.length ? 'high' : 'ok', view: 'inventory' },
       { key: 'food', label: 'Snacks out', n: snackOut, sev: snackOut ? 'high' : 'ok', view: 'meals' },
@@ -2890,9 +2889,10 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       { key: 'reorders', label: 'On order', n: reordersOpen, sev: 'ok', view: 'inventory' },
       { key: 'low', label: 'Below par (low)', n: lowItems.length, sev: lowItems.length ? 'warn' : 'ok', view: 'inventory' },
     ];
-    sections.push({ key: 'scorecard', title: '📋 The 2-week fit scorecard — measured by outcome, not effort',
-      items: live.map((x) => ({ name: x.name, sub: x.sub, badge: pass(x.ok) }))
-        .concat(pendingSystems.map((p) => ({ name: p.name, sub: p.sub, badge: 'SET UP' }))) });
+    tiles.push({ key: 'rescues', label: 'CEO rescues (wk)', n: ox.rescues.week, sev: ox.rescues.week ? 'high' : 'ok', view: 'operations' });
+    tiles.push({ key: 'projects', label: 'Projects overdue', n: ox.projects.overdue, sev: ox.projects.overdue ? 'high' : 'ok', view: 'operations' });
+    sections.push({ key: 'scorecard', title: '📋 The 2-week fit scorecard — measured by outcome, not effort', cta: { label: 'Open Operations →', view: 'operations' },
+      items: live.map((x) => ({ name: x.name, sub: x.sub, badge: pass(x.ok) })) });
     if (outItems.length || lowItems.length) sections.push({ key: 'supplies', title: '📦 Below par right now', cta: { label: 'Open Supplies →', view: 'inventory' },
       items: outItems.concat(lowItems).slice(0, 12).map((x) => ({ name: x.name, sub: x.department, badge: x.status === 'out' ? 'OUT' : 'low' })) });
     if (mOverdue.length) sections.push({ key: 'defects', title: '🛠️ Defects past their close-by time', cta: { label: 'Open Maintenance →', view: 'maintenance' },
@@ -3765,6 +3765,92 @@ app.post('/api/staffing-model/log', requireAuth, (req, res) => {
   audit({ user: req.user, action: 'STAFFING_LOG', detail: `${b.role} ${b.shift_label} ${actual}/${s.needed}`, ip: req.ip });
   res.json({ ok: true, short: actual < s.needed });
 });
+
+// ── OPERATIONS SYSTEMS — environment, handoff, CEO rescues, projects ─────────
+// The four DOO outcomes the scorecard needs, computed for the dashboard.
+function opsExtras() {
+  const today = appToday();
+  const env = db.prepare(`SELECT beds, rooms, common, kitchen, defects FROM environment_checks WHERE date = ?`).all(today);
+  const envPassAll = env.length > 0 && env.every((e) => e.beds && e.rooms && e.common && e.kitchen);
+  const ho = db.prepare(`SELECT stock, beds, kitchen, smokes FROM ops_handoffs WHERE date = ?`).all(today);
+  const hoPassAll = ho.length > 0 && ho.every((h) => h.stock && h.beds && h.kitchen && h.smokes);
+  const rescuesWeek = db.prepare(`SELECT COUNT(*) n FROM ceo_rescues WHERE created_at >= datetime('now','-7 day')`).get().n;
+  const openProjects = db.prepare(`SELECT due_date FROM projects WHERE status != 'Done'`).all();
+  const overdueProjects = openProjects.filter((p) => p.due_date && p.due_date < today).length;
+  return {
+    env: { logged: env.length, pass: envPassAll },
+    handoff: { logged: ho.length, pass: hoPassAll },
+    rescues: { week: rescuesWeek, pass: rescuesWeek === 0 },
+    projects: { open: openProjects.length, overdue: overdueProjects, pass: overdueProjects === 0 },
+  };
+}
+const SHIFTS_FOR_OPS = ['Morning', 'Day', 'Evening', 'Night'];
+// Everything the Operations view needs.
+app.get('/api/ops', requireAuth, (req, res) => {
+  const today = appToday();
+  const env = {}; db.prepare(`SELECT * FROM environment_checks WHERE date = ?`).all(today).forEach((r) => { env[r.shift] = r; });
+  const ho = {}; db.prepare(`SELECT * FROM ops_handoffs WHERE date = ?`).all(today).forEach((r) => { ho[r.shift] = r; });
+  const rescues = db.prepare(`SELECT id, what, by_name, created_at FROM ceo_rescues ORDER BY id DESC LIMIT 20`).all()
+    .map((r) => ({ id: r.id, what: r.what, by: r.by_name || '', at: String(r.created_at).slice(0, 16) }));
+  const rescuesWeek = db.prepare(`SELECT COUNT(*) n FROM ceo_rescues WHERE created_at >= datetime('now','-7 day')`).get().n;
+  const projects = db.prepare(`SELECT * FROM projects ORDER BY (status='Done'), (due_date IS NULL), due_date`).all().map((p) => {
+    let cl = []; try { cl = JSON.parse(p.checklist || '[]'); } catch { /* */ }
+    const doneN = cl.filter((c) => c.done).length;
+    return { id: p.id, name: p.name, owner: p.owner || '', due: p.due_date || '', status: p.status, notes: p.notes || '',
+      checklist: cl, pct: cl.length ? Math.round(doneN / cl.length * 100) : null, overdue: p.status !== 'Done' && p.due_date && p.due_date < today };
+  });
+  res.json({ shifts: SHIFTS_FOR_OPS, current: currentShift(), env, ho, rescues, rescuesWeek, projects, extras: opsExtras() });
+});
+app.post('/api/ops/environment', requireAuth, (req, res) => {
+  const b = req.body || {}; const shift = SHIFTS_FOR_OPS.includes(b.shift) ? b.shift : currentShift();
+  const v = (x) => b[x] ? 1 : 0;
+  db.prepare(`INSERT INTO environment_checks (date, shift, beds, rooms, common, kitchen, defects, by_id, by_name) VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(date, shift) DO UPDATE SET beds=excluded.beds, rooms=excluded.rooms, common=excluded.common, kitchen=excluded.kitchen, defects=excluded.defects, by_id=excluded.by_id, by_name=excluded.by_name`)
+    .run(appToday(), shift, v('beds'), v('rooms'), v('common'), v('kitchen'), (b.defects || '').trim() || null, req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/ops/handoff', requireAuth, (req, res) => {
+  const b = req.body || {}; const shift = SHIFTS_FOR_OPS.includes(b.shift) ? b.shift : currentShift();
+  const v = (x) => b[x] ? 1 : 0;
+  db.prepare(`INSERT INTO ops_handoffs (date, shift, stock, beds, kitchen, smokes, note, by_id, by_name) VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(date, shift) DO UPDATE SET stock=excluded.stock, beds=excluded.beds, kitchen=excluded.kitchen, smokes=excluded.smokes, note=excluded.note, by_id=excluded.by_id, by_name=excluded.by_name`)
+    .run(appToday(), shift, v('stock'), v('beds'), v('kitchen'), v('smokes'), (b.note || '').trim() || null, req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/ops/rescue', requireAuth, (req, res) => {
+  const what = (req.body?.what || '').trim();
+  if (!what) return res.status(400).json({ error: 'What did the CEO have to fix/source?' });
+  db.prepare(`INSERT INTO ceo_rescues (what, by_id, by_name) VALUES (?,?,?)`).run(what, req.user.id, req.user.name);
+  audit({ user: req.user, action: 'CEO_RESCUE', detail: what.slice(0, 80), ip: req.ip });
+  res.json({ ok: true });
+});
+app.delete('/api/ops/rescue/:id', requireAuth, requireAdmin, (req, res) => { db.prepare(`DELETE FROM ceo_rescues WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+app.post('/api/projects', requireAuth, (req, res) => {
+  const b = req.body || {}; const name = (b.name || '').trim();
+  const status = ['Planned', 'In progress', 'Blocked', 'Done'].includes(b.status) ? b.status : 'Planned';
+  if (b.id) {
+    db.prepare(`UPDATE projects SET name=?, owner=?, due_date=?, status=?, notes=?, updated_at=datetime('now') WHERE id=?`)
+      .run(name || db.prepare(`SELECT name FROM projects WHERE id=?`).get(b.id)?.name, (b.owner || '').trim() || null, b.due_date || null, status, (b.notes || '').trim() || null, b.id);
+    res.json({ ok: true, id: b.id });
+  } else {
+    if (!name) return res.status(400).json({ error: 'Project name required' });
+    const id = db.prepare(`INSERT INTO projects (name, owner, due_date, status, notes, checklist, created_by) VALUES (?,?,?,?,?, '[]', ?)`)
+      .run(name, (b.owner || '').trim() || null, b.due_date || null, status, (b.notes || '').trim() || null, req.user.name).lastInsertRowid;
+    res.json({ ok: true, id });
+  }
+});
+app.post('/api/projects/:id/checklist', requireAuth, (req, res) => {
+  const p = db.prepare(`SELECT checklist FROM projects WHERE id = ?`).get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  let cl = []; try { cl = JSON.parse(p.checklist || '[]'); } catch { /* */ }
+  const b = req.body || {};
+  if (b.add) cl.push({ t: String(b.add).trim().slice(0, 200), done: false });
+  else if (b.toggle != null && cl[b.toggle]) cl[b.toggle].done = !cl[b.toggle].done;
+  else if (b.remove != null) cl.splice(b.remove, 1);
+  db.prepare(`UPDATE projects SET checklist = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(cl), req.params.id);
+  res.json({ ok: true });
+});
+app.delete('/api/projects/:id', requireAuth, requireAdmin, (req, res) => { db.prepare(`DELETE FROM projects WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 
 /* ---------------- Scheduling & workforce ---------------- */
 // The schedule for a date: each slot with assignments, plus live coverage

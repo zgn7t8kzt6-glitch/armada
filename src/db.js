@@ -535,6 +535,45 @@ CREATE TABLE IF NOT EXISTS message_reads (
   last_read_id INTEGER NOT NULL DEFAULT 0,
   UNIQUE(user_id, channel)
 );
+
+-- OPERATIONS SYSTEMS (Director of Operations scorecard) ----------------------
+-- Per-shift environment walk (beds/rooms/common/kitchen pass + defects).
+CREATE TABLE IF NOT EXISTS environment_checks (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL, shift TEXT NOT NULL,
+  beds INTEGER NOT NULL DEFAULT 0, rooms INTEGER NOT NULL DEFAULT 0,
+  common INTEGER NOT NULL DEFAULT 0, kitchen INTEGER NOT NULL DEFAULT 0,
+  defects TEXT, by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(date, shift)
+);
+-- Per-shift operational handoff (stock/beds/kitchen/smokes prepped for next shift).
+CREATE TABLE IF NOT EXISTS ops_handoffs (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL, shift TEXT NOT NULL,
+  stock INTEGER NOT NULL DEFAULT 0, beds INTEGER NOT NULL DEFAULT 0,
+  kitchen INTEGER NOT NULL DEFAULT 0, smokes INTEGER NOT NULL DEFAULT 0,
+  note TEXT, by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(date, shift)
+);
+-- A logged "CEO had to fix/source something operational" — the rescue count is
+-- the metric (zero = the systems held).
+CREATE TABLE IF NOT EXISTS ceo_rescues (
+  id INTEGER PRIMARY KEY,
+  what TEXT NOT NULL,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Project tracker: buildouts/initiatives with owner, date, status, checklist.
+CREATE TABLE IF NOT EXISTS projects (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL, owner TEXT, due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'Planned',     -- Planned | In progress | Blocked | Done
+  checklist TEXT, notes TEXT,
+  created_by TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS saves (
   id INTEGER PRIMARY KEY,
   client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,

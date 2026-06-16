@@ -827,6 +827,22 @@ CREATE TABLE IF NOT EXISTS meal_checks (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(date, meal)
 );
+-- MEAL FEEDBACK — the resident's own voice on each meal, captured from the dining-room
+-- kiosk. Three taps (enjoyed / enough / want again) + an optional word, stamped with
+-- the local meal date + which meal, so leadership can read how every breakfast, lunch,
+-- and dinner actually landed, day by day. Anonymous-friendly: client_id is optional.
+CREATE TABLE IF NOT EXISTS meal_feedback (
+  id INTEGER PRIMARY KEY,
+  meal_date TEXT NOT NULL,                  -- YYYY-MM-DD (local dining-room date)
+  meal TEXT NOT NULL,                       -- Breakfast | Lunch | Dinner
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  liked INTEGER,                            -- 1 enjoyed | 0 didn't
+  enough INTEGER,                           -- 1 enough | 0 still hungry
+  again INTEGER,                            -- 1 would want again | 0 not really
+  comment TEXT,                             -- optional one line, in their words
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_meal_feedback_day ON meal_feedback(meal_date, meal);
 CREATE INDEX IF NOT EXISTS idx_meal_checks ON meal_checks(date, meal);
 
 -- Scheduling: a staffing need (one row per part×role on a date, with how many needed).

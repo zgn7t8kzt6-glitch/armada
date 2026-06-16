@@ -2787,6 +2787,26 @@ async function loadMeals(){
     <div class="ret-card ${issues?'rc-high':''}"><div class="n">${issues}</div><div class="l">Flagged today</div></div>`;
   $('mealsToday').innerHTML = d.today.map(m=>mealCard(m,d)).join('');
   loadMealsScore();
+  loadMealFeedback();
+}
+async function loadMealFeedback(){
+  const el=$('mealFeedback'); if(!el) return;
+  let d; try{ d=await api('/meals/feedback?days=14'); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  if(!d.byDay.length){ el.innerHTML='<div class="empty">No resident meal feedback yet. It appears here as they tap "How was the meal?" on the dining-room kiosk.</div>'; return; }
+  const meals=['Breakfast','Lunch','Dinner'];
+  const cellPct=(p)=> p==null?'<span class="hint">—</span>':`<span style="color:${p>=70?'var(--good)':p>=40?'var(--gold)':'var(--danger)'}">${p}%</span>`;
+  const cell=(m)=> m?`${cellPct(m.likedPct)} liked · ${cellPct(m.enoughPct)} enough · ${cellPct(m.againPct)} again <span class="hint">(${m.n})</span>`:'<span class="hint">—</span>';
+  const niceDate=(s)=>{const dt=new Date(s+'T12:00:00'); return dt.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'});};
+  let rows = d.byDay.map(day=>`<tr><td style="white-space:nowrap;font-weight:600">${niceDate(day.date)}</td>`
+    + meals.map(m=>`<td style="font-size:13px">${cell(day.meals[m])}</td>`).join('') + '</tr>').join('');
+  let html = `<div style="overflow-x:auto"><table class="tbl" style="width:100%;font-size:14px">
+    <thead><tr><th>Day</th>${meals.map(m=>`<th>${m}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  if(d.comments.length){
+    html += '<div style="margin-top:12px"><strong class="sans">In their words</strong>'
+      + d.comments.slice(0,12).map(c=>`<div class="sans" style="margin-top:6px;font-size:14px">“${esc(c.comment)}” <span class="hint">— ${esc(c.pref||'a resident')}, ${esc(c.meal)} ${esc(c.meal_date)}</span></div>`).join('')
+      + '</div>';
+  }
+  el.innerHTML = html;
 }
 function mealCard(m,d){
   const cur = m.meal===d.current;

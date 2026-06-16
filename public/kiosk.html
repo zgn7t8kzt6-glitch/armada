@@ -16,6 +16,9 @@
   .ksub{color:var(--muted);font-family:sans-serif;font-size:15px}
   textarea,select,input{font-size:17px;padding:12px}
   .big{font-size:18px;padding:16px 22px}
+  .mopt{flex:1;font-size:20px;text-align:center}
+  .msel{border-color:var(--gold)!important;background:#faf6ee!important;font-weight:600}
+  .kchip{font-family:inherit;font-size:15px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:#fff;cursor:pointer;color:var(--navy);margin:0 4px 4px 0}
 </style>
 </head>
 <body>
@@ -29,6 +32,11 @@
 const $=id=>document.getElementById(id);
 const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let CODE=localStorage.getItem('kioskCode')||'', DATA=null, CLIENT='', VIEW='';
+const MEALS3=['Breakfast','Lunch','Dinner'];
+let MEAL_SEL='', MEAL_DATE='';
+// Which meal is it right now, by the iPad's local clock (the real dining-room time).
+function currentMeal(){ const h=new Date().getHours(); return h<11?'Breakfast':(h<16?'Lunch':'Dinner'); }
+function localDate(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 
 async function kapi(path, opts){ const r=await fetch('/api/kiosk/'+path,opts); if(!r.ok){throw new Error((await r.json().catch(()=>({}))).error||'Error');} return r.json(); }
 
@@ -69,6 +77,7 @@ function home(){
     <label>I am (optional)</label>
     <select id="kclient"><option value="">Prefer not to say</option>${DATA.clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
     <button class="kbtn" onclick="reqView()">🛎  Request something</button>
+    <button class="kbtn" onclick="mealView()">🍽️  How was ${currentMeal().toLowerCase()}?</button>
     ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}
     <div style="margin-top:18px;text-align:center">
       <button id="kRefreshBtn" class="btn btn-ghost" style="font-size:15px" onclick="refreshData()">🔄  Update list</button>
@@ -77,6 +86,42 @@ function home(){
     </div>`;
 }
 function client(){ const s=$('kclient'); return s?s.value:''; }
+// Daily meal pulse — three taps, in the resident's hands. Short on purpose.
+function mealView(){
+  VIEW='meal';
+  CLIENT=client();
+  MEAL_SEL=currentMeal(); MEAL_DATE=localDate();
+  const ynRow=(k,q,yes,no)=>`<div class="mq" data-k="${k}" style="margin:16px 0">
+    <div style="font-size:18px;color:var(--navy);margin-bottom:8px">${q}</div>
+    <div class="toolbar" style="gap:10px">
+      <button class="kbtn mopt" style="margin:0" onclick="pick(this,1)">${yes}</button>
+      <button class="kbtn mopt" style="margin:0" onclick="pick(this,0)">${no}</button>
+    </div></div>`;
+  $('kview').innerHTML=`<h1>How was the meal?</h1>
+    <p class="ksub">Just a few taps — it helps us cook for you, not just feed you.</p>
+    <div style="margin:6px 0 14px">${MEALS3.map(m=>`<button class="kchip${m===MEAL_SEL?' msel':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>
+    ${ynRow('liked','Did you enjoy it?','😋  Yes','😕  Not really')}
+    ${ynRow('enough','Was there enough?','👍  Plenty','🙁  Still hungry')}
+    ${ynRow('again','Would you want it again?','💛  Yes please','🙅  Maybe not')}
+    <label style="margin-top:10px;display:block">Anything you'd want us to know? (optional)</label>
+    <input id="mcomment" placeholder="e.g. loved the chicken; soup was cold" maxlength="200"/>
+    <div id="merr" class="err" style="margin-top:6px"></div>
+    <button class="btn btn-gold big" style="width:100%;margin-top:14px" onclick="submitMeal()">Send</button>
+    <button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`;
+}
+function setMeal(m){ MEAL_SEL=m; document.querySelectorAll('.kchip').forEach(b=>b.classList.toggle('msel', b.textContent===m)); }
+function pick(btn,val){ const row=btn.closest('.mq'); row.dataset.val=val; row.querySelectorAll('.mopt').forEach(b=>b.classList.remove('msel')); btn.classList.add('msel'); }
+async function submitMeal(){
+  const get=k=>{const r=document.querySelector('.mq[data-k="'+k+'"]'); return r&&r.dataset.val!=null?+r.dataset.val:null;};
+  const liked=get('liked'), enough=get('enough'), again=get('again');
+  const comment=$('mcomment')?$('mcomment').value.trim():'';
+  if(liked==null&&enough==null&&again==null&&!comment){ if($('merr'))$('merr').textContent='Tap at least one answer.'; return; }
+  try{
+    await kapi('meal',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code:CODE,meal:MEAL_SEL,meal_date:MEAL_DATE,client_id:CLIENT||null,liked,enough,again,comment})});
+    thanks('Thank you — that helps us make every meal better.');
+  }catch(e){ if($('merr'))$('merr').textContent=e.message; }
+}
 function reqView(){
   VIEW='req';
   CLIENT=client();

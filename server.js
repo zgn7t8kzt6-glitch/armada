@@ -794,6 +794,27 @@ app.post('/api/meals/check', requireAuth, async (req, res) => {
 });
 // Caterer scorecard — last 30 days of meal checks (held the standard?).
 app.get('/api/meals/scorecard', requireAuth, (req, res) => res.json(mealScorecard()));
+// Resident meal pulse, by day + meal — how every breakfast/lunch/dinner landed.
+app.get('/api/meals/feedback', requireAuth, (req, res) => {
+  const days = Math.min(60, Math.max(1, +(req.query.days || 14)));
+  const rows = db.prepare(`SELECT meal_date, meal,
+      COUNT(*) n,
+      SUM(CASE WHEN liked=1 THEN 1 ELSE 0 END) liked, SUM(CASE WHEN liked IS NOT NULL THEN 1 ELSE 0 END) likedN,
+      SUM(CASE WHEN enough=1 THEN 1 ELSE 0 END) enough, SUM(CASE WHEN enough IS NOT NULL THEN 1 ELSE 0 END) enoughN,
+      SUM(CASE WHEN again=1 THEN 1 ELSE 0 END) again, SUM(CASE WHEN again IS NOT NULL THEN 1 ELSE 0 END) againN
+    FROM meal_feedback WHERE meal_date >= date('now', ?) GROUP BY meal_date, meal`).all(`-${days} day`);
+  const pct = (a, b) => b ? Math.round(a / b * 100) : null;
+  const byDay = {};
+  for (const r of rows) {
+    (byDay[r.meal_date] ||= { date: r.meal_date, meals: {} }).meals[r.meal] = {
+      n: r.n, likedPct: pct(r.liked, r.likedN), enoughPct: pct(r.enough, r.enoughN), againPct: pct(r.again, r.againN),
+    };
+  }
+  const comments = db.prepare(`SELECT f.meal_date, f.meal, f.comment, f.created_at, c.pref
+    FROM meal_feedback f LEFT JOIN clients c ON c.id = f.client_id
+    WHERE f.comment IS NOT NULL AND f.meal_date >= date('now', ?) ORDER BY f.created_at DESC LIMIT 40`).all(`-${days} day`);
+  res.json({ days, byDay: Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date)), comments });
+});
 
 // Every Kipu discharge must have the in-app fond-farewell completed (Safe
 // Departure checklist + where they went). What's missing on a given discharge:
@@ -4777,6 +4798,27 @@ app.post('/api/kiosk/survey', (req, res) => {
   }
   surveyRecovery(b.client_id, b.answers);   // the guest spoke — recover instantly if it's low
   notifySurveyResult(survey.id, b.client_id, b.answers);   // email leadership the rating + focus
+  res.json({ ok: true });
+});
+// Resident meal pulse from the dining-room kiosk — three taps + an optional word.
+// meal + meal_date come from the iPad's local clock (the real dining-room time), so
+// the date is correct regardless of server timezone; we validate and clamp anyway.
+const MEALS3 = ['Breakfast', 'Lunch', 'Dinner'];
+app.post('/api/kiosk/meal', (req, res) => {
+  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+  const b = req.body || {};
+  const meal = MEALS3.includes(b.meal) ? b.meal : null;
+  if (!meal) return res.status(400).json({ error: 'Which meal?' });
+  // Accept the kiosk's local date if it's a sane YYYY-MM-DD within a day of now;
+  // otherwise fall back to the server's date.
+  const today = new Date().toISOString().slice(0, 10);
+  const date = (/^\d{4}-\d{2}-\d{2}$/.test(b.meal_date || '') && Math.abs(Date.parse(b.meal_date) - Date.now()) < 36 * 3600e3)
+    ? b.meal_date : today;
+  const yn = (v) => (v === 1 || v === true || v === '1') ? 1 : (v === 0 || v === false || v === '0') ? 0 : null;
+  if (yn(b.liked) == null && yn(b.enough) == null && yn(b.again) == null && !(b.comment || '').trim())
+    return res.status(400).json({ error: 'Tap at least one answer.' });
+  db.prepare(`INSERT INTO meal_feedback (meal_date, meal, client_id, liked, enough, again, comment) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(date, meal, b.client_id || null, yn(b.liked), yn(b.enough), yn(b.again), (b.comment || '').trim().slice(0, 280) || null);
   res.json({ ok: true });
 });
 

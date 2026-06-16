@@ -3124,9 +3124,17 @@ async function markHomework(sid, cid){ try{ await api('/sessions/'+sid+'/homewor
 
 /* ---- My Shift: role-tailored employee dashboard ---- */
 function dashScrollTo(key){ const el=$('dash-'+key); if(!el) return; el.scrollIntoView({behavior:'smooth',block:'start'}); el.style.transition='box-shadow .3s'; el.style.boxShadow='0 0 0 2px var(--gold)'; setTimeout(()=>{el.style.boxShadow='';},1300); }
+let DASH_PREVIEW=null;
+function setDashPreview(role){ DASH_PREVIEW=role||null; loadDashboard(); }
 async function loadDashboard(){
-  let d; try{ d=await api('/dashboard'); }catch(e){ $('dashSections').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const qs = DASH_PREVIEW ? '?as='+encodeURIComponent(DASH_PREVIEW) : '';
+  let d; try{ d=await api('/dashboard'+qs); }catch(e){ $('dashSections').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
   $('dashGreeting').textContent = `${d.greeting} · ${d.jobRole}`;
+  // Admin role-preview switcher — review any role's dashboard.
+  if(d.canPreview){
+    let bar=$('dashPreview'); if(!bar){ bar=document.createElement('div'); bar.id='dashPreview'; bar.className='card no-print'; bar.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap'; const host=$('dashGreeting').closest('.view')||$('dashSections').parentNode; host.insertBefore(bar, host.firstChild); }
+    bar.innerHTML = `<span class="hint">👁 Preview dashboard as role:</span><select id="dashAsSel" class="sans" onchange="setDashPreview(this.value)"><option value="">My role (${esc(ME.job_role||'Team')})</option>${(d.roles||[]).map(r=>`<option value="${esc(r)}" ${r===DASH_PREVIEW?'selected':''}>${esc(r)}</option>`).join('')}</select>${d.previewing?`<span class="risk risk-warn">previewing ${esc(d.previewing)}</span>`:''}`;
+  }
   $('dashSubtitle').textContent = d.subtitle||'';
   const ns=d.northStar;
   $('dashNorthStar').innerHTML = ns ? `<div class="card" style="text-align:center;border-left:4px solid var(--gold)">

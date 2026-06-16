@@ -2801,7 +2801,8 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const h = localHour();
   const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
   const first = (req.user.name || '').split(/\s+/)[0] || 'there';
-  const jr = req.user.job_role || '';
+  // Admins can preview any role's dashboard (?as=Role) for review.
+  const jr = (req.user.role === 'admin' && req.query.as && JOB_ROLES.includes(req.query.as)) ? req.query.as : (req.user.job_role || '');
   const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
   const dischToday = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, anticipated_dc, next_loc, medications, allergies FROM clients WHERE substr(discharge_date,1,10) = ? OR (anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= date('now','+1 day'))`).all(today);
   const item = (c, sub, badge) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', sub: sub || '', badge: badge || '' });
@@ -3137,7 +3138,8 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
 
   // Proactive alerts (the automations' output) surfaced on every shift screen.
   const alerts = db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all();
-  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins });
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins,
+    canPreview: req.user.role === 'admin', roles: req.user.role === 'admin' ? JOB_ROLES : undefined, previewing: jr !== (req.user.job_role || '') ? jr : null });
 });
 
 // Moments of Truth — the three steps of service, made measurable per client:

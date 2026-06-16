@@ -3026,6 +3026,21 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       if (inDays === 0 || inDays === 1) milestones.push({ id: c.id, name: c.pref || c.name, label: `${m} day${m > 1 ? 's' : ''} clean`, today: inDays === 0 });
     }
   }
+  // My arrival tasks — outstanding on-arrival checklist items for new admits,
+  // for whatever arrival role this person covers.
+  const myArrivalRole = arrivalRoleFor(jr);
+  if (myArrivalRole) {
+    const roleItems = db.prepare(`SELECT COUNT(*) n FROM arrival_items WHERE active = 1 AND role = ?`).get(myArrivalRole).n;
+    if (roleItems) {
+      const doneCount = db.prepare(`SELECT COUNT(*) n FROM arrival_checks ch JOIN arrival_items i ON i.id = ch.item_id WHERE ch.client_id = ? AND i.role = ?`);
+      const recentAdmits = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) >= date('now','-3 day') ORDER BY admit DESC, id DESC`).all();
+      let totalOut = 0; const outRows = [];
+      for (const c of recentAdmits) { const out = roleItems - doneCount.get(c.id, myArrivalRole).n; if (out > 0) { totalOut += out; outRows.push({ c, out }); } }
+      tiles.push({ key: 'arrival', label: 'My arrival tasks', n: totalOut, sev: totalOut ? 'warn' : 'ok', view: 'arrivalcheck' });
+      if (outRows.length) sections.push({ key: 'arrival', title: `🤝 Arrival tasks for new admits — your part (${myArrivalRole})`, cta: { label: 'Open Arrival Tasks →', view: 'arrivalcheck' },
+        items: outRows.map((x) => ({ id: x.c.id, name: x.c.pref || x.c.name, room: x.c.room || '', sub: `${x.out} arrival item${x.out === 1 ? '' : 's'} left`, badge: 'TO DO' })) });
+    }
+  }
   // Meal service — for the roles that serve/stock food (techs + kitchen): prompt
   // to inspect the current meal delivery if it hasn't been checked yet.
   if (jr === 'BHT / Tech' || jr === 'Kitchen' || jr === '' || jr === 'Team') {
@@ -3430,6 +3445,12 @@ app.get('/api/arrivals/diagnose', requireAuth, requireAdmin, async (req, res) =>
 // Today's (or a given day's) board, split by status.
 // ── ARRIVAL CHECKLISTS — each role's on-arrival tasks per new admit ──────────
 const ARRIVAL_ROLES = ['Front Desk', 'Housekeeping', 'RT / BHT', 'Nurse', 'Provider / Medical', 'Case Mgmt / Therapist', 'Kitchen'];
+// Loosely map a user's job_role to the arrival checklist role it covers.
+function arrivalRoleFor(jr) {
+  const j = (jr || '').toLowerCase();
+  const keys = ['nurse', 'bht', 'tech', 'therapist', 'case', 'front', 'desk', 'kitchen', 'housekeep', 'provider', 'medical'];
+  return ARRIVAL_ROLES.find((role) => keys.some((k) => role.toLowerCase().includes(k) && j.includes(k))) || null;
+}
 // Board: recent admits with per-role completion, so the team sees what's left.
 app.get('/api/arrival/board', requireAuth, (req, res) => {
   const items = db.prepare(`SELECT id, role FROM arrival_items WHERE active = 1`).all();

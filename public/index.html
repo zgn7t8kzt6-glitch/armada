@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616S" />
+<link rel="stylesheet" href="/styles.css?v=20260616T" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -45,6 +45,7 @@
     <button data-view="dashboard">My Shift</button>
     <button data-view="today">Today</button>
     <button data-view="command" data-admin>Command Center</button>
+    <button data-view="leadership" data-admin>Leadership</button>
     <button data-view="compliance" data-admin>Documentation</button>
     <button data-view="report" class="active">Shift Playbook</button>
     <button data-view="retention">Retention</button>
@@ -583,6 +584,17 @@
       <div class="card"><h3>Everyone's path</h3><div id="contBoard"></div></div>
       <div class="card"><h3>By case manager — conversion accountability</h3><div id="contCM"></div></div>
       <p class="sub sans" data-admin>Approved referral partners are managed in <strong>Settings → Approved partners</strong>.</p>
+    </section>
+
+    <!-- LEADERSHIP ROLL-UP (admin) -->
+    <section id="leadership" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Leadership — accountability roll-up</h3><p class="sub sans">Every director's seat at a glance: are the systems holding, and are they running their routine? Click a seat to open their dashboard.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadLeadership()">Refresh</button>
+        </div>
+        <div id="leadBody"></div>
+      </div>
     </section>
 
     <!-- DOCUMENTATION COMPLIANCE (admin) -->
@@ -1654,6 +1666,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616S"></script>
+<script src="/app.js?v=20260616T"></script>
 </body>
 </html>

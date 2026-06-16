@@ -3913,6 +3913,35 @@ app.post('/api/projects/:id/checklist', requireAuth, (req, res) => {
 });
 app.delete('/api/projects/:id', requireAuth, requireAdmin, (req, res) => { db.prepare(`DELETE FROM projects WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 
+// ── LEADERSHIP ROLL-UP — every director's scorecard + routine run, side by side ─
+app.get('/api/leadership', requireAuth, requireAdmin, (req, res) => {
+  const today = appToday();
+  const holders = (role) => db.prepare(`SELECT name FROM users WHERE job_role = ? AND active = 1 ORDER BY name`).all(role).map((u) => u.name);
+  // Operations seat — fully instrumented.
+  const sc = dooScorecard();
+  const rh = opsRoutineHistory(7);
+  const ops = {
+    role: 'Director of Operations', holders: holders('Director of Operations'),
+    scorePass: sc.passing, scoreTotal: sc.total, misses: sc.outcomes.filter((o) => !o.ok).map((o) => o.name),
+    routinePct: rh.pct, routineSeries: rh.series, rescuesWeek: sc.ox.rescues.week, projectsOverdue: sc.ox.projects.overdue,
+  };
+  // House clinical numbers (Clinical / Executive seats watch these).
+  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const amaToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ? AND discharge_status LIKE '%AMA%'`).get(today).n;
+  const atRisk = active.filter((c) => { const a = latestAmaRead(c.id); return a && (a.level === 'High' || a.level === 'Elevated'); }).length;
+  const openIncidents = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'`).get().n;
+  const dcMissing = db.prepare(`SELECT departure_steps, aftercare_dest, discharge_reason, discharge_improve FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-7 day')`).all().filter((c) => dischargeMissing(c).length).length;
+  const delightSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM delights WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
+  let welcomed = 0, anticipated = 0;
+  for (const c of active) { if (careCardStatus(c).complete) welcomed++; if (delightSet.has(c.id)) anticipated++; }
+  const served = active.length ? Math.round((welcomed + anticipated) / (active.length * 2) * 100) : 100;
+  const clinical = {
+    role: 'Clinical Director', holders: holders('Clinical Director'),
+    census: active.length, amaToday, atRisk, openIncidents, dcMissing, served,
+  };
+  res.json({ ops, clinical, execHolders: holders('Executive Director') });
+});
+
 /* ---------------- Scheduling & workforce ---------------- */
 // The schedule for a date: each slot with assignments, plus live coverage
 // (needed vs scheduled vs called-off vs currently clocked-in).

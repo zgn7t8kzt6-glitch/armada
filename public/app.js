@@ -128,7 +128,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 function renderGroups(){
   const isAdmin = ME && ME.role==='admin';
@@ -166,6 +166,7 @@ function show(v){
   if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
+  if(v==='leadership') loadLeadership();
   if(v==='compliance') loadCompliance();
   if(v==='askai') loadAskAI();
   if(v==='incidents') loadIncidents();
@@ -1974,6 +1975,38 @@ async function loadVoice(){
     const chk=(v.checkins||[]).map(x=>`<div class="pc-note">💬 <strong>${esc(x.client||'Client')}</strong>${x.room?' <span class="hint">· '+esc(x.room)+'</span>':''}: “${esc(x.answer)}” <span class="hint">— ${esc(x.shift||'')} ${esc((x.at||'').slice(5))}${x.by?' · '+esc(x.by):''}</span></div>`).join('');
     $('cmdVoice').innerHTML = (reqs||chk) ? ((reqs?`<div class="cmd-sub">What they're asking for (kiosk)</div>${reqs}`:'')+(chk?`<div class="cmd-sub">What they're telling us (rounds)</div>${chk}`:'')) : '<div class="hint">No guest voice yet. Ask the shift question on Rounds, and put the kiosk on the unit.</div>';
   }catch(e){ $('cmdVoice').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; }
+}
+async function loadLeadership(){
+  let d; try{ d=await api('/leadership'); }catch(e){ $('leadBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const o=d.ops, c=d.clinical;
+  const holders=h=>h&&h.length?h.join(', '):'<span class="hint">unassigned</span>';
+  const scColor=(p,t)=>p===t?'var(--good)':p>=t-2?'#9a6a1f':'var(--danger)';
+  const pctColor=p=>p==null?'var(--muted)':p>=90?'var(--good)':p>=60?'#9a6a1f':'var(--danger)';
+  const day=s=>new Date(s.date+'T12:00').toLocaleDateString('en-US',{weekday:'narrow'});
+  const opsCard=`<div class="card" style="border-left:4px solid var(--gold)">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">⚙️ Operations</h3><div class="hint">${holders(o.holders)}</div></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="setDashPreview('Director of Operations');show('dashboard')">Open dashboard →</button></div>
+    <div class="ret-cards" style="margin-top:8px">
+      <div class="ret-card"><div class="n" style="color:${scColor(o.scorePass,o.scoreTotal)}">${o.scorePass}/${o.scoreTotal}</div><div class="l">Systems holding</div></div>
+      <div class="ret-card"><div class="n" style="color:${pctColor(o.routinePct)}">${o.routinePct!=null?o.routinePct+'%':'—'}</div><div class="l">Routine run (7d)</div></div>
+      <div class="ret-card ${o.rescuesWeek?'rc-high':''}"><div class="n">${o.rescuesWeek}</div><div class="l">CEO rescues (wk)</div></div>
+      <div class="ret-card ${o.projectsOverdue?'rc-high':''}"><div class="n">${o.projectsOverdue}</div><div class="l">Projects overdue</div></div>
+    </div>
+    <div style="display:flex;gap:4px;margin-top:8px">${(o.routineSeries||[]).map(s=>`<div title="${s.date}: ${s.done}/${s.due}" style="flex:1;text-align:center"><div style="height:22px;display:flex;align-items:flex-end;justify-content:center"><div style="width:13px;background:${pctColor(s.pct)};height:${s.pct==null?3:Math.max(3,Math.round(s.pct/100*22))}px;border-radius:2px"></div></div><div class="hint" style="font-size:10px">${day(s)}</div></div>`).join('')}</div>
+    ${o.misses.length?`<div class="pc-note" style="margin-top:8px;border-left:3px solid var(--danger)"><strong>Not holding:</strong> ${o.misses.map(esc).join(' · ')}</div>`:'<div class="pc-note" style="margin-top:8px;border-left:3px solid var(--good)">All systems holding. 🎯</div>'}
+    <button class="btn btn-ghost btn-sm sans" style="margin-top:8px" onclick="show('operations')">Open Operations hub →</button></div>`;
+  const clinCard=`<div class="card">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">🩺 Clinical</h3><div class="hint">${holders(c.holders)}</div></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="setDashPreview('Clinical Director');show('dashboard')">Open dashboard →</button></div>
+    <div class="ret-cards" style="margin-top:8px">
+      <div class="ret-card"><div class="n" style="color:${c.served>=80?'var(--good)':c.served>=60?'#9a6a1f':'var(--danger)'}">${c.served}%</div><div class="l">3 Steps of Service</div></div>
+      <div class="ret-card"><div class="n">${c.census}</div><div class="l">Census</div></div>
+      <div class="ret-card ${c.atRisk?'rc-high':''}"><div class="n">${c.atRisk}</div><div class="l">At risk</div></div>
+      <div class="ret-card ${c.amaToday?'rc-high':''}"><div class="n">${c.amaToday}</div><div class="l">AMA today</div></div>
+      <div class="ret-card ${c.openIncidents?'rc-warn':''}"><div class="n">${c.openIncidents}</div><div class="l">Open incidents</div></div>
+      <div class="ret-card ${c.dcMissing?'rc-high':''}"><div class="n">${c.dcMissing}</div><div class="l">Discharges missing form</div></div>
+    </div></div>`;
+  $('leadBody').innerHTML = opsCard + clinCard + `<p class="hint">Executive Director: ${holders(d.execHolders)}. More seats show their scorecard + routine here as they're built.</p>`;
 }
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }

@@ -426,68 +426,77 @@ export function ensureOpsRoutines() {
 // are flagged to source. Additive: inserts missing items by name and backfills
 // the product code on any that already exist.
 // [category, name, unit, par, reorder, expiry, sku, note]
+// Units sourced from Pollak Food Distributors invoice (June 2026).
+// [category, name, unit, par, reorder, expiry, sku, note]
 const NOURISHMENT = [
-  ['Hydration & Electrolytes', 'Gatorade Zero Watermelon', 'case', 6, 2, 0, 'PL620', null],
-  ['Hydration & Electrolytes', 'Gatorade G2 Fruit Punch', 'case', 6, 2, 0, 'B4678', null],
-  ['Hydration & Electrolytes', 'Gatorade G2 Grape', 'case', 6, 2, 0, '27472', null],
-  ['Hydration & Electrolytes', 'Clear protein — Apple Cranberry', 'case', 4, 2, 0, 'TG782', null],
-  ['Hydration & Electrolytes', 'Clear protein — Peach Mango', 'case', 4, 2, 0, 'PC892', null],
-  ['Hydration & Electrolytes', 'Ginger ale, caffeine-free', 'case', 4, 1, 0, '33206', null],
-  ['Easy to Tolerate', 'Saltines', 'case', 4, 2, 0, 'K4940', null],
-  ['Easy to Tolerate', 'Cream of Wheat / farina', 'box', 4, 1, 0, 'GT506', null],
-  ['Easy to Tolerate', 'Gelatin, regular', 'case', 4, 1, 0, '23736', null],
-  ['Easy to Tolerate', 'Gelatin, sugar-free', 'case', 4, 1, 0, 'M3476', null],
-  ['Easy to Tolerate', 'Pudding, sugar-free', 'case', 4, 1, 0, '68652', null],
-  ['Easy to Tolerate', 'Pudding, vanilla', 'case', 4, 1, 0, 'C7352', null],
-  ['Easy to Tolerate', 'Plain bagels', 'case', 4, 1, 1, 'RW814', null],
-  ['Easy to Tolerate', 'White Pullman bread (toast)', 'case', 4, 1, 1, '13830', null],
-  ['Easy to Tolerate', 'Bananas', 'case', 4, 1, 1, '13746', null],
-  ['Protein & Rebuild', 'Boost Very Vanilla', 'case', 6, 2, 0, 'FJ412', null],
-  ['Protein & Rebuild', 'Boost Wildberry', 'case', 6, 2, 0, 'FJ334', null],
-  ['Protein & Rebuild', 'Ensure Chocolate', 'case', 6, 2, 0, 'C5698', null],
-  ['Protein & Rebuild', 'Glucerna Chocolate (diabetic)', 'case', 4, 2, 0, 'J3080', null],
-  ['Protein & Rebuild', 'Greek yogurt (assorted)', 'case', 6, 2, 1, 'A4532 / A4530 / A2056', null],
-  ['Protein & Rebuild', 'Cheese sticks', 'case', 6, 2, 1, 'GR878 / BD270', null],
-  ['Protein & Rebuild', 'Peanut butter', 'jar', 4, 1, 0, 'DV690', null],
-  ['Protein & Rebuild', 'Whole milk', 'case', 4, 1, 1, 'CF162', null],
-  ['Fruit', 'Golden apples', 'case', 3, 1, 1, '97582', 'Order to census'],
-  ['Fruit', 'Red apples', 'case', 3, 1, 1, '80062 / 13164', 'Order to census'],
-  ['Fruit', 'Oranges', 'case', 3, 1, 1, 'GC968 / 16168', 'Order to census'],
-  ['Fruit', 'Red grapes', 'case', 3, 1, 1, '13762', 'Order to census'],
-  ['Fruit', 'Strawberries', 'case', 3, 1, 1, '39142', 'Order to census'],
-  ['Savory Snacks', 'Pretzels', 'case', 4, 2, 0, 'C3266', 'Lead with savory over sweets'],
-  ['Savory Snacks', 'Chex Mix Cheddar', 'case', 4, 2, 0, 'AV480', null],
-  ['Savory Snacks', 'Potato chips', 'case', 4, 2, 0, 'CB440', null],
-  ['Savory Snacks', 'Tortilla chips', 'case', 4, 2, 0, 'P5334', null],
-  ['Cereal', 'Corn Flakes', 'case', 3, 1, 0, '26304', null],
-  ['Cereal', 'Honey Nut Toasted Oat', 'case', 3, 1, 0, '17812', null],
-  ['Cereal', 'Frosted Flakes (sugary — cap qty)', 'case', 2, 1, 0, '26312', 'Craving release valve; alt: Fruit Whirls 26318'],
-  ['Condiments & Disposables', 'Sweetener packets', 'box', 4, 1, 0, null, null],
-  ['Condiments & Disposables', 'Sugar-free syrup', 'case', 2, 1, 0, '10772', null],
-  ['Condiments & Disposables', 'Jelly', 'box (200 packets)', 2, 1, 0, 'GP564', 'Regular — delivered in 200-packet boxes'],
-  ['Condiments & Disposables', 'Jelly, diet / sugar-free', 'box (200 packets)', 2, 1, 0, null, 'Sugar-free, 200-packet boxes — confirm PFS code with source.'],
-  ['Condiments & Disposables', 'Cream cheese', 'case', 3, 1, 1, 'BW730', null],
-  // Off-guide adds — NOT on the PFS guide, source separately.
-  ['Comfort & Recovery', 'Chicken broth', 'case', 6, 2, 0, null, 'Off-guide — source. Biggest savory gap.'],
-  ['Comfort & Recovery', 'Beef broth', 'case', 4, 2, 0, null, 'Off-guide — source.'],
-  ['Comfort & Recovery', 'Chicken noodle soup', 'case', 6, 2, 0, null, 'Off-guide — source.'],
-  ['Comfort & Recovery', 'Decaf coffee', 'case', 4, 2, 0, null, 'Off-guide — pair with Ridgeline regular.'],
-  ['Comfort & Recovery', 'Chamomile / caffeine-free tea', 'box', 4, 1, 0, null, 'Off-guide — anxiety + sleep.'],
-  ['Comfort & Recovery', 'Instant oatmeal packets', 'case', 4, 2, 0, null, 'Off-guide — fiber + steadier breakfast.'],
-  ['Comfort & Recovery', 'Prune juice', 'case', 4, 2, 0, null, 'Off-guide — opioid-withdrawal constipation.'],
-  ['Comfort & Recovery', 'Applesauce cups', 'case', 4, 2, 0, null, 'Off-guide — BRAT staple.'],
-  ['Comfort & Recovery', 'Ginger chews / ginger tea', 'case', 4, 1, 0, null, 'Off-guide — active nausea.'],
+  ['Hydration & Electrolytes', 'Gatorade Zero Watermelon',       'case (24)',           6, 2, 0, 'PL620',              null],
+  ['Hydration & Electrolytes', 'Gatorade G2 Fruit Punch',        'case (24)',           6, 2, 0, 'B4678',              null],
+  ['Hydration & Electrolytes', 'Gatorade G2 Grape',              'case (24)',           6, 2, 0, '27472',              null],
+  ['Hydration & Electrolytes', 'Clear protein — Apple Cranberry','case (24)',           4, 2, 0, 'TG782',              null],
+  ['Hydration & Electrolytes', 'Clear protein — Peach Mango',    'case (24)',           4, 2, 0, 'PC892',              null],
+  ['Hydration & Electrolytes', 'Ginger ale, caffeine-free',      'case (24)',           4, 1, 0, '33206',              null], // Pollak S01230 24/7.5 oz
+  ['Easy to Tolerate',         'Saltines',                       'case (500 packs)',    4, 2, 0, 'K4940',              null], // Pollak CR1040 500/2-ct packs
+  ['Easy to Tolerate',         'Cream of Wheat / farina',        'case (144 packets)', 4, 1, 0, 'GT506',              null], // Pollak CE5035 144/1
+  ['Easy to Tolerate',         'Gelatin, regular',               'case (12 × 4-pack)', 4, 1, 0, '23736',              null], // Pollak GE1500 12/4
+  ['Easy to Tolerate',         'Gelatin, sugar-free',            'case (12 × 4-pack)', 4, 1, 0, 'M3476',              null], // Pollak GE5040 12/4
+  ['Easy to Tolerate',         'Pudding, sugar-free',            'case (12 × 4-pack)', 4, 1, 0, '68652',              null], // Pollak PD3010 12/4
+  ['Easy to Tolerate',         'Pudding, vanilla',               'case (12 × 4-pack)', 4, 1, 0, 'C7352',              null], // Pollak PD3050 12/4
+  ['Easy to Tolerate',         'Plain bagels',                   'case (12 bags/6)',   4, 1, 1, 'RW814',              null], // Pollak BR1045 12/6
+  ['Easy to Tolerate',         'White Pullman bread (toast)',    'case (12 loaves)',   4, 1, 1, '13830',              null], // Pollak BR1016 12/28
+  ['Easy to Tolerate',         'Bananas',                        '40-lb case',         4, 1, 1, '13746',              null], // Pollak PC0005 40 LB
+  ['Protein & Rebuild',        'Boost Very Vanilla',             'case (24)',           6, 2, 0, 'FJ412',              null], // Pollak 2N186000 24/80
+  ['Protein & Rebuild',        'Boost Wildberry',                'case (24)',           6, 2, 0, 'FJ334',              null], // Pollak 2N186600 24/80
+  ['Protein & Rebuild',        'Ensure Chocolate',               'case (24)',           6, 2, 0, 'C5698',              null],
+  ['Protein & Rebuild',        'Glucerna Chocolate (diabetic)',  'case (24)',           4, 2, 0, 'J3080',              null], // Pollak 2N360200 24/80
+  ['Protein & Rebuild',        'Greek yogurt (assorted)',        'case (48)',           6, 2, 1, 'A4532 / A4530 / A2056', null], // Pollak DP1520/1550/1515 48/40
+  ['Protein & Rebuild',        'Cheese sticks',                  'case',               6, 2, 1, 'GR878 / BD270',      null],
+  ['Protein & Rebuild',        'Peanut butter',                  'case (60 packets)',  4, 1, 0, 'DV690',              null], // Pollak CN1145 60/1 portion packets
+  ['Protein & Rebuild',        'Whole milk',                     'case (50 × 8 oz)',   4, 1, 1, 'CF162',              null], // Pollak DP0013 50/8 oz
+  ['Fruit',                    'Golden apples',                  'case (138 ct)',       3, 1, 1, '97582',              'Order to census'],
+  ['Fruit',                    'Red apples',                     'case (138 ct)',       3, 1, 1, '80062 / 13164',      'Order to census'], // Pollak PC0003B 138 ct
+  ['Fruit',                    'Oranges',                        'case (138 ct)',       3, 1, 1, 'GC968 / 16168',      'Order to census'], // Pollak PC0081 138 ct
+  ['Fruit',                    'Red grapes',                     'flat',               3, 1, 1, '13762',              'Order to census'], // Pollak PC0037 flat
+  ['Fruit',                    'Strawberries',                   'flat',               3, 1, 1, '39142',              'Order to census'], // Pollak PC1023 flat
+  ['Savory Snacks',            'Pretzels',                       'case (60 bags)',      4, 2, 0, 'C3266',              'Lead with savory over sweets'], // Pollak PR2060 60/10
+  ['Savory Snacks',            'Chex Mix Cheddar',               'case',               4, 2, 0, 'AV480',              null],
+  ['Savory Snacks',            'Potato chips',                   'case (60 bags)',      4, 2, 0, 'CB440',              null], // Pollak PR2050 60/10
+  ['Savory Snacks',            'Tortilla chips',                 'case (50 bags)',      4, 2, 0, 'P5334',              null], // Pollak PR2054 50/10
+  ['Cereal',                   'Corn Flakes',                    'case (96 bowls)',     3, 1, 0, '26304',              null], // Pollak CE3310 96 ct bowl pack
+  ['Cereal',                   'Honey Nut Toasted Oat',          'case (96 bowls)',     3, 1, 0, '17812',              null], // Pollak CE3337 96/10
+  ['Cereal',                   'Frosted Flakes (sugary — cap qty)', 'case (96 bowls)', 2, 1, 0, '26312',              'Craving release valve; alt: Fruit Whirls 26318'], // Pollak CE3320 96/10
+  ['Condiments & Disposables', 'Sweetener packets',              'case (2,000 packets)', 4, 1, 0, null,              null], // Pollak CN1210 2000 ct
+  ['Condiments & Disposables', 'Sugar-free syrup',               'case (100 cups)',     2, 1, 0, '10772',              null], // Pollak CN5071 100/1
+  ['Condiments & Disposables', 'Jelly',                          'box (200 packets)',  2, 1, 0, 'GP564',              'Regular — Pollak CN1090H'],
+  ['Condiments & Disposables', 'Jelly, diet / sugar-free',       'box (200 packets)',  2, 1, 0, null,                 'Pollak CN5041 (Heinz Diet, 200 packets, 3 flavors) — confirm code'],
+  ['Condiments & Disposables', 'Cream cheese',                   'case (100 packets)', 3, 1, 1, 'BW730',              null], // Pollak CH1061 100/
+  // Comfort & Recovery — items confirmed available from Pollak (Pollak code in sku).
+  // Chicken broth and beef broth are NOT on Pollak; source separately.
+  ['Comfort & Recovery',       'Chicken broth',                  'case',               6, 2, 0, null,                 'NOT on Pollak — source separately. Biggest savory gap.'],
+  ['Comfort & Recovery',       'Beef broth',                     'case',               4, 2, 0, null,                 'NOT on Pollak — source separately.'],
+  ['Comfort & Recovery',       'Chicken noodle soup',            'case (24)',           6, 2, 0, 'SC2010',             null], // Pollak SC2010 24/7 oz
+  ['Comfort & Recovery',       'Decaf coffee',                   'case (48 × 8 oz)',   4, 2, 0, 'CF1574',             'Pair with Ridgeline regular coffee.'], // Pollak CF1574 48/8 oz
+  ['Comfort & Recovery',       'Chamomile / caffeine-free tea',  'case (5 × 100 bags)', 4, 1, 0, 'CF3030',            'Anxiety + sleep support.'], // Pollak CF3030 5/100
+  ['Comfort & Recovery',       'Instant oatmeal packets',        'case (64 packets)',  4, 2, 0, 'CE5105',             'Fiber + steadier breakfast than cereal.'], // Pollak CE5105 64/10
+  ['Comfort & Recovery',       'Prune juice',                    'case (8)',            4, 2, 0, 'JU2050',             'Opioid-withdrawal constipation.'], // Pollak JU2050 8/480 ml
+  ['Comfort & Recovery',       'Applesauce cups',                'case (72 × 4 oz)',   4, 2, 0, 'AP1072',             'BRAT staple.'], // Pollak AP1072 72/4 oz
+  ['Comfort & Recovery',       'Ginger chews / ginger tea',      'case',               4, 1, 0, null,                 'NOT on Pollak — source separately. Active nausea.'],
 ];
 export function ensureNourishment() {
   const has = db.prepare(`SELECT id, sku FROM inventory_items WHERE name = ? COLLATE NOCASE LIMIT 1`);
   const max = db.prepare(`SELECT COALESCE(MAX(sort),0) m FROM inventory_items`).get().m;
   const ins = db.prepare(`INSERT INTO inventory_items (department, category, name, unit, par_level, reorder_point, critical, track_expiry, sku, notes, sort) VALUES ('Kitchen',?,?,?,?,?,0,?,?,?,?)`);
-  const setSku = db.prepare(`UPDATE inventory_items SET sku = ? WHERE id = ? AND (sku IS NULL OR sku = '')`);
+  const setSku  = db.prepare(`UPDATE inventory_items SET sku  = ? WHERE id = ? AND (sku IS NULL OR sku = '')`);
+  const setUnit = db.prepare(`UPDATE inventory_items SET unit = ? WHERE id = ?`);
   let n = 0;
   NOURISHMENT.forEach((r, i) => {
     const ex = has.get(r[1]);
-    if (ex) { if (r[6]) setSku.run(r[6], ex.id); }
-    else { ins.run(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], max + 1 + n); n++; }
+    if (ex) {
+      if (r[6]) setSku.run(r[6], ex.id);
+      setUnit.run(r[2], ex.id); // always keep unit in sync with invoice data
+    } else {
+      ins.run(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], max + 1 + n);
+      n++;
+    }
   });
   return n;
 }

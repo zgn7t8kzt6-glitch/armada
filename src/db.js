@@ -1018,6 +1018,10 @@ addColumn('facilities', 'preferred', 'INTEGER');       // 1 = approved reciproca
 addColumn('clients', 'discharged_by_kipu', 'TEXT');    // who did the discharge in Kipu (best-effort), for accountability
 addColumn('maintenance_requests', 'photo', 'TEXT');    // (legacy single photo — superseded by maintenance_photos)
 addColumn('assigned_tasks', 'assigned_by_id', 'INTEGER'); // who created the task, so they can see responses
+// Cleanup: older syncs sometimes saved the building/facility name (e.g. "Armada
+// Recovery") into room when no bed was set. A real bed has a digit — clear the
+// facility-name ones so the room shows blank, not wrong. Idempotent + self-healing.
+db.exec(`UPDATE clients SET room = NULL WHERE room LIKE '%armada%' AND room NOT GLOB '*[0-9]*'`);
 // Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
 db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
   id INTEGER PRIMARY KEY,

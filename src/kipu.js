@@ -363,7 +363,7 @@ export async function kipuSyncRoster() {
     let admitTime = admitTimeFrom(admitRaw, pick(p, 'created_at', 'created_date'));
     let therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
     let caseMgr = pick(p, 'case_manager', 'casemanager');
-    let room = pick(p, 'bed_name', 'room', 'bed', 'bed_name_full');
+    let room = pick(p, 'bed_name', 'bed_number', 'room_number', 'room_name', 'room', 'bed', 'bed_label', 'bed_name_full');
     // Demographics the census DOES carry — map them straight through.
     const flat = (v) => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v != null ? String(v) : null);
     // Allergies may be a string, a list of strings, or a list of objects — pull
@@ -422,7 +422,7 @@ export async function kipuSyncRoster() {
           nextLoc = clean(d('next_level_of_care'));
           anticipatedDc = d('anticipated_discharge_date');
           if (refSrcRaw == null) refSrcRaw = d('referrer_name', 'first_contact_name');
-          if (room == null) room = d('bed_name', 'room_name', 'building_name');
+          if (room == null) room = d('bed_name', 'bed_number', 'room_name', 'room_number', 'room', 'bed', 'bed_label');
           if (dischStatus == null) dischStatus = d('discharge_type', 'discharge_type_code', 'discharge_or_transition_name');
           if (dischDest == null) dischDest = d('discharge_or_transition_name');
           if (therapist == null) therapist = deepFind(det, /(therapist|counselor|primary.?clinician)/i);
@@ -430,6 +430,9 @@ export async function kipuSyncRoster() {
         }
       } catch { /* best-effort */ }
     }
+    // Guard: a bed/room is never the facility/building name (e.g. "Armada
+    // Recovery") — that's not a bed. Drop it so the room shows blank, not wrong.
+    if (room && /\barmada\b/i.test(String(room)) && !/\d/.test(String(room))) room = null;
     const program = programRaw != null ? String(programRaw) : null;
     const newLoc = realLoc(program);
     const adm = !refSrcRaw ? admRef.get(name, p.first_name || name) : null;
@@ -536,7 +539,7 @@ export async function kipuSyncRoster() {
         const admit = (pick(p, 'admission_date', 'admit_date') || g('admission_date') || '').slice(0, 10) || null;
         const admitTimeD = admitTimeFrom(pick(p, 'admission_date', 'admit_date', 'admitted_at') || g('admission_date'), pick(p, 'created_at', 'created_date') || g('created_at'));
         const program = cleanLoc(g('level_of_care', 'program'));
-        const info = ins.run(name, p.first_name || name, g('bed_name', 'room_name', 'building_name'), program, realLoc(program), admit, admitTimeD, null, null,
+        const info = ins.run(name, p.first_name || name, g('bed_name', 'bed_number', 'room_name', 'room_number', 'room', 'bed'), program, realLoc(program), admit, admitTimeD, null, null,
           g('referrer_name', 'first_contact_name'), flat2(pick(p, 'dob', 'date_of_birth')), flat2(pick(p, 'diagnosis_codes')),
           flat2(pick(p, 'insurance_company')), flat2(pick(p, 'phone')), flat2(pick(p, 'pronouns')), flat2(pick(p, 'preferred_language')),
           flat2(pick(p, 'mr_number')), null, null, null, kid);

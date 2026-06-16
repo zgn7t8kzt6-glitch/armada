@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616L" />
+<link rel="stylesheet" href="/styles.css?v=20260616M" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -67,6 +67,7 @@
     <button data-view="partners" data-subview>Partners</button>
     <button data-view="askai" data-subview>Ask AI</button>
     <button data-view="mytasks">My Tasks</button>
+    <button data-view="messages">Messages <span id="msgBadge" class="badge-danger" style="display:none"></span></button>
     <button data-view="family" data-subview>Family</button>
     <button data-view="arrivals">Front Desk</button>
     <button data-view="arrivalcheck">Arrival Tasks</button>
@@ -768,6 +769,23 @@
         <h3>All open team tasks</h3>
         <p class="sub sans">Every teammate's open required tasks. Configure the Aftercare Coordinator and on-call leader under <strong>Settings</strong>.</p>
         <div id="allTasksList"></div>
+      </div>
+    </section>
+
+    <!-- MESSAGES — staff-to-staff -->
+    <section id="messages" class="view">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="msg-wrap">
+          <div class="msg-list" id="msgThreads"></div>
+          <div class="msg-main">
+            <div class="msg-head" id="msgHead"><span class="hint">Pick a conversation</span></div>
+            <div class="msg-body" id="msgBody"><div class="hint" style="padding:16px">Select the Team channel or a teammate to start chatting.</div></div>
+            <div class="msg-compose" id="msgCompose" style="display:none">
+              <input id="msgInput" placeholder="Message…" onkeydown="if(event.key==='Enter')sendMessage()"/>
+              <button class="btn btn-gold sans" onclick="sendMessage()">Send</button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1569,6 +1587,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616L"></script>
+<script src="/app.js?v=20260616M"></script>
 </body>
 </html>

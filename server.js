@@ -3881,6 +3881,69 @@ app.post('/api/beds/:id', requireAuth, (req, res) => {
 app.get('/api/staff', requireAuth, (req, res) => {
   res.json({ staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all() });
 });
+
+// ── STAFF MESSAGING — Team channel + 1:1 direct messages ─────────────────────
+function dmChannel(a, b) { return 'dm:' + [+a, +b].sort((x, y) => x - y).join('-'); }
+function canAccessChannel(channel, uid) {
+  if (channel === 'team') return true;
+  const m = /^dm:(\d+)-(\d+)$/.exec(channel || '');
+  return !!m && (+m[1] === uid || +m[2] === uid);
+}
+function unreadCount(channel, uid) {
+  const lr = db.prepare(`SELECT last_read_id FROM message_reads WHERE user_id = ? AND channel = ?`).get(uid, channel);
+  return db.prepare(`SELECT COUNT(*) n FROM messages WHERE channel = ? AND id > ? AND by_id != ?`).get(channel, lr ? lr.last_read_id : 0, uid).n;
+}
+// Conversation list: the Team channel + any DM threads I'm in, with last message
+// + unread, plus the staff roster to start a new DM.
+app.get('/api/messages/threads', requireAuth, (req, res) => {
+  const uid = req.user.id;
+  const threads = [];
+  const teamLast = db.prepare(`SELECT body, by_name, created_at FROM messages WHERE channel = 'team' ORDER BY id DESC LIMIT 1`).get();
+  threads.push({ channel: 'team', name: '📣 Team', kind: 'team', unread: unreadCount('team', uid),
+    last: teamLast ? { body: teamLast.body, by: teamLast.by_name, at: String(teamLast.created_at).slice(0, 16) } : null });
+  const dmChannels = db.prepare(`SELECT DISTINCT channel FROM messages WHERE channel LIKE 'dm:%' AND (channel LIKE ? OR channel LIKE ? OR channel LIKE ?)`)
+    .all(`dm:${uid}-%`, `dm:%-${uid}`, `dm:%-${uid}`).filter((r) => canAccessChannel(r.channel, uid));
+  for (const { channel } of dmChannels) {
+    const m = /^dm:(\d+)-(\d+)$/.exec(channel); const other = +m[1] === uid ? +m[2] : +m[1];
+    const ou = db.prepare(`SELECT name, job_role FROM users WHERE id = ?`).get(other);
+    const last = db.prepare(`SELECT body, by_name, created_at FROM messages WHERE channel = ? ORDER BY id DESC LIMIT 1`).get(channel);
+    threads.push({ channel, name: ou?.name || 'Staff', sub: ou?.job_role || '', kind: 'dm', otherId: other, unread: unreadCount(channel, uid),
+      last: last ? { body: last.body, by: last.by_name, at: String(last.created_at).slice(0, 16) } : null });
+  }
+  threads.sort((a, b) => (b.last ? b.last.at : '').localeCompare(a.last ? a.last.at : '') || (a.kind === 'team' ? -1 : 1));
+  const staff = db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 AND id != ? ORDER BY name`).all(uid);
+  res.json({ threads, staff });
+});
+// Messages in a channel (and mark it read).
+app.get('/api/messages', requireAuth, (req, res) => {
+  const channel = req.query.channel || 'team';
+  if (!canAccessChannel(channel, req.user.id)) return res.status(403).json({ error: 'Not your conversation' });
+  const rows = db.prepare(`SELECT id, body, by_id, by_name, created_at FROM messages WHERE channel = ? ORDER BY id DESC LIMIT 80`).all(channel).reverse();
+  const maxId = rows.length ? rows[rows.length - 1].id : 0;
+  if (maxId) db.prepare(`INSERT INTO message_reads (user_id, channel, last_read_id) VALUES (?,?,?) ON CONFLICT(user_id, channel) DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)`).run(req.user.id, channel, maxId);
+  res.json({ channel, messages: rows.map((m) => ({ id: m.id, body: m.body, by: m.by_name, mine: m.by_id === req.user.id, at: String(m.created_at).slice(0, 16) })) });
+});
+// Send a message (to a channel, or to a staffer to open/continue a DM).
+app.post('/api/messages', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const body = (b.body || '').trim();
+  if (!body) return res.status(400).json({ error: 'Write a message' });
+  let channel = b.channel;
+  if (b.to) { const ok = db.prepare(`SELECT 1 FROM users WHERE id = ? AND active = 1`).get(+b.to); if (!ok) return res.status(400).json({ error: 'Unknown staff member' }); channel = dmChannel(req.user.id, +b.to); }
+  if (!canAccessChannel(channel, req.user.id)) return res.status(403).json({ error: 'Not your conversation' });
+  const id = db.prepare(`INSERT INTO messages (channel, body, by_id, by_name) VALUES (?,?,?,?)`).run(channel, body.slice(0, 4000), req.user.id, req.user.name).lastInsertRowid;
+  db.prepare(`INSERT INTO message_reads (user_id, channel, last_read_id) VALUES (?,?,?) ON CONFLICT(user_id, channel) DO UPDATE SET last_read_id = ?`).run(req.user.id, channel, id, id);
+  res.json({ ok: true, id, channel });
+});
+// Total unread across all my conversations (for the nav badge).
+app.get('/api/messages/unread', requireAuth, (req, res) => {
+  const uid = req.user.id;
+  let n = unreadCount('team', uid);
+  for (const { channel } of db.prepare(`SELECT DISTINCT channel FROM messages WHERE channel LIKE 'dm:%'`).all()) {
+    if (canAccessChannel(channel, uid)) n += unreadCount(channel, uid);
+  }
+  res.json({ unread: n });
+});
 app.get('/api/team', requireAuth, (req, res) => {
   const today = appToday();
   res.json({

@@ -326,6 +326,23 @@ details.card[open]>summary{margin-bottom:12px}
 .side-kiosk:hover{filter:brightness(1.05)}
 .meal-grp,.meal-like{font-family:'Inter',system-ui,sans-serif;font-size:13px;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--navy);cursor:pointer}
 .meal-grp.on,.meal-like.on{border-color:var(--gold);background:#faf6ee;font-weight:600}
+.msg-wrap{display:flex;min-height:62vh;font-family:'Inter',system-ui,sans-serif}
+.msg-list{width:240px;border-right:1px solid var(--line);overflow-y:auto;background:#fafaf8}
+.msg-thread{display:block;width:100%;text-align:left;border:none;background:none;border-bottom:1px solid var(--line);padding:11px 13px;cursor:pointer}
+.msg-thread:hover{background:#f2efe8}.msg-thread.on{background:#efe7d8}
+.msg-thread .nm{font-weight:600;color:var(--navy);font-size:14px;display:flex;justify-content:space-between;align-items:center}
+.msg-thread .pv{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msg-main{flex:1;display:flex;flex-direction:column;min-width:0}
+.msg-head{padding:11px 14px;border-bottom:1px solid var(--line);font-weight:600;color:var(--navy)}
+.msg-body{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:#fff}
+.msg-row{max-width:78%;padding:8px 11px;border-radius:12px;font-size:14px;line-height:1.35}
+.msg-row.them{align-self:flex-start;background:#f0f1f4;color:var(--ink)}
+.msg-row.me{align-self:flex-end;background:var(--gold);color:#fff}
+.msg-row .meta{font-size:11px;opacity:.7;margin-bottom:2px}
+.msg-compose{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
+.msg-compose input{flex:1}
+.badge-danger:empty{display:none}
+@media(max-width:640px){.msg-list{width:120px}}
 
 /* ===== Leadership Command Center ===== */
 .cmd-hero{background:linear-gradient(125deg,#20484e,#2d6168);border:none;color:#fff}

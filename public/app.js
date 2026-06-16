@@ -88,6 +88,7 @@ async function boot(){
   // Role-based landing: everyone opens already where they work.
   const landing = ME.role==='admin' ? 'command' : 'dashboard';
   show(landing);
+  pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
 // Build a deep link to a patient's Kipu chart from the configured URL pattern.
@@ -123,7 +124,7 @@ const GROUP_OF={
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
   // Team — culture, recognition, learning, tasks
-  mytasks:'team',team:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
+  mytasks:'team',messages:'team',team:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',coverage:'facility',schedule:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
@@ -174,6 +175,7 @@ function show(v){
   if(v==='training') loadTraining();
   if(v==='scorecard') loadScorecard();
   if(v==='mytasks') loadMyTasks();
+  if(v==='messages') loadMessages();
   if(v==='settings') loadSettings();
   if(v==='referrals') loadReferrals();
   if(v==='partners') loadPartners();
@@ -1544,6 +1546,54 @@ async function logInbound(){
 }
 /* ---- Front desk: scheduled arrivals ---- */
 let _arrivalsTimer=null;
+/* ---- Staff messaging ---- */
+let MSG_CHANNEL=null, MSG_STAFF=[], MSG_POLL=null;
+async function loadMessages(){
+  await loadMsgThreads();
+  if(MSG_POLL) clearInterval(MSG_POLL);
+  MSG_POLL=setInterval(()=>{ if(document.getElementById('messages').classList.contains('active')){ loadMsgThreads(); if(MSG_CHANNEL) openChannel(MSG_CHANNEL,true); } else { clearInterval(MSG_POLL); } }, 12000);
+}
+async function loadMsgThreads(){
+  let d; try{ d=await api('/messages/threads'); }catch(e){ $('msgThreads').innerHTML='<div class="hint" style="padding:10px">'+esc(e.message)+'</div>'; return; }
+  MSG_STAFF=d.staff;
+  const row=t=>`<button class="msg-thread ${t.channel===MSG_CHANNEL?'on':''}" onclick="openChannel('${t.channel}')">
+    <div class="nm">${esc(t.name)} ${t.unread?`<span class="badge-danger">${t.unread}</span>`:''}</div>
+    <div class="pv">${t.last?esc((t.last.by?t.last.by.split(' ')[0]+': ':'')+t.last.body):'No messages yet'}</div></button>`;
+  $('msgThreads').innerHTML = d.threads.map(row).join('') +
+    `<button class="msg-thread" onclick="newDm()"><div class="nm" style="color:var(--gold)">＋ New message</div><div class="pv">Message a teammate</div></button>`;
+  updateMsgBadge(d.threads.reduce((a,t)=>a+(t.unread||0),0));
+}
+function newDm(){
+  const opts=MSG_STAFF.map((s,i)=>`${i+1}. ${s.name} (${s.job_role||''})`).join('\n');
+  const p=prompt('Message which teammate?\n\n'+opts+'\n\nEnter a number:'); if(p===null) return;
+  const s=MSG_STAFF[parseInt(p,10)-1]; if(!s) return;
+  openChannel('dm:new:'+s.id);
+}
+async function openChannel(channel, quiet){
+  if(channel.startsWith('dm:new:')){ MSG_CHANNEL=channel; const sid=channel.split(':')[2]; const s=MSG_STAFF.find(x=>String(x.id)===String(sid));
+    $('msgHead').textContent=(s?s.name:'New message'); $('msgBody').innerHTML='<div class="hint" style="padding:12px">Say hi 👋</div>'; $('msgCompose').style.display='flex'; $('msgInput').dataset.to=sid; $('msgInput').focus();
+    document.querySelectorAll('.msg-thread').forEach(b=>b.classList.remove('on')); return;
+  }
+  MSG_CHANNEL=channel; $('msgInput')&&($('msgInput').dataset.to='');
+  let d; try{ d=await api('/messages?channel='+encodeURIComponent(channel)); }catch(e){ $('msgBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const t=(await api('/messages/threads')).threads.find(x=>x.channel===channel);
+  $('msgHead').textContent = t?t.name:(channel==='team'?'📣 Team':'Conversation');
+  const atBottom=true;
+  $('msgBody').innerHTML = d.messages.length ? d.messages.map(m=>`<div class="msg-row ${m.mine?'me':'them'}">${m.mine?'':`<div class="meta">${esc(m.by||'')}</div>`}${esc(m.body)}<div class="meta" style="text-align:right">${esc(m.at.slice(11))}</div></div>`).join('') : '<div class="hint" style="padding:12px">No messages yet — start the conversation.</div>';
+  $('msgCompose').style.display='flex';
+  $('msgBody').scrollTop=$('msgBody').scrollHeight;
+  if(!quiet){ document.querySelectorAll('.msg-thread').forEach(b=>b.classList.toggle('on', b.getAttribute('onclick')?.includes("'"+channel+"'"))); $('msgInput').focus(); }
+  loadMsgThreads();
+}
+async function sendMessage(){
+  const inp=$('msgInput'); const body=inp.value.trim(); if(!body||!MSG_CHANNEL) return;
+  const to=inp.dataset.to; inp.value='';
+  try{ const r=await api('/messages',{method:'POST',body:JSON.stringify(to?{to,body}:{channel:MSG_CHANNEL,body})}); openChannel(r.channel); }
+  catch(e){ inp.value=body; alert(e.message); }
+}
+function updateMsgBadge(n){ const b=$('msgBadge'); if(!b) return; if(n>0){ b.textContent=n; b.style.display=''; } else { b.textContent=''; b.style.display='none'; } }
+async function pollMsgUnread(){ try{ const {unread}=await api('/messages/unread'); updateMsgBadge(unread); }catch(e){} }
+
 /* ---- Arrival Tasks: per-role on-arrival checklist per admit ---- */
 async function loadArrivalTasks(){
   let d; try{ d=await api('/arrival/board'); }catch(e){ $('arrBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }

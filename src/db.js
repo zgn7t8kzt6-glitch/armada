@@ -518,6 +518,23 @@ CREATE TABLE IF NOT EXISTS arrival_checks (
   UNIQUE(client_id, item_id)
 );
 CREATE INDEX IF NOT EXISTS idx_arrival_checks ON arrival_checks(client_id);
+
+-- STAFF MESSAGING — a shared Team channel + 1:1 direct messages between staff.
+-- channel = 'team' for everyone, or 'dm:<lowId>-<highId>' for a direct thread.
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY,
+  channel TEXT NOT NULL,
+  body TEXT NOT NULL,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel, id);
+CREATE TABLE IF NOT EXISTS message_reads (
+  user_id INTEGER NOT NULL,
+  channel TEXT NOT NULL,
+  last_read_id INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(user_id, channel)
+);
 CREATE TABLE IF NOT EXISTS saves (
   id INTEGER PRIMARY KEY,
   client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,

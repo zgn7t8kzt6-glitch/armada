@@ -32,7 +32,7 @@
 const $=id=>document.getElementById(id);
 const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let CODE=localStorage.getItem('kioskCode')||'', DATA=null, CLIENT='', VIEW='';
-const MEALS3=['Breakfast','Lunch','Dinner'];
+const MEALS3=['Breakfast','Lunch','Dinner','Snack'];
 let MEAL_SEL='', MEAL_DATE='';
 // Which meal is it right now, by the iPad's local clock (the real dining-room time).
 function currentMeal(){ const h=new Date().getHours(); return h<11?'Breakfast':(h<16?'Lunch':'Dinner'); }
@@ -79,6 +79,7 @@ function home(){
     <button class="kbtn" onclick="reqView()">🛎  Request something</button>
     <button class="kbtn" onclick="mealView()">🍽️  How was ${currentMeal().toLowerCase()}?</button>
     ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}
+    <button class="kbtn" onclick="suggestionView()">💡  Share an idea</button>
     <div style="margin-top:18px;text-align:center">
       <button id="kRefreshBtn" class="btn btn-ghost" style="font-size:15px" onclick="refreshData()">🔄  Update list</button>
       <div id="kSyncNote" class="ksub" style="margin-top:8px">${syncLine()}</div>
@@ -86,6 +87,29 @@ function home(){
     </div>`;
 }
 function client(){ const s=$('kclient'); return s?s.value:''; }
+// Suggestion box — one free-text idea, optional name, straight to leadership.
+function suggestionView(){
+  VIEW='suggest';
+  CLIENT=client();
+  $('kview').innerHTML=`<h1>Share an idea 💡</h1>
+    <p class="ksub">Anything that would make your stay better — big or small. Sharing your name is optional.</p>
+    <label>Your name (optional)</label>
+    <select id="sgclient"><option value="">Prefer not to say</option>${DATA.clients.map(c=>`<option value="${c.id}"${String(c.id)===String(CLIENT)?' selected':''}>${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
+    <label style="margin-top:10px;display:block">Your idea</label>
+    <textarea id="sgtext" rows="4" placeholder="I'd love it if…"></textarea>
+    <div id="sgerr" class="err" style="margin-top:6px"></div>
+    <button class="btn btn-gold big" style="width:100%;margin-top:12px" onclick="submitSuggestion()">Send</button>
+    <button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`;
+}
+async function submitSuggestion(){
+  const text=$('sgtext')?$('sgtext').value.trim():'';
+  if(!text){ if($('sgerr'))$('sgerr').textContent='Tell us your idea first.'; return; }
+  const cid=$('sgclient')?$('sgclient').value:'';
+  try{
+    await kapi('suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,client_id:cid||null,text})});
+    thanks('Thank you — your idea goes straight to our leadership team.');
+  }catch(e){ if($('sgerr'))$('sgerr').textContent=e.message; }
+}
 // Daily meal pulse — three taps, in the resident's hands. Short on purpose.
 function mealView(){
   VIEW='meal';

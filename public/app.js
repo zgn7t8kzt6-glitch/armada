@@ -2795,7 +2795,7 @@ async function loadMenu(){
   if($('menuDate') && !$('menuDate').value){ $('menuDate').value=new Date().toISOString().slice(0,10); }
   const date=$('menuDate')?$('menuDate').value:'';
   let d; try{ d=await api('/meals/menu'+(date?('?date='+date):'')); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
-  const meals=['Breakfast','Lunch','Dinner'];
+  const meals=['Breakfast','Lunch','Dinner','Snack'];
   el.innerHTML = meals.map(m=>{
     const cur=(d.meals&&d.meals[m])?d.meals[m]:{dish:'',notes:''};
     return `<div class="toolbar" style="gap:8px;margin:6px 0;align-items:center">
@@ -2818,7 +2818,7 @@ async function loadMealFeedback(){
   const el=$('mealFeedback'); if(!el) return;
   let d; try{ d=await api('/meals/feedback?days=14'); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   if(!d.byDay.length){ el.innerHTML='<div class="empty">No resident meal feedback yet. It appears here as they tap "How was the meal?" on the dining-room kiosk.</div>'; return; }
-  const meals=['Breakfast','Lunch','Dinner'];
+  const meals=['Breakfast','Lunch','Dinner','Snack'];
   const cellPct=(p)=> p==null?'<span class="hint">—</span>':`<span style="color:${p>=70?'var(--good)':p>=40?'var(--gold)':'var(--danger)'}">${p}%</span>`;
   const cell=(m)=> m?`${m.dish?`<div style="font-weight:600;color:var(--navy);font-size:12px">${esc(m.dish)}</div>`:''}${cellPct(m.likedPct)} liked · ${cellPct(m.enoughPct)} enough · ${cellPct(m.againPct)} again <span class="hint">(${m.n})</span>`:'<span class="hint">—</span>';
   const niceDate=(s)=>{const dt=new Date(s+'T12:00:00'); return dt.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'});};

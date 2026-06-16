@@ -920,7 +920,7 @@ async function runAiHealth(){
       : '';
     el.innerHTML = `${tag(r.ok)} ${esc(r.provider)} · model ${esc(r.model||'?')} · structured output ${tag(r.structuredOutput)}`
       + diag
-      + (r.error?`<div class="hint" style="color:var(--danger)">${esc(r.error)}</div>`:'');
+      + (r.error?`<div class="hint" style="color:${r.rateLimited?'var(--gold)':'var(--danger)'}">${esc(r.error)}</div>`:'');
   }catch(e){ el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function loadAiConfig(st){

@@ -831,6 +831,14 @@ export async function aiHealth() {
     JSON.parse(text); // throws if not valid structured JSON
     return { ...base, ok: true, structuredOutput: true };
   } catch (e) {
+    // A 429 proves the key authenticated — the request reached Anthropic and was
+    // rate-limited, not rejected. Report it as connected-but-busy (don't retry
+    // immediately; that just burns another request against the same limit).
+    const status = e?.status || e?.statusCode;
+    if (status === 429 || /rate.?limit|too many|429/i.test(String(e?.message || ''))) {
+      return { ...base, ok: true, rateLimited: true, structuredOutput: true,
+        error: 'Connected — but your Anthropic account is over its rate limit right now (HTTP 429). The key works; wait a minute and retry, or raise your usage tier / add credits at console.anthropic.com.' };
+    }
     // Retry once WITHOUT output_config to tell apart "provider down" from
     // "structured outputs unsupported here" (the Bedrock risk we flagged).
     let plainOk = false, plainErr = null;

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616W" />
+<link rel="stylesheet" href="/styles.css?v=20260616X" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -923,8 +923,9 @@
       </div>
       <div class="card">
         <h3>On-call leader — real-time alerts</h3>
-        <p class="sub sans">High-risk pulses, escalating AMA reads, urgent requests, and serious incidents text/email here the moment they happen.</p>
+        <p class="sub sans">High-risk pulses, escalating AMA reads, urgent requests, and serious incidents reach the on-call leader the moment they happen. Alerts always show in-app; SMS fires if a number is set.</p>
         <div class="grid2"><div><label>Email</label><input id="oc_email" type="email"/></div><div><label>Mobile (for SMS)</label><input id="oc_phone" placeholder="+1..."/></div></div>
+        <label class="sans" style="display:inline-flex;align-items:center;gap:6px;margin:8px 0"><input type="checkbox" id="oc_email_alerts"/> Also send an <b>email per alert</b> <span class="hint" style="font-weight:400">— off by default; per-alert emails flood the inbox and use up the email quota the daily reports need. Leave off and rely on in-app + SMS.</span></label>
         <div id="ocStatus" class="hint"></div>
         <div class="toolbar"><button class="btn btn-ghost sans" onclick="testAlert()">Send test alert</button><button class="btn btn-primary sans" onclick="saveOncall()">Save on-call</button></div>
       </div>
@@ -1670,6 +1671,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616W"></script>
+<script src="/app.js?v=20260616X"></script>
 </body>
 </html>

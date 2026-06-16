@@ -96,17 +96,15 @@ export function ensureExampleClient12A() {
 const INVENTORY_CATALOG = [
   // ── KITCHEN (techs cover this for now) ──────────────────────────────
   // chips/crackers + fresh fruit + Gatorade now live as PFS-coded nourishment lines.
-  ['Kitchen','Snacks','Snacks — granola/protein bars','box',6,2,0,0],
-  ['Kitchen','Snacks','Cookies / sweet snacks','box',4,2,0,0],
-  ['Kitchen','Beverages','Bottled water','case',10,3,1,0],
-  ['Kitchen','Beverages','Juice (apple/orange/cranberry)','case',4,2,0,0],
-  ['Kitchen','Beverages','Soda (regular + caffeine-free)','case',4,1,0,0],
-  ['Kitchen','Beverages','Coffee — regular','bag',6,2,0,0],
-  ['Kitchen','Beverages','Coffee — decaf','bag',4,2,0,0],
-  ['Kitchen','Beverages','Tea (regular + herbal/decaf)','box',4,1,0,0],
-  ['Kitchen','Beverages','Creamer','case',4,1,0,0],
-  ['Kitchen','Beverages','Sugar / sweetener packets','box',4,1,0,0],
-  ['Kitchen','Beverages','Hot chocolate / electrolyte packets','box',3,1,0,0],
+  ['Kitchen','Dry Goods & Snacks','Snacks — granola/protein bars','box',6,2,0,0],
+  ['Kitchen','Dry Goods & Snacks','Cookies / sweet snacks','box',4,2,0,0],
+  ['Kitchen','Drinks','Bottled water','case',10,3,1,0],
+  ['Kitchen','Drinks','Juice (apple/orange/cranberry)','case',4,2,0,0],
+  ['Kitchen','Drinks','Soda (regular + caffeine-free)','case',4,1,0,0],
+  ['Kitchen','Drinks','Coffee — regular','bag',6,2,0,0],
+  // Decaf coffee, sweetener packets, and hot chocolate live in the nourishment list (coded) — not here.
+  ['Kitchen','Drinks','Tea (regular + herbal/decaf)','box',4,1,0,0],
+  ['Kitchen','Condiments','Creamer','case',4,1,0,0],
   ['Kitchen','Cutlery & Paper','Plastic forks','pack',8,3,0,0],
   ['Kitchen','Cutlery & Paper','Plastic spoons','pack',8,3,0,0],
   ['Kitchen','Cutlery & Paper','Plastic knives','pack',6,2,0,0],
@@ -246,14 +244,13 @@ const INVENTORY_EXTRA = [
   // Ginger ale, protein boost/shakes, Jello, yogurt, milk now live as PFS-coded
   // nourishment lines (Ginger ale caffeine-free, Boost/Ensure, Gelatin, Greek
   // yogurt, Whole milk). Orange juice stays — no coded equivalent on the order.
-  ['Kitchen', 'Hydration & Nutrition', 'Orange juice', 'case', 4, 1, 0, 1],
+  ['Kitchen', 'Drinks', 'Orange juice', 'case', 4, 1, 0, 1],
   // Nurse beverage station
-  ['Kitchen', 'Nurse Station', 'Splenda', 'box', 3, 1, 0, 0],
-  // Pantry / condiments
-  ['Kitchen', 'Pantry', 'Peanut butter', 'jar', 3, 1, 0, 0],
+  ['Kitchen', 'Condiments', 'Splenda', 'box', 3, 1, 0, 0],
+  // Peanut butter lives in the nourishment list (Condiments, 60-packet case) — not here.
   // Jelly lives in the nourishment list (box of 200 packets, GP564) — not here.
-  ['Kitchen', 'Pantry', 'Butter', 'case', 3, 1, 0, 1],
-  ['Kitchen', 'Pantry', 'Garlic powder', 'each', 2, 1, 0, 0],
+  ['Kitchen', 'Fresh & Refrigerated', 'Butter', 'case', 3, 1, 0, 1],
+  ['Kitchen', 'Condiments', 'Garlic powder', 'each', 2, 1, 0, 0],
   // Personal care / hygiene
   ['Housekeeping', 'Toiletries', 'Nail clippers', 'each', 8, 2, 0, 0],
   ['Housekeeping', 'Clothing', 'Adult underwear (assorted, for anyone)', 'pack', 8, 2, 0, 0],
@@ -498,9 +495,9 @@ const NOURISHMENT = [
   ['Dry Goods & Snacks', 'Chicken noodle soup',            'case (24)',           6, 2, 0, 'SC2010',  null], // Pollak SC2010
   ['Dry Goods & Snacks', 'Chicken broth',                  'case',               6, 2, 0, null,       'NOT on Pollak — source separately. Biggest savory gap.'],
   ['Dry Goods & Snacks', 'Beef broth',                     'case',               4, 2, 0, null,       'NOT on Pollak — source separately.'],
-  ['Dry Goods & Snacks', 'Decaf coffee',                   'case (48 × 8 oz)',   4, 2, 0, 'CF1574',  'Pair with Ridgeline regular coffee.'], // Pollak CF1574
-  ['Dry Goods & Snacks', 'Chamomile / caffeine-free tea',  'case (5 × 100 bags)', 4, 1, 0, 'CF3030', 'Anxiety + sleep support.'], // Pollak CF3030
-  ['Dry Goods & Snacks', 'Ginger chews / ginger tea',      'case',               4, 1, 0, null,       'NOT on Pollak — source separately. Active nausea.'],
+  ['Drinks', 'Decaf coffee',                   'case (48 × 8 oz)',   4, 2, 0, 'CF1574',  'Pair with Ridgeline regular coffee.'], // Pollak CF1574
+  ['Drinks', 'Chamomile / caffeine-free tea',  'case (5 × 100 bags)', 4, 1, 0, 'CF3030', 'Anxiety + sleep support.'], // Pollak CF3030
+  ['Drinks', 'Ginger chews / ginger tea',      'case',               4, 1, 0, null,       'NOT on Pollak — source separately. Active nausea.'],
   // ── CONDIMENTS ──────────────────────────────────────────────────────────
   ['Condiments', 'Honey packets',            'case (200 packets)',   4, 1, 0, null,     'For tea and hot chocolate — popular in detox. Check Pollak condiment section.'],
   ['Condiments', 'Nutella / chocolate hazelnut packets', 'case (200 packets)', 3, 1, 0, null, 'Comfort condiment — popular with bagels and graham crackers. Source separately.'],

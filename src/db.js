@@ -1145,6 +1145,32 @@ if (getState('jelly_par_v1') !== 'done') {
   ['Jelly', 'Jelly, diet / sugar-free'].forEach((n) => jelly.run(n));
   setState('jelly_par_v1', 'done');
 }
+// One-time: merge the old fragmented Kitchen categories (Snacks, Beverages,
+// Pantry, Hydration & Nutrition, Nurse Station) into the simplified 4-category
+// scheme so there aren't two "snacks" sections. Non-food categories (Cutlery &
+// Paper, Cleaning) are left alone. Guarded so manual recategorizing isn't undone.
+if (getState('kitchen_cat_merge_v1') !== 'done') {
+  const setCat = db.prepare(`UPDATE inventory_items SET category = ? WHERE department = 'Kitchen' AND category = ? AND active = 1`);
+  setCat.run('Dry Goods & Snacks', 'Snacks');
+  setCat.run('Drinks', 'Beverages');
+  setCat.run('Drinks', 'Hydration & Nutrition');
+  setCat.run('Condiments', 'Nurse Station');
+  setCat.run('Condiments', 'Pantry');
+  // Item-level exceptions that don't follow their old category's bulk move.
+  const setItem = db.prepare(`UPDATE inventory_items SET category = ? WHERE name = ? COLLATE NOCASE AND department = 'Kitchen'`);
+  setItem.run('Condiments', 'Creamer');               // was Beverages → Drinks, but it's a condiment
+  setItem.run('Condiments', 'Sugar / sweetener packets');
+  setItem.run('Fresh & Refrigerated', 'Butter');      // was Pantry → Condiments, but it's refrigerated
+  setItem.run('Condiments', 'Peanut butter');         // was Pantry, belongs with condiments
+  // Deactivate older generic walk-list items now duplicated by a coded nourishment
+  // line in the same category (keeps history; drops them off the live count list).
+  const deact = db.prepare(`UPDATE inventory_items SET active = 0 WHERE name = ? COLLATE NOCASE AND department = 'Kitchen'`);
+  ['Coffee — decaf',                          // → 'Decaf coffee' (CF1574)
+   'Sugar / sweetener packets',               // → 'Sweetener packets' (CN1210)
+   'Hot chocolate / electrolyte packets',     // → 'Hot chocolate mix packets'
+  ].forEach((n) => deact.run(n));
+  setState('kitchen_cat_merge_v1', 'done');
+}
 // Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
 db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
   id INTEGER PRIMARY KEY,

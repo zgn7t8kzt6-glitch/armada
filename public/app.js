@@ -683,7 +683,7 @@ async function assignTask(){
   $('at_title').value=''; $('at_due').value=''; alert('Assigned.'); loadMyTasks();
 }
 async function saveCoordinator(){ await api('/settings/aftercare-coordinator',{method:'POST',body:JSON.stringify({user_id:$('acc_user').value||null})}); alert('Aftercare Coordinator saved. New discharges will auto-assign their calls.'); }
-async function saveOncall(){ await api('/settings/oncall',{method:'POST',body:JSON.stringify({email:$('oc_email').value,phone:$('oc_phone').value})}); alert('On-call leader saved. High alerts will reach them in real time.'); }
+async function saveOncall(){ const emailAlerts=$('oc_email_alerts')?$('oc_email_alerts').checked:false; await api('/settings/oncall',{method:'POST',body:JSON.stringify({email:$('oc_email').value,phone:$('oc_phone').value,email_alerts:emailAlerts})}); alert('On-call leader saved. High alerts show in-app'+(emailAlerts?' and email':'')+(($('oc_phone').value||'').trim()?' and text the on-call leader':'')+'.'); }
 
 /* ---- settings hub ---- */
 function emailProviderUI(){ const p=$('em_provider').value; if($('em_smtp'))$('em_smtp').style.display=(p==='smtp')?'':'none'; if($('em_resend'))$('em_resend').style.display=(p==='resend')?'':'none'; }
@@ -890,7 +890,7 @@ async function loadSettings(){
   $('aiHealthWrap').innerHTML = `<button class="btn btn-ghost btn-sm sans" onclick="runAiHealth()">Run AI health check</button> <span id="aiHealthResult" class="hint"></span>`;
   const ac=st.aftercareCoordinator;
   $('acc_user').innerHTML='<option value="">— none —</option>'+st.staff.map(s=>`<option value="${s.id}" ${ac&&ac.id===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
-  $('oc_email').value=st.oncallEmail||''; $('oc_phone').value=st.oncallPhone||'';
+  $('oc_email').value=st.oncallEmail||''; $('oc_phone').value=st.oncallPhone||''; if($('oc_email_alerts')) $('oc_email_alerts').checked=!!st.oncallEmailAlerts;
   $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
   $('kc_code').value = st.kioskCode||'';
   try { const k = await api('/kipu/status'); $('kipuStatus').innerHTML = k.configured ? '<span class="risk risk-low">credentials set</span>' : '<span class="risk risk-warn">not configured — set Kipu env vars on your host</span>'; } catch(e){}

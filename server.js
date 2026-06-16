@@ -1292,7 +1292,13 @@ function latestAmaRead(clientId) {
 function notifyOnCall(message) {
   const email = getState('oncall_email') || process.env.ONCALL_EMAIL;
   const phone = getState('oncall_phone') || process.env.ONCALL_PHONE;
-  if (email && emailConfigured()) sendEmail({ to: email, subject: 'Armada — on-call alert', html: `<p style="font-family:Georgia,serif">${message}</p><p style="color:#888">Go to the client in person. A human goes to the patient — never a chat.</p>` }).catch((e) => console.error('on-call email:', e.message));
+  // On-call EMAIL is OFF by default — per-alert emails flood the inbox and burn
+  // the Resend quota that the daily reports/orders need. Alerts still surface
+  // in-app, and SMS (a different channel) still fires if configured. Re-enable
+  // email alerts in Settings → On-call if you ever want them back.
+  if (email && emailConfigured() && autoCfg('oncall_email_on', 'off') !== 'off') {
+    sendEmail({ to: email, subject: 'Armada — on-call alert', html: `<p style="font-family:Georgia,serif">${message}</p><p style="color:#888">Go to the client in person. A human goes to the patient — never a chat.</p>` }).catch((e) => console.error('on-call email:', e.message));
+  }
   if (phone && smsConfigured()) sendSms({ to: phone, body: `Armada alert: ${message}`.slice(0, 300) }).catch((e) => console.error('on-call sms:', e.message));
 }
 
@@ -2231,6 +2237,7 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     staff: db.prepare(`SELECT id, name FROM users WHERE active = 1 ORDER BY name`).all(),
     oncallEmail: getState('oncall_email') || process.env.ONCALL_EMAIL || '',
     oncallPhone: getState('oncall_phone') || process.env.ONCALL_PHONE || '',
+    oncallEmailAlerts: autoCfg('oncall_email_on', 'off') !== 'off',
     emailReady: emailConfigured(), smsReady: smsConfigured(), claudeReady: claudeConfigured(),
     aiProvider: aiProvider(), deidentify: DEID,
     kioskCode: kioskCode(),
@@ -2509,6 +2516,8 @@ app.post('/api/settings/aftercare-coordinator', requireAuth, requireAdmin, (req,
 app.post('/api/settings/oncall', requireAuth, requireAdmin, (req, res) => {
   setState('oncall_email', (req.body?.email || '').trim());
   setState('oncall_phone', (req.body?.phone || '').trim());
+  // Per-alert on-call EMAIL is opt-in (off by default) to protect the email quota.
+  if (req.body?.email_alerts != null) setState('auto_oncall_email_on', req.body.email_alerts ? 'on' : 'off');
   res.json({ ok: true });
 });
 

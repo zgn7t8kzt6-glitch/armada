@@ -99,7 +99,8 @@ function mealView(){
     </div></div>`;
   $('kview').innerHTML=`<h1>How was the meal?</h1>
     <p class="ksub">Just a few taps — it helps us cook for you, not just feed you.</p>
-    <div style="margin:6px 0 14px">${MEALS3.map(m=>`<button class="kchip${m===MEAL_SEL?' msel':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>
+    <div style="margin:6px 0 8px">${MEALS3.map(m=>`<button class="kchip${m===MEAL_SEL?' msel':''}" onclick="setMeal('${m}')">${m}</button>`).join('')}</div>
+    <div id="mdish" style="font-size:18px;color:var(--navy);font-weight:600;margin:0 0 12px">${dishLine(MEAL_SEL)}</div>
     ${ynRow('liked','Did you enjoy it?','😋  Yes','😕  Not really')}
     ${ynRow('enough','Was there enough?','👍  Plenty','🙁  Still hungry')}
     ${ynRow('again','Would you want it again?','💛  Yes please','🙅  Maybe not')}
@@ -109,7 +110,11 @@ function mealView(){
     <button class="btn btn-gold big" style="width:100%;margin-top:14px" onclick="submitMeal()">Send</button>
     <button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`;
 }
-function setMeal(m){ MEAL_SEL=m; document.querySelectorAll('.kchip').forEach(b=>b.classList.toggle('msel', b.textContent===m)); }
+function dishLine(meal){
+  const d=(DATA&&DATA.menu&&DATA.menu[meal])?DATA.menu[meal].dish:'';
+  return d ? '🍽️ '+meal+': '+esc(d) : '';
+}
+function setMeal(m){ MEAL_SEL=m; document.querySelectorAll('.kchip').forEach(b=>b.classList.toggle('msel', b.textContent===m)); const el=$('mdish'); if(el) el.innerHTML=dishLine(m); }
 function pick(btn,val){ const row=btn.closest('.mq'); row.dataset.val=val; row.querySelectorAll('.mopt').forEach(b=>b.classList.remove('msel')); btn.classList.add('msel'); }
 async function submitMeal(){
   const get=k=>{const r=document.querySelector('.mq[data-k="'+k+'"]'); return r&&r.dataset.val!=null?+r.dataset.val:null;};

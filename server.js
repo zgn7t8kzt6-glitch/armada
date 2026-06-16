@@ -794,11 +794,28 @@ app.post('/api/meals/check', requireAuth, async (req, res) => {
 });
 // Caterer scorecard — last 30 days of meal checks (held the standard?).
 app.get('/api/meals/scorecard', requireAuth, (req, res) => res.json(mealScorecard()));
+// Meal menu — staff records what's being served each meal (residents don't).
+app.get('/api/meals/menu', requireAuth, (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  res.json({ date, meals: menuForDate(date) });
+});
+app.post('/api/meals/menu', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : appToday();
+  if (!MEALS3.includes(b.meal)) return res.status(400).json({ error: 'Pick a meal (Breakfast/Lunch/Dinner).' });
+  db.prepare(`INSERT INTO meal_menu (menu_date, meal, dish, notes, by_id, by_name) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(menu_date, meal) DO UPDATE SET dish=excluded.dish, notes=excluded.notes,
+      by_id=excluded.by_id, by_name=excluded.by_name, updated_at=datetime('now')`)
+    .run(date, b.meal, (b.dish || '').trim().slice(0, 200) || null, (b.notes || '').trim().slice(0, 280) || null, req.user.id, req.user.name);
+  res.json({ ok: true, date, meals: menuForDate(date) });
+});
 // Resident meal pulse, by day + meal — how every breakfast/lunch/dinner landed.
 app.get('/api/meals/feedback', requireAuth, (req, res) => {
   const days = Math.min(60, Math.max(1, +(req.query.days || 14)));
   const rows = db.prepare(`SELECT meal_date, meal,
       COUNT(*) n,
+      (SELECT dish FROM meal_menu mm WHERE mm.menu_date = meal_feedback.meal_date AND mm.meal = meal_feedback.meal) menuDish,
+      MAX(dish) snapDish,
       SUM(CASE WHEN liked=1 THEN 1 ELSE 0 END) liked, SUM(CASE WHEN liked IS NOT NULL THEN 1 ELSE 0 END) likedN,
       SUM(CASE WHEN enough=1 THEN 1 ELSE 0 END) enough, SUM(CASE WHEN enough IS NOT NULL THEN 1 ELSE 0 END) enoughN,
       SUM(CASE WHEN again=1 THEN 1 ELSE 0 END) again, SUM(CASE WHEN again IS NOT NULL THEN 1 ELSE 0 END) againN
@@ -807,7 +824,8 @@ app.get('/api/meals/feedback', requireAuth, (req, res) => {
   const byDay = {};
   for (const r of rows) {
     (byDay[r.meal_date] ||= { date: r.meal_date, meals: {} }).meals[r.meal] = {
-      n: r.n, likedPct: pct(r.liked, r.likedN), enoughPct: pct(r.enough, r.enoughN), againPct: pct(r.again, r.againN),
+      n: r.n, dish: r.menuDish || r.snapDish || '',
+      likedPct: pct(r.liked, r.likedN), enoughPct: pct(r.enough, r.enoughN), againPct: pct(r.again, r.againN),
     };
   }
   const comments = db.prepare(`SELECT f.meal_date, f.meal, f.comment, f.created_at, c.pref
@@ -4754,15 +4772,17 @@ function kioskOk(req) {
 }
 app.get('/api/kiosk/data', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
-  // All active surveys appear on the kiosk (experience, meals, discharge, and any
-  // custom survey added later) — clients can fill whichever applies to them.
-  const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
+  // The dining-room kiosk shows the experience survey (+ any custom one), the
+  // request flow, and the dedicated meal pulse. It excludes the Discharge survey
+  // (that's administered at discharge, not here) and the old generic Meal survey
+  // (the per-meal pulse replaces it).
+  const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 AND key NOT IN ('discharge','meals') ORDER BY sort, id`).all();
   for (const s of surveys) s.questions = db.prepare(`SELECT id, category, text, type FROM survey_questions WHERE survey_id = ? ORDER BY sort, id`).all(s.id);
   res.json({
     // The kiosk is on the unit and only weakly authenticated — expose preferred
     // name + room only, never the full legal name.
     clients: db.prepare(`SELECT id, pref, room FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, pref`).all(),
-    departments: DEPARTMENTS, surveys,
+    departments: DEPARTMENTS, surveys, menu: menuForDate(appToday()),
   });
 });
 app.post('/api/kiosk/request', (req, res) => {
@@ -4817,8 +4837,9 @@ app.post('/api/kiosk/meal', (req, res) => {
   const yn = (v) => (v === 1 || v === true || v === '1') ? 1 : (v === 0 || v === false || v === '0') ? 0 : null;
   if (yn(b.liked) == null && yn(b.enough) == null && yn(b.again) == null && !(b.comment || '').trim())
     return res.status(400).json({ error: 'Tap at least one answer.' });
-  db.prepare(`INSERT INTO meal_feedback (meal_date, meal, client_id, liked, enough, again, comment) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(date, meal, b.client_id || null, yn(b.liked), yn(b.enough), yn(b.again), (b.comment || '').trim().slice(0, 280) || null);
+  const dish = dishFor(date, meal);   // snapshot what was served, so the rating keeps its meaning
+  db.prepare(`INSERT INTO meal_feedback (meal_date, meal, client_id, liked, enough, again, comment, dish) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(date, meal, b.client_id || null, yn(b.liked), yn(b.enough), yn(b.again), (b.comment || '').trim().slice(0, 280) || null, dish);
   res.json({ ok: true });
 });
 
@@ -5273,6 +5294,41 @@ function mealFeedback() {
     .map((x) => ({ q: x.q, t: x.t }));
   return { responses, total, likedPct: Math.round(liked / total * 100), dislikedPct: Math.round(disliked / total * 100), comments };
 }
+// Residents' own meal pulse (dining-room kiosk), last N days, broken out by meal —
+// so the caterer sees how each breakfast/lunch/dinner actually landed, not just an
+// overall number. Grouped newest day first; includes a few recent comments.
+function mealPulse(days = 2) {
+  const rows = db.prepare(`SELECT meal_date, meal, COUNT(*) n,
+      (SELECT dish FROM meal_menu mm WHERE mm.menu_date = meal_feedback.meal_date AND mm.meal = meal_feedback.meal) menuDish,
+      MAX(dish) snapDish,
+      SUM(CASE WHEN liked=1 THEN 1 ELSE 0 END) liked, SUM(CASE WHEN liked IS NOT NULL THEN 1 ELSE 0 END) likedN,
+      SUM(CASE WHEN enough=1 THEN 1 ELSE 0 END) enough, SUM(CASE WHEN enough IS NOT NULL THEN 1 ELSE 0 END) enoughN,
+      SUM(CASE WHEN again=1 THEN 1 ELSE 0 END) again, SUM(CASE WHEN again IS NOT NULL THEN 1 ELSE 0 END) againN
+    FROM meal_feedback WHERE meal_date >= date('now', ?) GROUP BY meal_date, meal`).all(`-${days} day`);
+  const pct = (a, b) => b ? Math.round(a / b * 100) : null;
+  const byDay = {}; let responses = 0;
+  for (const r of rows) {
+    responses += r.n;
+    (byDay[r.meal_date] ||= { date: r.meal_date, meals: {} }).meals[r.meal] =
+      { n: r.n, dish: r.menuDish || r.snapDish || '', likedPct: pct(r.liked, r.likedN), enoughPct: pct(r.enough, r.enoughN), againPct: pct(r.again, r.againN) };
+  }
+  const comments = db.prepare(`SELECT f.meal, f.meal_date, f.comment, c.pref FROM meal_feedback f
+    LEFT JOIN clients c ON c.id = f.client_id
+    WHERE f.comment IS NOT NULL AND f.meal_date >= date('now', ?) ORDER BY f.created_at DESC LIMIT 6`).all(`-${days} day`);
+  return { responses, days: Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date)), comments };
+}
+// What's on the menu for a given day, keyed by meal — set by staff, shown on the
+// kiosk so residents rate a real dish, and snapshotted onto each rating.
+function menuForDate(date) {
+  const rows = db.prepare(`SELECT meal, dish, notes FROM meal_menu WHERE menu_date = ?`).all(date);
+  const out = {};
+  for (const r of rows) out[r.meal] = { dish: r.dish || '', notes: r.notes || '' };
+  return out;
+}
+function dishFor(date, meal) {
+  const r = db.prepare(`SELECT dish FROM meal_menu WHERE menu_date = ? AND meal = ?`).get(date, meal);
+  return (r && r.dish) ? r.dish : null;
+}
 // Kitchen supplies that are low/out (from the Supplies par levels) — so the same
 // brief flags what to restock, not just what to cook.
 function kitchenLowStock() {
@@ -5293,11 +5349,12 @@ function buildMealCount() {
   const total = census + welcome;
   const dietary = dietaryBreakdown(active);
   const feedback = mealFeedback();
+  const pulse = mealPulse(2);
   const kitchenLow = kitchenLowStock();
   const scorecard = mealScorecard();
   const dtLabel = new Date(tomorrow + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
   const names = arrivals.map((a) => `${a.preferred_name || a.first_name || ''} ${a.last_name || ''}`.trim()).filter(Boolean);
-  return { date: tomorrow, dtLabel, census, welcome, total, portions: total, dietary, feedback, kitchenLow, scorecard, arrivals: names };
+  return { date: tomorrow, dtLabel, census, welcome, total, portions: total, dietary, feedback, pulse, kitchenLow, scorecard, arrivals: names };
 }
 async function sendMealCount() {
   const to = mealRecipients();
@@ -5311,11 +5368,26 @@ async function sendMealCount() {
     ${d.diets.length ? `<div>${d.diets.map((x) => `${e(x.label)} × <b>${x.n}</b>`).join(' · ')}</div>` : '<div style="color:#888">No special diets flagged.</div>'}
     ${d.allergies.length ? `<div style="margin-top:6px;color:#b00"><b>⚠ Allergies:</b> ${d.allergies.map((x) => `${e(x.label)}${x.n > 1 ? ` (×${x.n})` : ''}`).join(' · ')}</div>` : ''}` : '';
   const fb = m.feedback;
-  const fbRows = (fb && fb.responses) ? `
+  const p = m.pulse;
+  const MEALS_ORDER = ['Breakfast', 'Lunch', 'Dinner'];
+  const dayLabel = (s) => new Date(s + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'short', day: 'numeric' });
+  const fmtMeal = (mm) => [
+    mm.likedPct != null ? `<b style="color:${mm.likedPct >= 70 ? '#2d7a4f' : mm.likedPct >= 40 ? '#a60' : '#b00'}">${mm.likedPct}% enjoyed</b>` : '',
+    mm.enoughPct != null ? `${mm.enoughPct}% had enough` : '',
+    mm.againPct != null ? `${mm.againPct}% want it again` : '',
+  ].filter(Boolean).join(' · ') + ` <span style="color:#888">(${mm.n})</span>`;
+  // Lead with the residents' own per-meal pulse; fall back to the older meal survey
+  // only until the kiosk pulse has data.
+  const fbRows = (p && p.responses) ? `
+    <h3 style="margin:18px 0 4px">Residents' meal ratings — last 2 days</h3>
+    ${p.days.map((day) => `<div style="margin:8px 0"><b>${e(dayLabel(day.date))}</b>
+      ${MEALS_ORDER.filter((mm) => day.meals[mm]).map((mm) => `<div style="margin:2px 0 2px 12px"><span style="color:#666">${mm}${day.meals[mm].dish ? ` — <b>${e(day.meals[mm].dish)}</b>` : ''}:</span> ${fmtMeal(day.meals[mm])}</div>`).join('')}</div>`).join('')}
+    ${p.comments && p.comments.length ? `<div style="margin-top:8px;color:#444"><i>In their words:</i>${p.comments.map((c) => `<div style="margin:3px 0">• <span style="color:#888">${e(c.meal)}</span> — ${e(c.comment)}</div>`).join('')}</div>` : ''}`
+    : (fb && fb.responses) ? `
     <h3 style="margin:18px 0 4px">Last 2 days' food feedback</h3>
     <div>${fb.total ? `<b style="color:#2d7a4f">${fb.likedPct}% liked it</b> · <b style="color:#b00">${fb.dislikedPct}% didn't</b> · ` : ''}${fb.responses} response${fb.responses === 1 ? '' : 's'}</div>
     ${fb.comments && fb.comments.length ? `<div style="margin-top:6px;color:#444">${fb.comments.map((c) => `<div style="margin:3px 0">• <span style="color:#888">${e(c.q)}</span> — ${e(c.t)}</div>`).join('')}</div>` : ''}` : `
-    <h3 style="margin:18px 0 4px">Last 2 days' food feedback</h3><div style="color:#888">No meal surveys submitted yet — put the kiosk on the unit to gather this.</div>`;
+    <h3 style="margin:18px 0 4px">Residents' meal ratings</h3><div style="color:#888">No meal feedback yet — residents rate each meal from the dining-room kiosk ("How was the meal?").</div>`;
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
     <h2 style="margin:0 0 2px">Meals to prepare — ${e(m.dtLabel)}</h2>
     <p style="color:#666;margin:0 0 14px">Armada Recovery · daily kitchen brief</p>

@@ -2787,7 +2787,32 @@ async function loadMeals(){
     <div class="ret-card ${issues?'rc-high':''}"><div class="n">${issues}</div><div class="l">Flagged today</div></div>`;
   $('mealsToday').innerHTML = d.today.map(m=>mealCard(m,d)).join('');
   loadMealsScore();
+  loadMenu();
   loadMealFeedback();
+}
+async function loadMenu(){
+  const el=$('menuRows'); if(!el) return;
+  if($('menuDate') && !$('menuDate').value){ $('menuDate').value=new Date().toISOString().slice(0,10); }
+  const date=$('menuDate')?$('menuDate').value:'';
+  let d; try{ d=await api('/meals/menu'+(date?('?date='+date):'')); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const meals=['Breakfast','Lunch','Dinner'];
+  el.innerHTML = meals.map(m=>{
+    const cur=(d.meals&&d.meals[m])?d.meals[m]:{dish:'',notes:''};
+    return `<div class="toolbar" style="gap:8px;margin:6px 0;align-items:center">
+      <div style="width:90px;color:var(--muted);font-weight:600" class="sans">${m}</div>
+      <input id="dish_${m}" class="sans" style="flex:1" placeholder="e.g. Grilled chicken, rice, green beans" value="${esc(cur.dish||'')}"/>
+      <button class="btn btn-ghost btn-sm sans" onclick="saveMenu('${m}')">Save</button>
+    </div>`;
+  }).join('');
+}
+async function saveMenu(meal){
+  const date=$('menuDate')?$('menuDate').value:'';
+  const dish=$('dish_'+meal)?$('dish_'+meal).value.trim():'';
+  $('menu_msg').textContent='Saving '+meal+'…';
+  try{ await api('/meals/menu',{method:'POST',body:JSON.stringify({date,meal,dish})});
+    $('menu_msg').textContent='✓ '+meal+' menu saved';
+    loadMealFeedback();   // refresh grid so the dish shows alongside ratings
+  }catch(e){ $('menu_msg').textContent='Error: '+esc(e.message); }
 }
 async function loadMealFeedback(){
   const el=$('mealFeedback'); if(!el) return;
@@ -2795,7 +2820,7 @@ async function loadMealFeedback(){
   if(!d.byDay.length){ el.innerHTML='<div class="empty">No resident meal feedback yet. It appears here as they tap "How was the meal?" on the dining-room kiosk.</div>'; return; }
   const meals=['Breakfast','Lunch','Dinner'];
   const cellPct=(p)=> p==null?'<span class="hint">—</span>':`<span style="color:${p>=70?'var(--good)':p>=40?'var(--gold)':'var(--danger)'}">${p}%</span>`;
-  const cell=(m)=> m?`${cellPct(m.likedPct)} liked · ${cellPct(m.enoughPct)} enough · ${cellPct(m.againPct)} again <span class="hint">(${m.n})</span>`:'<span class="hint">—</span>';
+  const cell=(m)=> m?`${m.dish?`<div style="font-weight:600;color:var(--navy);font-size:12px">${esc(m.dish)}</div>`:''}${cellPct(m.likedPct)} liked · ${cellPct(m.enoughPct)} enough · ${cellPct(m.againPct)} again <span class="hint">(${m.n})</span>`:'<span class="hint">—</span>';
   const niceDate=(s)=>{const dt=new Date(s+'T12:00:00'); return dt.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'});};
   let rows = d.byDay.map(day=>`<tr><td style="white-space:nowrap;font-weight:600">${niceDate(day.date)}</td>`
     + meals.map(m=>`<td style="font-size:13px">${cell(day.meals[m])}</td>`).join('') + '</tr>').join('');

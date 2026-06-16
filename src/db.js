@@ -840,9 +840,24 @@ CREATE TABLE IF NOT EXISTS meal_feedback (
   enough INTEGER,                           -- 1 enough | 0 still hungry
   again INTEGER,                            -- 1 would want again | 0 not really
   comment TEXT,                             -- optional one line, in their words
+  dish TEXT,                                -- snapshot of what was served (from the menu)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_meal_feedback_day ON meal_feedback(meal_date, meal);
+-- MEAL MENU — what's actually being served each meal, set by staff (residents don't
+-- enter this). Gives the pulse meaning ("want THIS again") and tells the kiosk what
+-- to show. One row per meal per day (upsert).
+CREATE TABLE IF NOT EXISTS meal_menu (
+  id INTEGER PRIMARY KEY,
+  menu_date TEXT NOT NULL,                  -- YYYY-MM-DD
+  meal TEXT NOT NULL,                       -- Breakfast | Lunch | Dinner
+  dish TEXT,                                -- what's being served (free text)
+  notes TEXT,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(menu_date, meal)
+);
 CREATE INDEX IF NOT EXISTS idx_meal_checks ON meal_checks(date, meal);
 
 -- Scheduling: a staffing need (one row per part×role on a date, with how many needed).
@@ -1087,6 +1102,7 @@ addColumn('followups', 'assignee_id', 'INTEGER');
 addColumn('followups', 'assignee_name', 'TEXT');
 addColumn('users', 'mfa_secret', 'TEXT');
 addColumn('users', 'mfa_enabled', 'INTEGER');
+addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('clients', 'consent_on_file', 'INTEGER');
 addColumn('clients', 'anchor_why', 'TEXT');
 // Analytics dimensions: time-of-admit + staff attribution + discharge destination.

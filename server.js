@@ -2848,56 +2848,24 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'newadmits', title: 'New admits today', items: newAdmits.map((c) => item(c, c.program || '', 'NEW')) });
     sections.push({ key: 'discharges', title: 'Discharges today', items: dToday.map((d) => ({ name: d.pref || d.name, sub: d.discharge_status || '' })) });
   } else if (jr === 'Director of Operations') {
-    subtitle = 'Does the building run when you\'re not in it? Operations wins when nothing breaks — measured by outcome, not effort.';
-    // Supplies — current stockouts / low (the par-level system)
-    const invRows = db.prepare(`SELECT i.name, i.department, (SELECT status FROM inventory_counts c WHERE c.item_id = i.id ORDER BY c.id DESC LIMIT 1) status FROM inventory_items i WHERE i.active = 1`).all();
-    const outItems = invRows.filter((x) => x.status === 'out');
-    const lowItems = invRows.filter((x) => x.status === 'low');
-    const reordersOpen = db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'open'`).get().n;
-    // Food & snacks
-    const mealSc = mealScorecard();
-    const snackOut = db.prepare(`SELECT COUNT(*) n FROM inventory_items i WHERE i.department = 'Kitchen' AND i.category = 'Snacks' AND i.active = 1 AND (SELECT status FROM inventory_counts c WHERE c.item_id = i.id ORDER BY c.id DESC LIMIT 1) = 'out'`).get().n;
-    // Staffing coverage (the staffing model)
-    const staffSc = staffingScorecard();
-    const shortToday = db.prepare(`SELECT needed, actual FROM shift_staffing WHERE date = ?`).all(today).filter((r) => r.actual < r.needed).length;
-    // Environment defects — maintenance closed within 24h + open overdue
-    const maintOpen2 = db.prepare(`SELECT priority, location, title, created_at FROM maintenance_requests WHERE status IN ('open','in_progress')`).all();
-    const ageH = (t) => (Date.now() - Date.parse(String(t).replace(' ', 'T') + 'Z')) / 3.6e6;
-    const mOverdue = maintOpen2.filter((r) => ageH(r.created_at) > (r.priority === 'Urgent' ? 4 : r.priority === 'High' ? 24 : 72));
-    const closedRows = db.prepare(`SELECT created_at, resolved_at FROM maintenance_requests WHERE resolved_at >= datetime('now','-7 day')`).all();
-    const in24 = closedRows.filter((r) => r.resolved_at && (Date.parse(String(r.resolved_at).replace(' ', 'T') + 'Z') - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z')) / 3.6e6 <= 24).length;
-    const closurePct = closedRows.length ? Math.round(in24 / closedRows.length * 100) : null;
-    // The 2-week fit scorecard — pass = the system held on its own.
+    subtitle = 'Does the building run when you\'re not in it? Run your systems in Facility → Operations. Measured by outcome, not effort.';
+    const D = dooScorecard();
     const pass = (b) => b ? 'PASS' : 'MISS';
-    const ox = opsExtras();
-    const live = [
-      { ok: outItems.length === 0, name: 'Nothing ran "out"', sub: outItems.length ? `${outItems.length} item(s) OUT, ${lowItems.length} low` : `Zero stockouts · ${lowItems.length} low` },
-      { ok: snackOut === 0 && (mealSc.completePct == null || mealSc.completePct >= 90), name: 'Meals on time + snacks 24/7', sub: `Caterer ${mealSc.completePct == null ? '—' : mealSc.completePct + '%'} met · snacks ${snackOut ? 'OUT' : 'stocked'}` },
-      { ok: ox.env.logged > 0 && ox.env.pass, name: 'Beds made + building clean every shift', sub: ox.env.logged ? `${ox.env.logged} shift check(s)${ox.env.pass ? ' · all pass' : ' · gaps'}` : 'Not checked today — log the Environment walk' },
-      { ok: shortToday === 0 && (staffSc.week == null || staffSc.week >= 95), name: 'Shifts covered ahead of time', sub: `${staffSc.week == null ? '—' : staffSc.week + '%'} staffed (wk) · ${shortToday} short today` },
-      { ok: mOverdue.length === 0, name: 'Defects closed within 24h', sub: `${closurePct == null ? '—' : closurePct + '%'} in 24h · ${mOverdue.length} overdue` },
-      { ok: ox.handoff.logged > 0 && ox.handoff.pass, name: 'Handoff completed every shift', sub: ox.handoff.logged ? `${ox.handoff.logged} shift handoff(s)${ox.handoff.pass ? ' · complete' : ' · incomplete'}` : 'No handoff logged today' },
-      { ok: ox.rescues.pass, name: 'No CEO rescues', sub: `${ox.rescues.week} CEO rescue(s) this week` },
-      { ok: ox.projects.pass, name: 'Projects advanced on their dates', sub: `${ox.projects.open} open · ${ox.projects.overdue} overdue` },
-    ];
-    const passing = live.filter((x) => x.ok).length;
-    northStar = { label: 'Ops systems holding', value: `${passing}/${live.length}`, sev: passing === live.length ? 'ok' : passing >= live.length - 2 ? 'warn' : 'high' };
+    northStar = { label: 'Ops systems holding', value: `${D.passing}/${D.total}`, sev: D.passing === D.total ? 'ok' : D.passing >= D.total - 2 ? 'warn' : 'high' };
     tiles = [
-      { key: 'supplies', label: 'Stockouts', n: outItems.length, sev: outItems.length ? 'high' : 'ok', view: 'inventory' },
-      { key: 'food', label: 'Snacks out', n: snackOut, sev: snackOut ? 'high' : 'ok', view: 'meals' },
-      { key: 'defects', label: 'Defects overdue', n: mOverdue.length, sev: mOverdue.length ? 'high' : 'ok', view: 'maintenance' },
-      { key: 'coverage', label: 'Shifts short today', n: shortToday, sev: shortToday ? 'high' : 'ok', view: 'staffmodel' },
-      { key: 'reorders', label: 'On order', n: reordersOpen, sev: 'ok', view: 'inventory' },
-      { key: 'low', label: 'Below par (low)', n: lowItems.length, sev: lowItems.length ? 'warn' : 'ok', view: 'inventory' },
+      { key: 'supplies', label: 'Stockouts', n: D.outItems.length, sev: D.outItems.length ? 'high' : 'ok', view: 'inventory' },
+      { key: 'food', label: 'Snacks out', n: D.snackOut, sev: D.snackOut ? 'high' : 'ok', view: 'meals' },
+      { key: 'defects', label: 'Defects overdue', n: D.mOverdue.length, sev: D.mOverdue.length ? 'high' : 'ok', view: 'maintenance' },
+      { key: 'coverage', label: 'Shifts short today', n: D.shortToday, sev: D.shortToday ? 'high' : 'ok', view: 'staffmodel' },
+      { key: 'rescues', label: 'CEO rescues (wk)', n: D.ox.rescues.week, sev: D.ox.rescues.week ? 'high' : 'ok', view: 'operations' },
+      { key: 'projects', label: 'Projects overdue', n: D.ox.projects.overdue, sev: D.ox.projects.overdue ? 'high' : 'ok', view: 'operations' },
     ];
-    tiles.push({ key: 'rescues', label: 'CEO rescues (wk)', n: ox.rescues.week, sev: ox.rescues.week ? 'high' : 'ok', view: 'operations' });
-    tiles.push({ key: 'projects', label: 'Projects overdue', n: ox.projects.overdue, sev: ox.projects.overdue ? 'high' : 'ok', view: 'operations' });
-    sections.push({ key: 'scorecard', title: '📋 The 2-week fit scorecard — measured by outcome, not effort', cta: { label: 'Open Operations →', view: 'operations' },
-      items: live.map((x) => ({ name: x.name, sub: x.sub, badge: pass(x.ok) })) });
-    if (outItems.length || lowItems.length) sections.push({ key: 'supplies', title: '📦 Below par right now', cta: { label: 'Open Supplies →', view: 'inventory' },
-      items: outItems.concat(lowItems).slice(0, 12).map((x) => ({ name: x.name, sub: x.department, badge: x.status === 'out' ? 'OUT' : 'low' })) });
-    if (mOverdue.length) sections.push({ key: 'defects', title: '🛠️ Defects past their close-by time', cta: { label: 'Open Maintenance →', view: 'maintenance' },
-      items: mOverdue.slice(0, 10).map((r) => ({ name: r.title, sub: [r.location, r.priority].filter(Boolean).join(' · '), badge: 'OVERDUE' })) });
+    sections.push({ key: 'scorecard', title: '📋 The 2-week fit scorecard — run the systems in Operations', cta: { label: 'Open Operations →', view: 'operations' },
+      items: D.outcomes.map((x) => ({ name: x.name, sub: x.sub, badge: pass(x.ok) })) });
+    if (D.outItems.length || D.lowItems.length) sections.push({ key: 'supplies', title: '📦 Below par right now', cta: { label: 'Open Supplies →', view: 'inventory' },
+      items: D.outItems.concat(D.lowItems).slice(0, 12).map((x) => ({ name: x.name, sub: x.department, badge: x.status === 'out' ? 'OUT' : 'low' })) });
+    if (D.mOverdue.length) sections.push({ key: 'defects', title: '🛠️ Defects past their close-by time', cta: { label: 'Open Maintenance →', view: 'maintenance' },
+      items: D.mOverdue.slice(0, 10).map((r) => ({ name: r.title, sub: [r.location, r.priority].filter(Boolean).join(' · '), badge: 'OVERDUE' })) });
     sections.push({ key: 'note', title: 'The standard for this seat', items: [{ name: 'A great operations leader is invisible because nothing breaks.', sub: 'Build the system so the shortage never happens — fixing today\'s shortage is the failure, not the win.' }] });
   } else if (jr === 'Nurse') {
     subtitle = 'Medical watch — withdrawal, meds, and the safety of every client.';
@@ -3787,6 +3755,37 @@ function opsExtras() {
   };
 }
 const SHIFTS_FOR_OPS = ['Morning', 'Day', 'Evening', 'Night'];
+// The full 8-outcome operations scorecard — shared by the DOO dashboard and the
+// Operations hub so they never drift.
+function dooScorecard() {
+  const today = appToday();
+  const invRows = db.prepare(`SELECT i.name, i.department, (SELECT status FROM inventory_counts c WHERE c.item_id = i.id ORDER BY c.id DESC LIMIT 1) status FROM inventory_items i WHERE i.active = 1`).all();
+  const outItems = invRows.filter((x) => x.status === 'out');
+  const lowItems = invRows.filter((x) => x.status === 'low');
+  const reordersOpen = db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'open'`).get().n;
+  const mealSc = mealScorecard();
+  const snackOut = db.prepare(`SELECT COUNT(*) n FROM inventory_items i WHERE i.department = 'Kitchen' AND i.category = 'Snacks' AND i.active = 1 AND (SELECT status FROM inventory_counts c WHERE c.item_id = i.id ORDER BY c.id DESC LIMIT 1) = 'out'`).get().n;
+  const staffSc = staffingScorecard();
+  const shortToday = db.prepare(`SELECT needed, actual FROM shift_staffing WHERE date = ?`).all(today).filter((r) => r.actual < r.needed).length;
+  const maintOpen2 = db.prepare(`SELECT priority, location, title, created_at FROM maintenance_requests WHERE status IN ('open','in_progress')`).all();
+  const ageH = (t) => (Date.now() - Date.parse(String(t).replace(' ', 'T') + 'Z')) / 3.6e6;
+  const mOverdue = maintOpen2.filter((r) => ageH(r.created_at) > (r.priority === 'Urgent' ? 4 : r.priority === 'High' ? 24 : 72));
+  const closedRows = db.prepare(`SELECT created_at, resolved_at FROM maintenance_requests WHERE resolved_at >= datetime('now','-7 day')`).all();
+  const in24 = closedRows.filter((r) => r.resolved_at && (Date.parse(String(r.resolved_at).replace(' ', 'T') + 'Z') - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z')) / 3.6e6 <= 24).length;
+  const closurePct = closedRows.length ? Math.round(in24 / closedRows.length * 100) : null;
+  const ox = opsExtras();
+  const outcomes = [
+    { ok: outItems.length === 0, name: 'Nothing ran "out"', sub: outItems.length ? `${outItems.length} item(s) OUT, ${lowItems.length} low` : `Zero stockouts · ${lowItems.length} low`, view: 'inventory' },
+    { ok: snackOut === 0 && (mealSc.completePct == null || mealSc.completePct >= 90), name: 'Meals on time + snacks 24/7', sub: `Caterer ${mealSc.completePct == null ? '—' : mealSc.completePct + '%'} met · snacks ${snackOut ? 'OUT' : 'stocked'}`, view: 'meals' },
+    { ok: ox.env.logged > 0 && ox.env.pass, name: 'Beds made + building clean every shift', sub: ox.env.logged ? `${ox.env.logged} shift check(s)${ox.env.pass ? ' · all pass' : ' · gaps'}` : 'Not checked today — log the Environment walk', view: 'operations' },
+    { ok: shortToday === 0 && (staffSc.week == null || staffSc.week >= 95), name: 'Shifts covered ahead of time', sub: `${staffSc.week == null ? '—' : staffSc.week + '%'} staffed (wk) · ${shortToday} short today`, view: 'staffmodel' },
+    { ok: mOverdue.length === 0, name: 'Defects closed within 24h', sub: `${closurePct == null ? '—' : closurePct + '%'} in 24h · ${mOverdue.length} overdue`, view: 'maintenance' },
+    { ok: ox.handoff.logged > 0 && ox.handoff.pass, name: 'Handoff completed every shift', sub: ox.handoff.logged ? `${ox.handoff.logged} shift handoff(s)${ox.handoff.pass ? ' · complete' : ' · incomplete'}` : 'No handoff logged today', view: 'operations' },
+    { ok: ox.rescues.pass, name: 'No CEO rescues', sub: `${ox.rescues.week} CEO rescue(s) this week`, view: 'operations' },
+    { ok: ox.projects.pass, name: 'Projects advanced on their dates', sub: `${ox.projects.open} open · ${ox.projects.overdue} overdue`, view: 'operations' },
+  ];
+  return { outcomes, passing: outcomes.filter((o) => o.ok).length, total: outcomes.length, outItems, lowItems, reordersOpen, snackOut, shortToday, mOverdue, closurePct, ox };
+}
 // Everything the Operations view needs.
 app.get('/api/ops', requireAuth, (req, res) => {
   const today = appToday();
@@ -3801,7 +3800,9 @@ app.get('/api/ops', requireAuth, (req, res) => {
     return { id: p.id, name: p.name, owner: p.owner || '', due: p.due_date || '', status: p.status, notes: p.notes || '',
       checklist: cl, pct: cl.length ? Math.round(doneN / cl.length * 100) : null, overdue: p.status !== 'Done' && p.due_date && p.due_date < today };
   });
-  res.json({ shifts: SHIFTS_FOR_OPS, current: currentShift(), env, ho, rescues, rescuesWeek, projects, extras: opsExtras() });
+  const sc = dooScorecard();
+  res.json({ shifts: SHIFTS_FOR_OPS, current: currentShift(), env, ho, rescues, rescuesWeek, projects, extras: sc.ox,
+    scorecard: sc.outcomes, passing: sc.passing, total: sc.total });
 });
 app.post('/api/ops/environment', requireAuth, (req, res) => {
   const b = req.body || {}; const shift = SHIFTS_FOR_OPS.includes(b.shift) ? b.shift : currentShift();

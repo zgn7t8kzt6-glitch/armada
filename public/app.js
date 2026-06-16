@@ -86,7 +86,7 @@ async function boot(){
   $('r_date').value = today(); $('a_date').value = today();
   renderGroups();
   // Role-based landing: everyone opens already where they work.
-  const landing = ME.role==='admin' ? 'command' : 'dashboard';
+  const landing = (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
   show(landing);
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
 }
@@ -143,7 +143,8 @@ function selectGroup(g){
   document.querySelectorAll('#groupbar button').forEach(b=>b.classList.toggle('active', b.dataset.g===g));
   const navBtns=[...document.querySelectorAll('#nav button')];
   navBtns.forEach(b=>{
-    const adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
+    let adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
+    if(b.dataset.view==='operations' && ME && ME.job_role==='Director of Operations') adminHidden=false;   // DOO always sees Operations
     const sub = b.hasAttribute('data-subview');   // reached via in-page tabs, not the sidebar
     b.style.display = (b.dataset.group===g && !adminHidden && !sub) ? '' : 'none';
   });
@@ -2873,6 +2874,7 @@ const HO_AREAS=[['stock','Stock at par'],['beds','Beds made'],['kitchen','Kitche
 async function loadOps(){
   let d; try{ d=await api('/ops'); }catch(e){ $('opsKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   OPS=d; const x=d.extras;
+  if($('opsScorecard')) $('opsScorecard').innerHTML = `<p class="sub sans">${d.passing}/${d.total} systems holding.</p>`+(d.scorecard||[]).map(o=>`<div class="todo"><div class="txt"><span class="risk ${o.ok?'risk-low':'risk-high'}">${o.ok?'PASS':'MISS'}</span> <strong>${esc(o.name)}</strong><div class="hint">${esc(o.sub)}</div></div>${o.view?`<button class="btn btn-ghost btn-sm sans" onclick="show('${o.view}')">Open →</button>`:''}</div>`).join('');
   $('opsKpis').innerHTML = `
     <div class="ret-card ${!x.env.pass?'rc-warn':''}"><div class="n">${x.env.logged}</div><div class="l">Env checks today ${x.env.pass?'✓':''}</div></div>
     <div class="ret-card ${!x.handoff.pass?'rc-warn':''}"><div class="n">${x.handoff.logged}</div><div class="l">Handoffs today ${x.handoff.pass?'✓':''}</div></div>

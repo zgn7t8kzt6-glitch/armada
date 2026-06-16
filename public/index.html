@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616P" />
+<link rel="stylesheet" href="/styles.css?v=20260616Q" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -492,14 +492,29 @@
       </div>
     </section>
 
-    <!-- OPERATIONS — the DOO systems: environment, handoff, CEO rescues, projects -->
+    <!-- OPERATIONS — the DOO hub: role, systems, scorecard, and the tools -->
     <section id="operations" class="view">
       <div class="card">
         <div class="cmd-hero-row">
-          <div><h3>Operations</h3><p class="sub sans">The systems that make the building run on its own — environment, handoff, projects. Run them daily and the scorecard stays green.</p></div>
+          <div><h3>Operations — Director of Operations</h3><p class="sub sans">The test of this seat: <strong>does the building run when you're not in it?</strong> A great operations leader is invisible because nothing breaks. Run the systems below and the scorecard stays green.</p></div>
           <button class="btn btn-ghost sans" onclick="loadOps()">Refresh</button>
         </div>
         <div id="opsKpis" class="ret-cards"></div>
+      </div>
+      <div class="card">
+        <h3>What you own — six domains</h3>
+        <div class="grid3" style="gap:8px">
+          <div class="pc-note"><strong>📦 Supplies & inventory</strong><div class="hint">Never below par; nothing ever "out."</div><button class="btn btn-ghost btn-sm sans" onclick="show('inventory')">Open Supplies →</button></div>
+          <div class="pc-note"><strong>🍽️ Food service</strong><div class="hint">Every meal on time; snacks 24/7.</div><button class="btn btn-ghost btn-sm sans" onclick="show('meals')">Open Meals →</button></div>
+          <div class="pc-note"><strong>🧹 Environment & facilities</strong><div class="hint">Clean, immaculate, defects closed fast.</div><button class="btn btn-ghost btn-sm sans" onclick="show('maintenance')">Maintenance →</button></div>
+          <div class="pc-note"><strong>👥 Staffing logistics</strong><div class="hint">Covered ahead of time, nights & weekends.</div><button class="btn btn-ghost btn-sm sans" onclick="show('staffmodel')">Staffing Model →</button></div>
+          <div class="pc-note"><strong>🚚 Vendors & procurement</strong><div class="hint">Reordering automatic, costs controlled.</div><button class="btn btn-ghost btn-sm sans" onclick="show('inventory')">Reorder list →</button></div>
+          <div class="pc-note"><strong>🏗️ Projects</strong><div class="hint">Owner + date + checklist, not a queue.</div><button class="btn btn-ghost btn-sm sans" onclick="document.getElementById('pj_list').scrollIntoView({behavior:'smooth'})">Project Tracker ↓</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>📋 The 2-week fit scorecard <span class="hint" style="font-weight:400">— measured by outcome, not effort</span></h3>
+        <div id="opsScorecard"></div>
       </div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
         <div class="card" style="flex:1;min-width:300px">
@@ -1635,6 +1650,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616P"></script>
+<script src="/app.js?v=20260616Q"></script>
 </body>
 </html>

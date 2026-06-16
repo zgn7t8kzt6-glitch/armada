@@ -2884,9 +2884,17 @@ async function loadOps(){
       ${groups[c].map(t=>`<label class="trg" style="display:flex;gap:8px;align-items:flex-start;padding:6px 0"><input type="checkbox" ${t.done?'checked':''} onchange="toggleRoutine(${t.id},this.checked)"/>
         <span style="flex:1;${t.done?'color:var(--muted);text-decoration:line-through':''}">${esc(t.title)}${t.done&&t.by?` <span class="hint">✓ ${esc(t.by)} ${esc(t.at)}</span>`:''}</span>
         ${t.link?`<button class="btn btn-ghost btn-sm sans" onclick="show('${t.link}')">Open →</button>`:''}</label>`).join('')}</div>`).join('') : '<div class="hint">No tasks scheduled today.</div>';
+    // 7-day routine consistency strip
+    const wk=d.routineWeek;
+    if(wk){ const day=s=>new Date(s.date+'T12:00').toLocaleDateString('en-US',{weekday:'narrow'});
+      $('opsTasks').innerHTML += `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px"><div class="hint">Routine run — last 7 days: <strong>${wk.pct!=null?wk.pct+'%':'—'}</strong> (${wk.done}/${wk.due})</div>
+        <div style="display:flex;gap:4px;margin-top:5px">${wk.series.map(s=>`<div title="${s.date}: ${s.done}/${s.due}" style="flex:1;text-align:center"><div style="height:24px;display:flex;align-items:flex-end;justify-content:center"><div style="width:14px;background:${s.pct==null?'var(--line)':s.pct>=90?'var(--good)':s.pct>=60?'var(--gold)':'var(--danger)'};height:${s.pct==null?3:Math.max(3,Math.round(s.pct/100*24))}px;border-radius:2px"></div></div><div class="hint" style="font-size:10px">${day(s)}</div></div>`).join('')}</div></div>`;
+    }
   }
   if($('opsScorecard')) $('opsScorecard').innerHTML = `<p class="sub sans">${d.passing}/${d.total} systems holding.</p>`+(d.scorecard||[]).map(o=>`<div class="todo"><div class="txt"><span class="risk ${o.ok?'risk-low':'risk-high'}">${o.ok?'PASS':'MISS'}</span> <strong>${esc(o.name)}</strong><div class="hint">${esc(o.sub)}</div></div>${o.view?`<button class="btn btn-ghost btn-sm sans" onclick="show('${o.view}')">Open →</button>`:''}</div>`).join('');
+  const wkPct=d.routineWeek?d.routineWeek.pct:null;
   $('opsKpis').innerHTML = `
+    <div class="ret-card ${wkPct!=null&&wkPct<90?'rc-warn':''}"><div class="n">${wkPct!=null?wkPct+'%':'—'}</div><div class="l">Routine run (7d)</div></div>
     <div class="ret-card ${!x.env.pass?'rc-warn':''}"><div class="n">${x.env.logged}</div><div class="l">Env checks today ${x.env.pass?'✓':''}</div></div>
     <div class="ret-card ${!x.handoff.pass?'rc-warn':''}"><div class="n">${x.handoff.logged}</div><div class="l">Handoffs today ${x.handoff.pass?'✓':''}</div></div>
     <div class="ret-card ${x.rescues.week?'rc-high':''}"><div class="n">${x.rescues.week}</div><div class="l">CEO rescues (wk)</div></div>

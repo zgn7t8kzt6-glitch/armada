@@ -3769,6 +3769,22 @@ function opsRoutinesToday(dateStr) {
   const today = due.map((r) => { const lg = doneRow.get(r.id, date); return { id: r.id, title: r.title, cadence: r.cadence, link: r.link || null, done: !!lg, by: lg?.by_name || '', at: lg ? String(lg.done_at).slice(11, 16) : '' }; });
   return { date, today, done: today.filter((t) => t.done).length, total: today.length };
 }
+// How consistently the routine is run — % of due tasks completed over N days.
+function opsRoutineHistory(days = 7) {
+  const all = db.prepare(`SELECT id, cadence, dow, dom FROM ops_routines WHERE active = 1`).all();
+  const dueOn = (date) => { const d = new Date(date + 'T12:00:00'); const dow = d.getDay(); const dom = d.getDate(); return all.filter((r) => r.cadence === 'daily' || (r.cadence === 'weekly' && r.dow === dow) || (r.cadence === 'monthly' && r.dom === Math.min(dom, 28))); };
+  let totDue = 0, totDone = 0; const series = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const date = addDays(appToday(), -i);
+    const due = dueOn(date);
+    const ids = due.map((r) => r.id);
+    let done = 0;
+    if (ids.length) done = db.prepare(`SELECT COUNT(*) n FROM ops_routine_log WHERE date = ? AND routine_id IN (${ids.map(() => '?').join(',')})`).get(date, ...ids).n;
+    totDue += due.length; totDone += done;
+    series.push({ date, due: due.length, done, pct: due.length ? Math.round(done / due.length * 100) : null });
+  }
+  return { pct: totDue ? Math.round(totDone / totDue * 100) : null, done: totDone, due: totDue, series };
+}
 // The full 8-outcome operations scorecard — shared by the DOO dashboard and the
 // Operations hub so they never drift.
 function dooScorecard() {
@@ -3816,7 +3832,7 @@ app.get('/api/ops', requireAuth, (req, res) => {
   });
   const sc = dooScorecard();
   res.json({ shifts: SHIFTS_FOR_OPS, current: currentShift(), env, ho, rescues, rescuesWeek, projects, extras: sc.ox,
-    scorecard: sc.outcomes, passing: sc.passing, total: sc.total, routines: opsRoutinesToday() });
+    scorecard: sc.outcomes, passing: sc.passing, total: sc.total, routines: opsRoutinesToday(), routineWeek: opsRoutineHistory(7) });
 });
 // Check off (or un-check) a routine task for today.
 app.post('/api/ops/routine/done', requireAuth, (req, res) => {

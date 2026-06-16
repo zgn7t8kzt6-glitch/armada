@@ -64,7 +64,7 @@ app.use((req, res, next) => {
 });
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping'];
 const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nurse / Medical (comfort, not feeling well)', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
@@ -2846,6 +2846,58 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'incidents', title: 'Open incidents', cta: { label: 'Open Incidents →', view: 'incidents' }, items: incidentsRecent.map((i) => ({ name: i.pref || i.name || 'House', sub: `${i.type} — ${i.description}`, badge: i.severity })) });
     sections.push({ key: 'newadmits', title: 'New admits today', items: newAdmits.map((c) => item(c, c.program || '', 'NEW')) });
     sections.push({ key: 'discharges', title: 'Discharges today', items: dToday.map((d) => ({ name: d.pref || d.name, sub: d.discharge_status || '' })) });
+  } else if (jr === 'Director of Operations') {
+    subtitle = 'Does the building run when you\'re not in it? Operations wins when nothing breaks — measured by outcome, not effort.';
+    // Supplies — current stockouts / low (the par-level system)
+    const invRows = db.prepare(`SELECT i.name, i.department, (SELECT status FROM inventory_counts c WHERE c.item_id = i.id ORDER BY c.id DESC LIMIT 1) status FROM inventory_items i WHERE i.active = 1`).all();
+    const outItems = invRows.filter((x) => x.status === 'out');
+    const lowItems = invRows.filter((x) => x.status === 'low');
+    const reordersOpen = db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'open'`).get().n;
+    // Food & snacks
+    const mealSc = mealScorecard();
+    const snackOut = db.prepare(`SELECT COUNT(*) n FROM inventory_items i WHERE i.department = 'Kitchen' AND i.category = 'Snacks' AND i.active = 1 AND (SELECT status FROM inventory_counts c WHERE c.item_id = i.id ORDER BY c.id DESC LIMIT 1) = 'out'`).get().n;
+    // Staffing coverage (the staffing model)
+    const staffSc = staffingScorecard();
+    const shortToday = db.prepare(`SELECT needed, actual FROM shift_staffing WHERE date = ?`).all(today).filter((r) => r.actual < r.needed).length;
+    // Environment defects — maintenance closed within 24h + open overdue
+    const maintOpen2 = db.prepare(`SELECT priority, location, title, created_at FROM maintenance_requests WHERE status IN ('open','in_progress')`).all();
+    const ageH = (t) => (Date.now() - Date.parse(String(t).replace(' ', 'T') + 'Z')) / 3.6e6;
+    const mOverdue = maintOpen2.filter((r) => ageH(r.created_at) > (r.priority === 'Urgent' ? 4 : r.priority === 'High' ? 24 : 72));
+    const closedRows = db.prepare(`SELECT created_at, resolved_at FROM maintenance_requests WHERE resolved_at >= datetime('now','-7 day')`).all();
+    const in24 = closedRows.filter((r) => r.resolved_at && (Date.parse(String(r.resolved_at).replace(' ', 'T') + 'Z') - Date.parse(String(r.created_at).replace(' ', 'T') + 'Z')) / 3.6e6 <= 24).length;
+    const closurePct = closedRows.length ? Math.round(in24 / closedRows.length * 100) : null;
+    // The 2-week fit scorecard — pass = the system held on its own.
+    const pass = (b) => b ? 'PASS' : 'MISS';
+    const live = [
+      { ok: outItems.length === 0, name: 'Nothing ran "out"', sub: outItems.length ? `${outItems.length} item(s) OUT, ${lowItems.length} low` : `Zero stockouts · ${lowItems.length} low` },
+      { ok: snackOut === 0 && (mealSc.completePct == null || mealSc.completePct >= 90), name: 'Meals on time + snacks 24/7', sub: `Caterer ${mealSc.completePct == null ? '—' : mealSc.completePct + '%'} met · snacks ${snackOut ? 'OUT' : 'stocked'}` },
+      { ok: shortToday === 0 && (staffSc.week == null || staffSc.week >= 95), name: 'Shifts covered ahead of time', sub: `${staffSc.week == null ? '—' : staffSc.week + '%'} staffed (wk) · ${shortToday} short today` },
+      { ok: mOverdue.length === 0, name: 'Defects closed within 24h', sub: `${closurePct == null ? '—' : closurePct + '%'} in 24h · ${mOverdue.length} overdue` },
+    ];
+    const pendingSystems = [
+      { name: 'Beds made + building clean every shift', sub: 'Needs the per-shift Environment check (build pending)' },
+      { name: 'Handoff completed every shift', sub: 'Needs the operational Handoff checklist (build pending)' },
+      { name: 'No CEO rescues', sub: 'Needs the CEO-rescue log (build pending)' },
+      { name: 'Projects advanced on their dates', sub: 'Needs the Project Tracker (build pending)' },
+    ];
+    const passing = live.filter((x) => x.ok).length;
+    northStar = { label: 'Ops systems holding', value: `${passing}/${live.length}`, sev: passing === live.length ? 'ok' : passing >= live.length - 1 ? 'warn' : 'high' };
+    tiles = [
+      { key: 'supplies', label: 'Stockouts', n: outItems.length, sev: outItems.length ? 'high' : 'ok', view: 'inventory' },
+      { key: 'food', label: 'Snacks out', n: snackOut, sev: snackOut ? 'high' : 'ok', view: 'meals' },
+      { key: 'defects', label: 'Defects overdue', n: mOverdue.length, sev: mOverdue.length ? 'high' : 'ok', view: 'maintenance' },
+      { key: 'coverage', label: 'Shifts short today', n: shortToday, sev: shortToday ? 'high' : 'ok', view: 'staffmodel' },
+      { key: 'reorders', label: 'On order', n: reordersOpen, sev: 'ok', view: 'inventory' },
+      { key: 'low', label: 'Below par (low)', n: lowItems.length, sev: lowItems.length ? 'warn' : 'ok', view: 'inventory' },
+    ];
+    sections.push({ key: 'scorecard', title: '📋 The 2-week fit scorecard — measured by outcome, not effort',
+      items: live.map((x) => ({ name: x.name, sub: x.sub, badge: pass(x.ok) }))
+        .concat(pendingSystems.map((p) => ({ name: p.name, sub: p.sub, badge: 'SET UP' }))) });
+    if (outItems.length || lowItems.length) sections.push({ key: 'supplies', title: '📦 Below par right now', cta: { label: 'Open Supplies →', view: 'inventory' },
+      items: outItems.concat(lowItems).slice(0, 12).map((x) => ({ name: x.name, sub: x.department, badge: x.status === 'out' ? 'OUT' : 'low' })) });
+    if (mOverdue.length) sections.push({ key: 'defects', title: '🛠️ Defects past their close-by time', cta: { label: 'Open Maintenance →', view: 'maintenance' },
+      items: mOverdue.slice(0, 10).map((r) => ({ name: r.title, sub: [r.location, r.priority].filter(Boolean).join(' · '), badge: 'OVERDUE' })) });
+    sections.push({ key: 'note', title: 'The standard for this seat', items: [{ name: 'A great operations leader is invisible because nothing breaks.', sub: 'Build the system so the shortage never happens — fixing today\'s shortage is the failure, not the win.' }] });
   } else if (jr === 'Nurse') {
     subtitle = 'Medical watch — withdrawal, meds, and the safety of every client.';
     const detox = active.filter((c) => isDetoxProgram(c.program) || /3\.?7|3\.?2|wm/i.test(c.loc || ''));
@@ -3060,15 +3112,18 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const maintOpen = db.prepare(`SELECT id, title, location, category, priority, created_at FROM maintenance_requests WHERE status IN ('open','in_progress') ORDER BY
     CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, created_at DESC`).all();
   const maintUrgent = maintOpen.filter((r) => r.priority === 'Urgent' || r.priority === 'High').length;
-  tiles.push({ key: 'maintenance', label: 'Open maintenance', n: maintOpen.length, sev: maintUrgent ? 'high' : maintOpen.length ? 'warn' : 'ok', view: 'maintenance' });
-  if (maintOpen.length) sections.push({ key: 'maintenance', title: '🛠️ Open maintenance — report or pick one up', cta: { label: 'Open Maintenance →', view: 'maintenance' },
-    items: maintOpen.slice(0, 8).map((r) => ({ name: r.title, sub: [r.location, r.category].filter(Boolean).join(' · '), badge: r.priority })) });
-  // Today's coverage: any slot scheduled below what's needed.
-  const shortSlots = db.prepare(`SELECT part, role, needed, (SELECT COUNT(*) FROM schedule_assignments a WHERE a.slot_id = s.id AND a.status = 'scheduled') sched
-    FROM schedule_slots s WHERE s.date = ?`).all(today).filter((s) => s.sched < s.needed);
-  tiles.push({ key: 'coverage', label: 'Shifts short today', n: shortSlots.length, sev: shortSlots.length ? 'high' : 'ok', view: 'maintenance' });
-  if (shortSlots.length) sections.push({ key: 'coverage', title: '👥 Coverage gaps today — pick up or fill', cta: { label: 'See who\'s on →', view: 'maintenance' },
-    items: shortSlots.map((s) => ({ name: `${s.part} · ${s.role}`, sub: `${s.sched} of ${s.needed} scheduled`, badge: `SHORT ${s.needed - s.sched}` })) });
+  // The Director of Operations dashboard already covers maintenance + coverage in
+  // depth, so skip the generic strip for that role to keep it clean.
+  if (jr !== 'Director of Operations') {
+    tiles.push({ key: 'maintenance', label: 'Open maintenance', n: maintOpen.length, sev: maintUrgent ? 'high' : maintOpen.length ? 'warn' : 'ok', view: 'maintenance' });
+    if (maintOpen.length) sections.push({ key: 'maintenance', title: '🛠️ Open maintenance — report or pick one up', cta: { label: 'Open Maintenance →', view: 'maintenance' },
+      items: maintOpen.slice(0, 8).map((r) => ({ name: r.title, sub: [r.location, r.category].filter(Boolean).join(' · '), badge: r.priority })) });
+    const shortSlots = db.prepare(`SELECT part, role, needed, (SELECT COUNT(*) FROM schedule_assignments a WHERE a.slot_id = s.id AND a.status = 'scheduled') sched
+      FROM schedule_slots s WHERE s.date = ?`).all(today).filter((s) => s.sched < s.needed);
+    tiles.push({ key: 'coverage', label: 'Shifts short today', n: shortSlots.length, sev: shortSlots.length ? 'high' : 'ok', view: 'maintenance' });
+    if (shortSlots.length) sections.push({ key: 'coverage', title: '👥 Coverage gaps today — pick up or fill', cta: { label: 'See who\'s on →', view: 'maintenance' },
+      items: shortSlots.map((s) => ({ name: `${s.part} · ${s.role}`, sub: `${s.sched} of ${s.needed} scheduled`, badge: `SHORT ${s.needed - s.sched}` })) });
+  }
   // Who's on THIS shift right now (by name), so everyone knows their teammates.
   const part = currentShift();
   const onShift = db.prepare(`SELECT s.role, a.user_name FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id

@@ -431,6 +431,11 @@ export function ensureOpsRoutines() {
 // [category, name, unit, par, reorder, expiry, sku, note]
 const NOURISHMENT = [
   // ── DRINKS (beverage shelf / station) ───────────────────────────────────
+  // Client favourites in detox/SUD: sparkling water and coconut water are
+  // heavily requested; hot chocolate is a comfort drink for withdrawal nights.
+  ['Drinks', 'Sparkling water / seltzer',      'case (24)',            6, 2, 0, null,                    'Client favourite — refreshing, helps with nausea. Source from Pollak or Sysco.'],
+  ['Drinks', 'Coconut water',                  'case (12)',            4, 2, 0, null,                    'Natural electrolytes — popular alternative to Gatorade. Source separately.'],
+  ['Drinks', 'Hot chocolate mix packets',      'case (50 packets)',    4, 2, 0, null,                    'Comfort drink — popular at night in withdrawal. Off-guide; source separately.'],
   ['Drinks', 'Gatorade Zero Watermelon',       'case (24)',            6, 2, 0, 'PL620',                 null],
   ['Drinks', 'Gatorade G2 Fruit Punch',        'case (24)',            6, 2, 0, 'B4678',                 null],
   ['Drinks', 'Gatorade G2 Grape',              'case (24)',            6, 2, 0, '27472',                 null],
@@ -443,6 +448,12 @@ const NOURISHMENT = [
   ['Drinks', 'Glucerna Chocolate (diabetic)',  'case (24)',            4, 2, 0, 'J3080',                 null], // Pollak 2N360200
   ['Drinks', 'Prune juice',                    'case (8)',             4, 2, 0, 'JU2050',                'Opioid-withdrawal constipation.'], // Pollak JU2050
   // ── FRESH & REFRIGERATED ────────────────────────────────────────────────
+  // String cheese and hard-boiled eggs are the #1 requested protein snacks
+  // in residential SUD — easy to grab, no prep, finger food.
+  ['Fresh & Refrigerated', 'String cheese (individual)', 'case (48)',        6, 2, 1, null,        'Client favourite — easy protein, no prep. Source from Pollak refrigerated.'],
+  ['Fresh & Refrigerated', 'Hard-boiled eggs (packaged)', 'case (24)',       4, 2, 1, null,        'Client favourite — quick protein. Check Pollak refrigerated section.'],
+  ['Fresh & Refrigerated', 'Baby carrots (bags)',        'case (12 bags)',   4, 2, 1, null,        'Veggie crunch — helps oral fixation in early recovery. Source fresh.'],
+  ['Fresh & Refrigerated', 'Hummus cups',                'case (36)',        4, 2, 1, null,        'Protein + snack, popular with carrots or pretzels. Source from Pollak.'],
   ['Fresh & Refrigerated', 'Whole milk',               'case (50 × 8 oz)',   4, 1, 1, 'CF162',    null], // Pollak DP0013
   ['Fresh & Refrigerated', 'Greek yogurt (assorted)',  'case (48)',          6, 2, 1, 'A4532 / A4530 / A2056', null], // Pollak DP1520/1550/1515
   ['Fresh & Refrigerated', 'Cheese sticks',            'case',              6, 2, 1, 'GR878 / BD270', null],
@@ -456,6 +467,19 @@ const NOURISHMENT = [
   ['Fresh & Refrigerated', 'Red grapes',               'flat',              3, 1, 1, '13762',    'Order to census'], // Pollak PC0037
   ['Fresh & Refrigerated', 'Strawberries',             'flat',              3, 1, 1, '39142',    'Order to census'], // Pollak PC1023
   // ── DRY GOODS & SNACKS (dry storage shelves) ────────────────────────────
+  // Ramen and mac & cheese are the most requested comfort foods in detox —
+  // familiar, warm, easy on a queasy stomach. Granola bars and PB crackers
+  // are constant snack requests. Fruit cups fill in when fresh produce runs out.
+  ['Dry Goods & Snacks', 'Ramen noodles, chicken',         'case (24)',           6, 2, 0, null,      'Client favourite #1 comfort food — warm, salty, familiar. Source Pollak or Sysco.'],
+  ['Dry Goods & Snacks', 'Mac & cheese cups (microwaveable)', 'case (12)',        4, 2, 0, null,      'Client favourite comfort food — quick, warm, filling. Source from Pollak.'],
+  ['Dry Goods & Snacks', 'Graham crackers',                 'case (200 packets)', 4, 2, 0, null,      'Classic comfort snack — popular with peanut butter or Nutella. Source Pollak.'],
+  ['Dry Goods & Snacks', 'Cheez-Its (vend pack)',           'case (60 bags)',      4, 2, 0, null,      'Top requested salty snack in residential SUD. Source from Pollak.'],
+  ['Dry Goods & Snacks', 'Granola bars (variety)',          'case (48)',           4, 2, 0, null,      'Energy + easy to eat. Nutrigrain on Pollak (CE0927 48/1). Popular with clients.'],
+  ['Dry Goods & Snacks', 'Peanut butter cracker packs',     'case (60 packs)',     4, 2, 0, null,      'Client favourite — Lance PB crackers. Check Pollak alongside saltines CR1040.'],
+  ['Dry Goods & Snacks', 'Trail mix / mixed nut packs',     'case (48)',           4, 2, 0, null,      'Protein + energy — popular afternoon snack. Source from Pollak or Sysco.'],
+  ['Dry Goods & Snacks', 'Fruit cups (peaches / mixed)',    'case (72 × 4 oz)',    4, 2, 0, null,      'Popular when fresh fruit runs out — in juice, not syrup. Source Pollak.'],
+  ['Dry Goods & Snacks', 'Mandarin orange cups',            'case (72 × 4 oz)',    4, 2, 0, null,      'Client favourite — sweet, easy, no mess. Source Pollak (similar to AP1072).'],
+  ['Dry Goods & Snacks', 'Animal crackers',                 'case (72 bags)',       3, 1, 0, null,      'Comfort snack — nostalgic, light, popular. Source from Pollak.'],
   ['Dry Goods & Snacks', 'Saltines',                       'case (500 packs)',    4, 2, 0, 'K4940',   null], // Pollak CR1040
   ['Dry Goods & Snacks', 'Cream of Wheat / farina',        'case (144 packets)', 4, 1, 0, 'GT506',   null], // Pollak CE5035
   ['Dry Goods & Snacks', 'Gelatin, regular',               'case (12 × 4-pack)', 4, 1, 0, '23736',   null], // Pollak GE1500
@@ -478,6 +502,8 @@ const NOURISHMENT = [
   ['Dry Goods & Snacks', 'Chamomile / caffeine-free tea',  'case (5 × 100 bags)', 4, 1, 0, 'CF3030', 'Anxiety + sleep support.'], // Pollak CF3030
   ['Dry Goods & Snacks', 'Ginger chews / ginger tea',      'case',               4, 1, 0, null,       'NOT on Pollak — source separately. Active nausea.'],
   // ── CONDIMENTS ──────────────────────────────────────────────────────────
+  ['Condiments', 'Honey packets',            'case (200 packets)',   4, 1, 0, null,     'For tea and hot chocolate — popular in detox. Check Pollak condiment section.'],
+  ['Condiments', 'Nutella / chocolate hazelnut packets', 'case (200 packets)', 3, 1, 0, null, 'Comfort condiment — popular with bagels and graham crackers. Source separately.'],
   ['Condiments', 'Sweetener packets',        'case (2,000 packets)', 4, 1, 0, null,     null], // Pollak CN1210
   ['Condiments', 'Sugar-free syrup',         'case (100 cups)',      2, 1, 0, '10772',  null], // Pollak CN5071
   ['Condiments', 'Jelly',                    'box (200 packets)',    2, 1, 0, 'GP564',  'Regular — Pollak CN1090H'],

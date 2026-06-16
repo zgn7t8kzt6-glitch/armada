@@ -250,6 +250,10 @@ function invStatus(qty, item) {
 function corporateEmail() {
   return (getState('inventory_corporate_email') || process.env.CORPORATE_EMAIL || 'shlomo@armadarecovery.com').trim();
 }
+// Pollak distributor contact for direct orders + critical alerts.
+function pollakEmail() {
+  return (getState('pollak_email') || 'mordy@pollakdist.com').trim();
+}
 // Raise (or refresh) a reorder request for an item. Dedupes on an open request so
 // corporate gets one email per shortage, not one per shift count. Returns true if
 // a NEW request was opened (i.e. an email should fire).
@@ -283,6 +287,139 @@ async function emailReorder(item, qty, level, user) {
     db.prepare(`UPDATE reorder_requests SET emailed_at = datetime('now') WHERE item_id = ? AND status = 'open'`).run(item.id);
     return true;
   } catch (e) { console.error('reorder email:', e.message); return false; }
+}
+
+// Critical Kitchen item is OUT — this cannot wait until Monday. Send Pollak an
+// immediate alert so they can arrange next-day or emergency delivery.
+async function emailPollakCritical(item, qty, user) {
+  const to = pollakEmail();
+  if (!to || !emailConfigured()) return false;
+  const esc = htmlEsc;
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:560px">
+    <div style="background:#b00;color:#fff;padding:12px 16px;border-radius:4px 4px 0 0">
+      <h2 style="margin:0;font-size:18px">🚨 URGENT — Out of Stock · Cannot Wait for Delivery</h2>
+    </div>
+    <div style="border:1px solid #b00;border-top:none;padding:16px;border-radius:0 0 4px 4px">
+      <p style="font-size:20px;font-weight:bold;margin:0 0 4px">${esc(item.name)}</p>
+      <p style="color:#b00;font-weight:bold;margin:0 0 16px">CRITICAL ITEM — Armada Detox of Akron is out of stock</p>
+      <table style="border-collapse:collapse;width:100%">
+        <tr><td style="padding:4px 14px 4px 0;color:#666;width:130px">Account</td><td><b>Armada Detox of Akron (ARM011)</b></td></tr>
+        ${item.sku ? `<tr><td style="padding:4px 14px 4px 0;color:#666">Item code</td><td><b>${esc(item.sku)}</b></td></tr>` : ''}
+        <tr><td style="padding:4px 14px 4px 0;color:#666">Category</td><td>${esc(item.category || item.department)}</td></tr>
+        <tr><td style="padding:4px 14px 4px 0;color:#666">Unit</td><td>${esc(item.unit)}</td></tr>
+        <tr><td style="padding:4px 14px 4px 0;color:#666">On hand</td><td><b style="color:#b00">${qty} ${esc(item.unit)}</b></td></tr>
+        <tr><td style="padding:4px 14px 4px 0;color:#666">Need</td><td><b>${item.par_level} ${esc(item.unit)}</b> (par level)</td></tr>
+        <tr><td style="padding:4px 14px 4px 0;color:#666">Flagged by</td><td>${esc(user?.name || 'Staff')}</td></tr>
+      </table>
+      <p style="margin:16px 0 0;color:#555">Please contact Armada immediately to arrange emergency delivery or advise on earliest availability. This item is marked critical — clients cannot go without it.</p>
+      <p style="color:#888;margin:8px 0 0;font-size:13px">Sent automatically · Armada Care Standards · ${new Date().toLocaleString('en-US', { timeZone: APP_TZ })}</p>
+    </div>
+  </div>`;
+  try {
+    await sendEmail({ to, subject: `🚨 URGENT OUT OF STOCK — ${item.name} | Armada Detox Akron`, html });
+    return true;
+  } catch (e) { console.error('pollak critical email:', e.message); return false; }
+}
+
+// Build the Monday order email HTML — full Kitchen order for Wednesday delivery.
+function buildPollakOrderEmail(deliveryDate) {
+  const esc = htmlEsc;
+  const items = db.prepare(`
+    SELECT i.*,
+      (SELECT qty FROM inventory_counts WHERE item_id = i.id ORDER BY id DESC LIMIT 1) as last_qty,
+      (SELECT created_at FROM inventory_counts WHERE item_id = i.id ORDER BY id DESC LIMIT 1) as last_counted
+    FROM inventory_items i
+    WHERE i.active = 1 AND i.department = 'Kitchen'
+    ORDER BY i.category, i.sort, i.name
+  `).all();
+
+  // Items that need ordering: last count below par, OR never counted + critical
+  const toOrder = items.filter((i) => {
+    if (i.last_qty === null || i.last_qty === undefined) return !!i.critical;
+    return i.last_qty < i.par_level;
+  });
+
+  const totalItems = toOrder.length;
+  if (totalItems === 0) {
+    return `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:640px">
+      <p>All Kitchen items are at or above par as of today's counts. No items to order for Wednesday delivery (${deliveryDate}).</p>
+      <p style="color:#888;font-size:13px">Sent automatically · Armada Care Standards</p>
+    </div>`;
+  }
+
+  const cats = ['Drinks', 'Fresh & Refrigerated', 'Dry Goods & Snacks', 'Condiments'];
+  const byCategory = {};
+  for (const cat of cats) byCategory[cat] = toOrder.filter((i) => i.category === cat);
+  // Any items not in the 4 standard categories
+  const other = toOrder.filter((i) => !cats.includes(i.category));
+  if (other.length) byCategory['Other'] = other;
+
+  const rowStyle = 'padding:6px 10px;border-bottom:1px solid #f0f0f0';
+  let tables = '';
+  for (const [cat, catItems] of Object.entries(byCategory)) {
+    if (!catItems.length) continue;
+    const rows = catItems.map((i) => {
+      const onHand = i.last_qty !== null ? i.last_qty : '—';
+      const need = i.last_qty !== null ? Math.max(i.par_level - i.last_qty, 1) : i.par_level;
+      const critical = i.critical ? '<span style="color:#b00;font-weight:bold"> ★</span>' : '';
+      return `<tr style="background:${i.critical && i.last_qty === 0 ? '#fff8f8' : 'transparent'}">
+        <td style="${rowStyle}">${esc(i.name)}${critical}</td>
+        <td style="${rowStyle};color:#555">${i.sku ? esc(i.sku) : '<span style="color:#aaa">—</span>'}</td>
+        <td style="${rowStyle};text-align:center">${onHand} / ${i.unit}</td>
+        <td style="${rowStyle};text-align:center">${i.par_level}</td>
+        <td style="${rowStyle};text-align:center;font-weight:bold;color:#1a4">${need} ${esc(i.unit)}</td>
+      </tr>`;
+    }).join('');
+    tables += `<h3 style="margin:20px 0 6px;font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:#555">${esc(cat)}</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;border:1px solid #e8e8e8;border-radius:4px">
+      <thead><tr style="background:#f6f6f6">
+        <th style="${rowStyle};text-align:left">Item</th>
+        <th style="${rowStyle};text-align:left">Code</th>
+        <th style="${rowStyle};text-align:center">On Hand / Unit</th>
+        <th style="${rowStyle};text-align:center">Par</th>
+        <th style="${rowStyle};text-align:center">Order Qty</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  return `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:640px">
+    <div style="background:#1a3a5c;color:#fff;padding:14px 18px;border-radius:4px 4px 0 0">
+      <h2 style="margin:0 0 2px;font-size:18px">Armada Detox of Akron — Weekly Supply Order</h2>
+      <p style="margin:0;opacity:.8;font-size:13px">Account ARM011 · 105 East Market Street, Akron OH 44308</p>
+    </div>
+    <div style="border:1px solid #ddd;border-top:none;padding:16px 18px;border-radius:0 0 4px 4px">
+      <table style="margin-bottom:14px;font-size:13px">
+        <tr><td style="padding:2px 14px 2px 0;color:#666">Order date</td><td><b>${new Date().toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</b></td></tr>
+        <tr><td style="padding:2px 14px 2px 0;color:#666">Delivery date</td><td><b>Wednesday, ${deliveryDate}</b></td></tr>
+        <tr><td style="padding:2px 14px 2px 0;color:#666">Items to order</td><td><b>${totalItems}</b></td></tr>
+      </table>
+      <p style="margin:0 0 4px;color:#555;font-size:13px">★ = critical item · never-out</p>
+      ${tables}
+      <p style="margin:20px 0 4px;color:#555;font-size:13px">Please confirm receipt and advise on any substitutions or out-of-stock items.</p>
+      <p style="color:#888;margin:4px 0 0;font-size:12px">Sent automatically · Armada Care Standards · ${new Date().toLocaleString('en-US', { timeZone: APP_TZ })}</p>
+    </div>
+  </div>`;
+}
+
+async function sendWeeklyPollakOrder() {
+  const to = pollakEmail();
+  if (!to || !emailConfigured()) return { sent: false, reason: emailConfigured() ? 'no Pollak email set' : 'email not configured' };
+  // Delivery is Wednesday — 2 days after Monday
+  const deliveryDate = new Date();
+  deliveryDate.setDate(deliveryDate.getDate() + 2);
+  const deliveryStr = deliveryDate.toLocaleDateString('en-US', { timeZone: APP_TZ, month: 'long', day: 'numeric', year: 'numeric' });
+  const html = buildPollakOrderEmail(deliveryStr);
+  const itemCount = db.prepare(`
+    SELECT COUNT(*) n FROM inventory_items i WHERE i.active = 1 AND i.department = 'Kitchen'
+    AND (SELECT qty FROM inventory_counts WHERE item_id = i.id ORDER BY id DESC LIMIT 1) < i.par_level
+  `).get().n;
+  try {
+    await sendEmail({ to, subject: `Armada weekly order — delivery Wed ${deliveryStr}`, html });
+    setState('pollak_last_order', appToday());
+    console.log(`[order] weekly Pollak order sent to ${to}: ${itemCount} items`);
+    return { sent: true, items: itemCount };
+  } catch (e) { console.error('[order] weekly email:', e.message); return { sent: false, reason: e.message }; }
 }
 
 // The shift checklist / board, grouped by department.
@@ -322,6 +459,8 @@ app.get('/api/inventory', requireAuth, (req, res) => {
     departments: INV_DEPTS.filter((d) => depts[d]).map((d) => ({ name: d, items: depts[d], ...deptStatus(d) })),
     stats: { low, out, criticalOut, openReorders, items: items.length },
     corporateEmail: corporateEmail() ? corporateEmail().replace(/(.{2}).*(@.*)/, '$1•••$2') : '',
+    pollakEmail: pollakEmail() ? pollakEmail().replace(/(.{2}).*(@.*)/, '$1•••$2') : '',
+    pollakLastOrder: getState('pollak_last_order') || null,
     emailReady: emailConfigured(),
   });
 });
@@ -343,7 +482,11 @@ app.post('/api/inventory/count', requireAuth, async (req, res) => {
       const isNew = raiseReorder(item, qty, status, req.user);
       if (isNew) { flagged.push({ item, qty, status }); }
       // Critical item out → escalate as an alert (on-call) even if email isn't set.
-      if (status === 'out' && item.critical) createAlert(null, 'supply_out_' + item.id, 'High', `Supply OUT: ${item.name} (${item.department}). Critical item — restock now.`);
+      if (status === 'out' && item.critical) {
+        createAlert(null, 'supply_out_' + item.id, 'High', `Supply OUT: ${item.name} (${item.department}). Critical item — restock now.`);
+        // Kitchen critical = send Pollak an immediate alert (can't wait for Monday order).
+        if (item.department === 'Kitchen') emailPollakCritical(item, qty, req.user).catch((e) => console.error('pollak critical:', e.message));
+      }
     } else {
       // Restocked back above reorder — close any open request.
       db.prepare(`UPDATE reorder_requests SET status = 'received', received_at = datetime('now'), received_by = ?, updated_at = datetime('now') WHERE item_id = ? AND status = 'open'`).run(req.user.name, item.id);
@@ -432,8 +575,10 @@ app.get('/api/inventory/catalog', requireAuth, requireAdmin, (req, res) => {
 // Admin: set where reorder emails go.
 app.post('/api/inventory/settings', requireAuth, requireAdmin, (req, res) => {
   const email = (req.body?.corporate_email || '').trim();
+  const pollak = (req.body?.pollak_email || '').trim();
   setState('inventory_corporate_email', email);
-  audit({ user: req.user, action: 'INVENTORY_SETTINGS', detail: email, ip: req.ip });
+  if (pollak) setState('pollak_email', pollak);
+  audit({ user: req.user, action: 'INVENTORY_SETTINGS', detail: `corporate:${email} pollak:${pollak}`, ip: req.ip });
   res.json({ ok: true });
 });
 
@@ -5181,6 +5326,47 @@ function runMorningBrief() {
   setTimeout(runMorningBrief, msUntilLocalHour(briefHour()));
 }
 setTimeout(runMorningBrief, msUntilLocalHour(briefHour()));
+
+// ── MONDAY WEEKLY POLLAK ORDER ────────────────────────────────────────────────
+// Every Monday at 8 AM ET, send the full Kitchen order to mordy@pollakdist.com
+// for Wednesday delivery. If a critical item runs out mid-week, an immediate
+// email fires from the count endpoint instead (doesn't wait for Monday).
+function runWeeklyOrder() {
+  const dayName = new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, weekday: 'long' }).format(new Date());
+  const todayStr = appToday();
+  if (dayName === 'Monday' && getState('pollak_last_order') !== todayStr
+      && autoCfg('weekly_order_on', 'on') !== 'off') {
+    sendWeeklyPollakOrder()
+      .then((r) => console.log('[order] weekly Pollak order', r.sent ? `sent (${r.items} items)` : `skipped: ${r.reason}`))
+      .catch((e) => console.error('[order]', e.message));
+  }
+  setTimeout(runWeeklyOrder, msUntilLocalHour(8));
+}
+// Also check on boot: if the server restarted on a Monday after 8 AM, send now.
+(function () {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US',
+    { timeZone: APP_TZ, hour: '2-digit', weekday: 'long', hour12: false })
+    .formatToParts(new Date()).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+  const bootDay = parts.weekday;
+  const bootHour = +parts.hour;
+  if (bootDay === 'Monday' && bootHour >= 8 && getState('pollak_last_order') !== appToday()
+      && autoCfg('weekly_order_on', 'on') !== 'off') {
+    console.log('[order] Monday boot — sending weekly Pollak order now');
+    sendWeeklyPollakOrder()
+      .then((r) => console.log('[order]', r.sent ? `sent (${r.items} items)` : `skipped: ${r.reason}`))
+      .catch((e) => console.error('[order]', e.message));
+  }
+})();
+setTimeout(runWeeklyOrder, msUntilLocalHour(8));
+
+// Admin: manually send the Pollak weekly order right now (for testing / catch-up).
+app.post('/api/inventory/pollak-order/send', requireAuth, requireAdmin, async (req, res) => {
+  const r = await sendWeeklyPollakOrder();
+  res.json(r);
+});
+app.get('/api/inventory/pollak-order/status', requireAuth, requireAdmin, (req, res) => {
+  res.json({ pollakEmail: pollakEmail(), lastSent: getState('pollak_last_order') || null, weeklyOn: autoCfg('weekly_order_on', 'on') });
+});
 
 // Keep the front-desk arrivals board fresh through the day (Salesforce pull +
 // Kipu reconcile) without anyone clicking refresh.

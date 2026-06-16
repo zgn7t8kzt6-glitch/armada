@@ -2836,6 +2836,7 @@ async function loadInventory(){
   renderInvBoard();
   loadReorders();
   if($('inv_corp_email')) $('inv_corp_email').placeholder = d.corporateEmail || 'orders@armadarecovery.com';
+  if($('inv_pollak_email')) $('inv_pollak_email').placeholder = d.pollakEmail || 'mordy@pollakdist.com';
   if(ME&&ME.role==='admin') loadInvCatalog();
 }
 function setInvDept(n){ INV_DEPT=n; loadInventory(); }
@@ -2879,8 +2880,14 @@ async function loadReorders(){
   </tr>`).join('')}</table>` : '<div class="hint">Nothing on order.</div>';
 }
 async function markReorder(id,status){ try{ await api('/inventory/reorders/'+id,{method:'POST',body:JSON.stringify({status})}); loadInventory(); }catch(e){ alert(e.message); } }
-async function saveInvSettings(){ const v=$('inv_corp_email').value.trim(); try{ await api('/inventory/settings',{method:'POST',body:JSON.stringify({corporate_email:v})}); $('inv_corp_msg').textContent='✓ Saved'; }catch(e){ $('inv_corp_msg').textContent=e.message; } }
+async function saveInvSettings(){
+  const corp=($('inv_corp_email')||{}).value||''; const pollak=($('inv_pollak_email')||{}).value||'';
+  try{ await api('/inventory/settings',{method:'POST',body:JSON.stringify({corporate_email:corp.trim(),pollak_email:pollak.trim()})});
+    if($('inv_corp_msg')) $('inv_corp_msg').textContent='✓ Saved'; if($('inv_pollak_msg')) $('inv_pollak_msg').textContent='✓ Saved'; }
+  catch(e){ if($('inv_corp_msg')) $('inv_corp_msg').textContent=e.message; }
+}
 async function sendOrderList(){ $('inv_corp_msg').textContent='Sending…'; try{ const r=await api('/inventory/reorders/send',{method:'POST'}); $('inv_corp_msg').textContent = r.sent?('✓ Sent '+r.count+' item(s) to '+r.to):('Not sent — '+(r.reason||'')); }catch(e){ $('inv_corp_msg').textContent=e.message; } }
+async function sendPollakOrderNow(){ if($('inv_pollak_msg')) $('inv_pollak_msg').textContent='Sending…'; try{ const r=await api('/inventory/pollak-order/send',{method:'POST'}); if($('inv_pollak_msg')) $('inv_pollak_msg').textContent=r.sent?('✓ Sent — '+r.items+' items to order'):('Not sent — '+(r.reason||'')); }catch(e){ if($('inv_pollak_msg')) $('inv_pollak_msg').textContent=e.message; } }
 let INV_EDIT_ID=null;
 async function loadInvCatalog(){
   if(!$('invCatalog')) return;

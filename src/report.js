@@ -6,6 +6,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 
 // Email config resolves from the in-app settings first, then env vars.
 function ecfg(key, envName) { const v = getState('email_' + key); return (v != null && v !== '') ? v : (process.env[envName] || ''); }
+// Default leadership CC on every outgoing email (until overridden in Settings → Email).
+export const DEFAULT_CC = 'shlomo@armadarecovery.com, apepose@armadarecovery.com, bmiller@armadarecovery.com';
 export function smtpConfigured() { return Boolean(ecfg('smtp_host', 'SMTP_HOST') && ecfg('smtp_user', 'SMTP_USER') && ecfg('smtp_pass', 'SMTP_PASS')); }
 export function resendConfigured() { return Boolean(ecfg('resend_key', 'RESEND_API_KEY')); }
 export function emailConfigured() { return smtpConfigured() || resendConfigured(); }
@@ -148,7 +150,7 @@ export async function sendEmail({ subject, html, to, cc }) {
   // against the To list and any explicit cc, case-insensitively. Set 'email_cc'
   // to a blank-ish value ('-' / 'none') to turn the global CC off.
   const ccGlobal = ecfg('cc', 'EMAIL_CC');
-  const ccSetting = ccGlobal === '' ? 'shlomo@armadarecovery.com' : ccGlobal; // default to owner
+  const ccSetting = ccGlobal === '' ? DEFAULT_CC : ccGlobal; // default to leadership
   const ccRaw = [...(cc ? String(cc).split(',') : []), ...(/^(-|none|off)$/i.test(ccSetting) ? [] : ccSetting.split(','))];
   const lowerDest = dest.map((d) => d.toLowerCase());
   const ccList = [...new Set(ccRaw.map((s) => s.trim()).filter(Boolean))]

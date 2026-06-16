@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState } from './src/db.js';
-import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured, smsStatus } from './src/report.js';
+import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured, smsStatus, DEFAULT_CC } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
@@ -1064,7 +1064,7 @@ app.get('/api/email/config', requireAuth, requireAdmin, (req, res) => {
   const ccRaw = getState('email_cc');
   res.json({ ...st, hasResendKey: !!(getState('email_resend_key') || process.env.RESEND_API_KEY), hasSmtpPass: !!(getState('email_smtp_pass') || process.env.SMTP_PASS),
     smtpPort: getState('email_smtp_port') || process.env.SMTP_PORT || '587', to: getState('email_to') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '',
-    cc: ccRaw == null || ccRaw === '' ? 'shlomo@armadarecovery.com' : ccRaw });   // blank ⇒ owner default
+    cc: ccRaw == null || ccRaw === '' ? DEFAULT_CC : ccRaw });   // blank ⇒ leadership default
 });
 app.post('/api/email/config', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};

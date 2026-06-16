@@ -697,6 +697,19 @@ async function loadEmailConfig(){
     if($('em_to')) $('em_to').value=c.to||'';
     if($('em_smtp_pass')) $('em_smtp_pass').placeholder = c.hasSmtpPass?'•••••• (saved)':'app password';
     if($('em_resend_key')) $('em_resend_key').placeholder = c.hasResendKey?'•••••• (saved)':'re_…';
+    const h=$('em_health');
+    if(h){
+      const ready = c.provider && (c.provider==='resend'? c.hasResendKey : c.hasSmtpPass);
+      const fromDomain = (c.from||'').match(/@([^>\s]+)/);
+      const ownDomain = fromDomain && /armadarecovery\.com/i.test(fromDomain[1]);
+      const usingResendDev = !c.from || /resend\.dev/i.test(c.from);
+      let msg, bg, fg;
+      if(!ready){ bg='#fdecea'; fg='#b00'; msg='⚠ Email not connected — reports and orders cannot send. Add a provider below.'; }
+      else if(usingResendDev){ bg='#fff7e6'; fg='#a60'; msg='● Email working via '+(c.provider||'resend')+', but sending as <b>onboarding@resend.dev</b>. Verify <b>armadarecovery.com</b> in Resend → Domains, then set the From below to <b>care@armadarecovery.com</b> so mail lands in inboxes, not spam.'; }
+      else if(ownDomain){ bg='#eaf7ee'; fg='#2d7a4f'; msg='✓ Email healthy — sending via '+(c.provider||'resend')+' from <b>'+esc(c.from)+'</b> (your domain).'; }
+      else { bg='#eef4fb'; fg='#1a3a5c'; msg='● Email working via '+(c.provider||'resend')+', sending from <b>'+esc(c.from)+'</b>.'; }
+      h.innerHTML=msg; h.style.background=bg; h.style.color=fg; h.style.display='';
+    }
     emailProviderUI();
   }catch(e){}
 }

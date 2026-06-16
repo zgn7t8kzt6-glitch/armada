@@ -28,7 +28,7 @@
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let CODE=localStorage.getItem('kioskCode')||'', DATA=null, CLIENT='';
+let CODE=localStorage.getItem('kioskCode')||'', DATA=null, CLIENT='', VIEW='';
 
 async function kapi(path, opts){ const r=await fetch('/api/kiosk/'+path,opts); if(!r.ok){throw new Error((await r.json().catch(()=>({}))).error||'Error');} return r.json(); }
 
@@ -39,19 +39,46 @@ function gate(){
 }
 async function enter(){
   CODE=$('kcode')?$('kcode').value:CODE;
-  try{ DATA=await kapi('data?code='+encodeURIComponent(CODE)); localStorage.setItem('kioskCode',CODE); home(); }
+  try{ DATA=await kapi('data?code='+encodeURIComponent(CODE)); LAST_SYNC=Date.now(); localStorage.setItem('kioskCode',CODE); home(); }
   catch(e){ if($('kerr'))$('kerr').textContent='That code didn\'t work.'; else gate(); }
 }
+// Re-pull the resident list without re-entering the code (kiosk stays open for days
+// under Guided Access, so new admits won't show until this runs). Anyone can tap it.
+let LAST_SYNC=0;
+async function refreshData(){
+  const btn=$('kRefreshBtn'); if(btn){ btn.disabled=true; btn.textContent='Updating…'; }
+  try{
+    DATA=await kapi('data?code='+encodeURIComponent(CODE));
+    LAST_SYNC=Date.now();
+    home();   // re-render with the fresh list
+    const st=$('kSyncNote'); if(st){ st.textContent='✓ Updated — '+syncLine(); st.style.color='var(--gold)'; }
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='🔄  Update list'; }
+    const st=$('kSyncNote'); if(st){ st.textContent='Could not update — ask a staff member to re-enter the kiosk code.'; }
+  }
+}
+function syncLine(){
+  const n=(DATA&&DATA.clients)?DATA.clients.length:0;
+  const t=LAST_SYNC?new Date(LAST_SYNC).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}):'—';
+  return 'Showing '+n+' resident'+(n===1?'':'s')+' · Updated '+t;
+}
 function home(){
+  VIEW='home';
   $('kview').innerHTML=`<h1>How can we care for you?</h1>
     <p class="ksub">Ask for something, or tell us how you're doing. Surveys can be anonymous; a request will ask your name so we can bring it to you.</p>
     <label>I am (optional)</label>
     <select id="kclient"><option value="">Prefer not to say</option>${DATA.clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
     <button class="kbtn" onclick="reqView()">🛎  Request something</button>
-    ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}`;
+    ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}
+    <div style="margin-top:18px;text-align:center">
+      <button id="kRefreshBtn" class="btn btn-ghost" style="font-size:15px" onclick="refreshData()">🔄  Update list</button>
+      <div id="kSyncNote" class="ksub" style="margin-top:8px">${syncLine()}</div>
+      <p class="ksub" style="margin-top:4px;font-size:13px">Don't see your name? Tap Update.</p>
+    </div>`;
 }
 function client(){ const s=$('kclient'); return s?s.value:''; }
 function reqView(){
+  VIEW='req';
   CLIENT=client();
   const quick=['An extra blanket','A snack','To call my family','To talk to someone','Something for comfort','I want to leave'];
   $('kview').innerHTML=`<h1>What do you need?</h1>
@@ -74,6 +101,7 @@ async function sendReq(){
   thanks('We\'re on it. Someone will take care of this for you.');
 }
 function surveyView(id){
+  VIEW='survey';
   CLIENT=client();
   const s=DATA.surveys.find(x=>x.id===id);
   let cat='',html='';
@@ -106,6 +134,20 @@ function thanks(msg){
   setTimeout(()=>{ if($('kview')) home(); }, 6000);
 }
 if(CODE) enter(); else gate();
+
+// Self-heal: while sitting idle on the home screen, quietly re-pull the resident
+// list every 4 min. Only re-renders if the roster actually changed, so it never
+// interrupts anyone mid-survey or resets a selection without reason.
+setInterval(async ()=>{
+  if(VIEW!=='home' || !CODE) return;
+  try{
+    const fresh=await kapi('data?code='+encodeURIComponent(CODE));
+    const changed=!DATA || (fresh.clients||[]).length!==(DATA.clients||[]).length;
+    DATA=fresh; LAST_SYNC=Date.now();
+    if(changed && VIEW==='home') home();
+    else { const st=$('kSyncNote'); if(st) st.textContent=syncLine(); }
+  }catch(e){ /* leave the last good list in place */ }
+}, 240000);
 </script>
 </body>
 </html>

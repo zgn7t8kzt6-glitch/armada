@@ -1605,13 +1605,16 @@ async function loadArrivalTasks(){
     <td><button class="btn btn-gold btn-sm sans" onclick="openArrivalChecklist(${a.id})">Open</button></td>
   </tr>`).join('')+'</table>';
 }
+function roleMatchesMe(role){
+  const jr=((ME&&ME.job_role)||'').toLowerCase(); const r=(role||'').toLowerCase();
+  return ['nurse','bht','tech','therapist','case','front','desk','kitchen','housekeep','provider','medical'].some(k=>r.includes(k)&&jr.includes(k));
+}
 async function openArrivalChecklist(id){
   let d; try{ d=await api('/arrival/checklist/'+id); }catch(e){ $('arrDetail').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
-  const myRole = ME&&ME.job_role;
   $('arrDetail').innerHTML = `<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3><p class="sub sans">Arrival checklist · admitted ${esc(d.client.admit)}</p></div></div>
-    ${d.roles.map(r=>`<details class="card" style="margin:8px 0" ${r.role===myRole?'open':''}><summary class="sans" style="cursor:pointer;font-weight:600">${esc(r.role)}${r.role===myRole?' <span class="badge">your role</span>':''} <span class="hint">${r.items.filter(i=>i.done).length}/${r.items.length}</span></summary>
+    ${d.roles.map(r=>{const mine=roleMatchesMe(r.role); return `<details class="card" style="margin:8px 0" ${mine?'open':''}><summary class="sans" style="cursor:pointer;font-weight:600">${esc(r.role)}${mine?' <span class="badge">your role</span>':''} <span class="hint">${r.items.filter(i=>i.done).length}/${r.items.length}</span></summary>
       <div style="margin-top:8px">${r.items.map(i=>`<label class="trg" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" ${i.done?'checked':''} onchange="toggleArrival(${d.client.id},${i.id},this.checked)"/> <span>${esc(i.label)}${i.done&&i.by?` <span class="hint">✓ ${esc(i.by)} · ${esc(i.at)}</span>`:''}</span></label>`).join('')}</div>
-    </details>`).join('')}</div>`;
+    </details>`; }).join('')}</div>`;
   $('arrDetail').scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function toggleArrival(cid,iid,done){ try{ await api('/arrival/check',{method:'POST',body:JSON.stringify({client_id:cid,item_id:iid,done})}); openArrivalChecklist(cid); loadArrivalTasks(); }catch(e){ alert(e.message); } }

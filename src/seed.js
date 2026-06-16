@@ -315,45 +315,89 @@ export function ensureStaffingStandard() {
   STAFFING_STANDARD.forEach((r, i) => ins.run(r[0], r[1], r[2], r[3], i));
 }
 
-// Per-role arrival checklists. RT is a full draft (detox intake standard) to be
-// tuned to the facility's actual RT form; the other roles are starting stubs.
+// Gold-standard arrival checklists for every department — what a best-in-class
+// detox does to welcome a client. Tune to what's actually in place. Additive:
+// only inserts items not already present, so it augments without duplicating.
 const ARRIVAL_ITEMS = [
-  // RT / BHT — the tech intake
+  // ── FRONT DESK / RECEPTION — the very first impression ──────────────
+  ['Front Desk', 'Greet by name the moment they walk in — warm, unhurried, eye contact'],
+  ['Front Desk', 'Offer water/coffee and a seat; reassure them they are safe and in the right place'],
+  ['Front Desk', 'Confirm the scheduled arrival / mark "arrived" on the board'],
+  ['Front Desk', 'Verify identity; copy photo ID & insurance card'],
+  ['Front Desk', 'Collect / confirm emergency contact & next of kin'],
+  ['Front Desk', 'Issue ID band / wristband'],
+  ['Front Desk', 'Secure phone/valuables per policy with a signed receipt'],
+  ['Front Desk', 'Give the welcome packet / what-to-expect'],
+  ['Front Desk', 'Notify the team a new admit is here (nurse + tech + CM)'],
+  ['Front Desk', 'Update the welcome board / room assignment'],
+  // ── HOUSEKEEPING — room ready before they arrive ───────────────────
+  ['Housekeeping', 'Room cleaned, sanitized, and inspected before arrival'],
+  ['Housekeeping', 'Bed made with fresh linens; extra blanket + pillow'],
+  ['Housekeeping', 'Bathroom stocked — toilet paper, soap, fresh towels'],
+  ['Housekeeping', 'Trash emptied; surfaces wiped; floor clean'],
+  ['Housekeeping', 'Room smells fresh (not bleach-harsh)'],
+  ['Housekeeping', 'Temperature comfortable; all lighting works'],
+  ['Housekeeping', 'Welcome / dignity kit placed in the room'],
+  // ── RT / BHT — the tech intake & orientation ───────────────────────
   ['RT / BHT', 'Greet by name, warm welcome; orient to the unit'],
   ['RT / BHT', 'Search belongings for contraband — with the client, dignity intact'],
   ['RT / BHT', 'Inventory & secure valuables/belongings (signed)'],
   ['RT / BHT', 'Issue welcome / dignity kit + hygiene supplies'],
-  ['RT / BHT', 'Set up room/bed — linens, towels, non-slip socks'],
+  ['RT / BHT', 'Provide clean facility clothing / non-slip socks if needed'],
+  ['RT / BHT', 'Set up room/bed — linens, towels, water at bedside'],
   ['RT / BHT', 'Review unit rules, daily schedule, phone & smoking/vape policy'],
+  ['RT / BHT', 'Explain the call-light / how to get help any time'],
   ['RT / BHT', 'Offer food/drink (the Table) + water'],
   ['RT / BHT', 'Show bathroom, common areas, nurse station, exits'],
   ['RT / BHT', 'Start the Care Card — preferences + why they came (anchor)'],
   ['RT / BHT', 'Introduce to peers / assign a buddy'],
   ['RT / BHT', 'Hand off to nurse for vitals & assessment'],
   ['RT / BHT', 'Document arrival time + condition'],
-  // Nurse — stub (tune later)
-  ['Nurse', 'Baseline vitals + weight'],
-  ['Nurse', 'COWS / CIWA baseline assessment'],
-  ['Nurse', 'Nursing admission assessment'],
-  ['Nurse', 'Medication reconciliation'],
-  ['Nurse', 'Allergies documented'],
-  ['Nurse', 'Detox protocol / orders initiated'],
-  ['Nurse', 'Naloxone education'],
-  // Case Mgmt / Therapist — stub
+  // ── NURSE (RN / LPN) — the medical intake ──────────────────────────
+  ['Nurse', 'Baseline vitals (BP, HR, temp, RR, O2) + weight & height'],
+  ['Nurse', 'COWS / CIWA baseline withdrawal assessment'],
+  ['Nurse', 'Full nursing admission assessment (history, substances, last use)'],
+  ['Nurse', 'Medication reconciliation — current meds, doses, last taken'],
+  ['Nurse', 'Allergies & reactions documented'],
+  ['Nurse', 'Suicide-risk + fall-risk screen; skin/wound assessment'],
+  ['Nurse', 'Pregnancy test if applicable; pain assessment'],
+  ['Nurse', 'Initiate detox / comfort protocol per provider orders'],
+  ['Nurse', 'Administer first comfort meds as ordered'],
+  ['Nurse', 'Naloxone education; ensure a kit is in the room'],
+  ['Nurse', 'Review/secure meds the client brought, per policy'],
+  ['Nurse', 'Notify provider of any red flags (vitals, withdrawal severity)'],
+  // ── PROVIDER / MEDICAL — orders & H&P ──────────────────────────────
+  ['Provider / Medical', 'History & physical within the required timeframe'],
+  ['Provider / Medical', 'Assess withdrawal risk; write detox / taper orders'],
+  ['Provider / Medical', 'Reconcile and order home meds as appropriate'],
+  ['Provider / Medical', 'Order labs / UDS / EKG as indicated'],
+  ['Provider / Medical', 'Document diagnosis + level-of-care (ASAM) justification'],
+  ['Provider / Medical', 'Be reachable for nursing escalations'],
+  // ── CASE MGMT / THERAPIST — clinical & coordination ────────────────
   ['Case Mgmt / Therapist', 'Intake packet + consents / ROI signed'],
-  ['Case Mgmt / Therapist', 'Insurance verified'],
-  ['Case Mgmt / Therapist', 'Assign primary therapist / case manager'],
+  ['Case Mgmt / Therapist', 'Insurance verified + authorization started'],
+  ['Case Mgmt / Therapist', 'Assign primary therapist / case manager — introduce in person'],
   ['Case Mgmt / Therapist', 'Start biopsychosocial (within 24h)'],
-  // Front Desk — stub
-  ['Front Desk', 'Confirm scheduled arrival / mark arrived on the board'],
-  ['Front Desk', 'ID band / wristband'],
-  ['Front Desk', 'Copy ID & insurance card'],
-  ['Front Desk', 'Collect emergency contact; notify the team'],
+  ['Case Mgmt / Therapist', 'Begin individualized treatment plan'],
+  ['Case Mgmt / Therapist', 'Capture goals — what success looks like for them'],
+  ['Case Mgmt / Therapist', 'Identify legal/court, employment, housing, family needs'],
+  ['Case Mgmt / Therapist', 'Confirm who is in their corner (support/aftercare contact)'],
+  ['Case Mgmt / Therapist', 'Explain the program, groups, and what to expect this week'],
+  // ── KITCHEN — the Table, from minute one ───────────────────────────
+  ['Kitchen', 'Note dietary needs & allergies from intake'],
+  ['Kitchen', 'Have a warm welcome meal/snack + drink ready'],
+  ['Kitchen', 'Offer comfort food — they may not have eaten'],
+  ['Kitchen', 'Stock the unit with water + electrolyte drinks'],
+  ['Kitchen', 'Confirm detox hydration/nutrition plan (protein, electrolytes)'],
 ];
+// Additive: inserts only items not already present (by role + label), so it
+// augments an existing checklist without duplicating or wiping edits.
 export function ensureArrivalItems() {
-  if (db.prepare(`SELECT id FROM arrival_items LIMIT 1`).get()) return;
+  const has = db.prepare(`SELECT 1 FROM arrival_items WHERE role = ? AND label = ? LIMIT 1`);
   const ins = db.prepare(`INSERT INTO arrival_items (role, label, sort) VALUES (?,?,?)`);
-  ARRIVAL_ITEMS.forEach((r, i) => ins.run(r[0], r[1], i));
+  let n = 0;
+  ARRIVAL_ITEMS.forEach((r, i) => { if (!has.get(r[0], r[1])) { ins.run(r[0], r[1], i); n++; } });
+  return n;
 }
 
 // Allow `npm run seed` to set up admin + sample data locally.

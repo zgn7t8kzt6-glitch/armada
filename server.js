@@ -27,7 +27,7 @@ ensureExampleClient12A();
 ensureInventoryCatalog();
 try { const added = ensureInventoryItems(); if (added) console.log(`[inventory] added ${added} item(s) from the building-walk list`); } catch (e) { console.error('[inventory] ensureItems:', e.message); }
 try { ensureStaffingStandard(); } catch (e) { console.error('[staffing] ensureStandard:', e.message); }
-try { ensureArrivalItems(); } catch (e) { console.error('[arrival] ensureItems:', e.message); }
+try { const a = ensureArrivalItems(); if (a) console.log(`[arrival] added ${a} checklist item(s)`); } catch (e) { console.error('[arrival] ensureItems:', e.message); }
 // Default census recipient so a test send reaches the right person out of the box.
 if (!getState('census_email_to')) setState('census_email_to', process.env.CENSUS_EMAIL_TO || 'shlomo@armadarecovery.com');
 // One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.
@@ -3429,7 +3429,7 @@ app.get('/api/arrivals/diagnose', requireAuth, requireAdmin, async (req, res) =>
 });
 // Today's (or a given day's) board, split by status.
 // ── ARRIVAL CHECKLISTS — each role's on-arrival tasks per new admit ──────────
-const ARRIVAL_ROLES = ['RT / BHT', 'Nurse', 'Case Mgmt / Therapist', 'Front Desk'];
+const ARRIVAL_ROLES = ['Front Desk', 'Housekeeping', 'RT / BHT', 'Nurse', 'Provider / Medical', 'Case Mgmt / Therapist', 'Kitchen'];
 // Board: recent admits with per-role completion, so the team sees what's left.
 app.get('/api/arrival/board', requireAuth, (req, res) => {
   const items = db.prepare(`SELECT id, role FROM arrival_items WHERE active = 1`).all();

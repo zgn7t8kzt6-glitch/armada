@@ -427,12 +427,86 @@ export function ensureOpsRoutines() {
   OPS_ROUTINES.forEach((r, i) => ins.run(r[0], r[1], r[2], r[3], r[4], i));
 }
 
+// The nourishment order (detox-appropriate), with PFS product codes. Lives under
+// the Kitchen department, grouped for inventory. Off-guide items (no PFS code)
+// are flagged to source. Additive: inserts missing items by name and backfills
+// the product code on any that already exist.
+// [category, name, unit, par, reorder, expiry, sku, note]
+const NOURISHMENT = [
+  ['Hydration & Electrolytes', 'Gatorade Zero Watermelon', 'case', 6, 2, 0, 'PL620', null],
+  ['Hydration & Electrolytes', 'Gatorade G2 Fruit Punch', 'case', 6, 2, 0, 'B4678', null],
+  ['Hydration & Electrolytes', 'Gatorade G2 Grape', 'case', 6, 2, 0, '27472', null],
+  ['Hydration & Electrolytes', 'Clear protein — Apple Cranberry', 'case', 4, 2, 0, 'TG782', null],
+  ['Hydration & Electrolytes', 'Clear protein — Peach Mango', 'case', 4, 2, 0, 'PC892', null],
+  ['Hydration & Electrolytes', 'Ginger ale, caffeine-free', 'case', 4, 1, 0, '33206', null],
+  ['Easy to Tolerate', 'Saltines', 'case', 4, 2, 0, 'K4940', null],
+  ['Easy to Tolerate', 'Cream of Wheat / farina', 'box', 4, 1, 0, 'GT506', null],
+  ['Easy to Tolerate', 'Gelatin, regular', 'case', 4, 1, 0, '23736', null],
+  ['Easy to Tolerate', 'Gelatin, sugar-free', 'case', 4, 1, 0, 'M3476', null],
+  ['Easy to Tolerate', 'Pudding, sugar-free', 'case', 4, 1, 0, '68652', null],
+  ['Easy to Tolerate', 'Pudding, vanilla', 'case', 4, 1, 0, 'C7352', null],
+  ['Easy to Tolerate', 'Plain bagels', 'case', 4, 1, 1, 'RW814', null],
+  ['Easy to Tolerate', 'White Pullman bread (toast)', 'case', 4, 1, 1, '13830', null],
+  ['Easy to Tolerate', 'Bananas', 'case', 4, 1, 1, '13746', null],
+  ['Protein & Rebuild', 'Boost Very Vanilla', 'case', 6, 2, 0, 'FJ412', null],
+  ['Protein & Rebuild', 'Boost Wildberry', 'case', 6, 2, 0, 'FJ334', null],
+  ['Protein & Rebuild', 'Ensure Chocolate', 'case', 6, 2, 0, 'C5698', null],
+  ['Protein & Rebuild', 'Glucerna Chocolate (diabetic)', 'case', 4, 2, 0, 'J3080', null],
+  ['Protein & Rebuild', 'Greek yogurt (assorted)', 'case', 6, 2, 1, 'A4532 / A4530 / A2056', null],
+  ['Protein & Rebuild', 'Cheese sticks', 'case', 6, 2, 1, 'GR878 / BD270', null],
+  ['Protein & Rebuild', 'Peanut butter', 'jar', 4, 1, 0, 'DV690', null],
+  ['Protein & Rebuild', 'Whole milk', 'case', 4, 1, 1, 'CF162', null],
+  ['Fruit', 'Golden apples', 'case', 3, 1, 1, '97582', 'Order to census'],
+  ['Fruit', 'Red apples', 'case', 3, 1, 1, '80062 / 13164', 'Order to census'],
+  ['Fruit', 'Oranges', 'case', 3, 1, 1, 'GC968 / 16168', 'Order to census'],
+  ['Fruit', 'Red grapes', 'case', 3, 1, 1, '13762', 'Order to census'],
+  ['Fruit', 'Strawberries', 'case', 3, 1, 1, '39142', 'Order to census'],
+  ['Savory Snacks', 'Pretzels', 'case', 4, 2, 0, 'C3266', 'Lead with savory over sweets'],
+  ['Savory Snacks', 'Chex Mix Cheddar', 'case', 4, 2, 0, 'AV480', null],
+  ['Savory Snacks', 'Potato chips', 'case', 4, 2, 0, 'CB440', null],
+  ['Savory Snacks', 'Tortilla chips', 'case', 4, 2, 0, 'P5334', null],
+  ['Cereal', 'Corn Flakes', 'case', 3, 1, 0, '26304', null],
+  ['Cereal', 'Honey Nut Toasted Oat', 'case', 3, 1, 0, '17812', null],
+  ['Cereal', 'Frosted Flakes (sugary — cap qty)', 'case', 2, 1, 0, '26312', 'Craving release valve; alt: Fruit Whirls 26318'],
+  ['Condiments & Disposables', 'Sweetener packets', 'box', 4, 1, 0, null, null],
+  ['Condiments & Disposables', 'Sugar-free syrup', 'case', 2, 1, 0, '10772', null],
+  ['Condiments & Disposables', 'Jelly', 'case', 3, 1, 0, 'GP564', null],
+  ['Condiments & Disposables', 'Cream cheese', 'case', 3, 1, 1, 'BW730', null],
+  // Off-guide adds — NOT on the PFS guide, source separately.
+  ['Comfort & Recovery', 'Chicken broth', 'case', 6, 2, 0, null, 'Off-guide — source. Biggest savory gap.'],
+  ['Comfort & Recovery', 'Beef broth', 'case', 4, 2, 0, null, 'Off-guide — source.'],
+  ['Comfort & Recovery', 'Chicken noodle soup', 'case', 6, 2, 0, null, 'Off-guide — source.'],
+  ['Comfort & Recovery', 'Decaf coffee', 'case', 4, 2, 0, null, 'Off-guide — pair with Ridgeline regular.'],
+  ['Comfort & Recovery', 'Chamomile / caffeine-free tea', 'box', 4, 1, 0, null, 'Off-guide — anxiety + sleep.'],
+  ['Comfort & Recovery', 'Instant oatmeal packets', 'case', 4, 2, 0, null, 'Off-guide — fiber + steadier breakfast.'],
+  ['Comfort & Recovery', 'Prune juice', 'case', 4, 2, 0, null, 'Off-guide — opioid-withdrawal constipation.'],
+  ['Comfort & Recovery', 'Applesauce cups', 'case', 4, 2, 0, null, 'Off-guide — BRAT staple.'],
+  ['Comfort & Recovery', 'Ginger chews / ginger tea', 'case', 4, 1, 0, null, 'Off-guide — active nausea.'],
+];
+export function ensureNourishment() {
+  const has = db.prepare(`SELECT id, sku FROM inventory_items WHERE name = ? COLLATE NOCASE LIMIT 1`);
+  const max = db.prepare(`SELECT COALESCE(MAX(sort),0) m FROM inventory_items`).get().m;
+  const ins = db.prepare(`INSERT INTO inventory_items (department, category, name, unit, par_level, reorder_point, critical, track_expiry, sku, notes, sort) VALUES ('Kitchen',?,?,?,?,?,0,?,?,?,?)`);
+  const setSku = db.prepare(`UPDATE inventory_items SET sku = ? WHERE id = ? AND (sku IS NULL OR sku = '')`);
+  let n = 0;
+  NOURISHMENT.forEach((r, i) => {
+    const ex = has.get(r[1]);
+    if (ex) { if (r[6]) setSku.run(r[6], ex.id); }
+    else { ins.run(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], max + 1 + n); n++; }
+  });
+  return n;
+}
+
 // Allow `npm run seed` to set up admin + sample data locally.
 if (import.meta.url === `file://${process.argv[1]}`) {
   ensureAdmin();
   ensureSampleData();
   ensureExampleClient12A();
   ensureInventoryCatalog();
+  ensureInventoryItems();
   ensureStaffingStandard();
+  ensureArrivalItems();
+  ensureOpsRoutines();
+  ensureNourishment();
   console.log('Seed complete.');
 }

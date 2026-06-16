@@ -2847,7 +2847,7 @@ function renderInvBoard(){
   const cats={}; dd.items.forEach(i=>{ (cats[i.category||'Other']=cats[i.category||'Other']||[]).push(i); });
   const dot=i=>{ const c=i.status==='out'?'var(--danger)':i.status==='low'?'#c98a14':i.status==='ok'?'var(--good)':'var(--line)'; const lbl=i.status==='unknown'?'not counted':i.status; return `<span class="risk" style="background:${c}1a;color:${c};border:1px solid ${c}55">${lbl}</span>`; };
   const row=i=>`<tr ${i.status==='out'?'style="background:#fbeaea"':i.status==='low'?'style="background:#fdf6e8"':''}>
-    <td><strong>${esc(i.name)}</strong>${i.critical?' <span class="badge badge-danger" title="Never out">critical</span>':''}<div class="hint">par ${i.par} ${esc(i.unit)} · reorder ≤${i.reorder}${i.checkedThisShift?' · ✓ counted this shift':i.lastAt?' · last '+i.lastAt:''}</div></td>
+    <td><strong>${esc(i.name)}</strong>${i.sku?` <span class="badge" title="Product code">${esc(i.sku)}</span>`:''}${i.critical?' <span class="badge badge-danger" title="Never out">critical</span>':''}<div class="hint">par ${i.par} ${esc(i.unit)} · reorder ≤${i.reorder}${i.checkedThisShift?' · ✓ counted this shift':i.lastAt?' · last '+i.lastAt:''}${i.notes?' · '+esc(i.notes):''}</div></td>
     <td>${dot(i)}${i.reorderOpen?' <span class="hint">🛒 on order</span>':''}</td>
     <td style="white-space:nowrap"><input type="number" min="0" id="invq_${i.id}" value="${i.qty!=null?i.qty:''}" placeholder="${i.qty!=null?i.qty:'qty'}" style="width:64px" ${i.trackExpiry?'':''}/>${i.trackExpiry?` <input type="date" id="inve_${i.id}" value="${i.expiry||''}" title="earliest expiry" style="width:140px"/>`:''} <button class="btn btn-sm btn-gold sans" onclick="logCount(${i.id})">Save</button></td>
   </tr>`;

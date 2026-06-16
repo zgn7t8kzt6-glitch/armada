@@ -16,7 +16,7 @@ import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems, ensureOpsRoutines } from './src/seed.js';
+import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -29,6 +29,7 @@ try { const added = ensureInventoryItems(); if (added) console.log(`[inventory] 
 try { ensureStaffingStandard(); } catch (e) { console.error('[staffing] ensureStandard:', e.message); }
 try { const a = ensureArrivalItems(); if (a) console.log(`[arrival] added ${a} checklist item(s)`); } catch (e) { console.error('[arrival] ensureItems:', e.message); }
 try { ensureOpsRoutines(); } catch (e) { console.error('[ops] ensureRoutines:', e.message); }
+try { const nn = ensureNourishment(); if (nn) console.log(`[inventory] added ${nn} nourishment item(s)`); } catch (e) { console.error('[inventory] ensureNourishment:', e.message); }
 // Default census recipient so a test send reaches the right person out of the box.
 if (!getState('census_email_to')) setState('census_email_to', process.env.CENSUS_EMAIL_TO || 'shlomo@armadarecovery.com');
 // One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.
@@ -299,7 +300,7 @@ app.get('/api/inventory', requireAuth, (req, res) => {
     const status = last ? last.status : 'unknown';
     if (status === 'low') low++; if (status === 'out') { out++; if (it.critical) criticalOut++; }
     (depts[it.department] = depts[it.department] || []).push({
-      id: it.id, name: it.name, category: it.category || '', unit: it.unit,
+      id: it.id, name: it.name, category: it.category || '', unit: it.unit, sku: it.sku || '', notes: it.notes || '',
       par: it.par_level, reorder: it.reorder_point, critical: !!it.critical, trackExpiry: !!it.track_expiry,
       status, qty: last ? last.qty : null, expiry: last ? last.expiry : null,
       lastBy: last ? last.by_name : '', lastAt: last ? String(last.created_at).slice(0, 16) : '',
@@ -374,13 +375,13 @@ app.post('/api/inventory/reorders/send', requireAuth, requireAdmin, async (req, 
   const to = corporateEmail();
   if (!emailConfigured()) return res.status(400).json({ sent: false, reason: 'Email not connected — Settings → Email.' });
   if (!to) return res.status(400).json({ sent: false, reason: 'No reorder email set — Supplies → Manage.' });
-  const rows = db.prepare(`SELECT r.qty_on_hand, r.level, i.name, i.department, i.unit, i.par_level
+  const rows = db.prepare(`SELECT r.qty_on_hand, r.level, i.name, i.department, i.unit, i.par_level, i.sku
     FROM reorder_requests r JOIN inventory_items i ON i.id = r.item_id WHERE r.status = 'open'
     ORDER BY (r.level='out') DESC, i.department, i.name`).all();
   const e = htmlEsc;
   const byDept = {};
   for (const r of rows) (byDept[r.department] = byDept[r.department] || []).push(r);
-  const body = rows.length ? Object.entries(byDept).map(([d, items]) => `<h3 style="margin:14px 0 4px">${e(d)}</h3>${items.map((r) => `<div>${r.level === 'out' ? '<b style="color:#b00">OUT</b>' : '<span style="color:#a60">low</span>'} — ${e(r.name)} · on hand <b>${r.qty_on_hand}</b>/${r.par_level} ${e(r.unit)} · <b>order ${Math.max(r.par_level - r.qty_on_hand, 1)} ${e(r.unit)}</b></div>`).join('')}`).join('')
+  const body = rows.length ? Object.entries(byDept).map(([d, items]) => `<h3 style="margin:14px 0 4px">${e(d)}</h3>${items.map((r) => `<div>${r.level === 'out' ? '<b style="color:#b00">OUT</b>' : '<span style="color:#a60">low</span>'} — ${e(r.name)}${r.sku ? ` <span style="color:#888">[${e(r.sku)}]</span>` : ''} · on hand <b>${r.qty_on_hand}</b>/${r.par_level} ${e(r.unit)} · <b>order ${Math.max(r.par_level - r.qty_on_hand, 1)} ${e(r.unit)}</b></div>`).join('')}`).join('')
     : '<p>Nothing is flagged to order right now — every item is at or above its reorder point. (This confirms the reorder email is working.)</p>';
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
     <h2 style="margin:0 0 2px">Armada — supplies to order</h2>

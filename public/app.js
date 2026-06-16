@@ -100,26 +100,34 @@ function kipuWebLink(kipuId){
             .replace(/\{casefile\}/g, encodeURIComponent(parts[1]||''));
 }
 
-/* ---- grouped nav (role-aware: everyday up top; leadership & admin tucked away) ---- */
+/* ---- grouped nav, by the Ritz guest journey: Arrival → Stay → Handoff,
+   then Team (culture) and Facility (operations); My Shift on top, Command for leadership ---- */
 const GROUPS=[
-  {g:'today',label:'Today',first:'dashboard'},
-  {g:'clients',label:'Clients',first:'clients'},
-  {g:'care',label:'Care',first:'report'},
-  {g:'clinical',label:'Clinical',first:'casemgmt'},
-  {g:'frontdoor',label:'Growth',first:'admissions'},
+  {g:'today',label:'My Shift',first:'dashboard'},
+  {g:'arrival',label:'Arrival',first:'arrivals'},
+  {g:'stay',label:'Stay',first:'clients'},
+  {g:'handoff',label:'Handoff',first:'dischargepage'},
   {g:'team',label:'Team',first:'mytasks'},
-  {g:'learn',label:'Learn',first:'library'},
+  {g:'facility',label:'Facility',first:'inventory'},
   {g:'command',label:'Command',first:'command',admin:true},
 ];
 const GROUP_OF={
-  dashboard:'today',today:'today',lineup:'today',arrivals:'today',
-  clients:'clients',editor:'clients',journey:'clients',family:'clients',records:'clients',
-  report:'care',concierge:'care',dignity:'care',rounds:'care',engagement:'care',program:'care',meals:'care',dischargepage:'care',
-  casemgmt:'clinical',retention:'clinical',surveys:'clinical',incidents:'clinical',continuum:'clinical',
-  admissions:'frontdoor',referrals:'frontdoor',partners:'frontdoor',alumni:'frontdoor',
-  mytasks:'team',team:'team',coverage:'team',schedule:'team',assign:'team',inventory:'team',maintenance:'team',staffmodel:'team',
-  training:'learn',library:'learn',standard:'learn',
-  command:'command',compliance:'command',accountability:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  // My Shift — each person's role-tailored home
+  dashboard:'today',today:'today',
+  // Arrival — the warm welcome (front door + intake)
+  arrivals:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
+  // Stay — anticipate every need (the daily care)
+  clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
+  concierge:'stay',dignity:'stay',rounds:'stay',engagement:'stay',program:'stay',meals:'stay',
+  casemgmt:'stay',retention:'stay',surveys:'stay',incidents:'stay',compliance:'stay',
+  // Handoff — the fond farewell + continuum
+  dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
+  // Team — culture, recognition, learning, tasks
+  mytasks:'team',team:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
+  // Facility — the building runs (ordering, maintenance, staffing)
+  inventory:'facility',maintenance:'facility',coverage:'facility',schedule:'facility',assign:'facility',staffmodel:'facility',
+  // Command — leadership insight + config (admin)
+  command:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 function renderGroups(){
   const isAdmin = ME && ME.role==='admin';
@@ -127,7 +135,7 @@ function renderGroups(){
   const everyday = GROUPS.filter(x=>!x.admin).map(mk).join('');
   const leadership = isAdmin ? GROUPS.filter(x=>x.admin).map(mk).join('') : '';
   $('groupbar').innerHTML = everyday + (leadership ? '<div class="side-divider"></div>'+leadership : '');
-  document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'care'; });
+  document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'stay'; });
   document.querySelectorAll('#groupbar button').forEach(b=>b.onclick=()=>{ const grp=GROUPS.find(x=>x.g===b.dataset.g); show(grp.first); });
 }
 function selectGroup(g){
@@ -145,7 +153,7 @@ function selectGroup(g){
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.view));
 function toggleNav(){ document.getElementById('shell').classList.toggle('nav-open'); }
 function show(v){
-  selectGroup(GROUP_OF[v]||'care');
+  selectGroup(GROUP_OF[v]||'stay');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs

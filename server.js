@@ -16,7 +16,7 @@ import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard } from './src/seed.js';
+import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -27,6 +27,7 @@ ensureExampleClient12A();
 ensureInventoryCatalog();
 try { const added = ensureInventoryItems(); if (added) console.log(`[inventory] added ${added} item(s) from the building-walk list`); } catch (e) { console.error('[inventory] ensureItems:', e.message); }
 try { ensureStaffingStandard(); } catch (e) { console.error('[staffing] ensureStandard:', e.message); }
+try { ensureArrivalItems(); } catch (e) { console.error('[arrival] ensureItems:', e.message); }
 // Default census recipient so a test send reaches the right person out of the box.
 if (!getState('census_email_to')) setState('census_email_to', process.env.CENSUS_EMAIL_TO || 'shlomo@armadarecovery.com');
 // One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.
@@ -3427,6 +3428,58 @@ app.get('/api/arrivals/diagnose', requireAuth, requireAdmin, async (req, res) =>
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Today's (or a given day's) board, split by status.
+// ── ARRIVAL CHECKLISTS — each role's on-arrival tasks per new admit ──────────
+const ARRIVAL_ROLES = ['RT / BHT', 'Nurse', 'Case Mgmt / Therapist', 'Front Desk'];
+// Board: recent admits with per-role completion, so the team sees what's left.
+app.get('/api/arrival/board', requireAuth, (req, res) => {
+  const items = db.prepare(`SELECT id, role FROM arrival_items WHERE active = 1`).all();
+  const totalByRole = {}; items.forEach((i) => { totalByRole[i.role] = (totalByRole[i.role] || 0) + 1; });
+  const admits = db.prepare(`SELECT id, pref, name, room, admit FROM clients WHERE active = 1 AND discharge_status IS NULL
+    AND substr(admit,1,10) >= date('now','-5 day') ORDER BY admit DESC, id DESC`).all();
+  const doneByRole = db.prepare(`SELECT i.role, COUNT(*) n FROM arrival_checks ch JOIN arrival_items i ON i.id = ch.item_id WHERE ch.client_id = ? GROUP BY i.role`);
+  res.json({ roles: ARRIVAL_ROLES, admits: admits.map((c) => {
+    const done = {}; doneByRole.all(c.id).forEach((r) => { done[r.role] = r.n; });
+    const roles = ARRIVAL_ROLES.map((r) => ({ role: r, done: done[r] || 0, total: totalByRole[r] || 0 }));
+    const total = roles.reduce((a, r) => a + r.total, 0); const d = roles.reduce((a, r) => a + r.done, 0);
+    return { id: c.id, name: c.pref || c.name, room: c.room || '', admit: (c.admit || '').slice(0, 10), pct: total ? Math.round(d / total * 100) : 100, roles };
+  }) });
+});
+// One client's full checklist, grouped by role, with done status.
+app.get('/api/arrival/checklist/:id', requireAuth, (req, res) => {
+  const c = db.prepare(`SELECT id, pref, name, room, admit FROM clients WHERE id = ?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const items = db.prepare(`SELECT id, role, label, sort FROM arrival_items WHERE active = 1 ORDER BY role, sort, id`).all();
+  const done = {}; db.prepare(`SELECT item_id, by_name, done_at FROM arrival_checks WHERE client_id = ?`).all(c.id).forEach((x) => { done[x.item_id] = x; });
+  const byRole = {};
+  for (const it of items) (byRole[it.role] = byRole[it.role] || []).push({ id: it.id, label: it.label, done: !!done[it.id], by: done[it.id]?.by_name || '', at: done[it.id] ? String(done[it.id].done_at).slice(0, 16) : '' });
+  res.json({ client: { id: c.id, name: c.pref || c.name, room: c.room || '', admit: (c.admit || '').slice(0, 10) },
+    roles: ARRIVAL_ROLES.filter((r) => byRole[r]).map((r) => ({ role: r, items: byRole[r] })) });
+});
+// Toggle an arrival item done/undone for a client.
+app.post('/api/arrival/check', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.client_id || !b.item_id) return res.status(400).json({ error: 'client_id + item_id required' });
+  if (b.done === false) db.prepare(`DELETE FROM arrival_checks WHERE client_id = ? AND item_id = ?`).run(b.client_id, b.item_id);
+  else db.prepare(`INSERT OR IGNORE INTO arrival_checks (client_id, item_id, by_id, by_name) VALUES (?,?,?,?)`).run(b.client_id, b.item_id, req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+// Admin: manage the arrival template (add / rename / remove items).
+app.get('/api/arrival/template', requireAuth, requireAdmin, (req, res) => {
+  res.json({ roles: ARRIVAL_ROLES, items: db.prepare(`SELECT id, role, label, sort, active FROM arrival_items ORDER BY role, sort, id`).all() });
+});
+app.post('/api/arrival/template', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.id) {
+    if (b.delete) db.prepare(`UPDATE arrival_items SET active = 0 WHERE id = ?`).run(b.id);
+    else db.prepare(`UPDATE arrival_items SET label = ?, role = ? WHERE id = ?`).run((b.label || '').trim(), ARRIVAL_ROLES.includes(b.role) ? b.role : 'RT / BHT', b.id);
+  } else {
+    if (!(b.label || '').trim()) return res.status(400).json({ error: 'Label required' });
+    const sort = (db.prepare(`SELECT COALESCE(MAX(sort),0) m FROM arrival_items WHERE role = ?`).get(ARRIVAL_ROLES.includes(b.role) ? b.role : 'RT / BHT').m) + 1;
+    db.prepare(`INSERT INTO arrival_items (role, label, sort) VALUES (?,?,?)`).run(ARRIVAL_ROLES.includes(b.role) ? b.role : 'RT / BHT', b.label.trim(), sort);
+  }
+  res.json({ ok: true });
+});
+
 app.get('/api/arrivals', requireAuth, (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
   reconcileArrivals(); // keep it live without waiting on a sync

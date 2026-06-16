@@ -115,7 +115,7 @@ const GROUP_OF={
   // My Shift — each person's role-tailored home
   dashboard:'today',today:'today',
   // Arrival — the warm welcome (front door + intake)
-  arrivals:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
+  arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
   // Stay — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
   concierge:'stay',dignity:'stay',rounds:'stay',engagement:'stay',program:'stay',meals:'stay',
@@ -194,6 +194,7 @@ function show(v){
   if(v==='dischargepage') loadDischargePage();
   if(v==='maintenance') loadMaintenance();
   if(v==='arrivals') loadArrivals();
+  if(v==='arrivalcheck') loadArrivalTasks();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
   if(v==='surveys') loadSurveys();
@@ -1543,6 +1544,37 @@ async function logInbound(){
 }
 /* ---- Front desk: scheduled arrivals ---- */
 let _arrivalsTimer=null;
+/* ---- Arrival Tasks: per-role on-arrival checklist per admit ---- */
+async function loadArrivalTasks(){
+  let d; try{ d=await api('/arrival/board'); }catch(e){ $('arrBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  if(!d.admits.length){ $('arrBoard').innerHTML='<div class="hint">No new admits in the last 5 days.</div>'; $('arrDetail').innerHTML=''; return; }
+  $('arrBoard').innerHTML = '<table class="tbl"><tr><th>New admit</th><th>Arrival progress</th><th>By role</th><th></th></tr>'+d.admits.map(a=>`<tr>
+    <td><strong>${esc(a.name)}</strong>${a.room?' · '+esc(a.room):''}<div class="hint">admit ${esc(a.admit)}</div></td>
+    <td style="min-width:120px"><div style="display:flex;align-items:center;gap:6px"><div class="res-track" style="flex:1"><div class="res-fill ${a.pct<100?'':''}" style="width:${a.pct}%"></div></div><span class="hint">${a.pct}%</span></div></td>
+    <td class="hint">${a.roles.map(r=>`${esc(r.role.split(' ')[0])} ${r.done}/${r.total}`).join(' · ')}</td>
+    <td><button class="btn btn-gold btn-sm sans" onclick="openArrivalChecklist(${a.id})">Open</button></td>
+  </tr>`).join('')+'</table>';
+}
+async function openArrivalChecklist(id){
+  let d; try{ d=await api('/arrival/checklist/'+id); }catch(e){ $('arrDetail').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const myRole = ME&&ME.job_role;
+  $('arrDetail').innerHTML = `<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3><p class="sub sans">Arrival checklist · admitted ${esc(d.client.admit)}</p></div></div>
+    ${d.roles.map(r=>`<details class="card" style="margin:8px 0" ${r.role===myRole?'open':''}><summary class="sans" style="cursor:pointer;font-weight:600">${esc(r.role)}${r.role===myRole?' <span class="badge">your role</span>':''} <span class="hint">${r.items.filter(i=>i.done).length}/${r.items.length}</span></summary>
+      <div style="margin-top:8px">${r.items.map(i=>`<label class="trg" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" ${i.done?'checked':''} onchange="toggleArrival(${d.client.id},${i.id},this.checked)"/> <span>${esc(i.label)}${i.done&&i.by?` <span class="hint">✓ ${esc(i.by)} · ${esc(i.at)}</span>`:''}</span></label>`).join('')}</div>
+    </details>`).join('')}</div>`;
+  $('arrDetail').scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function toggleArrival(cid,iid,done){ try{ await api('/arrival/check',{method:'POST',body:JSON.stringify({client_id:cid,item_id:iid,done})}); openArrivalChecklist(cid); loadArrivalTasks(); }catch(e){ alert(e.message); } }
+async function loadArrivalTemplate(){
+  let d; try{ d=await api('/arrival/template'); }catch(e){ return; }
+  const byRole={}; d.items.filter(i=>i.active).forEach(i=>{ (byRole[i.role]=byRole[i.role]||[]).push(i); });
+  $('arrTemplate').innerHTML = d.roles.map(role=>`<div style="margin-bottom:10px"><strong class="sans">${esc(role)}</strong>
+    ${(byRole[role]||[]).map(i=>`<div class="todo"><div class="txt">${esc(i.label)}</div><button class="btn btn-ghost btn-sm sans" onclick="delArrivalItem(${i.id})">Remove</button></div>`).join('')}
+    <div class="toolbar" style="justify-content:flex-start;margin-top:4px"><input id="arr_new_${esc(role).replace(/[^a-z]/gi,'')}" placeholder="Add an item for ${esc(role)}…" style="min-width:240px"/><button class="btn btn-ghost btn-sm sans" onclick="addArrivalItem('${esc(role).replace(/'/g,"\\'")}')">+ Add</button></div></div>`).join('');
+}
+async function addArrivalItem(role){ const inp=$('arr_new_'+role.replace(/[^a-z]/gi,'')); const label=inp?inp.value.trim():''; if(!label)return; try{ await api('/arrival/template',{method:'POST',body:JSON.stringify({role,label})}); loadArrivalTemplate(); }catch(e){ alert(e.message); } }
+async function delArrivalItem(id){ if(!confirm('Remove this arrival item?'))return; try{ await api('/arrival/template',{method:'POST',body:JSON.stringify({id,delete:true})}); loadArrivalTemplate(); }catch(e){ alert(e.message); } }
+
 async function loadArrivals(){
   try{
     const d=await api('/arrivals');

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616K" />
+<link rel="stylesheet" href="/styles.css?v=20260616L" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -69,6 +69,7 @@
     <button data-view="mytasks">My Tasks</button>
     <button data-view="family" data-subview>Family</button>
     <button data-view="arrivals">Front Desk</button>
+    <button data-view="arrivalcheck">Arrival Tasks</button>
     <button data-view="admissions">Admissions</button>
     <button data-view="alumni">Alumni</button>
     <button data-view="accountability" data-admin data-subview>Accountability</button>
@@ -346,6 +347,23 @@
       <div class="card">
         <div class="cmd-hero-row"><div><h3>📋 Caterer scorecard (30 days)</h3><p class="sub sans">Are they holding the standard? Track it tight.</p></div></div>
         <div id="mealsScore"></div>
+      </div>
+    </section>
+
+    <!-- ARRIVAL TASKS — per-role on-arrival checklist per new admit -->
+    <section id="arrivalcheck" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Arrival Tasks — the warm welcome</h3><p class="sub sans">Every role's on-arrival checklist for each new admit. Check off your part; nothing about a client's first hour gets missed.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadArrivalTasks()">Refresh</button>
+        </div>
+        <div id="arrBoard"></div>
+      </div>
+      <div id="arrDetail"></div>
+      <div class="card" data-admin>
+        <details ontoggle="if(this.open)loadArrivalTemplate()"><summary class="sans" style="cursor:pointer;font-weight:600">⚙ Edit arrival checklists (admin)</summary>
+          <div id="arrTemplate" style="margin-top:10px"></div>
+        </details>
       </div>
     </section>
 
@@ -1551,6 +1569,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616K"></script>
+<script src="/app.js?v=20260616L"></script>
 </body>
 </html>

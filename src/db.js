@@ -498,6 +498,26 @@ CREATE TABLE IF NOT EXISTS shift_staffing (
   UNIQUE(date, role, shift_label)
 );
 CREATE INDEX IF NOT EXISTS idx_shift_staffing ON shift_staffing(date);
+
+-- ARRIVAL CHECKLISTS — each role's "on arrival" tasks for a new admit (the warm
+-- welcome, done right). arrival_items is the editable template per role;
+-- arrival_checks records completion per admit (a row = done).
+CREATE TABLE IF NOT EXISTS arrival_items (
+  id INTEGER PRIMARY KEY,
+  role TEXT NOT NULL,                        -- RT / BHT | Nurse | Case Mgmt / Therapist | Front Desk
+  label TEXT NOT NULL,
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS arrival_checks (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES arrival_items(id) ON DELETE CASCADE,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  done_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(client_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_arrival_checks ON arrival_checks(client_id);
 CREATE TABLE IF NOT EXISTS saves (
   id INTEGER PRIMARY KEY,
   client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,

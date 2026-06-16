@@ -315,6 +315,47 @@ export function ensureStaffingStandard() {
   STAFFING_STANDARD.forEach((r, i) => ins.run(r[0], r[1], r[2], r[3], i));
 }
 
+// Per-role arrival checklists. RT is a full draft (detox intake standard) to be
+// tuned to the facility's actual RT form; the other roles are starting stubs.
+const ARRIVAL_ITEMS = [
+  // RT / BHT — the tech intake
+  ['RT / BHT', 'Greet by name, warm welcome; orient to the unit'],
+  ['RT / BHT', 'Search belongings for contraband — with the client, dignity intact'],
+  ['RT / BHT', 'Inventory & secure valuables/belongings (signed)'],
+  ['RT / BHT', 'Issue welcome / dignity kit + hygiene supplies'],
+  ['RT / BHT', 'Set up room/bed — linens, towels, non-slip socks'],
+  ['RT / BHT', 'Review unit rules, daily schedule, phone & smoking/vape policy'],
+  ['RT / BHT', 'Offer food/drink (the Table) + water'],
+  ['RT / BHT', 'Show bathroom, common areas, nurse station, exits'],
+  ['RT / BHT', 'Start the Care Card — preferences + why they came (anchor)'],
+  ['RT / BHT', 'Introduce to peers / assign a buddy'],
+  ['RT / BHT', 'Hand off to nurse for vitals & assessment'],
+  ['RT / BHT', 'Document arrival time + condition'],
+  // Nurse — stub (tune later)
+  ['Nurse', 'Baseline vitals + weight'],
+  ['Nurse', 'COWS / CIWA baseline assessment'],
+  ['Nurse', 'Nursing admission assessment'],
+  ['Nurse', 'Medication reconciliation'],
+  ['Nurse', 'Allergies documented'],
+  ['Nurse', 'Detox protocol / orders initiated'],
+  ['Nurse', 'Naloxone education'],
+  // Case Mgmt / Therapist — stub
+  ['Case Mgmt / Therapist', 'Intake packet + consents / ROI signed'],
+  ['Case Mgmt / Therapist', 'Insurance verified'],
+  ['Case Mgmt / Therapist', 'Assign primary therapist / case manager'],
+  ['Case Mgmt / Therapist', 'Start biopsychosocial (within 24h)'],
+  // Front Desk — stub
+  ['Front Desk', 'Confirm scheduled arrival / mark arrived on the board'],
+  ['Front Desk', 'ID band / wristband'],
+  ['Front Desk', 'Copy ID & insurance card'],
+  ['Front Desk', 'Collect emergency contact; notify the team'],
+];
+export function ensureArrivalItems() {
+  if (db.prepare(`SELECT id FROM arrival_items LIMIT 1`).get()) return;
+  const ins = db.prepare(`INSERT INTO arrival_items (role, label, sort) VALUES (?,?,?)`);
+  ARRIVAL_ITEMS.forEach((r, i) => ins.run(r[0], r[1], i));
+}
+
 // Allow `npm run seed` to set up admin + sample data locally.
 if (import.meta.url === `file://${process.argv[1]}`) {
   ensureAdmin();

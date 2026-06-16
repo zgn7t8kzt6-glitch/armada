@@ -2789,6 +2789,36 @@ async function loadMeals(){
   loadMealsScore();
   loadMenu();
   loadMealFeedback();
+  loadMealInsights();
+}
+async function loadMealInsights(){
+  const el=$('mealInsights'); if(!el) return;
+  const days=$('insightDays')?$('insightDays').value:30;
+  let d; try{ d=await api('/meals/insights?days='+days); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const col=(p)=> p==null?'var(--muted)':p>=70?'var(--good)':p>=40?'var(--gold)':'var(--danger)';
+  const bar=(p)=> `<span style="display:inline-block;min-width:42px;color:${col(p)};font-weight:600">${p==null?'—':p+'%'}</span>`;
+  // Which meal slot lands best
+  const withData = d.byMeal.filter(m=>m.likedPct!=null);
+  const best = withData.length ? withData.reduce((a,b)=>(b.likedPct>a.likedPct?b:a)) : null;
+  let mealRows = d.byMeal.length ? d.byMeal.map(m=>`<tr${best&&m.meal===best.meal?' style="background:#faf6ee"':''}>
+      <td style="font-weight:600">${esc(m.meal)}${best&&m.meal===best.meal?' 🏆':''}</td>
+      <td>${bar(m.likedPct)} <span class="hint">enjoyed</span></td>
+      <td>${bar(m.enoughPct)} <span class="hint">enough</span></td>
+      <td>${bar(m.againPct)} <span class="hint">want again</span></td>
+      <td class="hint">${m.n}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="empty">No ratings yet.</td></tr>';
+  const dishList=(arr,emptyMsg)=> arr.length ? arr.map(x=>`<div class="sans" style="margin:5px 0;font-size:14px">
+      <b>${esc(x.dish)}</b> <span class="hint">(${esc(x.meal)}, ${x.n})</span><br>
+      <span style="color:${col(x.likedPct)}">${x.likedPct==null?'—':x.likedPct+'% enjoyed'}</span> ·
+      <span style="color:${col(x.againPct)}">${x.againPct==null?'—':x.againPct+'% want again'}</span></div>`).join('')
+    : '<div class="empty">'+emptyMsg+'</div>';
+  el.innerHTML = `
+    <table class="tbl" style="width:100%;font-size:14px"><tbody>${mealRows}</tbody></table>
+    <div class="grid2" style="margin-top:14px">
+      <div><strong class="sans">⭐ Crowd favorites — repeat these</strong>${dishList(d.favorites,'Set dish names in the menu above so favorites can be tracked.')}</div>
+      <div><strong class="sans">🚫 Reconsider / retire</strong>${dishList(d.retire,'Nothing flagged — no dish is rating poorly. 👍')}</div>
+    </div>
+    <p class="hint" style="margin-top:8px">Dishes need at least ${d.minN} ratings to rank. ${d.dishCount} dish${d.dishCount===1?'':'es'} have enough so far.</p>`;
 }
 async function loadMenu(){
   const el=$('menuRows'); if(!el) return;

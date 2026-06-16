@@ -833,6 +833,34 @@ app.get('/api/meals/feedback', requireAuth, (req, res) => {
     WHERE f.comment IS NOT NULL AND f.meal_date >= date('now', ?) ORDER BY f.created_at DESC LIMIT 40`).all(`-${days} day`);
   res.json({ days, byDay: Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date)), comments });
 });
+// Meal intelligence: which meal slot lands best, the crowd favorites, and the
+// dishes to retire — from the resident pulse, over a window (default 30 days).
+app.get('/api/meals/insights', requireAuth, (req, res) => {
+  const days = Math.min(180, Math.max(7, +(req.query.days || 30)));
+  const minN = Math.max(1, +(req.query.min || 3));   // ignore dishes with too few ratings
+  const pct = (a, b) => b ? Math.round(a / b * 100) : null;
+  const agg = `COUNT(*) n,
+    SUM(CASE WHEN liked=1 THEN 1 ELSE 0 END) liked, SUM(CASE WHEN liked IS NOT NULL THEN 1 ELSE 0 END) likedN,
+    SUM(CASE WHEN enough=1 THEN 1 ELSE 0 END) enough, SUM(CASE WHEN enough IS NOT NULL THEN 1 ELSE 0 END) enoughN,
+    SUM(CASE WHEN again=1 THEN 1 ELSE 0 END) again, SUM(CASE WHEN again IS NOT NULL THEN 1 ELSE 0 END) againN`;
+  const shape = (r) => ({ n: r.n, likedPct: pct(r.liked, r.likedN), enoughPct: pct(r.enough, r.enoughN), againPct: pct(r.again, r.againN) });
+  // Which meal slot is enjoyed most.
+  const order = { Breakfast: 0, Lunch: 1, Dinner: 2, Snack: 3 };
+  const byMeal = db.prepare(`SELECT meal, ${agg} FROM meal_feedback WHERE meal_date >= date('now', ?) GROUP BY meal`).all(`-${days} day`)
+    .map((r) => ({ meal: r.meal, ...shape(r) })).sort((a, b) => (order[a.meal] ?? 9) - (order[b.meal] ?? 9));
+  // Per-dish performance (only dishes with at least minN ratings).
+  const dishes = db.prepare(`SELECT dish, meal, ${agg} FROM meal_feedback
+    WHERE dish IS NOT NULL AND dish != '' AND meal_date >= date('now', ?) GROUP BY dish`).all(`-${days} day`)
+    .map((r) => ({ dish: r.dish, meal: r.meal, ...shape(r) }))
+    .filter((d) => d.n >= minN && (d.likedPct != null || d.againPct != null));
+  // Score = blend of "enjoyed" and "would want again" (again weighted, it's the keep/drop signal).
+  const score = (d) => Math.round(((d.likedPct ?? 0) + 2 * (d.againPct ?? 0)) / 3);
+  const ranked = dishes.map((d) => ({ ...d, score: score(d) })).sort((a, b) => b.score - a.score);
+  const favorites = ranked.slice(0, 8);
+  const retire = ranked.filter((d) => (d.againPct != null && d.againPct < 40) || (d.likedPct != null && d.likedPct < 50))
+    .sort((a, b) => a.score - b.score).slice(0, 8);
+  res.json({ days, minN, byMeal, favorites, retire, dishCount: dishes.length });
+});
 
 // Every Kipu discharge must have the in-app fond-farewell completed (Safe
 // Departure checklist + where they went). What's missing on a given discharge:

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616E" />
+<link rel="stylesheet" href="/styles.css?v=20260616F" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -360,6 +360,11 @@
       <div class="card">
         <div class="cmd-hero-row"><div><h3>🍽️ How the residents rated it — daily pulse</h3><p class="sub sans">Their own voice from the dining-room kiosk: enjoyed it, enough, would want again — every breakfast, lunch, and dinner, day by day.</p></div></div>
         <div id="mealFeedback"></div>
+      </div>
+      <div class="card">
+        <div class="cmd-hero-row"><div><h3>📊 Meal insights — what's working</h3><p class="sub sans">Which meal lands best, the crowd favorites worth repeating, and the dishes to retire — from residents' own ratings.</p></div>
+          <select id="insightDays" class="sans" onchange="loadMealInsights()" style="align-self:center"><option value="30">Last 30 days</option><option value="60">Last 60 days</option><option value="90">Last 90 days</option></select></div>
+        <div id="mealInsights"></div>
       </div>
     </section>
 
@@ -1690,6 +1695,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616E"></script>
+<script src="/app.js?v=20260616F"></script>
 </body>
 </html>

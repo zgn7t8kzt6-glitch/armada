@@ -2798,9 +2798,10 @@ async function loadMenu(){
   const meals=['Breakfast','Lunch','Dinner','Snack'];
   el.innerHTML = meals.map(m=>{
     const cur=(d.meals&&d.meals[m])?d.meals[m]:{dish:'',notes:''};
+    const ph = m==='Snack' ? 'optional — e.g. Fruit, yogurt, granola' : 'e.g. Grilled chicken, rice, green beans';
     return `<div class="toolbar" style="gap:8px;margin:6px 0;align-items:center">
       <div style="width:90px;color:var(--muted);font-weight:600" class="sans">${m}</div>
-      <input id="dish_${m}" class="sans" style="flex:1" placeholder="e.g. Grilled chicken, rice, green beans" value="${esc(cur.dish||'')}"/>
+      <input id="dish_${m}" class="sans" style="flex:1" placeholder="${ph}" value="${esc(cur.dish||'')}"/>
       <button class="btn btn-ghost btn-sm sans" onclick="saveMenu('${m}')">Save</button>
     </div>`;
   }).join('');

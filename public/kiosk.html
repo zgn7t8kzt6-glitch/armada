@@ -136,7 +136,9 @@ function mealView(){
 }
 function dishLine(meal){
   const d=(DATA&&DATA.menu&&DATA.menu[meal])?DATA.menu[meal].dish:'';
-  return d ? '🍽️ '+meal+': '+esc(d) : '';
+  if(d) return '🍽️ '+meal+': '+esc(d);
+  if(meal==='Snack') return '🍪 Snacks';   // snacks need no set dish to be ratable
+  return '';
 }
 function setMeal(m){ MEAL_SEL=m; document.querySelectorAll('.kchip').forEach(b=>b.classList.toggle('msel', b.textContent===m)); const el=$('mdish'); if(el) el.innerHTML=dishLine(m); }
 function pick(btn,val){ const row=btn.closest('.mq'); row.dataset.val=val; row.querySelectorAll('.mopt').forEach(b=>b.classList.remove('msel')); btn.classList.add('msel'); }

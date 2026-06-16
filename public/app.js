@@ -2874,6 +2874,17 @@ const HO_AREAS=[['stock','Stock at par'],['beds','Beds made'],['kitchen','Kitche
 async function loadOps(){
   let d; try{ d=await api('/ops'); }catch(e){ $('opsKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   OPS=d; const x=d.extras;
+  // Today's recurring tasks — the operational workflow
+  const rt=d.routines;
+  if($('opsTasks')&&rt){
+    if($('opsTaskCount')) $('opsTaskCount').textContent = `${rt.done}/${rt.total} done`;
+    const cadLabel={daily:'Daily',weekly:'This week',monthly:'This month'};
+    const groups={}; rt.today.forEach(t=>{ (groups[t.cadence]=groups[t.cadence]||[]).push(t); });
+    $('opsTasks').innerHTML = rt.total ? ['daily','weekly','monthly'].filter(c=>groups[c]).map(c=>`<div style="margin-bottom:8px"><div class="hint" style="text-transform:uppercase;letter-spacing:.5px">${cadLabel[c]}</div>
+      ${groups[c].map(t=>`<label class="trg" style="display:flex;gap:8px;align-items:flex-start;padding:6px 0"><input type="checkbox" ${t.done?'checked':''} onchange="toggleRoutine(${t.id},this.checked)"/>
+        <span style="flex:1;${t.done?'color:var(--muted);text-decoration:line-through':''}">${esc(t.title)}${t.done&&t.by?` <span class="hint">✓ ${esc(t.by)} ${esc(t.at)}</span>`:''}</span>
+        ${t.link?`<button class="btn btn-ghost btn-sm sans" onclick="show('${t.link}')">Open →</button>`:''}</label>`).join('')}</div>`).join('') : '<div class="hint">No tasks scheduled today.</div>';
+  }
   if($('opsScorecard')) $('opsScorecard').innerHTML = `<p class="sub sans">${d.passing}/${d.total} systems holding.</p>`+(d.scorecard||[]).map(o=>`<div class="todo"><div class="txt"><span class="risk ${o.ok?'risk-low':'risk-high'}">${o.ok?'PASS':'MISS'}</span> <strong>${esc(o.name)}</strong><div class="hint">${esc(o.sub)}</div></div>${o.view?`<button class="btn btn-ghost btn-sm sans" onclick="show('${o.view}')">Open →</button>`:''}</div>`).join('');
   $('opsKpis').innerHTML = `
     <div class="ret-card ${!x.env.pass?'rc-warn':''}"><div class="n">${x.env.logged}</div><div class="l">Env checks today ${x.env.pass?'✓':''}</div></div>
@@ -2892,6 +2903,7 @@ async function loadOps(){
   // projects
   $('pj_list').innerHTML = d.projects.length ? d.projects.map(p=>projectCard(p)).join('') : '<div class="hint">No projects yet — add one above.</div>';
 }
+async function toggleRoutine(id, done){ try{ await api('/ops/routine/done',{method:'POST',body:JSON.stringify({id,done})}); loadOps(); }catch(e){ alert(e.message); } }
 function renderEnvChecks(){ const sh=$('env_shift').value; const e=(OPS&&OPS.env[sh])||{}; $('env_checks').innerHTML=ENV_AREAS.map(a=>`<button type="button" class="meal-grp ${e[a[0]]?'on':''}" data-k="${a[0]}" onclick="this.classList.toggle('on')">${esc(a[1])}</button>`).join(''); $('env_defects').value=e.defects||''; }
 function renderHoChecks(){ const sh=$('ho_shift').value; const h=(OPS&&OPS.ho[sh])||{}; $('ho_checks').innerHTML=HO_AREAS.map(a=>`<button type="button" class="meal-grp ${h[a[0]]?'on':''}" data-k="${a[0]}" onclick="this.classList.toggle('on')">${esc(a[1])}</button>`).join(''); $('ho_note').value=h.note||''; }
 async function saveEnv(){ const body={shift:$('env_shift').value,defects:$('env_defects').value}; document.querySelectorAll('#env_checks .meal-grp.on').forEach(b=>body[b.dataset.k]=1); $('env_msg').textContent='Saving…'; try{ await api('/ops/environment',{method:'POST',body:JSON.stringify(body)}); $('env_msg').textContent='✓ Saved'; loadOps(); }catch(e){ $('env_msg').textContent=e.message; } }

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616Q" />
+<link rel="stylesheet" href="/styles.css?v=20260616R" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -500,6 +500,10 @@
           <button class="btn btn-ghost sans" onclick="loadOps()">Refresh</button>
         </div>
         <div id="opsKpis" class="ret-cards"></div>
+      </div>
+      <div class="card" style="border-left:4px solid var(--gold)">
+        <div class="cmd-hero-row"><div><h3 style="margin:0">✅ Today — do these</h3><p class="sub sans">Your operational tasks for today. Check each off — this is the job, not the alerts.</p></div><span id="opsTaskCount" class="badge"></span></div>
+        <div id="opsTasks"></div>
       </div>
       <div class="card">
         <h3>What you own — six domains</h3>
@@ -1650,6 +1654,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616Q"></script>
+<script src="/app.js?v=20260616R"></script>
 </body>
 </html>

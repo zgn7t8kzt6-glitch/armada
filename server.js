@@ -16,7 +16,7 @@ import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems } from './src/seed.js';
+import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems, ensureOpsRoutines } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -28,6 +28,7 @@ ensureInventoryCatalog();
 try { const added = ensureInventoryItems(); if (added) console.log(`[inventory] added ${added} item(s) from the building-walk list`); } catch (e) { console.error('[inventory] ensureItems:', e.message); }
 try { ensureStaffingStandard(); } catch (e) { console.error('[staffing] ensureStandard:', e.message); }
 try { const a = ensureArrivalItems(); if (a) console.log(`[arrival] added ${a} checklist item(s)`); } catch (e) { console.error('[arrival] ensureItems:', e.message); }
+try { ensureOpsRoutines(); } catch (e) { console.error('[ops] ensureRoutines:', e.message); }
 // Default census recipient so a test send reaches the right person out of the box.
 if (!getState('census_email_to')) setState('census_email_to', process.env.CENSUS_EMAIL_TO || 'shlomo@armadarecovery.com');
 // One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.
@@ -3755,6 +3756,19 @@ function opsExtras() {
   };
 }
 const SHIFTS_FOR_OPS = ['Morning', 'Day', 'Evening', 'Night'];
+// The DOO's recurring tasks DUE on a given date (daily + weekly-on-dow +
+// monthly-on-dom), each with its done status. The "what do I do today" list.
+function opsRoutinesToday(dateStr) {
+  const date = dateStr || appToday();
+  const d = new Date(date + 'T12:00:00');
+  const dow = d.getDay(); const dom = d.getDate();
+  const all = db.prepare(`SELECT id, title, cadence, dow, dom, link FROM ops_routines WHERE active = 1 ORDER BY
+    CASE cadence WHEN 'daily' THEN 0 WHEN 'weekly' THEN 1 ELSE 2 END, sort, id`).all();
+  const due = all.filter((r) => r.cadence === 'daily' || (r.cadence === 'weekly' && r.dow === dow) || (r.cadence === 'monthly' && r.dom === Math.min(dom, 28)));
+  const doneRow = db.prepare(`SELECT by_name, done_at FROM ops_routine_log WHERE routine_id = ? AND date = ?`);
+  const today = due.map((r) => { const lg = doneRow.get(r.id, date); return { id: r.id, title: r.title, cadence: r.cadence, link: r.link || null, done: !!lg, by: lg?.by_name || '', at: lg ? String(lg.done_at).slice(11, 16) : '' }; });
+  return { date, today, done: today.filter((t) => t.done).length, total: today.length };
+}
 // The full 8-outcome operations scorecard — shared by the DOO dashboard and the
 // Operations hub so they never drift.
 function dooScorecard() {
@@ -3802,7 +3816,35 @@ app.get('/api/ops', requireAuth, (req, res) => {
   });
   const sc = dooScorecard();
   res.json({ shifts: SHIFTS_FOR_OPS, current: currentShift(), env, ho, rescues, rescuesWeek, projects, extras: sc.ox,
-    scorecard: sc.outcomes, passing: sc.passing, total: sc.total });
+    scorecard: sc.outcomes, passing: sc.passing, total: sc.total, routines: opsRoutinesToday() });
+});
+// Check off (or un-check) a routine task for today.
+app.post('/api/ops/routine/done', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.id) return res.status(400).json({ error: 'id required' });
+  const date = (b.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) ? b.date : appToday();
+  if (b.done === false) db.prepare(`DELETE FROM ops_routine_log WHERE routine_id = ? AND date = ?`).run(b.id, date);
+  else db.prepare(`INSERT OR IGNORE INTO ops_routine_log (routine_id, date, by_id, by_name) VALUES (?,?,?,?)`).run(b.id, date, req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+// Admin: manage the routine list (add / edit / remove).
+app.get('/api/ops/routines/all', requireAuth, requireAdmin, (req, res) => {
+  res.json({ routines: db.prepare(`SELECT id, title, cadence, dow, dom, link, active FROM ops_routines ORDER BY CASE cadence WHEN 'daily' THEN 0 WHEN 'weekly' THEN 1 ELSE 2 END, sort, id`).all() });
+});
+app.post('/api/ops/routines', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const cadence = ['daily', 'weekly', 'monthly'].includes(b.cadence) ? b.cadence : 'daily';
+  const dow = cadence === 'weekly' ? (b.dow == null ? 1 : Math.max(0, Math.min(6, +b.dow))) : null;
+  const dom = cadence === 'monthly' ? (b.dom == null ? 1 : Math.max(1, Math.min(28, +b.dom))) : null;
+  if (b.id) {
+    if (b.delete) db.prepare(`UPDATE ops_routines SET active = 0 WHERE id = ?`).run(b.id);
+    else db.prepare(`UPDATE ops_routines SET title=?, cadence=?, dow=?, dom=?, link=? WHERE id=?`).run((b.title || '').trim(), cadence, dow, dom, (b.link || '').trim() || null, b.id);
+  } else {
+    if (!(b.title || '').trim()) return res.status(400).json({ error: 'Title required' });
+    const sort = (db.prepare(`SELECT COALESCE(MAX(sort),0) m FROM ops_routines`).get().m) + 1;
+    db.prepare(`INSERT INTO ops_routines (title, cadence, dow, dom, link, sort) VALUES (?,?,?,?,?,?)`).run(b.title.trim(), cadence, dow, dom, (b.link || '').trim() || null, sort);
+  }
+  res.json({ ok: true });
 });
 app.post('/api/ops/environment', requireAuth, (req, res) => {
   const b = req.body || {}; const shift = SHIFTS_FOR_OPS.includes(b.shift) ? b.shift : currentShift();

@@ -400,6 +400,33 @@ export function ensureArrivalItems() {
   return n;
 }
 
+// The Director of Operations' recurring task manager — daily/weekly/monthly
+// routines so she walks in knowing exactly what to do. Tunable in-app.
+const OPS_ROUTINES = [
+  // [title, cadence, dow, dom, link]
+  ['Morning stock check — anything below par?', 'daily', null, null, 'inventory'],
+  ['Walk the building — environment check this shift (beds/rooms/common/kitchen)', 'daily', null, null, 'operations'],
+  ['Confirm today AND tomorrow are fully staffed', 'daily', null, null, 'staffmodel'],
+  ['Clear maintenance defects — assign an owner + date to each', 'daily', null, null, 'maintenance'],
+  ['Snack station stocked 24/7 + meals on track', 'daily', null, null, 'meals'],
+  ['Shift handoff prepped before change of shift (stock/beds/kitchen/smokes)', 'daily', null, null, 'operations'],
+  ['Log any CEO rescue from yesterday (goal: zero)', 'daily', null, null, 'operations'],
+  // Weekly
+  ['Build next week\'s schedule — a week ahead, nights & weekends named', 'weekly', 4, null, 'staffmodel'],
+  ['Vendor & reorder review — prices, lead times, standing orders', 'weekly', 1, null, 'inventory'],
+  ['Advance every open project on its date', 'weekly', 1, null, 'operations'],
+  ['Deep environment audit — walk every room to standard', 'weekly', 5, null, 'operations'],
+  // Monthly
+  ['Full par-level review — adjust pars to real usage', 'monthly', null, 1, 'inventory'],
+  ['Vendor cost review — control spend, confirm reliability', 'monthly', null, 1, 'inventory'],
+  ['Review the month\'s operations scorecard', 'monthly', null, 1, 'operations'],
+];
+export function ensureOpsRoutines() {
+  if (db.prepare(`SELECT id FROM ops_routines LIMIT 1`).get()) return;
+  const ins = db.prepare(`INSERT INTO ops_routines (title, cadence, dow, dom, link, sort) VALUES (?,?,?,?,?,?)`);
+  OPS_ROUTINES.forEach((r, i) => ins.run(r[0], r[1], r[2], r[3], r[4], i));
+}
+
 // Allow `npm run seed` to set up admin + sample data locally.
 if (import.meta.url === `file://${process.argv[1]}`) {
   ensureAdmin();

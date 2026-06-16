@@ -574,6 +574,27 @@ CREATE TABLE IF NOT EXISTS projects (
   created_by TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Recurring operational routines (the DOO's daily/weekly/monthly task manager).
+-- A template + a per-date completion log, so "what do I do today" is never a guess.
+CREATE TABLE IF NOT EXISTS ops_routines (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  cadence TEXT NOT NULL DEFAULT 'daily',      -- daily | weekly | monthly
+  dow INTEGER,                                -- weekly: 0=Sun..6=Sat
+  dom INTEGER,                                -- monthly: 1..28
+  link TEXT,                                  -- view to open (inventory, meals, etc.)
+  role TEXT NOT NULL DEFAULT 'Director of Operations',
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS ops_routine_log (
+  id INTEGER PRIMARY KEY,
+  routine_id INTEGER NOT NULL REFERENCES ops_routines(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  done_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(routine_id, date)
+);
 CREATE TABLE IF NOT EXISTS saves (
   id INTEGER PRIMARY KEY,
   client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,

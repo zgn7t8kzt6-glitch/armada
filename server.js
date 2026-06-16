@@ -1061,13 +1061,15 @@ app.post('/api/settings/automation', requireAuth, requireAdmin, (req, res) => {
 // never returned to the client. ----
 app.get('/api/email/config', requireAuth, requireAdmin, (req, res) => {
   const st = emailStatus();
+  const ccRaw = getState('email_cc');
   res.json({ ...st, hasResendKey: !!(getState('email_resend_key') || process.env.RESEND_API_KEY), hasSmtpPass: !!(getState('email_smtp_pass') || process.env.SMTP_PASS),
-    smtpPort: getState('email_smtp_port') || process.env.SMTP_PORT || '587', to: getState('email_to') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '' });
+    smtpPort: getState('email_smtp_port') || process.env.SMTP_PORT || '587', to: getState('email_to') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '',
+    cc: ccRaw == null || ccRaw === '' ? 'shlomo@armadarecovery.com' : ccRaw });   // blank ⇒ owner default
 });
 app.post('/api/email/config', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
   const set = (k, v) => { if (v !== undefined) setState('email_' + k, (v == null ? '' : String(v)).trim()); };
-  set('provider', b.provider); set('from', b.from); set('to', b.to);
+  set('provider', b.provider); set('from', b.from); set('to', b.to); set('cc', b.cc);
   set('smtp_host', b.smtp_host); set('smtp_port', b.smtp_port); set('smtp_user', b.smtp_user);
   if (b.smtp_pass) set('smtp_pass', b.smtp_pass);              // only overwrite if provided
   if (b.resend_key) set('resend_key', b.resend_key);

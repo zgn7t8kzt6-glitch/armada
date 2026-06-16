@@ -691,6 +691,7 @@ async function loadEmailConfig(){
   try{ const c=await api('/email/config');
     if($('em_provider')){ $('em_provider').value = c.provider||'resend'; }
     if($('em_from')) $('em_from').value=c.from||'';
+    if($('em_cc')) $('em_cc').value=c.cc||'';
     if($('em_smtp_host')) $('em_smtp_host').value=c.smtpHost||'';
     if($('em_smtp_port')) $('em_smtp_port').value=c.smtpPort||'587';
     if($('em_smtp_user')) $('em_smtp_user').value=c.smtpUser||'';
@@ -715,7 +716,7 @@ async function loadEmailConfig(){
 }
 async function saveEmailConfig(){
   $('em_msg').textContent='Saving…';
-  const body={ provider:$('em_provider').value, from:$('em_from').value, to:$('em_to').value,
+  const body={ provider:$('em_provider').value, from:$('em_from').value, to:$('em_to').value, cc:($('em_cc')?$('em_cc').value:''),
     smtp_host:$('em_smtp_host').value, smtp_port:$('em_smtp_port').value, smtp_user:$('em_smtp_user').value };
   if($('em_smtp_pass').value) body.smtp_pass=$('em_smtp_pass').value;
   if($('em_resend_key').value) body.resend_key=$('em_resend_key').value;
@@ -2900,7 +2901,8 @@ async function saveInvSettings(){
   catch(e){ if($('inv_corp_msg')) $('inv_corp_msg').textContent=e.message; }
 }
 async function sendOrderList(){ $('inv_corp_msg').textContent='Sending…'; try{ const r=await api('/inventory/reorders/send',{method:'POST'}); $('inv_corp_msg').textContent = r.sent?('✓ Sent '+r.count+' item(s) to '+r.to):('Not sent — '+(r.reason||'')); }catch(e){ $('inv_corp_msg').textContent=e.message; } }
-async function sendPollakOrderNow(){ if($('inv_pollak_msg')) $('inv_pollak_msg').textContent='Sending…'; try{ const r=await api('/inventory/pollak-order/send',{method:'POST'}); if($('inv_pollak_msg')) $('inv_pollak_msg').textContent=r.sent?('✓ Sent — '+r.items+' items to order'):('Not sent — '+(r.reason||'')); }catch(e){ if($('inv_pollak_msg')) $('inv_pollak_msg').textContent=e.message; } }
+function setPollakMsg(t){ ['inv_pollak_msg','inv_pollak_msg_hero'].forEach(id=>{ if($(id)) $(id).textContent=t; }); }
+async function sendPollakOrderNow(){ setPollakMsg('Sending order to Pollak…'); try{ const r=await api('/inventory/pollak-order/send',{method:'POST'}); setPollakMsg(r.sent?('✓ Sent — '+(r.items||0)+' items to order (you are CC’d)'):('Not sent — '+(r.reason||''))); }catch(e){ setPollakMsg(e.message); } }
 let INV_EDIT_ID=null;
 async function loadInvCatalog(){
   if(!$('invCatalog')) return;

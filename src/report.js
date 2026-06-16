@@ -140,9 +140,19 @@ export function renderReportHtml(d) {
   </div>`;
 }
 
-export async function sendEmail({ subject, html, to }) {
+export async function sendEmail({ subject, html, to, cc }) {
   const dest = (to || ecfg('to', 'CENSUS_EMAIL_TO') || process.env.REPORT_TO || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!dest.length) throw new Error('No recipient address.');
+  // Always CC the owner (or whoever's set in Settings → Email) on every send, so
+  // there's one inbox with a copy of everything that leaves the system. Deduped
+  // against the To list and any explicit cc, case-insensitively. Set 'email_cc'
+  // to a blank-ish value ('-' / 'none') to turn the global CC off.
+  const ccGlobal = ecfg('cc', 'EMAIL_CC');
+  const ccSetting = ccGlobal === '' ? 'shlomo@armadarecovery.com' : ccGlobal; // default to owner
+  const ccRaw = [...(cc ? String(cc).split(',') : []), ...(/^(-|none|off)$/i.test(ccSetting) ? [] : ccSetting.split(','))];
+  const lowerDest = dest.map((d) => d.toLowerCase());
+  const ccList = [...new Set(ccRaw.map((s) => s.trim()).filter(Boolean))]
+    .filter((c) => !lowerDest.includes(c.toLowerCase()));
   // Preferred: send from your OWN mailbox over SMTP (e.g. Microsoft 365 / Google).
   if (smtpConfigured()) {
     const nodemailer = (await import('nodemailer')).default;
@@ -152,7 +162,7 @@ export async function sendEmail({ subject, html, to }) {
       auth: { user: ecfg('smtp_user', 'SMTP_USER'), pass: ecfg('smtp_pass', 'SMTP_PASS') },
     });
     const from = ecfg('from', 'SMTP_FROM') || ecfg('from', 'REPORT_FROM') || ecfg('smtp_user', 'SMTP_USER');
-    await transport.sendMail({ from, to: dest, subject, html });
+    await transport.sendMail({ from, to: dest, ...(ccList.length ? { cc: ccList } : {}), subject, html });
     return;
   }
   // Fallback: Resend API.
@@ -166,7 +176,7 @@ export async function sendEmail({ subject, html, to }) {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to: dest, subject, html }),
+      body: JSON.stringify({ from, to: dest, ...(ccList.length ? { cc: ccList } : {}), subject, html }),
     });
     if (r.ok) return;
     lastBody = (await r.text()).slice(0, 200);

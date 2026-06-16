@@ -95,12 +95,10 @@ export function ensureExampleClient12A() {
 // Idempotent: only seeds when the catalog is empty, and never deletes admin edits.
 const INVENTORY_CATALOG = [
   // ── KITCHEN (techs cover this for now) ──────────────────────────────
-  ['Kitchen','Snacks','Snacks — chips/crackers','box',6,2,0,0],
+  // chips/crackers + fresh fruit + Gatorade now live as PFS-coded nourishment lines.
   ['Kitchen','Snacks','Snacks — granola/protein bars','box',6,2,0,0],
   ['Kitchen','Snacks','Cookies / sweet snacks','box',4,2,0,0],
-  ['Kitchen','Snacks','Fresh fruit','case',3,1,0,0],
   ['Kitchen','Beverages','Bottled water','case',10,3,1,0],
-  ['Kitchen','Beverages','Gatorade / electrolyte drinks','case',6,2,1,0],
   ['Kitchen','Beverages','Juice (apple/orange/cranberry)','case',4,2,0,0],
   ['Kitchen','Beverages','Soda (regular + caffeine-free)','case',4,1,0,0],
   ['Kitchen','Beverages','Coffee — regular','bag',6,2,0,0],
@@ -245,14 +243,10 @@ const INVENTORY_EXTRA = [
   ['Medical', 'First Aid', '4x4 nonwoven gauze pads', 'box', 6, 2, 1, 0],
   ['Medical', 'First Aid', 'Conforming stretch gauze bandage', 'box', 4, 2, 0, 0],
   // Hydration & nutrition
-  ['Kitchen', 'Hydration & Nutrition', 'Ginger ale', 'case', 4, 1, 0, 0],
-  ['Kitchen', 'Hydration & Nutrition', 'Protein boost — chocolate', 'case', 4, 2, 0, 0],
-  ['Kitchen', 'Hydration & Nutrition', 'Protein boost — vanilla', 'case', 4, 2, 0, 0],
-  ['Kitchen', 'Hydration & Nutrition', 'Protein shakes', 'case', 4, 2, 0, 0],
-  ['Kitchen', 'Hydration & Nutrition', 'Jello', 'case', 4, 1, 0, 0],
-  ['Kitchen', 'Hydration & Nutrition', 'Yogurt (assorted)', 'case', 4, 1, 0, 1],
+  // Ginger ale, protein boost/shakes, Jello, yogurt, milk now live as PFS-coded
+  // nourishment lines (Ginger ale caffeine-free, Boost/Ensure, Gelatin, Greek
+  // yogurt, Whole milk). Orange juice stays — no coded equivalent on the order.
   ['Kitchen', 'Hydration & Nutrition', 'Orange juice', 'case', 4, 1, 0, 1],
-  ['Kitchen', 'Hydration & Nutrition', 'Milk', 'case', 4, 1, 1, 1],
   // Nurse beverage station
   ['Kitchen', 'Nurse Station', 'Splenda', 'box', 3, 1, 0, 0],
   // Pantry / condiments

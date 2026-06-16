@@ -1120,6 +1120,20 @@ addColumn('assigned_tasks', 'assigned_by_id', 'INTEGER'); // who created the tas
 // Recovery") into room when no bed was set. A real bed has a digit — clear the
 // facility-name ones so the room shows blank, not wrong. Idempotent + self-healing.
 db.exec(`UPDATE clients SET room = NULL WHERE room LIKE '%armada%' AND room NOT GLOB '*[0-9]*'`);
+// One-time: the nourishment order (PFS-coded items) replaced a set of older generic
+// Kitchen lines. Deactivate the generics so we're not double-counting the same thing
+// under two names. Guarded by a state flag so it runs once and never fights a manual
+// re-activation. (active=0 keeps history; it just drops them off the live count list.)
+if (getState('nourish_dedup_v1') !== 'done') {
+  const dupNames = [
+    'Gatorade / electrolyte drinks', 'Fresh fruit', 'Snacks — chips/crackers',
+    'Ginger ale', 'Protein boost — chocolate', 'Protein boost — vanilla',
+    'Protein shakes', 'Jello', 'Yogurt (assorted)', 'Milk',
+  ];
+  const upd = db.prepare(`UPDATE inventory_items SET active = 0 WHERE name = ? COLLATE NOCASE`);
+  dupNames.forEach((n) => upd.run(n));
+  setState('nourish_dedup_v1', 'done');
+}
 // Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
 db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
   id INTEGER PRIMARY KEY,

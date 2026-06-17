@@ -14,7 +14,7 @@ import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, 
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
-  mfaSetup, mfaEnable, mfaDisable,
+  mfaSetup, mfaEnable, mfaDisable, hashPassword,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, anthropicKey, resetAiClient } from './src/claude.js';
@@ -2175,6 +2175,56 @@ app.post('/api/users', requireAuth, requireAdmin, (req, res) => {
     res.json({ id });
   } catch (e) {
     res.status(400).json({ error: 'Username already exists' });
+  }
+});
+
+// Edit a staff member — name, job role, access level, active, and (optional)
+// password reset. Guards against locking out the last admin.
+app.post('/api/users/:id', requireAuth, requireAdmin, (req, res) => {
+  const id = +req.params.id;
+  const u = db.prepare(`SELECT * FROM users WHERE id = ?`).get(id);
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  const b = req.body || {};
+  const name = (b.name != null && String(b.name).trim()) ? String(b.name).trim() : u.name;
+  const job_role = b.job_role != null ? String(b.job_role).trim() : u.job_role;
+  const role = b.role != null ? (b.role === 'admin' ? 'admin' : 'staff') : u.role;
+  const active = b.active != null ? (b.active ? 1 : 0) : u.active;
+  // Don't allow demoting/deactivating the last active admin.
+  if (u.role === 'admin' && (role !== 'admin' || !active)) {
+    const admins = db.prepare(`SELECT COUNT(*) n FROM users WHERE role = 'admin' AND active = 1`).get().n;
+    if (admins <= 1) return res.status(400).json({ error: 'This is the last active admin — promote someone else first.' });
+  }
+  db.prepare(`UPDATE users SET name = ?, job_role = ?, role = ?, active = ? WHERE id = ?`).run(name, job_role, role, active, id);
+  if (b.password && String(b.password).trim()) {
+    db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hashPassword(String(b.password)), id);
+    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(id);   // force re-login with the new password
+  }
+  if (!active) db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(id);   // log out a deactivated user
+  audit({ user: req.user, action: 'UPDATE', entity: 'user', entity_id: id, detail: u.username, ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Delete a staff member. Won't delete yourself or the last admin. If the user is
+// referenced elsewhere (assignments, acks, audit…), fall back to deactivating so
+// the records stay intact rather than failing.
+app.delete('/api/users/:id', requireAuth, requireAdmin, (req, res) => {
+  const id = +req.params.id;
+  if (id === req.user.id) return res.status(400).json({ error: "You can't delete your own account." });
+  const u = db.prepare(`SELECT role, active, username FROM users WHERE id = ?`).get(id);
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  if (u.role === 'admin') {
+    const admins = db.prepare(`SELECT COUNT(*) n FROM users WHERE role = 'admin' AND active = 1`).get().n;
+    if (admins <= 1) return res.status(400).json({ error: 'Cannot delete the last active admin.' });
+  }
+  db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(id);
+  try {
+    db.prepare(`DELETE FROM users WHERE id = ?`).run(id);
+    audit({ user: req.user, action: 'DELETE', entity: 'user', entity_id: id, detail: u.username, ip: req.ip });
+    res.json({ ok: true, deleted: true });
+  } catch (e) {
+    db.prepare(`UPDATE users SET active = 0 WHERE id = ?`).run(id);   // had linked records — deactivate instead
+    audit({ user: req.user, action: 'DEACTIVATE', entity: 'user', entity_id: id, detail: u.username, ip: req.ip });
+    res.json({ ok: true, deleted: false, deactivated: true });
   }
 });
 // One demo login per role, so leadership can walk through every dashboard.

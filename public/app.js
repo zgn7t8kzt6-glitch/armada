@@ -2470,9 +2470,45 @@ async function saveAssign(){
 /* ---- users ---- */
 async function loadUsers(){
   const { users } = await api('/users');
-  $('userList').innerHTML = `<table class="tbl"><tr><th>Name</th><th>Username</th><th>Job role</th><th>Access</th></tr>${
-    users.map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.username)}</td><td>${esc(u.job_role)}</td>
-      <td><span class="badge ${u.role==='admin'?'admin':''}">${u.role}</span></td></tr>`).join('')}</table>`;
+  const roles = META.jobRoles||[];
+  $('userList').innerHTML = `<table class="tbl"><tr><th>Name</th><th>Username</th><th>Job role</th><th>Access</th><th>Active</th><th></th></tr>${
+    users.map(u=>{
+      const roleOpts = roles.map(r=>`<option ${u.job_role===r?'selected':''}>${esc(r)}</option>`).join('');
+      const missing = u.job_role && !roles.includes(u.job_role) ? `<option selected>${esc(u.job_role)}</option>` : (u.job_role?'':'<option selected value="">— none set —</option>');
+      return `<tr data-uid="${u.id}">
+        <td><input class="us-name sans" value="${esc(u.name)}" style="min-width:120px"/></td>
+        <td>${esc(u.username)}</td>
+        <td><select class="us-job sans">${missing}${roleOpts}</select></td>
+        <td><select class="us-role sans"><option value="staff" ${u.role!=='admin'?'selected':''}>Staff</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></td>
+        <td style="text-align:center"><input type="checkbox" class="us-active" ${u.active!==0?'checked':''}/></td>
+        <td class="toolbar" style="gap:6px">
+          <button class="btn btn-gold btn-sm sans" onclick="saveUser(${u.id})">Save</button>
+          <button class="btn btn-ghost btn-sm sans" onclick="resetUserPw(${u.id})">Reset pw</button>
+          <button class="btn btn-ghost btn-sm sans" onclick="deleteUser(${u.id}, ${JSON.stringify(u.name).replace(/"/g,'&quot;')})" style="color:var(--danger)">Delete</button>
+        </td></tr>`;
+    }).join('')}</table><div id="userMsg" class="hint" style="margin-top:6px"></div>`;
+}
+function userRow(id){ return document.querySelector('tr[data-uid="'+id+'"]'); }
+async function saveUser(id){
+  const r=userRow(id); if(!r) return;
+  const body={ name:r.querySelector('.us-name').value, job_role:r.querySelector('.us-job').value,
+    role:r.querySelector('.us-role').value, active:r.querySelector('.us-active').checked?1:0 };
+  if($('userMsg')) $('userMsg').textContent='Saving…';
+  try{ await api('/users/'+id,{method:'POST',body:JSON.stringify(body)}); if($('userMsg')) $('userMsg').textContent='✓ Saved'; loadUsers(); }
+  catch(e){ if($('userMsg')) $('userMsg').textContent='Error: '+esc(e.message); }
+}
+async function resetUserPw(id){
+  const pw=prompt('New temporary password for this user (they\'ll be logged out and must use it next sign-in):');
+  if(pw===null) return; if(!pw.trim()){ alert('Password cannot be blank.'); return; }
+  try{ await api('/users/'+id,{method:'POST',body:JSON.stringify({password:pw.trim()})}); if($('userMsg')) $('userMsg').textContent='✓ Password reset'; }
+  catch(e){ alert(e.message); }
+}
+async function deleteUser(id,name){
+  if(!confirm('Delete '+name+'? If they have linked records they\'ll be deactivated instead.')) return;
+  try{ const r=await api('/users/'+id,{method:'DELETE'});
+    if($('userMsg')) $('userMsg').textContent = r.deleted?('✓ '+name+' deleted'):('✓ '+name+' deactivated (had linked records)');
+    loadUsers();
+  }catch(e){ if($('userMsg')) $('userMsg').textContent='Error: '+esc(e.message); }
 }
 async function makeDemoStaff(){
   $('demoStaffMsg').textContent='Creating…';

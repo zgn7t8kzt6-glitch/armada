@@ -439,11 +439,12 @@ export async function kipuSyncRoster() {
     // patient detail (the only source of level of care, program, room,
     // referral, discharge type, and the step-down plan). Read it for active
     // clients and for anyone discharging right now; bounded + best-effort.
-    let nextLoc = null, anticipatedDc = null;
+    let nextLoc = null, anticipatedDc = null, detailRead = false;
     if (useDetail && kid && detailMap.has(kid)) {
       try {
         const det = detailMap.get(kid);
         if (det) {
+          detailRead = true;
           const d = (...keys) => { for (const k of keys) { const v = det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.join(', ') : String(v); } return null; };
           // Kipu prefixes the utilization-review level (e.g. "UR LOC: IOP") — strip it.
           const clean = (v) => v == null ? null : String(v).replace(/^\s*UR\s*LOC\s*:?\s*/i, '').trim() || null;
@@ -512,6 +513,15 @@ export async function kipuSyncRoster() {
           discharged ? (dischStatus ? String(dischStatus) : 'Discharged') : null,
           discharged ? (dischDate ? String(dischDate).slice(0, 10) : null) : null,
           dischDest, dischReason, discharged ? 0 : 1, existing.id);
+      // Kipu is the source of truth for the assigned therapist / case manager.
+      // When we actually read the patient detail and Kipu shows NO assignment,
+      // clear any stale value (e.g. a name once mis-inferred from a note author)
+      // so the kiosk never shows someone Kipu hasn't assigned. We only clear when
+      // detailRead is true, so a census-only/partial sync never wipes a real value.
+      if (detailRead) {
+        if (therapist == null) db.prepare(`UPDATE clients SET therapist = NULL WHERE id = ?`).run(existing.id);
+        if (caseMgr == null) db.prepare(`UPDATE clients SET case_manager = NULL WHERE id = ?`).run(existing.id);
+      }
       matched++;
     } else if (!discharged) {
       // Only create rows for currently-active patients.

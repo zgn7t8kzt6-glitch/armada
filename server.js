@@ -1680,8 +1680,11 @@ async function runAssessAll(user, opts = {}) {
         try {
           const np = await kipuPatientNotes(c.kipu_id);
           const txt = np.text;
-          if (np.therapist && !c.therapist) db.prepare(`UPDATE clients SET therapist = ? WHERE id = ?`).run(np.therapist, c.id);
-          if (np.case_manager && !c.case_manager) db.prepare(`UPDATE clients SET case_manager = ? WHERE id = ?`).run(np.case_manager, c.id);
+          // NOTE: we deliberately do NOT set therapist/case_manager from note
+          // authorship here. Whoever signs a "Discharge Plan" or case-mgmt note
+          // is not necessarily the assigned provider — that guesswork is what put
+          // a wrong name (e.g. Suzanne) on clients Kipu never assigned. Those two
+          // fields now come only from Kipu's real assignment fields (see kipu.js).
           if (np.forms) db.prepare(`UPDATE clients SET doc_forms = ? WHERE id = ?`).run(JSON.stringify(np.forms), c.id);
           if (txt && txt.trim()) {
             extra = [{ note: 'Kipu documentation:\n' + txt }];

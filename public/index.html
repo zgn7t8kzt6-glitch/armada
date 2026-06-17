@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616O" />
+<link rel="stylesheet" href="/styles.css?v=20260616P" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -674,9 +674,10 @@
     <section id="roundscan" class="view">
       <div class="card">
         <div class="cmd-hero-row">
-          <div><h3>📍 Scan Rounds — proof you were there</h3><p class="sub sans">A QR sits at the farthest point of every room and common area. A round only counts when you physically walk over and scan it. Use the iPad/phone <strong>Camera</strong> — it logs automatically — or the in-app scanner below.</p></div>
+          <div><h3>📍 Scan Rounds — proof you were there</h3><p class="sub sans">A QR sits at the farthest point of every room and common area. A round only counts when you physically walk over and scan it. Tap <strong>Scan a point</strong> and hold the camera on the QR — it must be scanned <strong>live, in-app</strong>; a photo of the QR won't log.</p></div>
           <button class="btn btn-gold sans" onclick="startScanner()">📷 Scan a point</button>
         </div>
+        <div id="scanWho" class="sans" style="margin:6px 0;font-size:14px"></div>
         <div id="scanMsg" class="sans" style="margin:8px 0;display:none"></div>
         <div id="scanManual" class="toolbar no-print" style="justify-content:flex-start;gap:6px;margin-top:6px">
           <input id="scanCodeInput" class="sans" placeholder="…or type the code under a damaged QR" style="min-width:240px"/>
@@ -705,6 +706,14 @@
             <button class="btn btn-ghost btn-sm sans" onclick="saveScanInterval()">Save cadence</button>
             <span id="scanIntMsg" class="hint" style="align-self:center"></span>
           </div>
+          <div class="toolbar no-print" style="justify-content:flex-start;gap:6px;margin:6px 0;align-items:center">
+            <span class="hint">Room hours (common areas stay 24/7):</span>
+            <input id="roomFrom" type="number" min="0" max="23" style="width:64px"/><span class="hint">to</span>
+            <input id="roomTo" type="number" min="0" max="23" style="width:64px"/>
+            <button class="btn btn-ghost btn-sm sans" onclick="saveRoomHours(false)">Save default</button>
+            <button class="btn btn-ghost btn-sm sans" onclick="saveRoomHours(true)">Apply to all rooms</button>
+            <span id="roomHrMsg" class="hint" style="align-self:center"></span>
+          </div>
           <div class="toolbar no-print" style="justify-content:flex-start;gap:6px;margin:6px 0">
             <input id="newScanLabel" class="sans" placeholder="New point label — e.g. Room A07 / Lounge" style="min-width:220px"/>
             <select id="newScanArea" class="sans"><option>Room</option><option>Common</option></select>
@@ -718,8 +727,8 @@
     <section id="rounds" class="view">
       <div class="card">
         <div class="cmd-hero-row">
-          <div><h3>Observation &amp; safety rounds</h3><p class="sub sans">Every client checked on cadence — provable compliance. The clock turns red when a client is overdue. Tap ✓ when you lay eyes on them.</p></div>
-          <button class="btn btn-gold sans" onclick="roundsSweep()">✓ I walked the whole unit</button>
+          <div><h3>Observation &amp; safety rounds</h3><p class="sub sans">Every client checked on cadence — provable compliance. The clock turns red when overdue, and only clears when you <strong>scan that room's QR</strong> (no desk check-off).</p></div>
+          <button class="btn btn-gold sans" onclick="show('roundscan')">📍 Scan Rounds</button>
         </div>
         <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="show('dignity')">Dignity Kits ↗</button></div>
         <div id="roundsEscalateRow" class="no-print" style="margin:8px 0"></div>
@@ -1740,6 +1749,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616O"></script>
+<script src="/jsqr.js"></script>
+<script src="/app.js?v=20260616P"></script>
 </body>
 </html>

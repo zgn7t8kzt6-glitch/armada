@@ -894,7 +894,8 @@ app.get('/api/voice', requireAuth, requireAdmin, (req, res) => {
 });
 app.get('/api/rounds/board', requireAuth, (req, res) => {
   const active = db.prepare(`SELECT id, pref, name, room, loc, photo, obs_interval FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
-  const lastChk = db.prepare(`SELECT ts, by_name, status FROM obs_checks WHERE client_id = ? ORDER BY id DESC LIMIT 1`);
+  // Only a SCANNED (or Kipu-charted) check proves presence — desk taps don't count.
+  const lastChk = db.prepare(`SELECT ts, by_name, status FROM obs_checks WHERE client_id = ? AND source IN ('scan','kipu') ORDER BY id DESC LIMIT 1`);
   const now = Date.now();
   const shift = currentShift();
   const askedSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM client_checkins WHERE date(created_at) = date('now') AND shift = ?`).all(shift).map((r) => r.client_id));
@@ -914,21 +915,15 @@ app.get('/api/rounds/board', requireAuth, (req, res) => {
 app.post('/api/rounds/check', requireAuth, (req, res) => {
   const b = req.body || {};
   if (!b.client_id) return res.status(400).json({ error: 'client_id required' });
-  const status = OBS_STATUSES.includes(b.status) ? b.status : 'ok';
-  db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name) VALUES (?,?,?,?)`).run(+b.client_id, status, (b.note || '').trim() || null, req.user.name);
-  if (status === 'concern') createAlert(+b.client_id, 'concern', 'Elevated', `Safety-round concern logged by ${req.user.name}`);
+  // Routine "ok" rounds can ONLY be completed by scanning the room's QR — no desk taps.
+  // This endpoint now only logs a CONCERN (a real observation you'd never fake to skip a walk).
+  if (b.status !== 'concern') return res.status(403).json({ error: 'Complete routine rounds by scanning the room QR. This is only for flagging a concern.' });
+  db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name, source) VALUES (?, 'concern', ?, ?, 'app')`).run(+b.client_id, (b.note || '').trim() || null, req.user.name);
+  createAlert(+b.client_id, 'concern', 'Elevated', `Safety-round concern logged by ${req.user.name}`);
   res.json({ ok: true });
 });
-// "I walked the whole unit" — log a check for every active client at once.
-app.post('/api/rounds/sweep', requireAuth, (req, res) => {
-  const active = db.prepare(`SELECT id FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
-  const ins = db.prepare(`INSERT INTO obs_checks (client_id, status, by_name) VALUES (?, 'ok', ?)`);
-  db.exec('BEGIN');
-  try { for (const c of active) ins.run(c.id, req.user.name); db.exec('COMMIT'); }
-  catch (e) { db.exec('ROLLBACK'); return res.status(500).json({ error: e.message }); }
-  audit({ user: req.user, action: 'ROUNDS_SWEEP', detail: `${active.length} clients`, ip: req.ip });
-  res.json({ ok: true, checked: active.length });
-});
+// The "I walked the whole unit" sweep is retired — a round only counts when you scan it.
+app.post('/api/rounds/sweep', requireAuth, (req, res) => res.status(403).json({ error: 'Rounds are completed by scanning the QR at each room and area. Open Scan Rounds.' }));
 app.put('/api/clients/:id/obs-interval', requireAuth, (req, res) => {
   const v = +req.body?.minutes || null;
   db.prepare(`UPDATE clients SET obs_interval = ? WHERE id = ?`).run(v && v > 0 ? v : null, req.params.id);
@@ -940,20 +935,34 @@ app.post('/api/rounds/escalation', requireAuth, requireAdmin, (req, res) => { se
 // ───────── Rounds SCAN verification (QR at the farthest point of each room/area) ─────────
 const newScanCode = () => 'sp' + crypto.randomBytes(6).toString('hex');
 function sweepInterval() { return Math.max(5, +autoCfg('round_sweep_min', 60)); }
-// Live coverage for the current cycle: each active point, last scan, and whether it's overdue.
+function roomHours() { return { from: Math.max(0, Math.min(23, +autoCfg('round_room_from', 8))), to: Math.max(0, Math.min(23, +autoCfg('round_room_to', 22))) }; }
+// Is a point expected to be scanned at this local hour? NULL window = 24/7; otherwise
+// [from, to) with midnight wrap (e.g. 20→8 means evening through morning).
+function expectedAtHour(from, to, h) {
+  if (from == null || to == null) return true;
+  if (from === to) return true;
+  return from < to ? (h >= from && h < to) : (h >= from || h < to);
+}
+function hoursActive(from, to) { if (from == null || to == null) return 24; const span = from < to ? to - from : 24 - from + to; return Math.max(0, span); }
+// Live coverage for the current cycle: each active point, last scan, overdue — window-aware.
 function scanCoverage() {
   const interval = sweepInterval();
-  const pts = db.prepare(`SELECT id, label, area FROM scan_points WHERE active = 1 ORDER BY area, sort, label`).all();
+  const pts = db.prepare(`SELECT id, label, area, active_from, active_to FROM scan_points WHERE active = 1 ORDER BY area, sort, label`).all();
   const lastFor = db.prepare(`SELECT ts, by_name FROM round_scans WHERE point_id = ? ORDER BY id DESC LIMIT 1`);
   const now = Date.now();
+  const h = localHour();
   const rows = pts.map((p) => {
     const l = lastFor.get(p.id);
     const t = l ? Date.parse(String(l.ts).replace(' ', 'T') + 'Z') : null;
     const mins = t != null ? Math.floor((now - t) / 60000) : null;
-    return { id: p.id, label: p.label, area: p.area, lastBy: l?.by_name || null, minsSince: mins, overdue: mins == null || mins >= interval };
+    const onWindow = expectedAtHour(p.active_from, p.active_to, h);
+    const window = (p.active_from == null || p.active_to == null) ? '24/7' : `${p.active_from}:00–${p.active_to}:00`;
+    return { id: p.id, label: p.label, area: p.area, window, expectedNow: onWindow, lastBy: l?.by_name || null, minsSince: mins,
+      overdue: onWindow && (mins == null || mins >= interval) };
   });
+  const expected = rows.filter((r) => r.expectedNow);
   const overdue = rows.filter((r) => r.overdue).length;
-  return { interval, rows, total: rows.length, covered: rows.length - overdue, overdue };
+  return { interval, rows, total: rows.length, expectedNow: expected.length, covered: expected.length - overdue, overdue, offHours: rows.length - expected.length };
 }
 app.get('/api/scan-points', requireAuth, (req, res) => {
   res.json({ points: db.prepare(`SELECT id, code, label, area, room, active, sort FROM scan_points ORDER BY active DESC, area, sort, label`).all(), interval: sweepInterval() });
@@ -964,24 +973,42 @@ app.post('/api/scan-points', requireAuth, requireAdmin, (req, res) => {
     if (b.delete) { db.prepare(`DELETE FROM scan_points WHERE id = ?`).run(b.id); return res.json({ ok: true, deleted: true }); }
     const cur = db.prepare(`SELECT * FROM scan_points WHERE id = ?`).get(b.id);
     if (!cur) return res.status(404).json({ error: 'Not found' });
-    db.prepare(`UPDATE scan_points SET label = ?, area = ?, room = ?, active = ? WHERE id = ?`)
-      .run((b.label || cur.label).trim(), ['Room', 'Common'].includes(b.area) ? b.area : cur.area, (b.room != null ? b.room : cur.room) || null, b.active != null ? (b.active ? 1 : 0) : cur.active, b.id);
+    const hr = (v, d) => (v === '' || v == null) ? d : Math.max(0, Math.min(23, +v));
+    const af = b.active_from !== undefined ? (b.active_from === '' || b.active_from == null ? null : hr(b.active_from)) : cur.active_from;
+    const at = b.active_to !== undefined ? (b.active_to === '' || b.active_to == null ? null : hr(b.active_to)) : cur.active_to;
+    db.prepare(`UPDATE scan_points SET label = ?, area = ?, room = ?, active = ?, active_from = ?, active_to = ? WHERE id = ?`)
+      .run((b.label || cur.label).trim(), ['Room', 'Common'].includes(b.area) ? b.area : cur.area, (b.room != null ? b.room : cur.room) || null, b.active != null ? (b.active ? 1 : 0) : cur.active, af, at, b.id);
     return res.json({ ok: true });
   }
   const label = (b.label || '').trim();
   if (!label) return res.status(400).json({ error: 'Label required' });
-  const id = db.prepare(`INSERT INTO scan_points (code, label, area, room) VALUES (?, ?, ?, ?)`)
-    .run(newScanCode(), label, ['Room', 'Common'].includes(b.area) ? b.area : 'Room', (b.room || '').trim() || null).lastInsertRowid;
+  const area = ['Room', 'Common'].includes(b.area) ? b.area : 'Room';
+  // New Room points default to the facility's room hours; Common points are 24/7.
+  const rh = roomHours();
+  const af = area === 'Room' ? rh.from : null, at = area === 'Room' ? rh.to : null;
+  const id = db.prepare(`INSERT INTO scan_points (code, label, area, room, active_from, active_to) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(newScanCode(), label, area, (b.room || '').trim() || null, af, at).lastInsertRowid;
   res.json({ ok: true, id });
+});
+// Facility room-hours: the default window for Room points (Common stay 24/7). Optionally
+// re-apply to every existing Room point.
+app.get('/api/rounds/room-hours', requireAuth, requireAdmin, (req, res) => res.json(roomHours()));
+app.post('/api/rounds/room-hours', requireAuth, requireAdmin, (req, res) => {
+  const from = Math.max(0, Math.min(23, +req.body?.from || 0)), to = Math.max(0, Math.min(23, +req.body?.to || 0));
+  setState('round_room_from', String(from)); setState('round_room_to', String(to));
+  let applied = 0;
+  if (req.body?.applyAll) applied = db.prepare(`UPDATE scan_points SET active_from = ?, active_to = ? WHERE area = 'Room'`).run(from, to).changes;
+  res.json({ ok: true, from, to, applied });
 });
 // Auto-create a scan point for every occupied room + the standard common areas.
 app.post('/api/scan-points/seed', requireAuth, requireAdmin, (req, res) => {
   const rooms = db.prepare(`SELECT DISTINCT room FROM clients WHERE active = 1 AND discharge_status IS NULL AND room IS NOT NULL AND room != '' ORDER BY room`).all().map((r) => r.room);
   const have = new Set(db.prepare(`SELECT LOWER(label) l FROM scan_points`).all().map((p) => p.l));
-  const ins = db.prepare(`INSERT INTO scan_points (code, label, area, room) VALUES (?, ?, ?, ?)`);
+  const ins = db.prepare(`INSERT INTO scan_points (code, label, area, room, active_from, active_to) VALUES (?, ?, ?, ?, ?, ?)`);
+  const rh = roomHours();
   let added = 0;
-  for (const rm of rooms) { const label = 'Room ' + rm; if (have.has(label.toLowerCase())) continue; ins.run(newScanCode(), label, 'Room', rm); added++; }
-  for (const c of ['Dining room', 'Lounge', 'Group room', 'Activity room', 'Front entrance', 'Smoke area']) { if (have.has(c.toLowerCase())) continue; ins.run(newScanCode(), c, 'Common', null); added++; }
+  for (const rm of rooms) { const label = 'Room ' + rm; if (have.has(label.toLowerCase())) continue; ins.run(newScanCode(), label, 'Room', rm, rh.from, rh.to); added++; }   // rooms = day window
+  for (const c of ['Dining room', 'Lounge', 'Group room', 'Activity room', 'Front entrance', 'Smoke area']) { if (have.has(c.toLowerCase())) continue; ins.run(newScanCode(), c, 'Common', null, null, null); added++; }   // common = 24/7
   res.json({ ok: true, added });
 });
 // QR image (SVG) for a point — encodes the app URL with the scan code. Native phone/
@@ -989,39 +1016,52 @@ app.post('/api/scan-points/seed', requireAuth, requireAdmin, (req, res) => {
 app.get('/api/scan-points/:id/qr.svg', requireAuth, requireAdmin, async (req, res) => {
   const p = db.prepare(`SELECT code FROM scan_points WHERE id = ?`).get(req.params.id);
   if (!p) return res.status(404).send('Not found');
-  const base = (process.env.PUBLIC_URL || ('https://' + (req.headers.host || ''))).replace(/\/$/, '');
-  try { const svg = await QRCode.toString(`${base}/?scan=${encodeURIComponent(p.code)}`, { type: 'svg', margin: 1, width: 240 }); res.type('image/svg+xml').send(svg); }
+  // Encode the RAW code (not a URL): a phone's native camera can't turn it into a
+  // tappable link, so the only way to log a scan is the in-app live scanner.
+  try { const svg = await QRCode.toString('ARMADA:' + p.code, { type: 'svg', margin: 1, width: 240 }); res.type('image/svg+xml').send(svg); }
   catch (e) { res.status(500).send('QR error'); }
 });
-// Record a scan (from the QR deep-link or the in-app scanner). A room scan also logs a
-// verified obs_check for the client(s) in that room.
+// Record a scan from the in-app live scanner (or a typed code). A room scan also logs a
+// verified obs_check for the client(s) in that room. Attributed to the logged-in user.
 app.post('/api/round-scan', requireAuth, (req, res) => {
-  const code = (req.body?.code || '').trim();
+  let code = (req.body?.code || '').trim();
+  if (code.startsWith('ARMADA:')) code = code.slice(7);   // tolerate the QR prefix
+  const m = code.match(/(sp[0-9a-f]{12})/i); if (m) code = m[1];   // tolerate a wrapped value
   const p = db.prepare(`SELECT * FROM scan_points WHERE code = ? AND active = 1`).get(code);
   if (!p) return res.status(404).json({ error: 'Unknown or inactive scan point.' });
-  db.prepare(`INSERT INTO round_scans (point_id, code, by_id, by_name, source) VALUES (?, ?, ?, ?, ?)`)
-    .run(p.id, code, req.user.id, req.user.name, req.body?.manual ? 'manual' : 'scan');
+  // Anti-replay: scanning several DIFFERENT points in seconds is physically impossible —
+  // the hallmark of someone scanning saved photos of the QRs. Record but flag for review.
+  const burst = db.prepare(`SELECT COUNT(DISTINCT point_id) n FROM round_scans WHERE by_id = ? AND point_id != ? AND ts >= datetime('now','-30 seconds')`).get(req.user.id, p.id).n;
+  let flagged = 0, reason = null;
+  if (burst >= 3) { flagged = 1; reason = `${burst + 1} different points scanned within 30s — too fast to walk (possible photo replay)`; }
+  db.prepare(`INSERT INTO round_scans (point_id, code, by_id, by_name, source, flagged, flag_reason) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(p.id, code, req.user.id, req.user.name, req.body?.manual ? 'manual' : 'scan', flagged, reason);
+  if (flagged) createAlert(null, 'scan_flag_' + req.user.id, 'Elevated', `Suspicious rounds scanning by ${req.user.name}: ${reason}. Spot-check.`);
   let clients = 0;
   if (p.area === 'Room' && p.room) {
     const cs = db.prepare(`SELECT id FROM clients WHERE active = 1 AND discharge_status IS NULL AND room = ?`).all(p.room);
     const ins = db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name, source) VALUES (?, 'ok', ?, ?, 'scan')`);
     for (const c of cs) { ins.run(c.id, 'Verified by scan · ' + p.label, req.user.name); clients++; }
   }
-  res.json({ ok: true, label: p.label, area: p.area, clients, coverage: scanCoverage() });
+  res.json({ ok: true, label: p.label, area: p.area, clients, by: req.user.name, flagged, reason, coverage: scanCoverage() });
 });
 app.get('/api/rounds/coverage', requireAuth, (req, res) => res.json(scanCoverage()));
 // Per-employee accountability + facility compliance over a window.
 app.get('/api/rounds/scorecard', requireAuth, (req, res) => {
   const days = Math.min(90, Math.max(1, +(req.query.days || 7)));
   const since = `-${days} day`;
-  const people = db.prepare(`SELECT COALESCE(by_name,'—') name, COUNT(*) scans, COUNT(DISTINCT point_id) points, MAX(ts) last
+  const people = db.prepare(`SELECT COALESCE(by_name,'—') name, COUNT(*) scans, COUNT(DISTINCT point_id) points,
+      SUM(CASE WHEN flagged=1 THEN 1 ELSE 0 END) flagged, MAX(ts) last
     FROM round_scans WHERE ts >= datetime('now', ?) GROUP BY by_name ORDER BY scans DESC`).all(since);
   const interval = sweepInterval();
-  const activePts = db.prepare(`SELECT COUNT(*) n FROM scan_points WHERE active = 1`).get().n;
+  const pts = db.prepare(`SELECT active_from af, active_to at FROM scan_points WHERE active = 1`).all();
+  const activePts = pts.length;
   const totalScans = db.prepare(`SELECT COUNT(*) n FROM round_scans WHERE ts >= datetime('now', ?)`).get(since).n;
-  const cycles = Math.max(1, Math.floor(days * 24 * 60 / interval));
-  const expected = activePts * cycles;
-  const compliancePct = expected ? Math.min(100, Math.round(totalScans / expected * 100)) : null;
+  // Window-aware expectation: each point only owes scans during its active hours.
+  let expected = 0;
+  for (const p of pts) expected += Math.floor(hoursActive(p.af, p.at) * 60 / interval) * days;
+  expected = Math.max(1, expected);
+  const compliancePct = Math.min(100, Math.round(totalScans / expected * 100));
   res.json({ days, interval, people, activePoints: activePts, totalScans, expected, compliancePct });
 });
 app.get('/api/rounds/sweep-interval', requireAuth, requireAdmin, (req, res) => res.json({ minutes: sweepInterval() }));

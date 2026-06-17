@@ -90,10 +90,8 @@ async function boot(){
   $('r_date').value = today(); $('a_date').value = today();
   renderGroups();
   // Role-based landing: everyone opens already where they work.
-  // QR deep-link: the native camera opened /?scan=CODE → log it, then land on Scan Rounds.
-  const scanCode = new URLSearchParams(location.search).get('scan');
-  if(scanCode){ history.replaceState({},'','/'); doRoundScan(scanCode); show(canSeeView('roundscan')?'roundscan':'dashboard'); }
-  else { const landing = (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard'); show(landing); }
+  const landing = (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
+  show(landing);
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
@@ -1716,55 +1714,63 @@ function scanBanner(msg, ok){
   el.style.background= ok?'#eaf7ee':'#fdecea'; el.style.color= ok?'#2d7a4f':'#b00'; el.innerHTML=msg;
   clearTimeout(scanBanner._t); scanBanner._t=setTimeout(()=>{ el.style.display='none'; }, 6000);
 }
-async function doRoundScan(code){
-  try{ const r=await api('/round-scan',{method:'POST',body:JSON.stringify({code})});
-    scanBanner(`✓ <strong>${esc(r.label)}</strong> scanned${r.clients?` · ${r.clients} client check${r.clients>1?'s':''} logged`:''}`, true);
-    if($('roundscan')&&$('roundscan').classList.contains('active')) loadRoundScan();
+async function doRoundScan(code, manual){
+  try{ const r=await api('/round-scan',{method:'POST',body:JSON.stringify({code,manual:!!manual})});
+    const who = r.by ? ` <span class="hint">— ${esc(r.by)}</span>` : '';
+    if(r.flagged) scanBanner(`⚠ Logged, but FLAGGED: ${esc(r.reason||'suspicious pattern')}. A leader will review.`, false);
+    else scanBanner(`✓ <strong>${esc(r.label)}</strong> scanned${r.clients?` · ${r.clients} client check${r.clients>1?'s':''} logged`:''}${who}`, true);
+    if($('roundscan')&&$('roundscan').classList.contains('active')) loadScanCoverage();
   }catch(e){ scanBanner('✗ '+esc(e.message), false); }
 }
-async function manualScan(){ const c=$('scanCodeInput')?$('scanCodeInput').value.trim():''; if(!c){return;} await doRoundScan(c); if($('scanCodeInput'))$('scanCodeInput').value=''; }
-let SCAN_STREAM=null;
+async function manualScan(){ const c=$('scanCodeInput')?$('scanCodeInput').value.trim():''; if(!c){return;} await doRoundScan(c, true); if($('scanCodeInput'))$('scanCodeInput').value=''; }
+let SCAN_STREAM=null, SCAN_RAF=null;
 async function startScanner(){
-  if(!('BarcodeDetector' in window)){
-    scanBanner('In-app scanning isn\'t supported on this device — open the <strong>Camera app</strong> and point it at the QR; it opens and logs automatically. (Or type the code below.)', true);
-    return;
-  }
-  try{
-    const det=new window.BarcodeDetector({formats:['qr_code']});
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    SCAN_STREAM=stream;
-    const ov=document.createElement('div'); ov.id='scanOverlay'; ov.style.cssText='position:fixed;inset:0;background:#000;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center';
-    const vid=document.createElement('video'); vid.autoplay=true; vid.playsInline=true; vid.style.cssText='max-width:100%;max-height:80vh';
-    vid.srcObject=stream;
-    const btn=document.createElement('button'); btn.textContent='✕ Close'; btn.className='btn btn-gold sans'; btn.style.marginTop='16px';
-    btn.onclick=stopScanner;
-    ov.appendChild(vid); ov.appendChild(btn); document.body.appendChild(ov);
-    const tick=async()=>{
-      if(!SCAN_STREAM) return;
-      try{ const codes=await det.detect(vid);
-        if(codes&&codes.length){ const raw=codes[0].rawValue||''; const code=(raw.match(/[?&]scan=([^&]+)/)||[])[1]; const val=code?decodeURIComponent(code):raw;
-          stopScanner(); doRoundScan(val); return; }
+  if(typeof jsQR!=='function'){ scanBanner('Scanner library not loaded — reload the page and try again.', false); return; }
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ scanBanner('This device/browser has no camera access. Use a different browser or type the code.', false); return; }
+  let stream;
+  try{ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}}); }
+  catch(e){ scanBanner('Camera permission denied or unavailable: '+esc(e.message), false); return; }
+  SCAN_STREAM=stream;
+  const ov=document.createElement('div'); ov.id='scanOverlay'; ov.style.cssText='position:fixed;inset:0;background:#000;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px';
+  const vid=document.createElement('video'); vid.autoplay=true; vid.muted=true; vid.playsInline=true; vid.setAttribute('playsinline',''); vid.style.cssText='max-width:100%;max-height:70vh;border-radius:12px';
+  vid.srcObject=stream;
+  const tip=document.createElement('div'); tip.className='sans'; tip.style.cssText='color:#fff;margin:14px 0;font-size:16px;text-align:center'; tip.textContent='Point the camera at the room/area QR';
+  const btn=document.createElement('button'); btn.textContent='✕ Close'; btn.className='btn btn-gold sans';
+  btn.onclick=stopScanner;
+  ov.appendChild(vid); ov.appendChild(tip); ov.appendChild(btn); document.body.appendChild(ov);
+  await vid.play().catch(()=>{});
+  const cv=document.createElement('canvas'); const cx=cv.getContext('2d',{willReadFrequently:true});
+  const tick=()=>{
+    if(!SCAN_STREAM) return;
+    if(vid.readyState===vid.HAVE_ENOUGH_DATA){
+      cv.width=vid.videoWidth; cv.height=vid.videoHeight; cx.drawImage(vid,0,0,cv.width,cv.height);
+      try{ const img=cx.getImageData(0,0,cv.width,cv.height); const q=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
+        if(q&&q.data){ stopScanner(); doRoundScan(q.data); return; }
       }catch(e){}
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }catch(e){ scanBanner('Camera unavailable: '+esc(e.message)+'. Use the Camera app to scan the QR, or type the code.', false); }
+    }
+    SCAN_RAF=requestAnimationFrame(tick);
+  };
+  SCAN_RAF=requestAnimationFrame(tick);
 }
-function stopScanner(){ if(SCAN_STREAM){ SCAN_STREAM.getTracks().forEach(t=>t.stop()); SCAN_STREAM=null; } const ov=$('scanOverlay'); if(ov) ov.remove(); }
+function stopScanner(){ if(SCAN_RAF) cancelAnimationFrame(SCAN_RAF); SCAN_RAF=null; if(SCAN_STREAM){ SCAN_STREAM.getTracks().forEach(t=>t.stop()); SCAN_STREAM=null; } const ov=$('scanOverlay'); if(ov) ov.remove(); }
 async function loadRoundScan(){
+  if($('scanWho')&&ME) $('scanWho').innerHTML = `Scanning as <strong>${esc(ME.name)}</strong>${ME.job_role?' · '+esc(ME.job_role):''} — every scan is logged under your name. <a href="#" class="hint" onclick="doLogout();return false">Not you? Switch user</a>`;
   loadScanCoverage();
-  if(ME&&ME.role==='admin'){ loadScanScorecard(); loadScanPoints(); }
+  if(ME&&ME.role==='admin'){ loadScanScorecard(); loadScanPoints(); loadRoomHours(); }
 }
 async function loadScanCoverage(){
   let d; try{ d=await api('/rounds/coverage'); }catch(e){ if($('scanCoverage'))$('scanCoverage').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   if($('scanCoverageKpis')) $('scanCoverageKpis').innerHTML =
-    `<div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.covered}/${d.total}</div><div class="l">Points covered (last ${d.interval}m)</div></div>`+
-    `<div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.overdue}</div><div class="l">Overdue — walk these</div></div>`;
+    `<div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.covered}/${d.expectedNow}</div><div class="l">Covered now (last ${d.interval}m)</div></div>`+
+    `<div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.overdue}</div><div class="l">Overdue — walk these</div></div>`+
+    `<div class="ret-card"><div class="n">${d.offHours}</div><div class="l">Off-hours (not expected now)</div></div>`;
   if(!d.rows.length){ $('scanCoverage').innerHTML='<div class="empty">No scan points yet. An admin can auto-create them under “Manage scan points”.</div>'; return; }
-  $('scanCoverage').innerHTML = '<table class="tbl" style="width:100%"><tr><th>Point</th><th>Area</th><th>Last scan</th><th>By</th></tr>'+
-    d.rows.map(r=>`<tr><td><strong>${esc(r.label)}</strong></td><td class="hint">${esc(r.area)}</td>
-      <td>${r.overdue?'<span class="risk risk-high">'+(r.minsSince==null?'never':r.minsSince+'m ago — OVERDUE')+'</span>':'<span class="risk risk-low">'+r.minsSince+'m ago ✓</span>'}</td>
-      <td class="hint">${esc(r.lastBy||'—')}</td></tr>`).join('')+'</table>';
+  const status=(r)=> !r.expectedNow ? '<span class="hint">off-hours ('+esc(r.window)+')</span>'
+    : r.overdue ? '<span class="risk risk-high">'+(r.minsSince==null?'never scanned':r.minsSince+'m ago — OVERDUE')+'</span>'
+    : '<span class="risk risk-low">'+r.minsSince+'m ago ✓</span>';
+  $('scanCoverage').innerHTML = '<table class="tbl" style="width:100%"><tr><th>Point</th><th>Area</th><th>Window</th><th>Status</th><th>By</th></tr>'+
+    d.rows.map(r=>`<tr${r.expectedNow?'':' style="opacity:.55"'}><td><strong>${esc(r.label)}</strong></td><td class="hint">${esc(r.area)}</td><td class="hint">${esc(r.window)}</td>
+      <td>${status(r)}</td><td class="hint">${esc(r.lastBy||'—')}</td></tr>`).join('')+'</table>';
 }
 async function loadScanScorecard(){
   const days=$('scanScoreDays')?$('scanScoreDays').value:7;
@@ -1773,8 +1779,8 @@ async function loadScanScorecard(){
   let html = `<div class="ret-cards"><div class="ret-card ${c!=null&&c<80?'rc-warn':''}"><div class="n">${c==null?'—':c+'%'}</div><div class="l">Facility compliance (${d.days}d)</div></div>`+
     `<div class="ret-card"><div class="n">${d.totalScans}</div><div class="l">Scans logged</div></div>`+
     `<div class="ret-card"><div class="n">${d.activePoints}</div><div class="l">Active points</div></div></div>`;
-  html += d.people.length ? '<table class="tbl" style="width:100%;margin-top:10px"><tr><th>Staff</th><th>Scans</th><th>Points covered</th><th>Last</th></tr>'+
-    d.people.map(p=>`<tr><td>${esc(p.name)}</td><td>${p.scans}</td><td>${p.points}</td><td class="hint">${esc((p.last||'').slice(0,16))}</td></tr>`).join('')+'</table>'
+  html += d.people.length ? '<table class="tbl" style="width:100%;margin-top:10px"><tr><th>Staff</th><th>Scans</th><th>Points covered</th><th>⚠ Flagged</th><th>Last</th></tr>'+
+    d.people.map(p=>`<tr><td>${esc(p.name)}</td><td>${p.scans}</td><td>${p.points}</td><td>${p.flagged?'<span class="risk risk-high">'+p.flagged+'</span>':'0'}</td><td class="hint">${esc((p.last||'').slice(0,16))}</td></tr>`).join('')+'</table>'
     : '<div class="empty" style="margin-top:8px">No scans logged in this window yet.</div>';
   html += `<p class="hint" style="margin-top:6px">Compliance estimate = scans ÷ (active points × cycles of ${d.interval}m). Use scan counts as the accountability signal; review context before any discipline.</p>`;
   $('scanScorecard').innerHTML = html;
@@ -1782,11 +1788,13 @@ async function loadScanScorecard(){
 async function loadScanPoints(){
   let d; try{ d=await api('/scan-points'); }catch(e){ return; }
   if($('scanInterval')&&!$('scanInterval').value) $('scanInterval').value=d.interval;
-  $('scanPointsList').innerHTML = d.points.length ? '<table class="tbl" style="width:100%"><tr><th>Label</th><th>Area</th><th>Room</th><th>Active</th><th>Code</th><th></th></tr>'+
-    d.points.map(p=>`<tr${p.active?'':' style="opacity:.5"'}><td>${esc(p.label)}</td><td>${esc(p.area)}</td><td>${esc(p.room||'')}</td>
+  const hrSel=(pid,which,val)=>`<select id="w_${which}_${pid}" onchange="setScanWindow(${pid})" class="sans" style="width:64px">${['',...Array.from({length:24},(_,i)=>i)].map(h=>`<option value="${h}" ${String(val??'')===String(h)?'selected':''}>${h===''?'24/7':(h+':00')}</option>`).join('')}</select>`;
+  $('scanPointsList').innerHTML = d.points.length ? '<table class="tbl" style="width:100%"><tr><th>Label</th><th>Area</th><th>Room</th><th>From</th><th>To</th><th>Active</th><th>Code</th><th></th></tr>'+
+    d.points.map(p=>`<tr${p.active?'':' style="opacity:.5"'} data-pid="${p.id}"><td>${esc(p.label)}</td><td>${esc(p.area)}</td><td>${esc(p.room||'')}</td>
+      <td>${hrSel(p.id,'from', p.active_from)}</td><td>${hrSel(p.id,'to', p.active_to)}</td>
       <td style="text-align:center"><input type="checkbox" ${p.active?'checked':''} onchange="toggleScanPoint(${p.id},this.checked)"/></td>
       <td class="hint"><code>${esc(p.code)}</code></td>
-      <td><button class="btn btn-ghost btn-sm sans" style="color:var(--danger)" onclick="delScanPoint(${p.id},'${esc(p.label).replace(/'/g,"")}')">Delete</button></td></tr>`).join('')+'</table>'
+      <td><button class="btn btn-ghost btn-sm sans" style="color:var(--danger)" onclick="delScanPoint(${p.id},'${esc(p.label).replace(/'/g,"")}')">Delete</button></td></tr>`).join('')+'</table><p class="hint" style="margin-top:4px">From/To = the daily window a point must be scanned (24/7 = always). Rooms default to your room hours; common areas 24/7.</p>'
     : '<div class="empty">No scan points yet.</div>';
 }
 async function addScanPoint(){
@@ -1795,6 +1803,14 @@ async function addScanPoint(){
   try{ await api('/scan-points',{method:'POST',body:JSON.stringify({label,area,room})}); $('newScanLabel').value='';$('newScanRoom').value=''; loadScanPoints(); }catch(e){ alert(e.message); }
 }
 async function toggleScanPoint(id,active){ try{ await api('/scan-points',{method:'POST',body:JSON.stringify({id,active:active?1:0})}); }catch(e){ alert(e.message); } }
+async function setScanWindow(id){ const f=$('w_from_'+id), t=$('w_to_'+id); try{ await api('/scan-points',{method:'POST',body:JSON.stringify({id,active_from:f?f.value:'',active_to:t?t.value:''})}); loadScanCoverage(); }catch(e){ alert(e.message); } }
+async function saveRoomHours(applyAll){
+  const f=+($('roomFrom')?$('roomFrom').value:8), t=+($('roomTo')?$('roomTo').value:22);
+  try{ const r=await api('/rounds/room-hours',{method:'POST',body:JSON.stringify({from:f,to:t,applyAll:!!applyAll})});
+    $('roomHrMsg').textContent = applyAll?('✓ Applied to '+r.applied+' room point(s)'):'✓ Saved (applies to new rooms)'; loadScanPoints(); loadScanCoverage();
+  }catch(e){ $('roomHrMsg').textContent=e.message; }
+}
+async function loadRoomHours(){ try{ const r=await api('/rounds/room-hours'); if($('roomFrom'))$('roomFrom').value=r.from; if($('roomTo'))$('roomTo').value=r.to; }catch(e){} }
 async function delScanPoint(id,label){ if(!confirm('Delete scan point "'+label+'"? Its QR will stop working.')) return; try{ await api('/scan-points',{method:'POST',body:JSON.stringify({id,delete:true})}); loadScanPoints(); }catch(e){ alert(e.message); } }
 async function seedScanPoints(){ try{ const r=await api('/scan-points/seed',{method:'POST'}); alert('Added '+r.added+' scan point(s).'); loadScanPoints(); loadScanCoverage(); }catch(e){ alert(e.message); } }
 async function saveScanInterval(){ const m=+$('scanInterval').value||60; try{ await api('/rounds/sweep-interval',{method:'POST',body:JSON.stringify({minutes:m})}); $('scanIntMsg').textContent='✓ Saved'; loadScanCoverage(); }catch(e){ $('scanIntMsg').textContent=e.message; } }
@@ -2046,16 +2062,16 @@ async function loadRounds(){
     <div class="ret-card"><div class="n">q${d.defaultMin}</div><div class="l">Default cadence</div></div>`;
   if($('roundsQuestion')) $('roundsQuestion').innerHTML = d.question ? `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Ask every client this ${esc((d.shift||'').toLowerCase())} shift</div><h3 style="margin:4px 0 0">“${esc(d.question)}”</h3><p class="sub sans" style="margin:4px 0 0">Tap 💬 on each client to capture their answer. Needs become requests automatically; distress pulls a human in person.</p></div>` : '';
   const rows=[...d.rows].sort((a,b)=>(b.overdue-a.overdue)||((b.minsSince??1e9)-(a.minsSince??1e9)));
-  board.innerHTML = rows.map(r=>{
-    const when = r.minsSince==null?'never checked':(r.minsSince+'m ago'+(r.lastBy?' · '+esc(r.lastBy):''));
+  const scanBannerHtml = `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:220px"><strong>Rounds are completed by scanning.</strong> <span class="hint">A check below only clears when you scan that room's QR — there is no desk check-off. The clock here reflects verified scans.</span></div><button class="btn btn-gold sans" onclick="show('roundscan')">📍 Open Scan Rounds</button></div></div>`;
+  board.innerHTML = scanBannerHtml + rows.map(r=>{
+    const when = r.minsSince==null?'never scanned':(r.minsSince+'m ago'+(r.lastBy?' · '+esc(r.lastBy):''));
     return `<div class="cmd-row ${r.overdue?'cmd-row-flag':''}">
       ${r.photo?`<img src="${esc(r.photo)}" class="client-photo sm" alt=""/>`:''}
       <div class="cmd-row-main"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''}${r.asked?' <span class="risk risk-low">asked ✓</span>':''}
-        <div class="hint">${r.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}last: ${when}${r.lastStatus&&r.lastStatus!=='ok'?' · '+esc(r.lastStatus):''} · q${r.interval}</div></div>
+        <div class="hint">${r.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}last verified: ${when}${r.lastStatus&&r.lastStatus!=='ok'?' · '+esc(r.lastStatus):''} · q${r.interval}</div></div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm sans" onclick="roundAsk(${r.id}, ${JSON.stringify(r.name).replace(/"/g,'&quot;')})" title="Ask the shift question">💬 Ask</button>
-        <button class="btn btn-gold btn-sm sans" onclick="roundCheck(${r.id},'ok')">✓ Check</button>
-        <button class="btn btn-ghost btn-sm sans" onclick="roundConcern(${r.id})" title="Log a concern">⚑</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="roundConcern(${r.id})" title="Flag a concern">⚑ Concern</button>
       </div></div>`;
   }).join('');
   $('roundsAccount').innerHTML = (d.byPerson||[]).length ? d.byPerson.map(p=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(p.k)}</strong></div><span class="chip">${p.n} checks</span></div>`).join('') : '<div class="hint">No checks logged today yet.</div>';

@@ -439,12 +439,11 @@ export async function kipuSyncRoster() {
     // patient detail (the only source of level of care, program, room,
     // referral, discharge type, and the step-down plan). Read it for active
     // clients and for anyone discharging right now; bounded + best-effort.
-    let nextLoc = null, anticipatedDc = null, detailRead = false;
+    let nextLoc = null, anticipatedDc = null;
     if (useDetail && kid && detailMap.has(kid)) {
       try {
         const det = detailMap.get(kid);
         if (det) {
-          detailRead = true;
           const d = (...keys) => { for (const k of keys) { const v = det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.join(', ') : String(v); } return null; };
           // Kipu prefixes the utilization-review level (e.g. "UR LOC: IOP") — strip it.
           const clean = (v) => v == null ? null : String(v).replace(/^\s*UR\s*LOC\s*:?\s*/i, '').trim() || null;
@@ -513,15 +512,6 @@ export async function kipuSyncRoster() {
           discharged ? (dischStatus ? String(dischStatus) : 'Discharged') : null,
           discharged ? (dischDate ? String(dischDate).slice(0, 10) : null) : null,
           dischDest, dischReason, discharged ? 0 : 1, existing.id);
-      // Kipu is the source of truth for the assigned therapist / case manager.
-      // When we actually read the patient detail and Kipu shows NO assignment,
-      // clear any stale value (e.g. a name once mis-inferred from a note author)
-      // so the kiosk never shows someone Kipu hasn't assigned. We only clear when
-      // detailRead is true, so a census-only/partial sync never wipes a real value.
-      if (detailRead) {
-        if (therapist == null) db.prepare(`UPDATE clients SET therapist = NULL WHERE id = ?`).run(existing.id);
-        if (caseMgr == null) db.prepare(`UPDATE clients SET case_manager = NULL WHERE id = ?`).run(existing.id);
-      }
       matched++;
     } else if (!discharged) {
       // Only create rows for currently-active patients.
@@ -1099,7 +1089,41 @@ export async function kipuInspect() {
     if (cf) { try { const ev = await evalListRaw(cf, { all: true }); roundEvalNames = [...new Set(ev.map((x) => x.name).filter((n) => /round|q15|q ?15|observation|safety check|bed ?check/i.test(n || '')))].slice(0, 8); } catch { /* ignore */ } }
     roundsProbe = { probes, roundEvalNames };
   }
-  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, admitTimeSamples, patientDetail, dischargeAnalysis, photoProbe, roundsProbe };
+  // Care-team probe: WHERE does Kipu actually store the assigned therapist /
+  // case manager? Scan several patients' full detail and dump every key path
+  // (any depth) whose key looks person/role-related, with its value — plus the
+  // shape of any team/provider arrays. This is how we find the real field name
+  // when the kiosk shows "no therapist / no case manager".
+  const careTeamProbe = { sampled: 0, scalarHits: [], arrayShapes: [], note: 'Look for the key whose value is the assigned therapist / case manager name.' };
+  try {
+    const KEY_RE = /therap|counsel|clinician|case.?manage|case.?mgmt|\bcm\b|provider|primary|assigned|care.?team|treatment.?team|\bstaff\b|employee|attending|social.?work|\bmsw\b|\blcsw\b/i;
+    const seenPaths = new Set();
+    const scan = (o, path, depth) => {
+      if (!o || typeof o !== 'object' || depth > 5) return;
+      if (Array.isArray(o)) {
+        if (o.length && typeof o[0] === 'object' && KEY_RE.test(path)) {
+          const shape = `${path} [${o.length}] of { ${Object.keys(o[0]).slice(0, 14).join(', ')} }`;
+          if (!seenPaths.has(shape)) { seenPaths.add(shape); careTeamProbe.arrayShapes.push({ shape, sample: JSON.stringify(o[0]).slice(0, 300) }); }
+        }
+        o.slice(0, 4).forEach((it, i) => scan(it, `${path}[${i}]`, depth + 1));
+        return;
+      }
+      for (const [k, v] of Object.entries(o)) {
+        const p = path ? `${path}.${k}` : k;
+        if (KEY_RE.test(k) && v != null && typeof v !== 'object' && String(v).trim()) {
+          const hit = `${p} = ${String(v).slice(0, 80)}`;
+          if (!seenPaths.has(hit)) { seenPaths.add(hit); careTeamProbe.scalarHits.push(hit); }
+        }
+        if (v && typeof v === 'object') scan(v, p, depth + 1);
+      }
+    };
+    const sample = list.slice(0, 6);
+    const dets = await mapLimit(sample, +(process.env.KIPU_CONCURRENCY || 4), async (p) => {
+      const id = p.casefile_id ?? p.id ?? p.patient_id; return id ? kipuPatientDetail(String(id)).catch(() => null) : null;
+    });
+    for (const det of dets) { if (det) { careTeamProbe.sampled++; scan(det, '', 0); } }
+  } catch (e) { careTeamProbe.error = String(e.message).slice(0, 140); }
+  return { count: list.length, topKeys: Object.keys(data || {}), fields, facets, locations, admitTimeSamples, patientDetail, careTeamProbe, dischargeAnalysis, photoProbe, roundsProbe };
 }
 
 // One-time repair: a backfill sync stamped "today" as the discharge date for

@@ -3338,8 +3338,8 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     ];
     sections.push({ key: 'diets', title: 'Dietary needs & allergies — honor these', items: diets.map((c) => item(c, [c.allergies, c.prefs].filter(Boolean).join(' · '), c.allergies ? 'ALLERGY' : '')) });
     sections.push({ key: 'new', title: 'New today — make their first meal land', items: newAdmits.map((c) => item(c)) });
-  } else {
-    // BHT / Tech (default) — the heartbeat of the house
+  } else if (jr === 'BHT / Tech') {
+    // BHT / Tech — the heartbeat of the house
     subtitle = 'The heartbeat of the house — welcome, watch, and the personal touches.';
     const overdue = active.filter(obsOverdue);
     const toWelcome = newAdmits.filter(ccIncomplete);
@@ -3369,6 +3369,16 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
         sections.push({ key: 'survey', title: 'Ask how we’re doing — experience surveys due this week', items: surveyDue.map((c) => item(c, 'no survey in 7 days')), cta: { label: 'Open Surveys →', view: 'surveys' } });
       }
     }
+  } else {
+    // Unset / unrecognized role — a clean, non-clinical landing. No safety rounds,
+    // no at-risk watch, no client-level detail. Just today's Standard (added below)
+    // and a nudge to get the role set so the right dashboard loads.
+    subtitle = 'Your job role isn\'t set yet, so this is a general view — no role-specific tasks are shown.';
+    northStar = { label: 'Residents on the unit', value: active.length, sev: 'ok' };
+    sections.push({ key: 'setup', title: 'Finish your setup', items: [{
+      name: 'Your job role isn\'t set.',
+      sub: 'Ask an admin to set it (Users → your name → Job role). Your My Shift will then show exactly what your role needs.',
+    }] });
   }
 
   // The Horst layer, on every role's dashboard: today's Standard (the lineup
@@ -3377,7 +3387,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const wins = db.prepare(`SELECT w.text, w.by_name, c.pref FROM wows w LEFT JOIN clients c ON c.id = w.client_id ORDER BY w.id DESC LIMIT 5`).all()
     .map((w) => ({ text: w.text, by: w.by_name || '', client: w.pref || '' }));
   // Anticipation nudges for the care-facing roles (the unexpressed-need engine).
-  const nudges = (jr === 'Nurse' || jr === 'BHT / Tech' || jr === '' || jr === 'Team') ? anticipationNudges(active, h) : [];
+  const nudges = (jr === 'Nurse' || jr === 'BHT / Tech') ? anticipationNudges(active, h) : [];
   // Your week — healthy pride: recognition you've given, touches delivered, and
   // your streak of showing up to the daily Standard.
   const uid = req.user.id;
@@ -3417,7 +3427,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   }
   // Meal service — for the roles that serve/stock food (techs + kitchen): prompt
   // to inspect the current meal delivery if it hasn't been checked yet.
-  if (jr === 'BHT / Tech' || jr === 'Kitchen' || jr === '' || jr === 'Team') {
+  if (jr === 'BHT / Tech' || jr === 'Kitchen') {
     const meal = currentMeal();
     const chk = db.prepare(`SELECT complete, received, expected FROM meal_checks WHERE date = ? AND meal = ?`).get(today, meal);
     const needsCheck = !chk;
@@ -3458,10 +3468,11 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       : [{ name: 'No one scheduled for this shift yet', sub: 'Set the lineup in Staffing.' }] });
 
   // Proactive alerts, scoped to the role: each person's My Shift shows only the
-  // alerts that pertain to their role. The Executive Director (and anyone with no
-  // set role) sees the whole house; the Operations and Clinical directors each see
-  // their own lane (tagged in alerts.roles). Untagged alerts surface to everyone.
-  const fullAlertView = !jr || jr === 'Executive Director';
+  // alerts that pertain to their role. The Executive Director and admins see the
+  // whole house; the Operations and Clinical directors each see their own lane
+  // (tagged in alerts.roles). A user with no/unrecognized role sees only general
+  // (untagged) alerts — never clinical detail by accident.
+  const fullAlertView = jr === 'Executive Director' || req.user.role === 'admin';
   const alerts = fullAlertView
     ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all()
     : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND (roles IS NULL OR roles LIKE ?) ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all('%|' + jr + '|%');

@@ -201,13 +201,46 @@ export async function kipuTest() {
 
 // Deep-search an object for the first value whose KEY matches a pattern (the
 // level of care / referral source can live nested in the patient detail).
+// Pull a human name out of a value that may be a plain string or an object —
+// Kipu stores providers either way ("Jane Doe" or {first_name, last_name} / {name}).
+function nameFrom(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.trim() || null;
+  if (typeof v === 'object' && !Array.isArray(v)) {
+    const direct = v.name || v.full_name || v.fullName || v.display_name || v.displayName
+      || v.staff_name || v.provider_name || v.employee_name || v.clinician_name;
+    if (direct && String(direct).trim()) return String(direct).trim();
+    const fn = v.first_name || v.firstName, ln = v.last_name || v.lastName;
+    if (fn || ln) return [fn, ln].filter(Boolean).join(' ').trim() || null;
+  }
+  return null;
+}
 function deepFind(obj, keyRe, depth = 0) {
   if (!obj || typeof obj !== 'object' || depth > 4) return null;
   for (const [k, v] of Object.entries(obj)) {
-    if (keyRe.test(k) && v != null && typeof v !== 'object' && String(v).trim()) return String(v);
+    // Match the key, then pull a name whether the value is a string OR an object
+    // ({primary_therapist: {name: "..."}}). Objects were previously skipped.
+    if (keyRe.test(k)) { const nm = nameFrom(v); if (nm) return nm; }
   }
   for (const v of Object.values(obj)) {
     if (v && typeof v === 'object') { const f = deepFind(v, keyRe, depth + 1); if (f) return f; }
+  }
+  return null;
+}
+// Kipu often lists the care/treatment team as an array of {role|title, name}.
+// Find the member whose role matches and return their name.
+function findTeamMember(obj, roleRe, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 4) return null;
+  const arrays = Array.isArray(obj) ? [obj] : Object.values(obj).filter(Array.isArray);
+  for (const arr of arrays) {
+    for (const it of arr) {
+      if (!it || typeof it !== 'object') continue;
+      const role = it.role || it.title || it.role_name || it.type || it.position || it.relationship || it.staff_role || '';
+      if (roleRe.test(String(role))) { const nm = nameFrom(it) || nameFrom(it.staff) || nameFrom(it.provider); if (nm) return nm; }
+    }
+  }
+  if (!Array.isArray(obj)) for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') { const f = findTeamMember(v, roleRe, depth + 1); if (f) return f; }
   }
   return null;
 }
@@ -361,8 +394,8 @@ export async function kipuSyncRoster() {
     // admission_date is stored at local midnight (date only); the real arrival
     // time is created_at (chart opened at intake). Both converted to local TZ.
     let admitTime = admitTimeFrom(admitRaw, pick(p, 'created_at', 'created_date'));
-    let therapist = pick(p, 'primary_therapist', 'therapist', 'counselor');
-    let caseMgr = pick(p, 'case_manager', 'casemanager');
+    let therapist = nameFrom(pick(p, 'primary_therapist', 'therapist', 'counselor', 'primary_clinician', 'clinician'));
+    let caseMgr = nameFrom(pick(p, 'case_manager', 'casemanager', 'case_manager_name'));
     let room = pick(p, 'bed_name', 'bed_number', 'room_number', 'room_name', 'room', 'bed', 'bed_label', 'bed_name_full');
     // Demographics the census DOES carry — map them straight through.
     const flat = (v) => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v != null ? String(v) : null);
@@ -425,8 +458,8 @@ export async function kipuSyncRoster() {
           if (room == null) room = d('bed_name', 'bed_number', 'room_name', 'room_number', 'room', 'bed', 'bed_label');
           if (dischStatus == null) dischStatus = d('discharge_type', 'discharge_type_code', 'discharge_or_transition_name');
           if (dischDest == null) dischDest = d('discharge_or_transition_name');
-          if (therapist == null) therapist = deepFind(det, /(therapist|counselor|primary.?clinician)/i);
-          if (caseMgr == null) caseMgr = deepFind(det, /(case.?manager|casemanager)/i);
+          if (therapist == null) therapist = deepFind(det, /(primary.?therapist|therapist|counselor|primary.?clinician)/i) || findTeamMember(det, /therap|counsel|clinician/i);
+          if (caseMgr == null) caseMgr = deepFind(det, /(case.?manager|casemanager|case.?mgmt)/i) || findTeamMember(det, /case.?manage|case.?mgmt|\bcm\b/i);
         }
       } catch { /* best-effort */ }
     }
@@ -453,8 +486,8 @@ export async function kipuSyncRoster() {
         kipu_id = COALESCE(kipu_id, ?),
         admit = COALESCE(NULLIF(admit,''), ?),
         admit_time = COALESCE(NULLIF(admit_time,''), ?),
-        therapist = COALESCE(NULLIF(therapist,''), ?),
-        case_manager = COALESCE(NULLIF(case_manager,''), ?),
+        therapist = COALESCE(NULLIF(?,''), NULLIF(therapist,'')),
+        case_manager = COALESCE(NULLIF(?,''), NULLIF(case_manager,'')),
         room = COALESCE(NULLIF(room,''), ?),
         program = COALESCE(NULLIF(program,''), ?),
         referral_source = COALESCE(NULLIF(referral_source,''), ?),
@@ -984,6 +1017,8 @@ export async function kipuInspect() {
         nested,
         levelOfCareFound: deepFind(det, LOC_KEY_RE) || '(none by key name)',
         referralFound: deepFind(det, REF_KEY_RE) || '(none by key name)',
+        therapistFound: deepFind(det, /(primary.?therapist|therapist|counselor|primary.?clinician)/i) || findTeamMember(det, /therap|counsel|clinician/i) || '(none found)',
+        caseManagerFound: deepFind(det, /(case.?manager|casemanager|case.?mgmt)/i) || findTeamMember(det, /case.?manage|case.?mgmt|\bcm\b/i) || '(none found)',
         asamLikeValues: asamLike.slice(0, 14),
         admitTimeFields_detail: timeLike.slice(0, 30),
         admitTimeFields_census: censusTimeFields,

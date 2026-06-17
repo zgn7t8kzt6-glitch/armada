@@ -2694,6 +2694,7 @@ async function loadJourney(){
       ${sec('Preferences', c.prefs?`<div class="pc-note">${esc(c.prefs)}</div>`:'<div class="pc-note">—</div>')}
       ${sec('Triggers / handle with care', c.triggers?`<div class="pc-note">${esc(c.triggers)}</div>`:'<div class="pc-note">—</div>')}
       ${sec('Treatment goals', goalsHtml + `<div class="handoff-add no-print" style="margin-top:8px"><input id="goalInput" placeholder="Add a goal…"/><button class="btn btn-ghost btn-sm sans" onclick="addGoal(${c.id})">Add</button></div>`)}
+      ${sec("Care tasks", `<div id="jTaskWrap"></div>`)}
       ${sec("Today's schedule", schedHtml)}
       ${sec('Open requests', reqHtml)}
       ${sec('Open concerns', concernHtml)}
@@ -2719,7 +2720,21 @@ async function loadJourney(){
       <div id="noteResult"></div>
       <div id="notesList"></div>
     </div>`;
+  JOURNEY_C = c; JTASK_ALL = false; renderJourneyTasks();
   loadClientNotes(c.id);
+}
+// This client's shift tasks, defaulting to the viewer's role; full plan on a toggle.
+let JOURNEY_C = null, JTASK_ALL = false;
+function renderJourneyTasks(){
+  const wrap=$('jTaskWrap'); if(!wrap||!JOURNEY_C) return;
+  const all=(JOURNEY_C.tasks||[]);
+  const leadAll = ME.role==='admin' || ME.job_role==='Executive Director';
+  const showAll = leadAll || JTASK_ALL;
+  const list = showAll ? all : all.filter(t=> t.job_role==='All' || t.job_role===ME.job_role);
+  const rows = list.length ? list.map(t=>`<div class="pc-note"><span class="pr ${t.priority==='High'?'high':'normal'}">${t.priority==='High'?'PRIORITY':(t.job_role==='All'?'ALL':esc(t.job_role))}</span> <span class="hint">${esc(t.shift)}</span> · ${esc(t.text)}</div>`).join('')
+    : `<div class="pc-note">${all.length?'No tasks for your role — tap "Show all roles" for the full plan.':'No shift tasks set.'}</div>`;
+  const toggle = (!leadAll && all.length) ? `<button class="btn btn-ghost btn-sm sans no-print" style="margin-top:6px" onclick="JTASK_ALL=!JTASK_ALL;renderJourneyTasks()">${JTASK_ALL?'Show just my role':'Show all roles ('+all.length+')'}</button>` : '';
+  wrap.innerHTML = rows + toggle;
 }
 async function loadClientNotes(id){
   try { const { notes } = await api('/clients/'+id+'/notes');

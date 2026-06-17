@@ -2571,9 +2571,10 @@ async function cmdChk(id, status){ await api('/command/checklist/'+id,{method:'P
 async function loadCoverage(){
   // clock-in/out widget
   try{ const c = await api('/clock/status');
-    $('clockBox').innerHTML = c.clockedIn
+    const geoHint = c.geofenceOn ? '<div class="hint" style="margin-top:4px">📍 Must be at Armada to clock in/out</div>' : '';
+    $('clockBox').innerHTML = (c.clockedIn
       ? `<span class="risk risk-low" style="margin-right:8px">On the clock</span><button class="btn btn-ghost sans" onclick="clockToggle(false)">Clock out</button>`
-      : `<button class="btn btn-gold sans" onclick="clockToggle(true)">🕐 Clock in</button>`;
+      : `<button class="btn btn-gold sans" onclick="clockToggle(true)">🕐 Clock in</button>`) + geoHint;
   }catch(e){}
   const s = await api('/workforce/summary?range=30');
   const cov = s.coverage;
@@ -2593,6 +2594,7 @@ async function loadCoverage(){
   await ensureReferralMeta().catch(()=>{});
   if($('mos_role')) fillSelect($('mos_role'), ['(role optional)',...(META.jobRoles||['BHT / Tech','Nurse','Therapist','Case Manager'])]);
   loadManualOnShift();
+  loadGeofence();
 }
 async function loadManualOnShift(){
   const box=$('mosList'); if(!box) return;
@@ -2606,7 +2608,38 @@ async function addManualOnShift(){
   catch(e){ if($('mos_msg'))$('mos_msg').textContent=e.message; }
 }
 async function delManualOnShift(id){ try{ await api('/onshift/manual/'+id,{method:'DELETE'}); loadCoverage(); }catch(e){ alert(e.message); } }
-async function clockToggle(inn){ await api('/clock/'+(inn?'in':'out'),{method:'POST'}); loadCoverage(); }
+function getGeo(){ return new Promise((res)=>{ if(!navigator.geolocation) return res({}); navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}),()=>res({}),{enableHighAccuracy:true,timeout:9000,maximumAge:30000}); }); }
+async function clockToggle(inn){
+  const box=$('clockBox'); const prev=box?box.innerHTML:''; if(box) box.innerHTML='<span class="hint">Checking location…</span>';
+  const coords = await getGeo();
+  try{ await api('/clock/'+(inn?'in':'out'),{method:'POST',body:JSON.stringify(coords)}); loadCoverage(); }
+  catch(e){ if(box) box.innerHTML=prev; alert(e.message); }
+}
+async function loadGeofence(){
+  const box=$('geofenceBox'); if(!box) return;
+  if(!canManageStaffing()){ box.style.display='none'; return; }
+  let g; try{ g=await api('/clock/geofence'); }catch(e){ box.style.display='none'; return; }
+  box.style.display='';
+  box.style.borderLeft='4px solid '+(g.on?'var(--good)':'var(--muted)');
+  box.innerHTML=`<h3>📍 Clock-in location lock</h3>
+    <p class="sub sans">Limit clock-in / clock-out to Armada (105 E Market St, Akron OH 44308). Stand at the building and tap <strong>Use my current location</strong> to set it exactly, then turn enforcement on.</p>
+    <div class="toolbar" style="justify-content:flex-start;gap:10px;flex-wrap:wrap;align-items:center">
+      <label class="trg" style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="gf_on" ${g.on?'checked':''} onchange="saveGeofence({on:this.checked})"/> Enforce on-site only</label>
+      <span>Radius <input id="gf_radius" type="number" min="30" value="${g.radius}" style="width:80px"/> m <button class="btn btn-ghost btn-sm sans" onclick="saveGeofence({radius:$('gf_radius').value})">Save radius</button></span>
+      <button class="btn btn-gold btn-sm sans" onclick="setGeofenceHere()">📍 Use my current location</button>
+    </div>
+    <p class="hint" id="gf_msg" style="margin-top:6px">Currently: ${g.on?'<strong style="color:var(--good)">ON</strong>':'off'} · center ${g.lat.toFixed(5)}, ${g.lon.toFixed(5)} · ${g.radius}m</p>`;
+}
+async function saveGeofence(patch){
+  try{ const g=await api('/clock/geofence',{method:'POST',body:JSON.stringify(patch)}); if($('gf_msg'))$('gf_msg').innerHTML=`✓ Saved · ${g.on?'<strong style="color:var(--good)">ON</strong>':'off'} · center ${g.lat.toFixed(5)}, ${g.lon.toFixed(5)} · ${g.radius}m`; }
+  catch(e){ if($('gf_msg'))$('gf_msg').textContent=e.message; }
+}
+async function setGeofenceHere(){
+  if($('gf_msg'))$('gf_msg').textContent='Getting your location…';
+  const c=await getGeo();
+  if(c.lat==null){ if($('gf_msg'))$('gf_msg').textContent='Could not read your location — allow location access and try again.'; return; }
+  saveGeofence({lat:c.lat,lon:c.lon});
+}
 
 let SCHED_STAFF=null;
 async function loadStaffModel(){

@@ -4558,13 +4558,53 @@ app.post('/api/staffing/assignments/:id/calloff', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Clock-in geofence: optionally limit punches to the facility location ──────
+// Default seed = 105 E Market St, Akron OH 44308 (admin should tap "use my
+// current location" on-site to set it precisely). Off until enabled, so it never
+// locks anyone out before it's deliberately configured.
+function geofenceCfg() {
+  return {
+    on: getState('geofence_on') === 'on',
+    lat: parseFloat(getState('geofence_lat')) || 41.0837,
+    lon: parseFloat(getState('geofence_lon')) || -81.5168,
+    radius: parseInt(getState('geofence_radius'), 10) || 200,
+  };
+}
+function metersBetween(la1, lo1, la2, lo2) {
+  const R = 6371000, toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(la2 - la1), dLon = toRad(lo2 - lo1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(la1)) * Math.cos(toRad(la2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+// Returns null if allowed, or an error string if the punch is off-site.
+function geofenceCheck(body) {
+  const g = geofenceCfg();
+  if (!g.on) return null;
+  const lat = parseFloat(body?.lat), lon = parseFloat(body?.lon);
+  if (!isFinite(lat) || !isFinite(lon)) return 'Location is required to clock in/out. Turn on location for this site and try again.';
+  const dist = metersBetween(lat, lon, g.lat, g.lon);
+  const acc = Math.min(parseFloat(body?.acc) || 0, 100);   // give back up to 100m of GPS slack
+  if (dist - acc > g.radius) return `You can only clock in/out at Armada. You appear to be about ${Math.round(dist)}m away.`;
+  return null;
+}
+app.get('/api/clock/geofence', requireAuth, (req, res) => res.json(geofenceCfg()));
+app.post('/api/clock/geofence', requireAuth, requireStaffingManager, (req, res) => {
+  const b = req.body || {};
+  if (b.lat != null && isFinite(parseFloat(b.lat))) setState('geofence_lat', String(parseFloat(b.lat)));
+  if (b.lon != null && isFinite(parseFloat(b.lon))) setState('geofence_lon', String(parseFloat(b.lon)));
+  if (b.radius != null) setState('geofence_radius', String(Math.max(30, parseInt(b.radius, 10) || 200)));
+  if (b.on != null) setState('geofence_on', b.on ? 'on' : 'off');
+  res.json({ ok: true, ...geofenceCfg() });
+});
 // In-app time clock (default until an external system is connected).
 app.get('/api/clock/status', requireAuth, (req, res) => {
   const mine = db.prepare(`SELECT * FROM time_entries WHERE user_id = ? AND clock_out IS NULL ORDER BY id DESC LIMIT 1`).get(req.user.id);
   const onNow = db.prepare(`SELECT user_id, user_name, clock_in FROM time_entries WHERE clock_out IS NULL ORDER BY clock_in`).all();
-  res.json({ clockedIn: !!mine, since: mine?.clock_in || null, onNow });
+  res.json({ clockedIn: !!mine, since: mine?.clock_in || null, onNow, geofenceOn: geofenceCfg().on });
 });
 app.post('/api/clock/in', requireAuth, (req, res) => {
+  const err = geofenceCheck(req.body);
+  if (err) return res.status(403).json({ error: err });
   const open = db.prepare(`SELECT id FROM time_entries WHERE user_id = ? AND clock_out IS NULL`).get(req.user.id);
   if (open) return res.json({ ok: true, already: true });
   db.prepare(`INSERT INTO time_entries (user_id, user_name) VALUES (?,?)`).run(req.user.id, req.user.name);
@@ -4572,6 +4612,8 @@ app.post('/api/clock/in', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 app.post('/api/clock/out', requireAuth, (req, res) => {
+  const err = geofenceCheck(req.body);
+  if (err) return res.status(403).json({ error: err });
   db.prepare(`UPDATE time_entries SET clock_out = datetime('now') WHERE user_id = ? AND clock_out IS NULL`).run(req.user.id);
   audit({ user: req.user, action: 'CLOCK_OUT', ip: req.ip });
   res.json({ ok: true });

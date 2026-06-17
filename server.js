@@ -5189,8 +5189,29 @@ function careRoleBucket(s) {
   const j = (s || '').toLowerCase();
   if (/nurse|\brn\b|\blpn\b|\blvn\b/.test(j)) return 'nurses';
   if (/bht|tech|\brt\b|recovery|behavioral health/.test(j)) return 'rts';
+  if (/therap/.test(j)) return 'therapists';
   if (/case\s*manager|case\s*mgmt|\bcm\b/.test(j)) return 'caseManagers';
   return null;
+}
+// Who's on shift now for the resident kiosk + the admin data-health check:
+// the union of staff clocked in now and staff scheduled for the current shift
+// part, deduped and bucketed by role. Tracks how many came from each source so
+// leaders can see whether the time clock / schedule is actually being kept.
+function computeOnShift() {
+  const buckets = { nurses: [], rts: [], caseManagers: [], therapists: [] };
+  const add = (name, roleStr) => {
+    const b = careRoleBucket(roleStr);
+    if (!b || !name) return;
+    if (!buckets[b].some((x) => x.toLowerCase() === String(name).toLowerCase())) buckets[b].push(name);
+  };
+  const clocked = db.prepare(`SELECT t.user_name, u.job_role FROM time_entries t JOIN users u ON u.id = t.user_id
+    WHERE t.clock_out IS NULL AND u.active = 1`).all();
+  clocked.forEach((r) => add(r.user_name, r.job_role));
+  const part = currentShift();
+  const scheduled = db.prepare(`SELECT a.user_name, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
+    WHERE s.date = date('now') AND s.part = ? AND a.status = 'scheduled'`).all(part);
+  scheduled.forEach((r) => add(r.user_name, r.role));
+  return { buckets, shift: part, clockedInCount: clocked.length, scheduledCount: scheduled.length };
 }
 app.get('/api/kiosk/careteam', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
@@ -5198,26 +5219,20 @@ app.get('/api/kiosk/careteam', (req, res) => {
     ? db.prepare(`SELECT pref, name, room, case_manager, therapist FROM clients WHERE id = ? AND active = 1 AND discharge_status IS NULL`).get(req.query.client_id)
     : null;
   if (!c) return res.status(400).json({ error: 'Please choose your name first.' });
-  const buckets = { nurses: [], rts: [], caseManagers: [] };
-  const add = (name, roleStr) => {
-    const b = careRoleBucket(roleStr);
-    if (!b || !name) return;
-    if (!buckets[b].some((x) => x.toLowerCase() === String(name).toLowerCase())) buckets[b].push(name);
-  };
-  // Clocked in right now (real presence).
-  db.prepare(`SELECT t.user_name, u.job_role FROM time_entries t JOIN users u ON u.id = t.user_id
-    WHERE t.clock_out IS NULL AND u.active = 1`).all().forEach((r) => add(r.user_name, r.job_role));
-  // Scheduled for the current shift part today (planned coverage).
-  const part = currentShift();
-  db.prepare(`SELECT a.user_name, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
-    WHERE s.date = date('now') AND s.part = ? AND a.status = 'scheduled'`).all(part).forEach((r) => add(r.user_name, r.role));
+  const { buckets, shift } = computeOnShift();
   res.json({
     client: { name: c.pref || c.name, room: c.room || '' },
     caseManager: c.case_manager || '',
     therapist: c.therapist || '',
     onShift: buckets,
-    shift: part,
+    shift,
   });
+});
+// Admin data-health: is the kiosk's "on shift now" going to show real names? Shows
+// per-role coverage plus whether the time clock / today's schedule are populated.
+app.get('/api/care-team/onshift', requireAuth, (req, res) => {
+  const { buckets, shift, clockedInCount, scheduledCount } = computeOnShift();
+  res.json({ shift, onShift: buckets, clockedInCount, scheduledCount });
 });
 
 app.get('/api/docs', requireAuth, (req, res) => {

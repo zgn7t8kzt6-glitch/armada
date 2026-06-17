@@ -2645,6 +2645,22 @@ async function loadSchedule(){
       ${ME&&ME.role==='admin'?`<div class="handoff-add"><select id="asgn_${s.id}">${opt}</select><button class="btn btn-ghost btn-sm sans" onclick="assignSlot(${s.id})">Assign</button></div>`:''}
     </div>`;
   }).join('') : '<div class="card"><div class="empty">No shifts scheduled for this day. Add shift needs above.</div></div>';
+  loadCareHealth();
+}
+// Mirrors exactly what the resident kiosk's "Who's on my care team?" will show for
+// "on shift now", so a leader can confirm at a glance it has real data to show.
+async function loadCareHealth(){
+  const box=$('careHealth'); if(!box) return;
+  let h; try{ h=await api('/care-team/onshift'); }catch(e){ box.style.display='none'; return; }
+  const os=h.onShift||{};
+  const chip=(label,arr)=>{ const n=(arr||[]).filter(Boolean); return `<span class="risk ${n.length?'risk-low':'risk-elev'}" style="margin:0 6px 6px 0;display:inline-block">${esc(label)}: ${n.length?esc(n.join(', ')):'none'}</span>`; };
+  const empty=!h.clockedInCount && !h.scheduledCount;
+  box.style.display='';
+  box.style.borderLeft='4px solid '+(empty?'var(--danger)':'var(--good)');
+  box.innerHTML=`<h3>Resident kiosk — who it shows as "on shift now"</h3>
+    <p class="sub sans">This is exactly what a resident sees under <strong>Who's on my care team?</strong> right now (${esc(h.shift||'')} shift). It's the union of who's <strong>clocked in</strong> and who's <strong>scheduled</strong> for this shift.</p>
+    <div style="margin:8px 0">${chip('Nurse',os.nurses)}${chip('RT / BHT',os.rts)}${chip('Therapist',os.therapists)}${chip('Case manager',os.caseManagers)}</div>
+    <p class="hint">${h.clockedInCount} clocked in · ${h.scheduledCount} scheduled this shift.${empty?' <strong style="color:var(--danger)">Nothing populated — residents will only see their assigned CM/therapist, no on-shift names. Build today\'s schedule above or have staff clock in.</strong>':''}</p>`;
 }
 function schShift(n){ const d=new Date($('sc_date').value||today()); d.setDate(d.getDate()+n); $('sc_date').value=d.toISOString().slice(0,10); loadSchedule(); }
 async function addSlot(){ try{ await api('/staffing/slots',{method:'POST',body:JSON.stringify({date:$('sc_date').value||today(),part:$('sc_part').value,role:$('sc_role').value,needed:$('sc_needed').value})}); $('sc_msg').textContent='✓ Added'; setTimeout(()=>$('sc_msg').textContent='',2000); loadSchedule(); }catch(e){ $('sc_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }

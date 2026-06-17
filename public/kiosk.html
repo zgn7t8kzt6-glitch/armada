@@ -190,6 +190,7 @@ async function loadCareTeam(){
         <div style="font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--gold);font-family:sans-serif">On shift right now${d.shift?' · '+esc(d.shift):''}</div>
         ${careList('Nurse', onShift.nurses, 'No nurse shown — ask the front desk')}
         ${careList('RT / BHT', onShift.rts, 'No RT shown — ask the front desk')}
+        ${careList('Therapist on shift', onShift.therapists, 'None on shift right now')}
         ${careList('Case manager on shift', onShift.caseManagers, 'None on shift right now')}
       </div>`;
   }catch(e){ if($('kcareerr')) $('kcareerr').textContent=e.message; if($('kcareout')) $('kcareout').innerHTML=''; }

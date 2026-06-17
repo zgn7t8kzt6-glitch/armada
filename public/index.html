@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616Q" />
+<link rel="stylesheet" href="/styles.css?v=20260616R" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -679,10 +679,7 @@
         </div>
         <div id="scanWho" class="sans" style="margin:6px 0;font-size:14px"></div>
         <div id="scanMsg" class="sans" style="margin:8px 0;display:none"></div>
-        <div id="scanManual" class="toolbar no-print" style="justify-content:flex-start;gap:6px;margin-top:6px">
-          <input id="scanCodeInput" class="sans" placeholder="…or type the code under a damaged QR" style="min-width:240px"/>
-          <button class="btn btn-ghost btn-sm sans" onclick="manualScan()">Log it</button>
-        </div>
+        <p class="hint no-print" style="margin:4px 0">Rounds can only be logged by scanning live in the app — every scan saves a photo of the spot. There is no manual/typed entry.</p>
         <div id="scanCoverageKpis" class="ret-cards" style="margin-top:10px"></div>
       </div>
       <div class="card">
@@ -1755,6 +1752,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616Q"></script>
+<script src="/app.js?v=20260616R"></script>
 </body>
 </html>

@@ -3146,6 +3146,29 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       items: D.outItems.concat(D.lowItems).slice(0, 12).map((x) => ({ name: x.name, sub: x.department, badge: x.status === 'out' ? 'OUT' : 'low' })) });
     if (D.mOverdue.length) sections.push({ key: 'defects', title: '🛠️ Defects past their close-by time', cta: { label: 'Open Maintenance →', view: 'maintenance' },
       items: D.mOverdue.slice(0, 10).map((r) => ({ name: r.title, sub: [r.location, r.priority].filter(Boolean).join(' · '), badge: 'OVERDUE' })) });
+    // Shift inventory checks still owed today, by department.
+    const invCutoff = localHour() >= +autoCfg('inv_check_hour', 14);
+    const invOwed = INV_DEPTS.map((d) => {
+      const has = db.prepare(`SELECT COUNT(*) n FROM inventory_items WHERE department = ? AND active = 1`).get(d).n;
+      if (!has) return null;
+      const last = db.prepare(`SELECT MAX(c.created_at) m FROM inventory_counts c JOIN inventory_items i ON i.id = c.item_id WHERE i.department = ?`).get(d).m;
+      if (last && String(last).slice(0, 10) === today) return null;   // already counted today
+      return { name: d, sub: last ? `last counted ${String(last).slice(0, 16)}` : 'never counted', badge: invCutoff ? 'OVERDUE' : 'DUE' };
+    }).filter(Boolean);
+    if (invOwed.length) sections.push({ key: 'invchecks', title: '🧮 Shift inventory checks still owed today', cta: { label: 'Open Supplies →', view: 'inventory' }, items: invOwed });
+    // Open operational requests (concierge/kitchen/housekeeping/maintenance/transport/activities).
+    const OPS_DEPTS = ['Front Desk / Concierge', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation'];
+    const opsReqs = db.prepare(`SELECT r.text, r.department, r.priority, c.pref FROM requests r LEFT JOIN clients c ON c.id = r.client_id
+      WHERE r.status != 'Done' AND r.department IN (${OPS_DEPTS.map(() => '?').join(',')})
+      ORDER BY (r.priority = 'Urgent') DESC, (r.priority = 'High') DESC, r.id DESC LIMIT 12`).all(...OPS_DEPTS);
+    if (opsReqs.length) sections.push({ key: 'requests', title: '🛎️ Open requests — operations', cta: { label: 'Open Concierge →', view: 'concierge' },
+      items: opsReqs.map((r) => ({ name: (r.text || '').slice(0, 80), sub: r.department + (r.pref ? ' · ' + r.pref : ''), badge: r.priority === 'Urgent' ? 'URGENT' : r.priority === 'High' ? 'HIGH' : '' })) });
+    // Today's meals not yet inspected (current + earlier meals).
+    const inspected = db.prepare(`SELECT meal FROM meal_checks WHERE date = ?`).all(today).map((r) => r.meal);
+    const mealRank = { Breakfast: 0, Lunch: 1, Dinner: 2 };
+    const mealsDue = MEALS_LIST.filter((m) => !inspected.includes(m) && (mealRank[m] ?? 9) <= (mealRank[currentMeal()] ?? 9));
+    if (mealsDue.length) sections.push({ key: 'meals', title: '🍽️ Meals not yet inspected today', cta: { label: 'Open Meals →', view: 'meals' },
+      items: mealsDue.map((m) => ({ name: m, sub: `Confirm portions (${censusNow()} on the unit) + all food groups, then log it`, badge: 'TO DO' })) });
     sections.push({ key: 'note', title: 'The standard for this seat', items: [{ name: 'A great operations leader is invisible because nothing breaks.', sub: 'Build the system so the shortage never happens — fixing today\'s shortage is the failure, not the win.' }] });
   } else if (jr === 'Nurse') {
     subtitle = 'Medical watch — withdrawal, meds, and the safety of every client.';

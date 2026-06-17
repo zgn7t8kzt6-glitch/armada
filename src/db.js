@@ -948,6 +948,8 @@ function ensureCourse(key, title, description, body, recert, questions) {
 function seedLearning() {
   ensureDoc('Policy', 'Crisis Escalation Ladder (L1–L4)',
     'The One Rule: a human goes to the patient, always — never a chat.\n\nL1 First signs (pacing, agitation): Crisis Owner goes within 5 minutes; sit, listen, fix the fixable. Most crises end here.\nL2 Escalating (shouting, demands): Crisis Owner + clinical staff respond together in person; on-call leader called; comfort per protocol; no ultimatums, no "calm down," no audience.\nL3 "I\'m leaving": leader + clinician engaged; run the Save; if staying, re-stabilize and follow up within an hour; if leaving, Safe Departure every step.\nL4 Safety event: 911/medical per clinical judgment; never block an exit, never restrain to retain; debrief within 24 hours.', 'crisis, escalation, owner');
+  ensureDoc('Policy', 'Safety Rounds — Scan Verification & Accountability',
+    'Why: a round is a face-to-face safety check, not a signature on a sheet. To prove every round actually happened, a QR code is mounted at the FARTHEST reachable point of every room and common area (dining, lounge, group rooms, activity room, entrances). You only get credit for a round when you physically walk to that point and scan it with your iPad/phone.\n\nHow:\n1. Every check-in cycle, do a FULL sweep — scan every active point. A room scan also logs the safety check for the client(s) in that room.\n2. Scan with the Camera app (it opens and logs automatically) or the in-app scanner. If a QR is damaged, type the code printed beneath it and tell maintenance.\n3. The Scan Rounds board shows what\'s covered and what\'s overdue (red) this cycle — clear the reds.\n\nAccountability (progressive, never automatic):\n- The system rates each employee by scans completed and on-time compliance.\n- Missed scans are coached first. Pattern of misses → documented verbal coaching → written warning → final warning → termination. Every step is reviewed by a leader with context (call-offs, emergencies, census). Termination is a human decision, documented — never triggered by the software alone.\n- Falsifying a round (scanning without checking, or having someone else scan for you) is a serious integrity violation and is grounds for immediate disciplinary review.\n\nThe standard: we round to keep people safe and seen, not to satisfy a form. Walk the full space, lay eyes on every client, scan to prove it.', 'rounds, safety, scan, accountability, policy');
   ensureDoc('SOP', 'Running the Daily Lineup',
     'Every shift, every day, including nights — led, 10–15 minutes:\n1. One principle of the Standard (rotating).\n2. Today\'s info: census, acuity, arrivals/departures, Crisis Owner named, on-call leader posted.\n3. Preference Board highlights — who needs what today.\n4. Recognition by name — specific, same-day.\n5. One defect from the Listening System and who owns the fix.', 'lineup, huddle');
   ensureDoc('SOP', 'Handoff Standard',
@@ -1328,6 +1330,31 @@ db.exec(`CREATE TABLE IF NOT EXISTS obs_checks (
 CREATE INDEX IF NOT EXISTS idx_obs_client_ts ON obs_checks(client_id, ts);`);
 addColumn('obs_checks', 'kipu_eval_id', 'TEXT');   // source eval id, so Kipu-charted rounds dedupe
 addColumn('clients', 'doc_forms', 'TEXT');          // JSON: which key Kipu forms exist on the chart
+
+// ---- Rounds scan verification: a QR at the FARTHEST point of each room/area, so a
+// "round" is only credited when staff physically walk there and scan it. Scanning a
+// room point also logs a verified obs_check for the client(s) in that room.
+db.exec(`CREATE TABLE IF NOT EXISTS scan_points (
+  id INTEGER PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,                 -- random token embedded in the QR
+  label TEXT NOT NULL,                       -- e.g. "Room A06" / "Dining room" / "Lounge"
+  area TEXT NOT NULL DEFAULT 'Room',         -- Room | Common
+  room TEXT,                                 -- links a Room point to client room(s)
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS round_scans (
+  id INTEGER PRIMARY KEY,
+  point_id INTEGER REFERENCES scan_points(id) ON DELETE CASCADE,
+  code TEXT,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  source TEXT NOT NULL DEFAULT 'scan',       -- scan | manual (typed code, e.g. damaged QR)
+  ts TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_round_scans_ts ON round_scans(ts);
+CREATE INDEX IF NOT EXISTS idx_round_scans_point ON round_scans(point_id, ts);`);
 
 // ---- Medical send-outs: ED/hospital trips (the "OTHER" section of the census).
 // A client physically sent out for medical care — still on our census until

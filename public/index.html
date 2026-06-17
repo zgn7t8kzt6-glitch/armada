@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616N" />
+<link rel="stylesheet" href="/styles.css?v=20260616O" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -57,6 +57,7 @@
     <button data-view="concierge">Concierge</button>
     <button data-view="dignity" data-subview>Dignity Kits</button>
     <button data-view="rounds">Rounds</button>
+    <button data-view="roundscan">Scan Rounds</button>
     <button data-view="engagement">Engagement</button>
     <button data-view="program">Program</button>
     <button data-view="meals">Meals</button>
@@ -670,6 +671,50 @@
       <div class="card"><h3>No-show follow-up <span class="hint" style="font-weight:400">— scheduled but never admitted in Kipu</span></h3><div id="arrivalsFollow"></div></div>
     </section>
 
+    <section id="roundscan" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>📍 Scan Rounds — proof you were there</h3><p class="sub sans">A QR sits at the farthest point of every room and common area. A round only counts when you physically walk over and scan it. Use the iPad/phone <strong>Camera</strong> — it logs automatically — or the in-app scanner below.</p></div>
+          <button class="btn btn-gold sans" onclick="startScanner()">📷 Scan a point</button>
+        </div>
+        <div id="scanMsg" class="sans" style="margin:8px 0;display:none"></div>
+        <div id="scanManual" class="toolbar no-print" style="justify-content:flex-start;gap:6px;margin-top:6px">
+          <input id="scanCodeInput" class="sans" placeholder="…or type the code under a damaged QR" style="min-width:240px"/>
+          <button class="btn btn-ghost btn-sm sans" onclick="manualScan()">Log it</button>
+        </div>
+        <div id="scanCoverageKpis" class="ret-cards" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <div class="cmd-hero-row"><div><h3>This cycle — coverage</h3><p class="sub sans">Every active point. Green = scanned within the window; red = overdue. Walk to the reds.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadRoundScan()">Refresh</button></div>
+        <div id="scanCoverage"></div>
+      </div>
+      <div class="card" data-admin>
+        <div class="cmd-hero-row"><div><h3>👤 Accountability scorecard</h3><p class="sub sans">Scans per person and facility compliance. Misses are coached first — termination is a documented human decision, never automatic.</p></div>
+          <select id="scanScoreDays" class="sans" onchange="loadScanScorecard()"><option value="7">7 days</option><option value="30">30 days</option></select></div>
+        <div id="scanScorecard"></div>
+      </div>
+      <div class="card" data-admin>
+        <details><summary class="sans" style="cursor:pointer;font-weight:600">⚙ Manage scan points &amp; print QR codes</summary>
+          <p class="sub sans" style="margin:8px 0">Place each QR at the FARTHEST reachable spot of its room/area so staff must walk the full space. Print, laminate, mount.</p>
+          <div class="toolbar no-print" style="justify-content:flex-start;gap:6px;margin:8px 0">
+            <button class="btn btn-gold sans" onclick="seedScanPoints()">Auto-create from current rooms + common areas</button>
+            <button class="btn btn-ghost sans" onclick="printScanCodes()">🖨 Print all QR codes</button>
+            <span class="hint" style="align-self:center">Cadence:</span>
+            <input id="scanInterval" type="number" min="5" style="width:70px"/><span class="hint" style="align-self:center">min</span>
+            <button class="btn btn-ghost btn-sm sans" onclick="saveScanInterval()">Save cadence</button>
+            <span id="scanIntMsg" class="hint" style="align-self:center"></span>
+          </div>
+          <div class="toolbar no-print" style="justify-content:flex-start;gap:6px;margin:6px 0">
+            <input id="newScanLabel" class="sans" placeholder="New point label — e.g. Room A07 / Lounge" style="min-width:220px"/>
+            <select id="newScanArea" class="sans"><option>Room</option><option>Common</option></select>
+            <input id="newScanRoom" class="sans" placeholder="room # (rooms only)" style="width:120px"/>
+            <button class="btn btn-ghost sans" onclick="addScanPoint()">+ Add point</button>
+          </div>
+          <div id="scanPointsList"></div>
+        </details>
+      </div>
+    </section>
     <section id="rounds" class="view">
       <div class="card">
         <div class="cmd-hero-row">
@@ -1695,6 +1740,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=20260616N"></script>
+<script src="/app.js?v=20260616O"></script>
 </body>
 </html>

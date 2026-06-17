@@ -90,8 +90,10 @@ async function boot(){
   $('r_date').value = today(); $('a_date').value = today();
   renderGroups();
   // Role-based landing: everyone opens already where they work.
-  const landing = (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
-  show(landing);
+  // QR deep-link: the native camera opened /?scan=CODE → log it, then land on Scan Rounds.
+  const scanCode = new URLSearchParams(location.search).get('scan');
+  if(scanCode){ history.replaceState({},'','/'); doRoundScan(scanCode); show(canSeeView('roundscan')?'roundscan':'dashboard'); }
+  else { const landing = (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard'); show(landing); }
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
@@ -123,7 +125,7 @@ const GROUP_OF={
   arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
   // Stay — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
-  concierge:'stay',dignity:'stay',rounds:'stay',engagement:'stay',program:'stay',meals:'stay',
+  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',engagement:'stay',program:'stay',meals:'stay',
   casemgmt:'stay',retention:'stay',surveys:'stay',incidents:'stay',compliance:'stay',
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
@@ -155,6 +157,7 @@ const VIEW_ROLES = {
   editor:      CARE,
   records:     ['Nurse','Case Manager','Therapist','Clinical Director'],
   rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
+  roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   dignity:     ['BHT / Tech','Nurse','Clinical Director'],
   engagement:  ['BHT / Tech','Therapist','Clinical Director'],
   program:     ['BHT / Tech','Therapist','Clinical Director'],
@@ -264,6 +267,7 @@ function show(v){
   if(v==='operations') loadOps();
   if(v==='arrivals') loadArrivals();
   if(v==='arrivalcheck') loadArrivalTasks();
+  if(v==='roundscan') loadRoundScan();
   if(v==='outcomes') loadOutcomes();
   if(v==='lineup') loadLineup();
   if(v==='surveys') loadSurveys();
@@ -1705,6 +1709,105 @@ async function sendMessage(){
 function updateMsgBadge(n){ const b=$('msgBadge'); if(!b) return; if(n>0){ b.textContent=n; b.style.display=''; } else { b.textContent=''; b.style.display='none'; } }
 async function pollMsgUnread(){ try{ const {unread}=await api('/messages/unread'); updateMsgBadge(unread); }catch(e){} }
 
+/* ---- Scan Rounds: QR-verified physical rounds ---- */
+function scanBanner(msg, ok){
+  const el=$('scanMsg'); if(!el) return;
+  el.style.display=''; el.style.padding='10px 14px'; el.style.borderRadius='8px'; el.style.fontSize='15px';
+  el.style.background= ok?'#eaf7ee':'#fdecea'; el.style.color= ok?'#2d7a4f':'#b00'; el.innerHTML=msg;
+  clearTimeout(scanBanner._t); scanBanner._t=setTimeout(()=>{ el.style.display='none'; }, 6000);
+}
+async function doRoundScan(code){
+  try{ const r=await api('/round-scan',{method:'POST',body:JSON.stringify({code})});
+    scanBanner(`✓ <strong>${esc(r.label)}</strong> scanned${r.clients?` · ${r.clients} client check${r.clients>1?'s':''} logged`:''}`, true);
+    if($('roundscan')&&$('roundscan').classList.contains('active')) loadRoundScan();
+  }catch(e){ scanBanner('✗ '+esc(e.message), false); }
+}
+async function manualScan(){ const c=$('scanCodeInput')?$('scanCodeInput').value.trim():''; if(!c){return;} await doRoundScan(c); if($('scanCodeInput'))$('scanCodeInput').value=''; }
+let SCAN_STREAM=null;
+async function startScanner(){
+  if(!('BarcodeDetector' in window)){
+    scanBanner('In-app scanning isn\'t supported on this device — open the <strong>Camera app</strong> and point it at the QR; it opens and logs automatically. (Or type the code below.)', true);
+    return;
+  }
+  try{
+    const det=new window.BarcodeDetector({formats:['qr_code']});
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    SCAN_STREAM=stream;
+    const ov=document.createElement('div'); ov.id='scanOverlay'; ov.style.cssText='position:fixed;inset:0;background:#000;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center';
+    const vid=document.createElement('video'); vid.autoplay=true; vid.playsInline=true; vid.style.cssText='max-width:100%;max-height:80vh';
+    vid.srcObject=stream;
+    const btn=document.createElement('button'); btn.textContent='✕ Close'; btn.className='btn btn-gold sans'; btn.style.marginTop='16px';
+    btn.onclick=stopScanner;
+    ov.appendChild(vid); ov.appendChild(btn); document.body.appendChild(ov);
+    const tick=async()=>{
+      if(!SCAN_STREAM) return;
+      try{ const codes=await det.detect(vid);
+        if(codes&&codes.length){ const raw=codes[0].rawValue||''; const code=(raw.match(/[?&]scan=([^&]+)/)||[])[1]; const val=code?decodeURIComponent(code):raw;
+          stopScanner(); doRoundScan(val); return; }
+      }catch(e){}
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }catch(e){ scanBanner('Camera unavailable: '+esc(e.message)+'. Use the Camera app to scan the QR, or type the code.', false); }
+}
+function stopScanner(){ if(SCAN_STREAM){ SCAN_STREAM.getTracks().forEach(t=>t.stop()); SCAN_STREAM=null; } const ov=$('scanOverlay'); if(ov) ov.remove(); }
+async function loadRoundScan(){
+  loadScanCoverage();
+  if(ME&&ME.role==='admin'){ loadScanScorecard(); loadScanPoints(); }
+}
+async function loadScanCoverage(){
+  let d; try{ d=await api('/rounds/coverage'); }catch(e){ if($('scanCoverage'))$('scanCoverage').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  if($('scanCoverageKpis')) $('scanCoverageKpis').innerHTML =
+    `<div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.covered}/${d.total}</div><div class="l">Points covered (last ${d.interval}m)</div></div>`+
+    `<div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.overdue}</div><div class="l">Overdue — walk these</div></div>`;
+  if(!d.rows.length){ $('scanCoverage').innerHTML='<div class="empty">No scan points yet. An admin can auto-create them under “Manage scan points”.</div>'; return; }
+  $('scanCoverage').innerHTML = '<table class="tbl" style="width:100%"><tr><th>Point</th><th>Area</th><th>Last scan</th><th>By</th></tr>'+
+    d.rows.map(r=>`<tr><td><strong>${esc(r.label)}</strong></td><td class="hint">${esc(r.area)}</td>
+      <td>${r.overdue?'<span class="risk risk-high">'+(r.minsSince==null?'never':r.minsSince+'m ago — OVERDUE')+'</span>':'<span class="risk risk-low">'+r.minsSince+'m ago ✓</span>'}</td>
+      <td class="hint">${esc(r.lastBy||'—')}</td></tr>`).join('')+'</table>';
+}
+async function loadScanScorecard(){
+  const days=$('scanScoreDays')?$('scanScoreDays').value:7;
+  let d; try{ d=await api('/rounds/scorecard?days='+days); }catch(e){ return; }
+  const c = d.compliancePct;
+  let html = `<div class="ret-cards"><div class="ret-card ${c!=null&&c<80?'rc-warn':''}"><div class="n">${c==null?'—':c+'%'}</div><div class="l">Facility compliance (${d.days}d)</div></div>`+
+    `<div class="ret-card"><div class="n">${d.totalScans}</div><div class="l">Scans logged</div></div>`+
+    `<div class="ret-card"><div class="n">${d.activePoints}</div><div class="l">Active points</div></div></div>`;
+  html += d.people.length ? '<table class="tbl" style="width:100%;margin-top:10px"><tr><th>Staff</th><th>Scans</th><th>Points covered</th><th>Last</th></tr>'+
+    d.people.map(p=>`<tr><td>${esc(p.name)}</td><td>${p.scans}</td><td>${p.points}</td><td class="hint">${esc((p.last||'').slice(0,16))}</td></tr>`).join('')+'</table>'
+    : '<div class="empty" style="margin-top:8px">No scans logged in this window yet.</div>';
+  html += `<p class="hint" style="margin-top:6px">Compliance estimate = scans ÷ (active points × cycles of ${d.interval}m). Use scan counts as the accountability signal; review context before any discipline.</p>`;
+  $('scanScorecard').innerHTML = html;
+}
+async function loadScanPoints(){
+  let d; try{ d=await api('/scan-points'); }catch(e){ return; }
+  if($('scanInterval')&&!$('scanInterval').value) $('scanInterval').value=d.interval;
+  $('scanPointsList').innerHTML = d.points.length ? '<table class="tbl" style="width:100%"><tr><th>Label</th><th>Area</th><th>Room</th><th>Active</th><th>Code</th><th></th></tr>'+
+    d.points.map(p=>`<tr${p.active?'':' style="opacity:.5"'}><td>${esc(p.label)}</td><td>${esc(p.area)}</td><td>${esc(p.room||'')}</td>
+      <td style="text-align:center"><input type="checkbox" ${p.active?'checked':''} onchange="toggleScanPoint(${p.id},this.checked)"/></td>
+      <td class="hint"><code>${esc(p.code)}</code></td>
+      <td><button class="btn btn-ghost btn-sm sans" style="color:var(--danger)" onclick="delScanPoint(${p.id},'${esc(p.label).replace(/'/g,"")}')">Delete</button></td></tr>`).join('')+'</table>'
+    : '<div class="empty">No scan points yet.</div>';
+}
+async function addScanPoint(){
+  const label=$('newScanLabel').value.trim(); if(!label){return;}
+  const area=$('newScanArea').value, room=$('newScanRoom').value.trim();
+  try{ await api('/scan-points',{method:'POST',body:JSON.stringify({label,area,room})}); $('newScanLabel').value='';$('newScanRoom').value=''; loadScanPoints(); }catch(e){ alert(e.message); }
+}
+async function toggleScanPoint(id,active){ try{ await api('/scan-points',{method:'POST',body:JSON.stringify({id,active:active?1:0})}); }catch(e){ alert(e.message); } }
+async function delScanPoint(id,label){ if(!confirm('Delete scan point "'+label+'"? Its QR will stop working.')) return; try{ await api('/scan-points',{method:'POST',body:JSON.stringify({id,delete:true})}); loadScanPoints(); }catch(e){ alert(e.message); } }
+async function seedScanPoints(){ try{ const r=await api('/scan-points/seed',{method:'POST'}); alert('Added '+r.added+' scan point(s).'); loadScanPoints(); loadScanCoverage(); }catch(e){ alert(e.message); } }
+async function saveScanInterval(){ const m=+$('scanInterval').value||60; try{ await api('/rounds/sweep-interval',{method:'POST',body:JSON.stringify({minutes:m})}); $('scanIntMsg').textContent='✓ Saved'; loadScanCoverage(); }catch(e){ $('scanIntMsg').textContent=e.message; } }
+async function printScanCodes(){
+  let d; try{ d=await api('/scan-points'); }catch(e){ alert(e.message); return; }
+  const pts=d.points.filter(p=>p.active);
+  if(!pts.length){ alert('No active scan points to print.'); return; }
+  const w=window.open('','_blank');
+  w.document.write('<html><head><title>Armada — Rounds QR codes</title><style>body{font-family:Georgia,serif;margin:0}.g{display:flex;flex-wrap:wrap;gap:0}.q{width:50%;box-sizing:border-box;padding:24px;text-align:center;page-break-inside:avoid;border:1px dashed #ccc}.q img{width:240px;height:240px}.q h2{margin:8px 0 2px}.q .c{color:#888;font-size:12px;font-family:monospace}.q .i{color:#555;font-size:13px;margin-top:4px}</style></head><body><div class="g">'+
+    pts.map(p=>`<div class="q"><h2>${esc(p.label)}</h2><img src="/api/scan-points/${p.id}/qr.svg" alt=""/><div class="c">${esc(p.code)}</div><div class="i">Mount at the FARTHEST reachable point of this ${p.area==='Room'?'room':'area'}.</div></div>`).join('')+
+    '</div><script>setTimeout(()=>window.print(),600)<\/script></body></html>');
+  w.document.close();
+}
 /* ---- Arrival Tasks: per-role on-arrival checklist per admit ---- */
 async function loadArrivalTasks(){
   let d; try{ d=await api('/arrival/board'); }catch(e){ $('arrBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }

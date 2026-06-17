@@ -306,6 +306,40 @@ export function ensureStaffingStandard() {
   STAFFING_STANDARD.forEach((r, i) => ins.run(r[0], r[1], r[2], r[3], i));
 }
 
+// Pre-load the weekly-grid shift rows from Armada's actual schedule: the real
+// shift names (RN Intake, LPN Floor, Resident Tech…) mapped to standard roles,
+// with the time kept in the label. Seeds once; soft-deleted rows keep the table
+// non-empty so a removed row never comes back.
+const SHIFT_TEMPLATES = [
+  ['Nurse', 'RN Intake · 7a–7p'],
+  ['Nurse', 'RN Intake/Floor · 7a–7p'],
+  ['Nurse', 'LPN Floor · 7a–7p'],
+  ['Nurse', 'LPN Floor · 7:30a–7:30p'],
+  ['Nurse', 'RN · 7p–7a'],
+  ['Nurse', 'LPN · 7p–7a'],
+  ['Therapist', 'Therapist · 8a–4p'],
+  ['Case Manager', 'Case Manager · 8a–4p'],
+  ['Case Manager', 'Case Manager · 2p–10p'],
+  ['BHT / Tech', 'Resident Tech · 7a–3p'],
+  ['BHT / Tech', 'Resident Tech · 3p–11p'],
+  ['BHT / Tech', 'Resident Tech · 11p–7a'],
+  ['Front Desk', 'Front Desk · 8a–4p'],
+];
+function partFromLabelSeed(label) {
+  const m = String(label).match(/(\d{1,2})(?::\d{2})?\s*([ap])/i);
+  let h = m ? (+m[1] % 12) + (/p/i.test(m[2]) ? 12 : 0) : 12;
+  if (h >= 5 && h < 11) return 'Morning';
+  if (h >= 11 && h < 16) return 'Day';
+  if (h >= 16 && h < 21) return 'Evening';
+  return 'Night';
+}
+export function ensureShiftTemplates() {
+  if (db.prepare(`SELECT id FROM shift_templates LIMIT 1`).get()) return 0;
+  const ins = db.prepare(`INSERT INTO shift_templates (role, shift_label, part, sort) VALUES (?,?,?,?)`);
+  SHIFT_TEMPLATES.forEach((r, i) => ins.run(r[0], r[1], partFromLabelSeed(r[1]), i));
+  return SHIFT_TEMPLATES.length;
+}
+
 // Gold-standard arrival checklists for every department — what a best-in-class
 // detox does to welcome a client. Tune to what's actually in place. Additive:
 // only inserts items not already present, so it augments without duplicating.

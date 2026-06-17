@@ -17,7 +17,7 @@ import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, requireStaffingManager, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable, hashPassword,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
+import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, anthropicKey, resetAiClient } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -28,6 +28,7 @@ ensureExampleClient12A();
 ensureInventoryCatalog();
 try { const added = ensureInventoryItems(); if (added) console.log(`[inventory] added ${added} item(s) from the building-walk list`); } catch (e) { console.error('[inventory] ensureItems:', e.message); }
 try { ensureStaffingStandard(); } catch (e) { console.error('[staffing] ensureStandard:', e.message); }
+try { const n = ensureShiftTemplates(); if (n) console.log(`[staffing] seeded ${n} weekly-grid shift rows`); } catch (e) { console.error('[staffing] ensureShiftTemplates:', e.message); }
 try { const a = ensureArrivalItems(); if (a) console.log(`[arrival] added ${a} checklist item(s)`); } catch (e) { console.error('[arrival] ensureItems:', e.message); }
 try { ensureOpsRoutines(); } catch (e) { console.error('[ops] ensureRoutines:', e.message); }
 try { const nn = ensureNourishment(); if (nn) console.log(`[inventory] added ${nn} nourishment item(s)`); } catch (e) { console.error('[inventory] ensureNourishment:', e.message); }

@@ -1377,25 +1377,38 @@ function notifyOnCall(message) {
 function rolesForAlert(kind, message = '') {
   const k = String(kind || '');
   const wrap = (arr) => '|' + arr.join('|') + '|';
+  const OPS = 'Director of Operations';   // operational lane oversight
+  const CLIN = 'Clinical Director';        // clinical lane oversight
   const byDept = () => {
     if (/kitchen|dietary|meal|food/i.test(message)) return ['Kitchen'];
     if (/housekeep|laundry|linen/i.test(message)) return ['Housekeeping'];
     if (/front desk|concierge|transport/i.test(message)) return ['Front Desk'];
-    return null;   // department unclear → everyone (leadership still sees it)
+    return null;   // department unclear
   };
-  if (k === 'risk' || k === 'concern') return wrap(['BHT / Tech', 'Nurse', 'Therapist', 'Case Manager']);
-  if (k === 'carecard') return wrap(['BHT / Tech', 'Nurse']);
-  if (k === 'dignity') return wrap(['BHT / Tech']);
-  if (k === 'docs') return wrap(['Nurse', 'Case Manager', 'Therapist']);
-  if (k === 'dc_incomplete') return wrap(['Case Manager', 'Nurse']);
-  if (k === 'continuum') return wrap(['Case Manager']);
-  if (k === 'unscheduled') return wrap(['Front Desk']);
-  if (k === 'request') return wrap(byDept() || ['Front Desk']);
-  if (k.startsWith('meal_')) return wrap(['Kitchen']);
-  if (k.startsWith('maint')) return wrap(['Director of Operations']);   // no dedicated Maintenance role
-  if (k.startsWith('supply_out_') || k.startsWith('inv_check_')) { const d = byDept(); return d ? wrap(d) : null; }
+  // Clinical lane — the Clinical Director (not Operations) oversees these.
+  if (k === 'risk' || k === 'concern') return wrap(['BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', CLIN]);
+  if (k === 'carecard') return wrap(['BHT / Tech', 'Nurse', CLIN]);
+  if (k === 'dignity') return wrap(['BHT / Tech', CLIN]);
+  if (k === 'docs') return wrap(['Nurse', 'Case Manager', 'Therapist', CLIN]);
+  if (k === 'dc_incomplete') return wrap(['Case Manager', 'Nurse', CLIN]);
+  if (k === 'continuum') return wrap(['Case Manager', CLIN]);
+  // Operational lane — the Director of Operations oversees these.
+  if (k === 'unscheduled') return wrap(['Front Desk', OPS]);
+  if (k === 'request') return wrap([...(byDept() || ['Front Desk']), OPS]);
+  if (k.startsWith('meal_')) return wrap(['Kitchen', OPS]);
+  if (k.startsWith('maint')) return wrap([OPS]);   // no dedicated Maintenance role
+  if (k.startsWith('supply_out_') || k.startsWith('inv_check_')) return wrap([...(byDept() || []), OPS]);
   return null;   // unknown kind → everyone
 }
+// One-time backfill: tag any pre-existing New alerts so role-scoping takes effect
+// immediately (without waiting for them to regenerate on the next sync).
+try {
+  const upd = db.prepare(`UPDATE alerts SET roles = ? WHERE id = ?`);
+  for (const a of db.prepare(`SELECT id, kind, message FROM alerts WHERE status = 'New' AND roles IS NULL`).all()) {
+    const r = rolesForAlert(a.kind, a.message || '');
+    if (r) upd.run(r, a.id);
+  }
+} catch { /* */ }
 function createAlert(client_id, kind, level, message) {
   const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id = ? AND kind = ? AND status = 'New' AND created_at >= datetime('now','-1 day') LIMIT 1`).get(client_id, kind);
   if (dup) return;
@@ -3371,9 +3384,10 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       : [{ name: 'No one scheduled for this shift yet', sub: 'Set the lineup in Staffing.' }] });
 
   // Proactive alerts, scoped to the role: each person's My Shift shows only the
-  // alerts that pertain to their role. Leadership (and anyone with no set role)
-  // sees the whole house; untagged alerts (roles IS NULL) surface to everyone.
-  const fullAlertView = !jr || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(jr);
+  // alerts that pertain to their role. The Executive Director (and anyone with no
+  // set role) sees the whole house; the Operations and Clinical directors each see
+  // their own lane (tagged in alerts.roles). Untagged alerts surface to everyone.
+  const fullAlertView = !jr || jr === 'Executive Director';
   const alerts = fullAlertView
     ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all()
     : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND (roles IS NULL OR roles LIKE ?) ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all('%|' + jr + '|%');

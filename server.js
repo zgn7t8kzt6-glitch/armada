@@ -1389,13 +1389,15 @@ function rolesForAlert(kind, message = '') {
   // Director for oversight. Safety items (rounds, risk, concerns, note red flags,
   // incidents) reach the hands-on care roles (BHT + Nurse); paperwork goes to
   // whoever owns it. None of these are operational — the DO does not see them.
-  if (k === 'risk' || k === 'concern' || k === 'rounds' || k === 'note' || k === 'incident') return wrap(['BHT / Tech', 'Nurse', CLIN]);
+  if (k === 'risk' || k === 'concern' || k === 'rounds' || k === 'note') return wrap(['BHT / Tech', 'Nurse', CLIN]);
   if (k === 'carecard') return wrap(['BHT / Tech', CLIN]);
   if (k === 'dignity') return wrap(['BHT / Tech', CLIN]);
   if (k === 'docs') return wrap(['Nurse', 'Case Manager', 'Therapist', CLIN]);
-  if (k === 'dc_incomplete') return wrap(['Case Manager', CLIN]);
-  if (k === 'continuum') return wrap(['Case Manager', CLIN]);
-  if (k === 'recovery') return wrap([CLIN]);   // low experience score — a leader checks in
+  // QA / compliance + discharge-retention monitoring — the Director of Operations owns these.
+  if (k === 'incident') return wrap(['Nurse', CLIN, OPS]);                  // incidents, med errors
+  if (k === 'dc_incomplete') return wrap(['Case Manager', CLIN, OPS]);      // discharge-form completion
+  if (k === 'continuum') return wrap(['Case Manager', CLIN, OPS]);          // aftercare/continuum gaps
+  if (k === 'recovery') return wrap([CLIN, OPS]);                           // grievances / low experience score
   // Operational lane — the Director of Operations oversees these.
   if (k === 'coverage' || k.startsWith('understaffed_')) return wrap([OPS]);
   if (k === 'unscheduled') return wrap(['Front Desk', OPS]);

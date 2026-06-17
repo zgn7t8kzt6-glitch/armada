@@ -176,7 +176,10 @@ const VIEW_ROLES = {
 };
 function canSeeView(v){
   if(!ME) return true;
-  if(ME.role==='admin' || ME.job_role==='Executive Director') return true;   // leadership sees all
+  // Broad leadership sees every page (Command/config stays admin-only via renderGroups).
+  // The Director of Operations oversees clinical, medical, admissions & case management
+  // and owns QA/compliance + discharge/retention, so she needs the full picture.
+  if(ME.role==='admin' || ME.job_role==='Executive Director' || ME.job_role==='Director of Operations') return true;
   const allowed = VIEW_ROLES[v];
   if(!allowed) return true;   // ungated → visible to everyone (generous default)
   return allowed.includes(ME.job_role);
@@ -1714,7 +1717,7 @@ async function loadArrivalTasks(){
   </tr>`).join('')+'</table>';
 }
 // Management (sees every role's arrival tasks) vs a worker (sees only their own).
-const ARR_MGMT_ROLES = ['Executive Director','Clinical Director'];
+const ARR_MGMT_ROLES = ['Executive Director','Clinical Director','Director of Operations'];
 function arrIsMgmt(){ return !!(ME && (ME.role==='admin' || ARR_MGMT_ROLES.includes(ME.job_role))); }
 function roleMatchesMe(role){
   const jr=((ME&&ME.job_role)||'').toLowerCase(); const r=(role||'').toLowerCase(); if(!jr) return false;

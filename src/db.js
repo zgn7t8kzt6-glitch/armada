@@ -1103,6 +1103,7 @@ addColumn('followups', 'assignee_name', 'TEXT');
 addColumn('users', 'mfa_secret', 'TEXT');
 addColumn('users', 'mfa_enabled', 'INTEGER');
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
+addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');
 addColumn('clients', 'anchor_why', 'TEXT');
 // Analytics dimensions: time-of-admit + staff attribution + discharge destination.

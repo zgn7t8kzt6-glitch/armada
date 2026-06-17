@@ -1371,10 +1371,35 @@ function notifyOnCall(message) {
 
 // Proactive alert: surfaced the moment a client's signals turn. De-duped so we
 // don't repeat the same open alert for the same client+kind.
+// Which job roles an alert pertains to, inferred from its kind (and the department
+// named in the message). Returns a pipe-wrapped string (e.g. "|Nurse|Therapist|")
+// for LIKE matching, or null = relevant to everyone. Leadership sees all regardless.
+function rolesForAlert(kind, message = '') {
+  const k = String(kind || '');
+  const wrap = (arr) => '|' + arr.join('|') + '|';
+  const byDept = () => {
+    if (/kitchen|dietary|meal|food/i.test(message)) return ['Kitchen'];
+    if (/housekeep|laundry|linen/i.test(message)) return ['Housekeeping'];
+    if (/front desk|concierge|transport/i.test(message)) return ['Front Desk'];
+    return null;   // department unclear → everyone (leadership still sees it)
+  };
+  if (k === 'risk' || k === 'concern') return wrap(['BHT / Tech', 'Nurse', 'Therapist', 'Case Manager']);
+  if (k === 'carecard') return wrap(['BHT / Tech', 'Nurse']);
+  if (k === 'dignity') return wrap(['BHT / Tech']);
+  if (k === 'docs') return wrap(['Nurse', 'Case Manager', 'Therapist']);
+  if (k === 'dc_incomplete') return wrap(['Case Manager', 'Nurse']);
+  if (k === 'continuum') return wrap(['Case Manager']);
+  if (k === 'unscheduled') return wrap(['Front Desk']);
+  if (k === 'request') return wrap(byDept() || ['Front Desk']);
+  if (k.startsWith('meal_')) return wrap(['Kitchen']);
+  if (k.startsWith('maint')) return wrap(['Director of Operations']);   // no dedicated Maintenance role
+  if (k.startsWith('supply_out_') || k.startsWith('inv_check_')) { const d = byDept(); return d ? wrap(d) : null; }
+  return null;   // unknown kind → everyone
+}
 function createAlert(client_id, kind, level, message) {
   const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id = ? AND kind = ? AND status = 'New' AND created_at >= datetime('now','-1 day') LIMIT 1`).get(client_id, kind);
   if (dup) return;
-  db.prepare(`INSERT INTO alerts (client_id, kind, level, message) VALUES (?, ?, ?, ?)`).run(client_id || null, kind, level || null, message);
+  db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles) VALUES (?, ?, ?, ?, ?)`).run(client_id || null, kind, level || null, message, rolesForAlert(kind, message));
   if (level === 'High' || level === 'Critical') {
     // How much to put in the SMS/email (an insecure channel). Default 'locator':
     // first name + room so the on-call leader knows WHO and WHERE, without the
@@ -3345,8 +3370,13 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     items: Object.keys(byRole).length ? Object.entries(byRole).map(([role, names]) => ({ name: role, sub: names.join(', ') }))
       : [{ name: 'No one scheduled for this shift yet', sub: 'Set the lineup in Staffing.' }] });
 
-  // Proactive alerts (the automations' output) surfaced on every shift screen.
-  const alerts = db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all();
+  // Proactive alerts, scoped to the role: each person's My Shift shows only the
+  // alerts that pertain to their role. Leadership (and anyone with no set role)
+  // sees the whole house; untagged alerts (roles IS NULL) surface to everyone.
+  const fullAlertView = !jr || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(jr);
+  const alerts = fullAlertView
+    ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all()
+    : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND (roles IS NULL OR roles LIKE ?) ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all('%|' + jr + '|%');
   res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins,
     canPreview: req.user.role === 'admin', roles: req.user.role === 'admin' ? JOB_ROLES : undefined, previewing: jr !== (req.user.job_role || '') ? jr : null });
 });

@@ -130,14 +130,70 @@ const GROUP_OF={
   // Command — leadership insight + config (admin)
   command:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
+// Role → pages. Only views listed here are restricted; anything NOT listed stays
+// visible to everyone (generous "when in doubt, show" default). Admin and the
+// Executive Director always see every page. My Shift + the whole Team/culture
+// section are intentionally never gated — the shared Standard is for everyone.
+const CARE = ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'];
+const VIEW_ROLES = {
+  // Facility / operations — the Director of Operations' lane (+ the depts that act in it)
+  operations:  ['Director of Operations'],
+  coverage:    ['Director of Operations'],
+  schedule:    ['Director of Operations'],
+  assign:      ['Director of Operations'],
+  staffmodel:  ['Director of Operations'],
+  maintenance: ['Director of Operations','Housekeeping'],
+  inventory:   ['Director of Operations','Kitchen','Housekeeping','Nurse'],
+  meals:       ['Director of Operations','Kitchen','BHT / Tech'],
+  // Clinical / care pages — the care team (+ Clinical Director)
+  clients:     [...CARE,'Front Desk'],
+  journey:     CARE,
+  editor:      CARE,
+  records:     ['Nurse','Case Manager','Therapist','Clinical Director'],
+  rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
+  dignity:     ['BHT / Tech','Nurse','Clinical Director'],
+  engagement:  ['BHT / Tech','Therapist','Clinical Director'],
+  program:     ['BHT / Tech','Therapist','Clinical Director'],
+  casemgmt:    ['Case Manager','Therapist','Clinical Director'],
+  continuum:   ['Case Manager','Clinical Director'],
+  retention:   CARE,
+  incidents:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
+  compliance:  ['Nurse','Case Manager','Therapist','Clinical Director'],
+  family:      ['Case Manager','Therapist','Clinical Director','Front Desk'],
+  // Handoff — discharge & continuum (case management + clinical)
+  dischargepage: ['Case Manager','Nurse','Clinical Director'],
+  alumni:      ['Case Manager','Clinical Director'],
+  // Arrival — front door + admissions
+  admissions:  ['Front Desk','Case Manager','Clinical Director'],
+  referrals:   ['Front Desk','Case Manager','Clinical Director'],
+  partners:    ['Front Desk','Case Manager','Clinical Director'],
+  // Concierge requests — front desk + hands-on care
+  concierge:   ['Front Desk','BHT / Tech','Nurse','Clinical Director'],
+};
+function canSeeView(v){
+  if(!ME) return true;
+  if(ME.role==='admin' || ME.job_role==='Executive Director') return true;   // leadership sees all
+  const allowed = VIEW_ROLES[v];
+  if(!allowed) return true;   // ungated → visible to everyone (generous default)
+  return allowed.includes(ME.job_role);
+}
+function groupVisible(g){
+  if(g==='today' || g==='team') return true;   // My Shift + culture: always
+  return Object.keys(GROUP_OF).some(v=>GROUP_OF[v]===g && canSeeView(v));
+}
+function firstAllowedView(grp){
+  if(canSeeView(grp.first)) return grp.first;
+  const v=[...document.querySelectorAll('#nav button')].map(b=>b.dataset.view).find(v=>GROUP_OF[v]===grp.g && canSeeView(v));
+  return v || grp.first;
+}
 function renderGroups(){
   const isAdmin = ME && ME.role==='admin';
   const mk = x=>`<button data-g="${x.g}"${x.admin?' class="side-admingroup"':''}>${x.label}</button>`;
-  const everyday = GROUPS.filter(x=>!x.admin).map(mk).join('');
+  const everyday = GROUPS.filter(x=>!x.admin && groupVisible(x.g)).map(mk).join('');
   const leadership = isAdmin ? GROUPS.filter(x=>x.admin).map(mk).join('') : '';
   $('groupbar').innerHTML = everyday + (leadership ? '<div class="side-divider"></div>'+leadership : '');
   document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'stay'; });
-  document.querySelectorAll('#groupbar button').forEach(b=>b.onclick=()=>{ const grp=GROUPS.find(x=>x.g===b.dataset.g); show(grp.first); });
+  document.querySelectorAll('#groupbar button').forEach(b=>b.onclick=()=>{ const grp=GROUPS.find(x=>x.g===b.dataset.g); show(firstAllowedView(grp)); });
 }
 function selectGroup(g){
   document.querySelectorAll('#groupbar button').forEach(b=>b.classList.toggle('active', b.dataset.g===g));
@@ -146,7 +202,7 @@ function selectGroup(g){
     let adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
     if(b.dataset.view==='operations' && ME && ME.job_role==='Director of Operations') adminHidden=false;   // DOO always sees Operations
     const sub = b.hasAttribute('data-subview');   // reached via in-page tabs, not the sidebar
-    b.style.display = (b.dataset.group===g && !adminHidden && !sub) ? '' : 'none';
+    b.style.display = (b.dataset.group===g && !adminHidden && !sub && canSeeView(b.dataset.view)) ? '' : 'none';
   });
   // Hide the sub-nav when a section has only one screen (no redundant repeat).
   const visible=navBtns.filter(b=>b.dataset.group===g && b.style.display!=='none').length;
@@ -155,6 +211,7 @@ function selectGroup(g){
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.view));
 function toggleNav(){ document.getElementById('shell').classList.toggle('nav-open'); }
 function show(v){
+  if(!canSeeView(v)) v='dashboard';   // role can't see this page → send to My Shift
   selectGroup(GROUP_OF[v]||'stay');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));

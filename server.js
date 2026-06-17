@@ -1385,28 +1385,29 @@ function rolesForAlert(kind, message = '') {
     if (/front desk|concierge|transport/i.test(message)) return ['Front Desk'];
     return null;   // department unclear
   };
-  // Clinical lane — the Clinical Director (not Operations) oversees these.
-  if (k === 'risk' || k === 'concern') return wrap(['BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', CLIN]);
-  if (k === 'carecard') return wrap(['BHT / Tech', 'Nurse', CLIN]);
+  // Clinical lane — kept to the fewest roles that must act, plus the Clinical
+  // Director for oversight. Safety items (risk/concern) reach the hands-on care
+  // roles only (BHT + Nurse); paperwork goes to whoever owns it.
+  if (k === 'risk' || k === 'concern') return wrap(['BHT / Tech', 'Nurse', CLIN]);
+  if (k === 'carecard') return wrap(['BHT / Tech', CLIN]);
   if (k === 'dignity') return wrap(['BHT / Tech', CLIN]);
   if (k === 'docs') return wrap(['Nurse', 'Case Manager', 'Therapist', CLIN]);
-  if (k === 'dc_incomplete') return wrap(['Case Manager', 'Nurse', CLIN]);
+  if (k === 'dc_incomplete') return wrap(['Case Manager', CLIN]);
   if (k === 'continuum') return wrap(['Case Manager', CLIN]);
   // Operational lane — the Director of Operations oversees these.
   if (k === 'unscheduled') return wrap(['Front Desk', OPS]);
-  if (k === 'request') return wrap([...(byDept() || ['Front Desk']), OPS]);
+  if (k === 'request') { const d = byDept(); return d ? wrap([...d, OPS]) : wrap(['Front Desk', OPS]); }
   if (k.startsWith('meal_')) return wrap(['Kitchen', OPS]);
   if (k.startsWith('maint')) return wrap([OPS]);   // no dedicated Maintenance role
   if (k.startsWith('supply_out_') || k.startsWith('inv_check_')) return wrap([...(byDept() || []), OPS]);
-  return null;   // unknown kind → everyone
+  return null;   // unknown kind → everyone (a safety net; all current kinds are mapped above)
 }
-// One-time backfill: tag any pre-existing New alerts so role-scoping takes effect
-// immediately (without waiting for them to regenerate on the next sync).
+// Re-tag every New alert on startup so any change to the mapping above takes
+// effect immediately (rolesForAlert is deterministic, so this is idempotent).
 try {
   const upd = db.prepare(`UPDATE alerts SET roles = ? WHERE id = ?`);
-  for (const a of db.prepare(`SELECT id, kind, message FROM alerts WHERE status = 'New' AND roles IS NULL`).all()) {
-    const r = rolesForAlert(a.kind, a.message || '');
-    if (r) upd.run(r, a.id);
+  for (const a of db.prepare(`SELECT id, kind, message FROM alerts WHERE status = 'New'`).all()) {
+    upd.run(rolesForAlert(a.kind, a.message || ''), a.id);
   }
 } catch { /* */ }
 function createAlert(client_id, kind, level, message) {

@@ -1709,23 +1709,48 @@ async function loadArrivalTasks(){
   $('arrBoard').innerHTML = '<table class="tbl"><tr><th>New admit</th><th>Arrival progress</th><th>By role</th><th></th></tr>'+d.admits.map(a=>`<tr>
     <td><strong>${esc(a.name)}</strong>${a.room?' · '+esc(a.room):''}<div class="hint">admit ${esc(a.admit)}</div></td>
     <td style="min-width:120px"><div style="display:flex;align-items:center;gap:6px"><div class="res-track" style="flex:1"><div class="res-fill ${a.pct<100?'':''}" style="width:${a.pct}%"></div></div><span class="hint">${a.pct}%</span></div></td>
-    <td class="hint">${a.roles.map(r=>`${esc(r.role.split(' ')[0])} ${r.done}/${r.total}`).join(' · ')}</td>
-    <td><button class="btn btn-gold btn-sm sans" onclick="openArrivalChecklist(${a.id})">Open</button></td>
+    <td class="hint">${(arrIsMgmt()?a.roles:a.roles.filter(r=>roleMatchesMe(r.role))).map(r=>`${esc(r.role.split(' ')[0])} ${r.done}/${r.total}`).join(' · ')||'—'}</td>
+    <td><button class="btn btn-gold btn-sm sans" onclick="openArrival(${a.id})">Open</button></td>
   </tr>`).join('')+'</table>';
 }
+// Management (sees every role's arrival tasks) vs a worker (sees only their own).
+const ARR_MGMT_ROLES = ['Executive Director','Clinical Director'];
+function arrIsMgmt(){ return !!(ME && (ME.role==='admin' || ARR_MGMT_ROLES.includes(ME.job_role))); }
 function roleMatchesMe(role){
-  const jr=((ME&&ME.job_role)||'').toLowerCase(); const r=(role||'').toLowerCase();
+  const jr=((ME&&ME.job_role)||'').toLowerCase(); const r=(role||'').toLowerCase(); if(!jr) return false;
   return ['nurse','bht','tech','therapist','case','front','desk','kitchen','housekeep','provider','medical'].some(k=>r.includes(k)&&jr.includes(k));
 }
-async function openArrivalChecklist(id){
+let ARR_CID=null, ARR_SHOWALL=false;
+function openArrival(id){ ARR_CID=id; ARR_SHOWALL=false; renderArrivalChecklist(); }
+async function renderArrivalChecklist(){
+  const id=ARR_CID; if(id==null) return;
   let d; try{ d=await api('/arrival/checklist/'+id); }catch(e){ $('arrDetail').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
-  $('arrDetail').innerHTML = `<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3><p class="sub sans">Arrival checklist · admitted ${esc(d.client.admit)}</p></div></div>
-    ${d.roles.map(r=>{const mine=roleMatchesMe(r.role); return `<details class="card" style="margin:8px 0" ${mine?'open':''}><summary class="sans" style="cursor:pointer;font-weight:600">${esc(r.role)}${mine?' <span class="badge">your role</span>':''} <span class="hint">${r.items.filter(i=>i.done).length}/${r.items.length}</span></summary>
-      <div style="margin-top:8px">${r.items.map(i=>`<label class="trg" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" ${i.done?'checked':''} onchange="toggleArrival(${d.client.id},${i.id},this.checked)"/> <span>${esc(i.label)}${i.done&&i.by?` <span class="hint">✓ ${esc(i.by)} · ${esc(i.at)}</span>`:''}</span></label>`).join('')}</div>
-    </details>`; }).join('')}</div>`;
+  const mgmt=arrIsMgmt();
+  const myRoles=d.roles.filter(r=>roleMatchesMe(r.role));
+  const showAll = mgmt || ARR_SHOWALL || !myRoles.length;   // managers (or no role match) see the full checklist
+  const roles = showAll ? d.roles : myRoles;
+  const allItems=d.roles.flatMap(r=>r.items||[]); const overall=allItems.length?Math.round(allItems.filter(i=>i.done).length/allItems.length*100):0;
+  const itemRow=(i)=>`<label style="display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border:1px solid var(--line);border-radius:12px;margin:8px 0;cursor:pointer;background:${i.done?'#f3f8f4':'#fff'}">
+      <input type="checkbox" ${i.done?'checked':''} onchange="toggleArrival(${d.client.id},${i.id},this.checked)" style="width:22px;height:22px;margin-top:1px;flex:none;accent-color:var(--gold)"/>
+      <span style="font-size:16px;line-height:1.35;${i.done?'color:#2d7a4f;text-decoration:line-through':''}">${esc(i.label)}${i.done&&i.by?`<br><span class="hint" style="text-decoration:none">✓ ${esc(i.by)}${i.at?' · '+esc(i.at):''}</span>`:''}</span></label>`;
+  const roleBlock=(r)=>{ const done=r.items.filter(i=>i.done).length; const mine=roleMatchesMe(r.role); const pct=r.items.length?Math.round(done/r.items.length*100):0;
+    return `<div style="margin:16px 0 4px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px"><strong class="sans" style="font-size:15px">${esc(r.role)}</strong>${mine?'<span class="badge">your role</span>':''}<span class="hint" style="margin-left:auto">${done}/${r.items.length}</span></div>
+      <div class="res-track" style="height:5px;margin-bottom:6px"><div class="res-fill" style="width:${pct}%"></div></div>
+      ${r.items.length?r.items.map(itemRow).join(''):'<div class="pc-note">No items for this role.</div>'}</div>`; };
+  const toggleBtn = (!mgmt && myRoles.length && d.roles.length>myRoles.length)
+    ? (ARR_SHOWALL ? `<button class="btn btn-ghost btn-sm sans no-print" onclick="ARR_SHOWALL=false;renderArrivalChecklist()">Show just my role</button>`
+                   : `<button class="btn btn-ghost btn-sm sans no-print" onclick="ARR_SHOWALL=true;renderArrivalChecklist()">Show all roles</button>`) : '';
+  $('arrDetail').innerHTML = `<div class="card">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3>
+      <p class="sub sans" style="margin:2px 0 0">Arrival checklist · admitted ${esc(d.client.admit)} · <strong>${overall}% complete</strong></p></div>${toggleBtn}</div>
+    <div class="res-track" style="height:7px;margin:8px 0 2px"><div class="res-fill" style="width:${overall}%"></div></div>
+    ${(!mgmt && !myRoles.length)?'<div class="pc-note" style="margin-top:8px">Nothing assigned to your role for this admit — showing the full checklist.</div>':''}
+    ${roles.map(roleBlock).join('')}
+  </div>`;
   $('arrDetail').scrollIntoView({behavior:'smooth',block:'start'});
 }
-async function toggleArrival(cid,iid,done){ try{ await api('/arrival/check',{method:'POST',body:JSON.stringify({client_id:cid,item_id:iid,done})}); openArrivalChecklist(cid); loadArrivalTasks(); }catch(e){ alert(e.message); } }
+async function toggleArrival(cid,iid,done){ try{ await api('/arrival/check',{method:'POST',body:JSON.stringify({client_id:cid,item_id:iid,done})}); renderArrivalChecklist(); loadArrivalTasks(); }catch(e){ alert(e.message); } }
 async function loadArrivalTemplate(){
   let d; try{ d=await api('/arrival/template'); }catch(e){ return; }
   const byRole={}; d.items.filter(i=>i.active).forEach(i=>{ (byRole[i.role]=byRole[i.role]||[]).push(i); });

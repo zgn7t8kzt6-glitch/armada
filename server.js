@@ -711,17 +711,15 @@ app.post('/api/maintenance/:id', requireAuth, (req, res) => {
 // Every meal the caterer delivers gets inspected against a standard: enough
 // portions for the census, all food groups present, and whether clients liked it.
 const MEAL_GROUPS = ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit', 'Dairy', 'Beverage'];
-const MEALS_LIST = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
-// A complete plate differs by meal — fruit at breakfast, full plate at lunch/
-// dinner, snacks held to no fixed standard (just logged).
+const MEALS_LIST = ['Breakfast', 'Lunch', 'Dinner'];
+// A complete plate differs by meal — fruit at breakfast, full plate at lunch/dinner.
 const MEAL_REQUIRED_BY = {
   Breakfast: ['Protein', 'Grain/Carb', 'Fruit'],
   Lunch: ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit'],
   Dinner: ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit'],
-  Snack: [],
 };
 function requiredFor(meal) { return MEAL_REQUIRED_BY[meal] || ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit']; }
-function currentMeal() { const h = localHour(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : h < 20 ? 'Dinner' : 'Snack'; }
+function currentMeal() { const h = localHour(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : 'Dinner'; }
 function censusNow() { return db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n; }
 // 30-day caterer scorecard rollup — shared by the Meals view, the kitchen brief,
 // and the Command Center.

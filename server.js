@@ -4788,7 +4788,10 @@ app.get('/api/workforce/summary', requireAuth, (req, res) => {
   const today = appToday();
   const onNow = db.prepare(`SELECT user_name, clock_in FROM time_entries WHERE clock_out IS NULL ORDER BY clock_in`).all();
   // Manually-added on-shift staff (no login) — surfaced alongside clock-ins.
-  const onNowManual = db.prepare(`SELECT id, name, role FROM manual_on_shift WHERE date(created_at) = date('now') ORDER BY id DESC`).all();
+  const onNowManual = db.prepare(`SELECT id, name, role FROM manual_on_shift WHERE for_date = ? ORDER BY id DESC`).all(today);
+  // Everyone scheduled today (default on-shift) who hasn't called off or been marked absent.
+  const onNowScheduled = db.prepare(`SELECT a.user_name name, s.role, s.shift_label FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
+    WHERE s.date = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent') ORDER BY s.part, s.role`).all(today);
   // Today coverage roll-up.
   const slotsToday = db.prepare(`SELECT s.id, s.needed,
     (SELECT COUNT(*) FROM schedule_assignments a WHERE a.slot_id=s.id AND a.status='scheduled') AS sched
@@ -4807,7 +4810,7 @@ app.get('/api/workforce/summary', requireAuth, (req, res) => {
   const dutiesToday = db.prepare(`SELECT COUNT(*) n FROM duty_logs WHERE date = ?`).get(today).n;
   const calloffsWeek = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?`).get(new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10)).n;
   res.json({
-    onNow, onNowManual, coverage: { needed, scheduled, gaps, pct: needed ? Math.round(scheduled / needed * 100) : null },
+    onNow, onNowManual, onNowScheduled, coverage: { needed, scheduled, gaps, pct: needed ? Math.round(scheduled / needed * 100) : null },
     calloffsWeek, byPerson, byDow, roundsToday, dutiesToday,
   });
 });
@@ -5423,24 +5426,27 @@ function computeOnShift() {
   const clocked = db.prepare(`SELECT t.user_name, u.job_role FROM time_entries t JOIN users u ON u.id = t.user_id
     WHERE t.clock_out IS NULL AND u.active = 1`).all();
   clocked.forEach((r) => add(r.user_name, r.job_role));
-  const part = currentShift();
+  // Everyone scheduled for TODAY (the local business day) is on shift by default —
+  // unless they called off or a supervisor marked them a no-show. We intentionally
+  // do NOT filter by time-of-day block, so the whole day's roster shows.
+  const today = appToday();
   const scheduled = db.prepare(`SELECT a.user_name, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
-    WHERE s.date = date('now') AND s.part = ? AND a.status = 'scheduled'`).all(part);
+    WHERE s.date = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent')`).all(today);
   scheduled.forEach((r) => add(r.user_name, r.role));
   // Manually-added on-shift staff (no user login) for today.
-  const manual = db.prepare(`SELECT name, role FROM manual_on_shift WHERE date(created_at) = date('now')`).all();
+  const manual = db.prepare(`SELECT name, role FROM manual_on_shift WHERE for_date = ?`).all(today);
   manual.forEach((r) => add(r.name, r.role));
-  return { buckets, shift: part, clockedInCount: clocked.length, scheduledCount: scheduled.length, manualCount: manual.length };
+  return { buckets, shift: currentShift(), clockedInCount: clocked.length, scheduledCount: scheduled.length, manualCount: manual.length };
 }
 // Manually-added on-shift staff — for people who don't have a login yet.
 app.get('/api/onshift/manual', requireAuth, (req, res) => {
-  res.json({ rows: db.prepare(`SELECT id, name, role, by_name, substr(created_at,12,5) at FROM manual_on_shift WHERE date(created_at) = date('now') ORDER BY id DESC`).all() });
+  res.json({ rows: db.prepare(`SELECT id, name, role, by_name FROM manual_on_shift WHERE for_date = ? ORDER BY id DESC`).all(appToday()) });
 });
 app.post('/api/onshift/manual', requireAuth, (req, res) => {
   const name = (req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Name required' });
   const role = (req.body?.role || '').trim() || null;
-  db.prepare(`INSERT INTO manual_on_shift (name, role, by_name) VALUES (?,?,?)`).run(name.slice(0, 80), role, req.user.name);
+  db.prepare(`INSERT INTO manual_on_shift (name, role, by_name, for_date) VALUES (?,?,?,?)`).run(name.slice(0, 80), role, req.user.name, appToday());
   res.json({ ok: true });
 });
 app.delete('/api/onshift/manual/:id', requireAuth, (req, res) => {

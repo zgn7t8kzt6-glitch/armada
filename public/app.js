@@ -2583,15 +2583,20 @@ async function loadCoverage(){
   const s = await api('/workforce/summary?range=30');
   const cov = s.coverage;
   const manual = s.onNowManual||[];
-  const onTotal = s.onNow.length + manual.length;
+  const sched = s.onNowScheduled||[];
+  // Names already clocked in or manually added — so we don't list a scheduled person twice.
+  const shown = new Set([...s.onNow.map(p=>(p.user_name||'').toLowerCase()), ...manual.map(p=>(p.name||'').toLowerCase())]);
+  const schedExtra = sched.filter(p=>!shown.has((p.name||'').toLowerCase()));
+  const onTotal = s.onNow.length + manual.length + schedExtra.length;
   $('wfKpis').innerHTML = `
     <div class="ret-card"><div class="n">${onTotal}</div><div class="l">On shift now</div></div>
     <div class="ret-card ${cov.pct!=null&&cov.pct<100?'rc-warn':''}"><div class="n">${cov.pct!=null?cov.pct+'%':'—'}</div><div class="l">Today covered (${cov.scheduled}/${cov.needed})</div></div>
     <div class="ret-card ${cov.gaps?'rc-high':''}"><div class="n">${cov.gaps}</div><div class="l">Coverage gaps today</div></div>
     <div class="ret-card ${s.calloffsWeek?'rc-elev':''}"><div class="n">${s.calloffsWeek}</div><div class="l">Call-offs this week</div></div>`;
   const clockedHtml = s.onNow.map(p=>`<div class="pc-note">🟢 <strong>${esc(p.user_name||'')}</strong> <span class="hint">clocked in ${esc((p.clock_in||'').slice(11,16))}</span></div>`).join('');
+  const schedHtml = schedExtra.map(p=>`<div class="pc-note">🟢 <strong>${esc(p.name)}</strong> <span class="hint">${esc(p.shift_label||p.role||'scheduled')} · scheduled</span></div>`).join('');
   const manualHtml = manual.map(p=>`<div class="pc-note">🟢 <strong>${esc(p.name)}</strong> ${p.role?`<span class="hint">${esc(p.role)} · </span>`:''}<span class="hint">added manually</span></div>`).join('');
-  $('wfOnNow').innerHTML = (clockedHtml+manualHtml) || '<div class="hint">No one on shift right now. Add people below or have them clock in.</div>';
+  $('wfOnNow').innerHTML = (clockedHtml+schedHtml+manualHtml) || '<div class="hint">No one on shift right now. Add people below, have them clock in, or build the schedule.</div>';
   const bars=(rows)=>{ const max=Math.max(1,...rows.map(r=>r.n)); return rows.length&&rows.some(r=>r.n)?rows.map(r=>`<div class="pc-note" style="display:flex;justify-content:space-between"><span>${esc(r.k)}</span><span class="hint">${r.n}</span></div><div style="height:5px;background:var(--gold);width:${Math.round(r.n/max*100)}%;border-radius:3px;margin:2px 0 8px"></div>`).join(''):'<div class="hint">No call-offs in this window. 🎉</div>'; };
   $('wfByPerson').innerHTML = bars(s.byPerson);
   $('wfByDow').innerHTML = bars(s.byDow);

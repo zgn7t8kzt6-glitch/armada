@@ -3468,11 +3468,13 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       : [{ name: 'No one scheduled for this shift yet', sub: 'Set the lineup in Staffing.' }] });
 
   // Proactive alerts, scoped to the role: each person's My Shift shows only the
-  // alerts that pertain to their role. The Executive Director and admins see the
-  // whole house; the Operations and Clinical directors each see their own lane
-  // (tagged in alerts.roles). A user with no/unrecognized role sees only general
-  // (untagged) alerts — never clinical detail by accident.
-  const fullAlertView = jr === 'Executive Director' || req.user.role === 'admin';
+  // alerts that pertain to their role — regardless of access level. So a Director
+  // of Operations who also has Admin access still sees only the operational lane
+  // on My Shift (admins get the whole-house view in the Command Center instead).
+  // Only the Executive Director's My Shift shows everything. Operations & Clinical
+  // directors each see their own lane (tagged in alerts.roles); a user with no/
+  // unrecognized role sees only general (untagged) alerts.
+  const fullAlertView = jr === 'Executive Director';
   const alerts = fullAlertView
     ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all()
     : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND (roles IS NULL OR roles LIKE ?) ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all('%|' + jr + '|%');

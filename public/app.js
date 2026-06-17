@@ -82,6 +82,10 @@ async function boot(){
   // fill shift/role selects
   fillSelect($('r_shift'), META.shifts); fillSelect($('a_shift'), META.shifts);
   fillSelect($('r_role'), ['All', ...META.jobRoles]);
+  // Default the Playbook to the viewer's own role so they see their lineup, not
+  // every role's. Admin/ED default to All (they run the whole-shift sheet); anyone
+  // can still switch the dropdown.
+  if($('r_role')){ const dflt=(ME.role==='admin'||ME.job_role==='Executive Director'||!META.jobRoles.includes(ME.job_role))?'All':ME.job_role; $('r_role').value=dflt; }
   fillSelect($('u_job'), META.jobRoles);
   $('r_date').value = today(); $('a_date').value = today();
   renderGroups();

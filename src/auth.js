@@ -116,6 +116,13 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
+// Staffing/scheduling is the Director of Operations' core lane — let her manage
+// it without a full admin login (admins still allowed).
+export function requireStaffingManager(req, res, next) {
+  if (req.user?.role === 'admin' || req.user?.job_role === 'Director of Operations') return next();
+  return res.status(403).json({ error: 'Staffing is managed by the Director of Operations or an admin.' });
+}
+
 export function changePassword(userId, current, next, keepToken = null) {
   const u = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId);
   if (!u || !bcrypt.compareSync(current, u.password_hash)) return false;

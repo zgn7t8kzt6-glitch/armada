@@ -14,7 +14,7 @@ import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
-  cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, createUser, changePassword,
+  cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, requireStaffingManager, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable, hashPassword,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
@@ -4506,23 +4506,23 @@ app.get('/api/staffing', requireAuth, (req, res) => {
   });
   res.json({ date, slots: out });
 });
-app.post('/api/staffing/slots', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/staffing/slots', requireAuth, requireStaffingManager, (req, res) => {
   const b = req.body || {};
   if (!b.date || !b.part || !b.role) return res.status(400).json({ error: 'date, part, role required' });
   const info = db.prepare(`INSERT INTO schedule_slots (date, part, role, needed, notes, created_by) VALUES (?,?,?,?,?,?)`)
     .run(b.date.slice(0, 10), b.part, b.role, Math.max(1, +b.needed || 1), b.notes || null, req.user.id);
   res.json({ id: info.lastInsertRowid });
 });
-app.delete('/api/staffing/slots/:id', requireAuth, requireAdmin, (req, res) => {
+app.delete('/api/staffing/slots/:id', requireAuth, requireStaffingManager, (req, res) => {
   db.prepare(`DELETE FROM schedule_slots WHERE id = ?`).run(req.params.id); res.json({ ok: true });
 });
-app.post('/api/staffing/slots/:id/assign', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/staffing/slots/:id/assign', requireAuth, requireStaffingManager, (req, res) => {
   const u = db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(+req.body?.user_id);
   if (!u) return res.status(400).json({ error: 'Unknown staff member' });
   db.prepare(`INSERT INTO schedule_assignments (slot_id, user_id, user_name) VALUES (?,?,?)`).run(req.params.id, u.id, u.name);
   res.json({ ok: true });
 });
-app.delete('/api/staffing/assignments/:id', requireAuth, requireAdmin, (req, res) => {
+app.delete('/api/staffing/assignments/:id', requireAuth, requireStaffingManager, (req, res) => {
   db.prepare(`DELETE FROM schedule_assignments WHERE id = ?`).run(req.params.id); res.json({ ok: true });
 });
 app.post('/api/staffing/assignments/:id/calloff', requireAuth, (req, res) => {

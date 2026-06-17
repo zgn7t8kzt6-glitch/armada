@@ -175,6 +175,7 @@ const VIEW_ROLES = {
   // Concierge requests — front desk + hands-on care
   concierge:   ['Front Desk','BHT / Tech','Nurse','Clinical Director'],
 };
+function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role==='Director of Operations')); }
 function canSeeView(v){
   if(!ME) return true;
   // Broad leadership sees every page (Command/config stays admin-only via renderGroups).
@@ -190,6 +191,9 @@ function groupVisible(g){
   return Object.keys(GROUP_OF).some(v=>GROUP_OF[v]===g && canSeeView(v));
 }
 function firstAllowedView(grp){
+  // Staffing is the Director of Operations' core job — land the Facility section
+  // on the Staffing schedule for her, not the supplies list.
+  if(grp.g==='facility' && ME && ME.job_role==='Director of Operations' && canSeeView('schedule')) return 'schedule';
   if(canSeeView(grp.first)) return grp.first;
   const v=[...document.querySelectorAll('#nav button')].map(b=>b.dataset.view).find(v=>GROUP_OF[v]===grp.g && canSeeView(v));
   return v || grp.first;
@@ -208,7 +212,10 @@ function selectGroup(g){
   const navBtns=[...document.querySelectorAll('#nav button')];
   navBtns.forEach(b=>{
     let adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
-    if(b.dataset.view==='operations' && ME && ME.job_role==='Director of Operations') adminHidden=false;   // DOO always sees Operations
+    // Views explicitly granted to a job role (VIEW_ROLES) are never admin-hidden
+    // for that role — e.g. the Director of Operations owns Staffing / Coverage /
+    // Assign Staff / Staffing Model / Operations even on a non-admin login.
+    if(adminHidden && VIEW_ROLES[b.dataset.view] && canSeeView(b.dataset.view)) adminHidden=false;
     const sub = b.hasAttribute('data-subview');   // reached via in-page tabs, not the sidebar
     b.style.display = (b.dataset.group===g && !adminHidden && !sub && canSeeView(b.dataset.view)) ? '' : 'none';
   });
@@ -2639,12 +2646,13 @@ async function loadSchedule(){
         <strong>${esc(s.part)}</strong> · ${esc(s.role)}
         <span class="risk ${s.covered?'risk-low':'risk-elev'}">${s.scheduledCount}/${s.needed} ${s.covered?'covered':'short '+(s.needed-s.scheduledCount)}</span>
         ${s.calledOffCount?`<span class="risk risk-warn">${s.calledOffCount} off</span>`:''}
-        ${ME&&ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" style="margin-left:auto" onclick="delSlot(${s.id})">Delete</button>`:''}
+        ${canManageStaffing()?`<button class="btn btn-ghost btn-sm sans" style="margin-left:auto" onclick="delSlot(${s.id})">Delete</button>`:''}
       </div>
       <div style="margin:8px 0">${people||'<span class="hint">No one assigned.</span>'}</div>
-      ${ME&&ME.role==='admin'?`<div class="handoff-add"><select id="asgn_${s.id}">${opt}</select><button class="btn btn-ghost btn-sm sans" onclick="assignSlot(${s.id})">Assign</button></div>`:''}
+      ${canManageStaffing()?`<div class="handoff-add"><select id="asgn_${s.id}">${opt}</select><button class="btn btn-ghost btn-sm sans" onclick="assignSlot(${s.id})">Assign</button></div>`:''}
     </div>`;
   }).join('') : '<div class="card"><div class="empty">No shifts scheduled for this day. Add shift needs above.</div></div>';
+  loadOnShiftToday();
   loadCareHealth();
 }
 // Mirrors exactly what the resident kiosk's "Who's on my care team?" will show for
@@ -3418,7 +3426,6 @@ async function loadMaintenance(){
   if($('mt_pri')&&!$('mt_pri').options.length){ $('mt_pri').innerHTML = d.priorities.map(p=>`<option ${p==='Normal'?'selected':''}>${esc(p)}</option>`).join(''); }
   if($('mt_owner_email')) $('mt_owner_email').placeholder = d.maintenanceEmail || 'maintenance@armadarecovery.com';
   renderMaintBoard();
-  loadMaintShift();
 }
 function priPill(p){ const c=p==='Urgent'?'var(--danger)':p==='High'?'#c98a14':p==='Low'?'var(--muted)':'var(--navy)'; return `<span class="risk" style="background:${c}1a;color:${c};border:1px solid ${c}55">${esc(p)}</span>`; }
 function renderMaintBoard(){
@@ -3480,13 +3487,14 @@ async function loadMaintHistory(){
 async function maintStatus(id,status){ try{ await api('/maintenance/'+id,{method:'POST',body:JSON.stringify({status})}); loadMaintenance(); }catch(e){ alert(e.message); } }
 async function maintResolve(id){ const r=prompt('What was done? (optional)','')||''; try{ await api('/maintenance/'+id,{method:'POST',body:JSON.stringify({status:'resolved',resolution:r})}); loadMaintenance(); }catch(e){ alert(e.message); } }
 async function saveMaintEmail(){ const v=$('mt_owner_email').value.trim(); try{ await api('/maintenance/settings',{method:'POST',body:JSON.stringify({maintenance_email:v})}); $('mt_owner_msg').textContent='✓ Saved'; }catch(e){ $('mt_owner_msg').textContent=e.message; } }
-async function loadMaintShift(){
-  let d; try{ d=await api('/staffing'); }catch(e){ $('maintShift').innerHTML='<div class="hint">Shift schedule unavailable.</div>'; return; }
+async function loadOnShiftToday(){
+  const box=$('schOnShift'); if(!box) return;
+  let d; try{ d=await api('/staffing'); }catch(e){ box.innerHTML='<div class="hint">Shift schedule unavailable.</div>'; return; }
   const parts=['Morning','Day','Evening','Night'];
   const byPart={}; (d.slots||[]).forEach(s=>{ (byPart[s.part]=byPart[s.part]||[]).push(s); });
   const has=parts.some(p=>byPart[p]);
-  if(!has){ $('maintShift').innerHTML='<div class="hint">No shifts scheduled for today yet.</div>'; return; }
-  $('maintShift').innerHTML = parts.filter(p=>byPart[p]).map(p=>{
+  if(!has){ box.innerHTML='<div class="hint">No shifts scheduled for today yet — build today\'s schedule below.</div>'; return; }
+  box.innerHTML = parts.filter(p=>byPart[p]).map(p=>{
     const slots=byPart[p];
     const rows=slots.map(s=>{
       const on=s.assignments.filter(a=>a.status==='scheduled');

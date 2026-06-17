@@ -1714,15 +1714,17 @@ function scanBanner(msg, ok){
   el.style.background= ok?'#eaf7ee':'#fdecea'; el.style.color= ok?'#2d7a4f':'#b00'; el.innerHTML=msg;
   clearTimeout(scanBanner._t); scanBanner._t=setTimeout(()=>{ el.style.display='none'; }, 6000);
 }
-async function doRoundScan(code, manual){
-  try{ const r=await api('/round-scan',{method:'POST',body:JSON.stringify({code,manual:!!manual})});
+async function doRoundScan(code, opts){
+  opts=opts||{};
+  try{ const r=await api('/round-scan',{method:'POST',body:JSON.stringify({code,manual:!!opts.manual,photo:opts.photo||null})});
     const who = r.by ? ` <span class="hint">— ${esc(r.by)}</span>` : '';
-    if(r.flagged) scanBanner(`⚠ Logged, but FLAGGED: ${esc(r.reason||'suspicious pattern')}. A leader will review.`, false);
+    if(r.flagged) scanBanner(`⚠ Logged, but FLAGGED: ${esc(r.reason||'suspicious pattern')}. A leader will review the photo.`, false);
     else scanBanner(`✓ <strong>${esc(r.label)}</strong> scanned${r.clients?` · ${r.clients} client check${r.clients>1?'s':''} logged`:''}${who}`, true);
-    if($('roundscan')&&$('roundscan').classList.contains('active')) loadScanCoverage();
+    if(navigator.vibrate) navigator.vibrate(80);
+    if($('roundscan')&&$('roundscan').classList.contains('active')){ loadScanCoverage(); if(ME&&ME.role==='admin') loadScanReview(); }
   }catch(e){ scanBanner('✗ '+esc(e.message), false); }
 }
-async function manualScan(){ const c=$('scanCodeInput')?$('scanCodeInput').value.trim():''; if(!c){return;} await doRoundScan(c, true); if($('scanCodeInput'))$('scanCodeInput').value=''; }
+async function manualScan(){ const c=$('scanCodeInput')?$('scanCodeInput').value.trim():''; if(!c){return;} await doRoundScan(c, {manual:true}); if($('scanCodeInput'))$('scanCodeInput').value=''; }
 let SCAN_STREAM=null, SCAN_RAF=null;
 async function startScanner(){
   if(typeof jsQR!=='function'){ scanBanner('Scanner library not loaded — reload the page and try again.', false); return; }
@@ -1745,7 +1747,13 @@ async function startScanner(){
     if(vid.readyState===vid.HAVE_ENOUGH_DATA){
       cv.width=vid.videoWidth; cv.height=vid.videoHeight; cx.drawImage(vid,0,0,cv.width,cv.height);
       try{ const img=cx.getImageData(0,0,cv.width,cv.height); const q=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
-        if(q&&q.data){ stopScanner(); doRoundScan(q.data); return; }
+        if(q&&q.data){
+          // Grab a small JPEG of what the camera saw, for paper-vs-phone review.
+          let photo=null;
+          try{ const sc=document.createElement('canvas'); const W=360, scale=W/cv.width; sc.width=W; sc.height=Math.round(cv.height*scale);
+            sc.getContext('2d').drawImage(cv,0,0,sc.width,sc.height); photo=sc.toDataURL('image/jpeg',0.5); }catch(e){}
+          stopScanner(); doRoundScan(q.data,{photo}); return;
+        }
       }catch(e){}
     }
     SCAN_RAF=requestAnimationFrame(tick);
@@ -1756,8 +1764,22 @@ function stopScanner(){ if(SCAN_RAF) cancelAnimationFrame(SCAN_RAF); SCAN_RAF=nu
 async function loadRoundScan(){
   if($('scanWho')&&ME) $('scanWho').innerHTML = `Scanning as <strong>${esc(ME.name)}</strong>${ME.job_role?' · '+esc(ME.job_role):''} — every scan is logged under your name. <a href="#" class="hint" onclick="doLogout();return false">Not you? Switch user</a>`;
   loadScanCoverage();
-  if(ME&&ME.role==='admin'){ loadScanScorecard(); loadScanPoints(); loadRoomHours(); }
+  if(ME&&ME.role==='admin'){ loadScanScorecard(); loadScanReview(); loadScanPoints(); loadRoomHours(); }
 }
+async function loadScanReview(){
+  const el=$('scanReview'); if(!el) return;
+  let d; try{ d=await api('/rounds/scan-review?photos=1'); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  if(!d.scans.length){ el.innerHTML='<div class="empty">No scan photos yet. They appear here as staff scan with the in-app camera (typed-code entries have no photo).</div>'; return; }
+  el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:10px">'+d.scans.map(s=>`
+    <div style="width:150px;border:1px solid ${s.flagged?'var(--danger)':'var(--line)'};border-radius:10px;padding:6px;text-align:center">
+      <img src="/api/rounds/scan-photo/${s.id}" alt="" style="width:100%;height:120px;object-fit:cover;border-radius:6px;background:#eee"/>
+      <div class="sans" style="font-size:12px;margin-top:4px"><strong>${esc(s.label||'?')}</strong></div>
+      <div class="hint" style="font-size:11px">${esc(s.by_name||'')} · ${esc((s.ts||'').slice(5,16))}</div>
+      ${s.flagged?`<div class="risk risk-high" style="margin-top:3px">flagged</div><button class="btn btn-ghost btn-sm sans" onclick="flagScan(${s.id},0)">Clear</button>`
+        :`<button class="btn btn-ghost btn-sm sans" style="color:var(--danger);margin-top:3px" onclick="flagScan(${s.id},1)">⚠ Phone screen</button>`}
+    </div>`).join('')+'</div>';
+}
+async function flagScan(id,on){ try{ await api('/rounds/scan-flag',{method:'POST',body:JSON.stringify({id,flagged:on})}); loadScanReview(); loadScanScorecard(); }catch(e){ alert(e.message); } }
 async function loadScanCoverage(){
   let d; try{ d=await api('/rounds/coverage'); }catch(e){ if($('scanCoverage'))$('scanCoverage').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   if($('scanCoverageKpis')) $('scanCoverageKpis').innerHTML =

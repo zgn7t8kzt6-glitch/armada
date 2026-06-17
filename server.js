@@ -1031,11 +1031,15 @@ app.post('/api/round-scan', requireAuth, (req, res) => {
   if (!p) return res.status(404).json({ error: 'Unknown or inactive scan point.' });
   // Anti-replay: scanning several DIFFERENT points in seconds is physically impossible —
   // the hallmark of someone scanning saved photos of the QRs. Record but flag for review.
-  const burst = db.prepare(`SELECT COUNT(DISTINCT point_id) n FROM round_scans WHERE by_id = ? AND point_id != ? AND ts >= datetime('now','-30 seconds')`).get(req.user.id, p.id).n;
+  const source = req.body?.manual ? 'manual' : 'scan';
   let flagged = 0, reason = null;
+  const burst = db.prepare(`SELECT COUNT(DISTINCT point_id) n FROM round_scans WHERE by_id = ? AND point_id != ? AND ts >= datetime('now','-30 seconds')`).get(req.user.id, p.id).n;
   if (burst >= 3) { flagged = 1; reason = `${burst + 1} different points scanned within 30s — too fast to walk (possible photo replay)`; }
-  db.prepare(`INSERT INTO round_scans (point_id, code, by_id, by_name, source, flagged, flag_reason) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(p.id, code, req.user.id, req.user.name, req.body?.manual ? 'manual' : 'scan', flagged, reason);
+  // The camera frame at scan time, stored small so a leader can see it was the wall
+  // poster, not a phone screen. Capped to keep the row light.
+  const photo = (typeof req.body?.photo === 'string' && req.body.photo.startsWith('data:image') && req.body.photo.length < 200000) ? req.body.photo : null;
+  db.prepare(`INSERT INTO round_scans (point_id, code, by_id, by_name, source, flagged, flag_reason, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(p.id, code, req.user.id, req.user.name, source, flagged, reason, photo);
   if (flagged) createAlert(null, 'scan_flag_' + req.user.id, 'Elevated', `Suspicious rounds scanning by ${req.user.name}: ${reason}. Spot-check.`);
   let clients = 0;
   if (p.area === 'Room' && p.room) {
@@ -1063,6 +1067,33 @@ app.get('/api/rounds/scorecard', requireAuth, (req, res) => {
   expected = Math.max(1, expected);
   const compliancePct = Math.min(100, Math.round(totalScans / expected * 100));
   res.json({ days, interval, people, activePoints: activePts, totalScans, expected, compliancePct });
+});
+// Scan-image review: recent scans with the photo taken at scan time, so a leader can
+// eyeball whether the QR was the wall poster or a phone screen, and flag the cheats.
+app.get('/api/rounds/scan-review', requireAuth, requireAdmin, (req, res) => {
+  const days = Math.min(30, Math.max(1, +(req.query.days || 2)));
+  const onlyPhotos = req.query.photos === '1';
+  const rows = db.prepare(`SELECT r.id, r.by_name, r.source, r.flagged, r.flag_reason, r.ts, r.photo IS NOT NULL hasPhoto, s.label
+    FROM round_scans r LEFT JOIN scan_points s ON s.id = r.point_id
+    WHERE r.ts >= datetime('now', ?) ${onlyPhotos ? 'AND r.photo IS NOT NULL' : ''}
+    ORDER BY r.flagged DESC, r.id DESC LIMIT 120`).all(`-${days} day`);
+  res.json({ days, scans: rows });
+});
+app.get('/api/rounds/scan-photo/:id', requireAuth, requireAdmin, (req, res) => {
+  const r = db.prepare(`SELECT photo FROM round_scans WHERE id = ?`).get(req.params.id);
+  if (!r || !r.photo) return res.status(404).send('No photo');
+  const m = r.photo.match(/^data:(image\/\w+);base64,(.+)$/); if (!m) return res.status(404).send('Bad photo');
+  res.type(m[1]).send(Buffer.from(m[2], 'base64'));
+});
+app.post('/api/rounds/scan-flag', requireAuth, requireAdmin, (req, res) => {
+  const id = +req.body?.id; const on = req.body?.flagged ? 1 : 0;
+  const reason = on ? (String(req.body?.reason || 'Flagged on review — QR appears to be a phone screen, not the wall poster').slice(0, 200)) : null;
+  const r = db.prepare(`SELECT by_name FROM round_scans WHERE id = ?`).get(id);
+  if (!r) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`UPDATE round_scans SET flagged = ?, flag_reason = ? WHERE id = ?`).run(on, reason, id);
+  if (on) createAlert(null, 'scan_review_' + id, 'Elevated', `Rounds scan flagged on review (${r.by_name}): ${reason}`);
+  audit({ user: req.user, action: on ? 'SCAN_FLAG' : 'SCAN_UNFLAG', entity: 'round_scan', entity_id: id, ip: req.ip });
+  res.json({ ok: true });
 });
 app.get('/api/rounds/sweep-interval', requireAuth, requireAdmin, (req, res) => res.json({ minutes: sweepInterval() }));
 app.post('/api/rounds/sweep-interval', requireAuth, requireAdmin, (req, res) => { setState('round_sweep_min', String(Math.max(5, +req.body?.minutes || 60))); res.json({ ok: true, minutes: sweepInterval() }); });

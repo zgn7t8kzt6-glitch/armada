@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616P" />
+<link rel="stylesheet" href="/styles.css?v=20260616Q" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -694,6 +694,11 @@
         <div class="cmd-hero-row"><div><h3>👤 Accountability scorecard</h3><p class="sub sans">Scans per person and facility compliance. Misses are coached first — termination is a documented human decision, never automatic.</p></div>
           <select id="scanScoreDays" class="sans" onchange="loadScanScorecard()"><option value="7">7 days</option><option value="30">30 days</option></select></div>
         <div id="scanScorecard"></div>
+      </div>
+      <div class="card" data-admin>
+        <div class="cmd-hero-row"><div><h3>🖼️ Scan photo review — paper vs. phone</h3><p class="sub sans">Each scan saves what the camera saw. Real rounds show the QR <strong>on the wall</strong>; a scan of a QR <strong>on a phone screen</strong> is a falsified round — tap “Phone screen” to flag it.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadScanReview()">Refresh</button></div>
+        <div id="scanReview"></div>
       </div>
       <div class="card" data-admin>
         <details><summary class="sans" style="cursor:pointer;font-weight:600">⚙ Manage scan points &amp; print QR codes</summary>
@@ -1750,6 +1755,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616P"></script>
+<script src="/app.js?v=20260616Q"></script>
 </body>
 </html>

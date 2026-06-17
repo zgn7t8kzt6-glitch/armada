@@ -5180,7 +5180,46 @@ app.post('/api/kiosk/suggestion', (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------------- SOP / Policy library ---------------- */
+// "Who's my care team?" — a resident picks their name and sees their own case
+// manager + therapist (from Kipu) plus who's actually on shift right now (nurses,
+// RT/BHTs, case managers). On-shift = anyone clocked in now MERGED with anyone
+// scheduled for the current shift part, deduped — so the client always sees a name
+// even if the time clock or the schedule alone is sparsely used.
+function careRoleBucket(s) {
+  const j = (s || '').toLowerCase();
+  if (/nurse|\brn\b|\blpn\b|\blvn\b/.test(j)) return 'nurses';
+  if (/bht|tech|\brt\b|recovery|behavioral health/.test(j)) return 'rts';
+  if (/case\s*manager|case\s*mgmt|\bcm\b/.test(j)) return 'caseManagers';
+  return null;
+}
+app.get('/api/kiosk/careteam', (req, res) => {
+  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+  const c = req.query.client_id
+    ? db.prepare(`SELECT pref, name, room, case_manager, therapist FROM clients WHERE id = ? AND active = 1 AND discharge_status IS NULL`).get(req.query.client_id)
+    : null;
+  if (!c) return res.status(400).json({ error: 'Please choose your name first.' });
+  const buckets = { nurses: [], rts: [], caseManagers: [] };
+  const add = (name, roleStr) => {
+    const b = careRoleBucket(roleStr);
+    if (!b || !name) return;
+    if (!buckets[b].some((x) => x.toLowerCase() === String(name).toLowerCase())) buckets[b].push(name);
+  };
+  // Clocked in right now (real presence).
+  db.prepare(`SELECT t.user_name, u.job_role FROM time_entries t JOIN users u ON u.id = t.user_id
+    WHERE t.clock_out IS NULL AND u.active = 1`).all().forEach((r) => add(r.user_name, r.job_role));
+  // Scheduled for the current shift part today (planned coverage).
+  const part = currentShift();
+  db.prepare(`SELECT a.user_name, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
+    WHERE s.date = date('now') AND s.part = ? AND a.status = 'scheduled'`).all(part).forEach((r) => add(r.user_name, r.role));
+  res.json({
+    client: { name: c.pref || c.name, room: c.room || '' },
+    caseManager: c.case_manager || '',
+    therapist: c.therapist || '',
+    onShift: buckets,
+    shift: part,
+  });
+});
+
 app.get('/api/docs', requireAuth, (req, res) => {
   const q = (req.query.q || '').trim();
   let sql = `SELECT id, title, category, tags, body, updated_at FROM docs`;

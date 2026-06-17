@@ -76,6 +76,7 @@ function home(){
     <p class="ksub">Ask for something, or tell us how you're doing. Surveys can be anonymous; a request will ask your name so we can bring it to you.</p>
     <label>I am (optional)</label>
     <select id="kclient"><option value="">Prefer not to say</option>${DATA.clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
+    <button class="kbtn" onclick="careView()">🧭  Who's on my care team?</button>
     <button class="kbtn" onclick="reqView()">🛎  Request something</button>
     <button class="kbtn" onclick="mealView()">🍽️  How was ${currentMeal().toLowerCase()}?</button>
     ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}
@@ -150,6 +151,48 @@ async function submitMeal(){
       body:JSON.stringify({code:CODE,meal:MEAL_SEL,meal_date:MEAL_DATE,client_id:CLIENT||null,liked,enough,again,comment})});
     thanks('Thank you — that helps us make every meal better.');
   }catch(e){ if($('merr'))$('merr').textContent=e.message; }
+}
+// "Who's on my care team?" — pick your name, see your own CM + therapist plus
+// who's on shift right now. Names matter most when you're new and disoriented.
+function careView(){
+  VIEW='care';
+  CLIENT=client();
+  $('kview').innerHTML=`<h1>Who's on my care team? 🧭</h1>
+    <p class="ksub">Choose your name and we'll show your case manager and therapist, plus who's on shift right now.</p>
+    <label>Your name <span style="color:#c0392b">*</span></label>
+    <select id="kcareclient" onchange="loadCareTeam()"><option value="">— choose your name —</option>${DATA.clients.map(c=>`<option value="${c.id}"${String(c.id)===String(CLIENT)?' selected':''}>${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
+    <div id="kcareerr" class="err" style="margin-top:6px"></div>
+    <div id="kcareout" style="margin-top:14px"></div>
+    <button class="kbtn" style="text-align:center;margin-top:14px" onclick="home()">← Back</button>`;
+  if(CLIENT) loadCareTeam();
+}
+function careList(label, arr, empty){
+  const names=(arr||[]).filter(Boolean);
+  return `<div style="margin:10px 0"><div style="font-family:sans-serif;font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)">${esc(label)}</div>
+    <div style="font-size:19px;color:var(--navy);margin-top:2px">${names.length?names.map(esc).join(', '):'<span style="color:var(--muted);font-style:italic">'+esc(empty)+'</span>'}</div></div>`;
+}
+async function loadCareTeam(){
+  const sel=$('kcareclient'); const cid=sel?sel.value:'';
+  if($('kcareerr')) $('kcareerr').textContent='';
+  if(!cid){ if($('kcareout')) $('kcareout').innerHTML=''; return; }
+  CLIENT=cid;
+  if($('kcareout')) $('kcareout').innerHTML='<p class="ksub">Looking that up…</p>';
+  try{
+    const d=await kapi('careteam?code='+encodeURIComponent(CODE)+'&client_id='+encodeURIComponent(cid));
+    const onShift=d.onShift||{};
+    $('kcareout').innerHTML=`
+      <div class="kcard" style="box-shadow:none;border:1px solid var(--line);padding:18px;margin:0">
+        <div style="font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--gold);font-family:sans-serif">Your team</div>
+        ${careList('Your case manager', d.caseManager?[d.caseManager]:[], 'Not assigned yet — ask the front desk')}
+        ${careList('Your therapist', d.therapist?[d.therapist]:[], 'Not assigned yet — ask the front desk')}
+      </div>
+      <div class="kcard" style="box-shadow:none;border:1px solid var(--line);padding:18px;margin:12px 0 0">
+        <div style="font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--gold);font-family:sans-serif">On shift right now${d.shift?' · '+esc(d.shift):''}</div>
+        ${careList('Nurse', onShift.nurses, 'No nurse shown — ask the front desk')}
+        ${careList('RT / BHT', onShift.rts, 'No RT shown — ask the front desk')}
+        ${careList('Case manager on shift', onShift.caseManagers, 'None on shift right now')}
+      </div>`;
+  }catch(e){ if($('kcareerr')) $('kcareerr').textContent=e.message; if($('kcareout')) $('kcareout').innerHTML=''; }
 }
 function reqView(){
   VIEW='req';

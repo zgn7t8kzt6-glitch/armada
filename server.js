@@ -1386,15 +1386,18 @@ function rolesForAlert(kind, message = '') {
     return null;   // department unclear
   };
   // Clinical lane — kept to the fewest roles that must act, plus the Clinical
-  // Director for oversight. Safety items (risk/concern) reach the hands-on care
-  // roles only (BHT + Nurse); paperwork goes to whoever owns it.
-  if (k === 'risk' || k === 'concern') return wrap(['BHT / Tech', 'Nurse', CLIN]);
+  // Director for oversight. Safety items (rounds, risk, concerns, note red flags,
+  // incidents) reach the hands-on care roles (BHT + Nurse); paperwork goes to
+  // whoever owns it. None of these are operational — the DO does not see them.
+  if (k === 'risk' || k === 'concern' || k === 'rounds' || k === 'note' || k === 'incident') return wrap(['BHT / Tech', 'Nurse', CLIN]);
   if (k === 'carecard') return wrap(['BHT / Tech', CLIN]);
   if (k === 'dignity') return wrap(['BHT / Tech', CLIN]);
   if (k === 'docs') return wrap(['Nurse', 'Case Manager', 'Therapist', CLIN]);
   if (k === 'dc_incomplete') return wrap(['Case Manager', CLIN]);
   if (k === 'continuum') return wrap(['Case Manager', CLIN]);
+  if (k === 'recovery') return wrap([CLIN]);   // low experience score — a leader checks in
   // Operational lane — the Director of Operations oversees these.
+  if (k === 'coverage' || k.startsWith('understaffed_')) return wrap([OPS]);
   if (k === 'unscheduled') return wrap(['Front Desk', OPS]);
   if (k === 'request') { const d = byDept(); return d ? wrap([...d, OPS]) : wrap(['Front Desk', OPS]); }
   if (k.startsWith('meal_')) return wrap(['Kitchen', OPS]);

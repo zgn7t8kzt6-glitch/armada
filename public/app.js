@@ -2082,18 +2082,18 @@ async function loadRounds(){
     <div class="ret-card"><div class="n">${d.onTime}</div><div class="l">On time</div></div>
     <div class="ret-card ${(d.total-d.askedThisShift)?'rc-warn':''}"><div class="n">${d.askedThisShift}/${d.total}</div><div class="l">Asked this shift</div></div>
     <div class="ret-card"><div class="n">q${d.defaultMin}</div><div class="l">Default cadence</div></div>`;
-  if($('roundsQuestion')) $('roundsQuestion').innerHTML = d.question ? `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Ask every client this ${esc((d.shift||'').toLowerCase())} shift</div><h3 style="margin:4px 0 0">“${esc(d.question)}”</h3><p class="sub sans" style="margin:4px 0 0">Tap 💬 on each client to capture their answer. Needs become requests automatically; distress pulls a human in person.</p></div>` : '';
+  if($('roundsQuestion')) $('roundsQuestion').innerHTML = d.question ? `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Ask every client this ${esc((d.shift||'').toLowerCase())} shift</div><h3 style="margin:4px 0 0">“${esc(d.question)}”</h3><p class="sub sans" style="margin:4px 0 0">Ask it on rounds. Capture anything worth keeping with 📝 Note next to the client.</p></div>` : '';
   const rows=[...d.rows].sort((a,b)=>(b.overdue-a.overdue)||((b.minsSince??1e9)-(a.minsSince??1e9)));
   const scanBannerHtml = `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:220px"><strong>Rounds are completed by scanning.</strong> <span class="hint">A check below only clears when you scan that room's QR — there is no desk check-off. The clock here reflects verified scans.</span></div><button class="btn btn-gold sans" onclick="show('roundscan')">📍 Open Scan Rounds</button></div></div>`;
   board.innerHTML = scanBannerHtml + rows.map(r=>{
     const when = r.minsSince==null?'never scanned':(r.minsSince+'m ago'+(r.lastBy?' · '+esc(r.lastBy):''));
+    const noteHtml = r.note ? `<div class="hint" style="margin-top:2px">📝 ${esc(r.note)}${r.noteBy?' <span style="opacity:.7">— '+esc(r.noteBy)+'</span>':''}</div>` : '';
     return `<div class="cmd-row ${r.overdue?'cmd-row-flag':''}">
       ${r.photo?`<img src="${esc(r.photo)}" class="client-photo sm" alt=""/>`:''}
-      <div class="cmd-row-main"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''}${r.asked?' <span class="risk risk-low">asked ✓</span>':''}
-        <div class="hint">${r.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}last verified: ${when}${r.lastStatus&&r.lastStatus!=='ok'?' · '+esc(r.lastStatus):''} · q${r.interval}</div></div>
+      <div class="cmd-row-main"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''}
+        <div class="hint">${r.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}last verified: ${when}${r.lastStatus&&r.lastStatus!=='ok'?' · '+esc(r.lastStatus):''} · q${r.interval}</div>${noteHtml}</div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm sans" onclick="roundAsk(${r.id}, ${JSON.stringify(r.name).replace(/"/g,'&quot;')})" title="Ask the shift question">💬 Ask</button>
-        <button class="btn btn-ghost btn-sm sans" onclick="roundConcern(${r.id})" title="Flag a concern">⚑ Concern</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="roundNote(${r.id}, ${JSON.stringify(r.note||'').replace(/"/g,'&quot;')})" title="Add or edit an optional note">📝 ${r.note?'Edit note':'Note'}</button>
       </div></div>`;
   }).join('');
   $('roundsAccount').innerHTML = (d.byPerson||[]).length ? d.byPerson.map(p=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(p.k)}</strong></div><span class="chip">${p.n} checks</span></div>`).join('') : '<div class="hint">No checks logged today yet.</div>';
@@ -2108,6 +2108,7 @@ async function resetShiftQuestions(){ try{ await api('/checkins/questions',{meth
 async function roundAsk(id, name){ const answer=prompt('Their answer to this shift\'s question'+(name?' — '+name:'')+':\n(needs become requests automatically)'); if(answer===null) return; try{ await api('/checkins',{method:'POST',body:JSON.stringify({client_id:id,answer})}); loadRounds(); }catch(e){ alert(e.message); } }
 async function roundCheck(id, status){ await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:status||'ok'})}); loadRounds(); }
 async function roundConcern(id){ const note=prompt('What did you observe? (logs a safety concern)'); if(note===null) return; await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:'concern',note})}); loadRounds(); }
+async function roundNote(id, current){ const note=prompt('Optional note for this client:', current||''); if(note===null) return; try{ await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:'note',note})}); loadRounds(); }catch(e){ alert(e.message); } }
 async function roundsSweep(){ if(!confirm('Log a completed safety check for EVERY client right now?')) return; await api('/rounds/sweep',{method:'POST'}); loadRounds(); }
 async function setRoundsEscalation(on){ await api('/rounds/escalation',{method:'POST',body:JSON.stringify({on})}); }
 

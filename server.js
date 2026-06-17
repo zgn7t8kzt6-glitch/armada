@@ -896,16 +896,19 @@ app.get('/api/rounds/board', requireAuth, (req, res) => {
   const active = db.prepare(`SELECT id, pref, name, room, loc, photo, obs_interval FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
   // Only a SCANNED (or Kipu-charted) check proves presence — desk taps don't count.
   const lastChk = db.prepare(`SELECT ts, by_name, status FROM obs_checks WHERE client_id = ? AND source IN ('scan','kipu') ORDER BY id DESC LIMIT 1`);
+  const lastNote = db.prepare(`SELECT note, by_name FROM obs_checks WHERE client_id = ? AND status = 'note' AND note IS NOT NULL AND note != '' ORDER BY id DESC LIMIT 1`);
   const now = Date.now();
   const shift = currentShift();
   const askedSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM client_checkins WHERE date(created_at) = date('now') AND shift = ?`).all(shift).map((r) => r.client_id));
   const rows = active.map((c) => {
     const l = lastChk.get(c.id);
+    const n = lastNote.get(c.id);
     const interval = c.obs_interval || OBS_DEFAULT_MIN;
     const lastTs = l ? Date.parse(String(l.ts).replace(' ', 'T') + 'Z') : null;
     const mins = lastTs ? Math.floor((now - lastTs) / 60000) : null;
     return { id: c.id, name: c.pref || c.name, room: c.room, photo: c.photo || null, interval,
-      lastBy: l?.by_name || null, lastStatus: l?.status || null, minsSince: mins, overdue: mins == null || mins >= interval, asked: askedSet.has(c.id) };
+      lastBy: l?.by_name || null, lastStatus: l?.status || null, minsSince: mins, overdue: mins == null || mins >= interval, asked: askedSet.has(c.id),
+      note: n?.note || null, noteBy: n?.by_name || null };
   });
   const overdue = rows.filter((r) => r.overdue).length;
   // Accountability: checks logged today, by person.
@@ -916,10 +919,11 @@ app.post('/api/rounds/check', requireAuth, (req, res) => {
   const b = req.body || {};
   if (!b.client_id) return res.status(400).json({ error: 'client_id required' });
   // Routine "ok" rounds can ONLY be completed by scanning the room's QR — no desk taps.
-  // This endpoint now only logs a CONCERN (a real observation you'd never fake to skip a walk).
-  if (b.status !== 'concern') return res.status(403).json({ error: 'Complete routine rounds by scanning the room QR. This is only for flagging a concern.' });
-  db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name, source) VALUES (?, 'concern', ?, ?, 'app')`).run(+b.client_id, (b.note || '').trim() || null, req.user.name);
-  createAlert(+b.client_id, 'concern', 'Elevated', `Safety-round concern logged by ${req.user.name}`);
+  // This endpoint logs a CONCERN (raises an alert) or a plain NOTE (optional context, no alert).
+  if (b.status !== 'concern' && b.status !== 'note') return res.status(403).json({ error: 'Complete routine rounds by scanning the room QR. This is only for an optional note or flagging a concern.' });
+  const note = (b.note || '').trim() || null;
+  db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name, source) VALUES (?, ?, ?, ?, 'app')`).run(+b.client_id, b.status, note, req.user.name);
+  if (b.status === 'concern') createAlert(+b.client_id, 'concern', 'Elevated', `Safety-round concern logged by ${req.user.name}`);
   res.json({ ok: true });
 });
 // The "I walked the whole unit" sweep is retired — a round only counts when you scan it.

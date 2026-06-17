@@ -845,7 +845,7 @@ app.get('/api/meals/insights', requireAuth, (req, res) => {
     SUM(CASE WHEN again=1 THEN 1 ELSE 0 END) again, SUM(CASE WHEN again IS NOT NULL THEN 1 ELSE 0 END) againN`;
   const shape = (r) => ({ n: r.n, likedPct: pct(r.liked, r.likedN), enoughPct: pct(r.enough, r.enoughN), againPct: pct(r.again, r.againN) });
   // Which meal slot is enjoyed most.
-  const order = { Breakfast: 0, Lunch: 1, Dinner: 2, Snack: 3 };
+  const order = { Breakfast: 0, Lunch: 1, Dinner: 2 };
   const byMeal = db.prepare(`SELECT meal, ${agg} FROM meal_feedback WHERE meal_date >= date('now', ?) GROUP BY meal`).all(`-${days} day`)
     .map((r) => ({ meal: r.meal, ...shape(r) })).sort((a, b) => (order[a.meal] ?? 9) - (order[b.meal] ?? 9));
   // Per-dish performance (only dishes with at least minN ratings).
@@ -4850,7 +4850,7 @@ app.post('/api/kiosk/survey', (req, res) => {
 // Resident meal pulse from the dining-room kiosk — three taps + an optional word.
 // meal + meal_date come from the iPad's local clock (the real dining-room time), so
 // the date is correct regardless of server timezone; we validate and clamp anyway.
-const MEALS3 = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+const MEALS3 = ['Breakfast', 'Lunch', 'Dinner'];
 app.post('/api/kiosk/meal', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
   const b = req.body || {};
@@ -5406,7 +5406,7 @@ async function sendMealCount() {
     ${d.allergies.length ? `<div style="margin-top:6px;color:#b00"><b>⚠ Allergies:</b> ${d.allergies.map((x) => `${e(x.label)}${x.n > 1 ? ` (×${x.n})` : ''}`).join(' · ')}</div>` : ''}` : '';
   const fb = m.feedback;
   const p = m.pulse;
-  const MEALS_ORDER = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  const MEALS_ORDER = ['Breakfast', 'Lunch', 'Dinner'];
   const dayLabel = (s) => new Date(s + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'short', day: 'numeric' });
   const fmtMeal = (mm) => [
     mm.likedPct != null ? `<b style="color:${mm.likedPct >= 70 ? '#2d7a4f' : mm.likedPct >= 40 ? '#a60' : '#b00'}">${mm.likedPct}% enjoyed</b>` : '',

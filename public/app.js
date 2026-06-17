@@ -2825,13 +2825,12 @@ async function loadMenu(){
   if($('menuDate') && !$('menuDate').value){ $('menuDate').value=new Date().toISOString().slice(0,10); }
   const date=$('menuDate')?$('menuDate').value:'';
   let d; try{ d=await api('/meals/menu'+(date?('?date='+date):'')); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
-  const meals=['Breakfast','Lunch','Dinner','Snack'];
+  const meals=['Breakfast','Lunch','Dinner'];
   el.innerHTML = meals.map(m=>{
     const cur=(d.meals&&d.meals[m])?d.meals[m]:{dish:'',notes:''};
-    const ph = m==='Snack' ? 'optional — e.g. Fruit, yogurt, granola' : 'e.g. Grilled chicken, rice, green beans';
     return `<div class="toolbar" style="gap:8px;margin:6px 0;align-items:center">
       <div style="width:90px;color:var(--muted);font-weight:600" class="sans">${m}</div>
-      <input id="dish_${m}" class="sans" style="flex:1" placeholder="${ph}" value="${esc(cur.dish||'')}"/>
+      <input id="dish_${m}" class="sans" style="flex:1" placeholder="e.g. Grilled chicken, rice, green beans" value="${esc(cur.dish||'')}"/>
       <button class="btn btn-ghost btn-sm sans" onclick="saveMenu('${m}')">Save</button>
     </div>`;
   }).join('');
@@ -2849,7 +2848,7 @@ async function loadMealFeedback(){
   const el=$('mealFeedback'); if(!el) return;
   let d; try{ d=await api('/meals/feedback?days=14'); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   if(!d.byDay.length){ el.innerHTML='<div class="empty">No resident meal feedback yet. It appears here as they tap "How was the meal?" on the dining-room kiosk (reload the kiosk once so the button shows). <br><span class="hint">The longer ⭐ Meal &amp; Food Survey is separate — its responses live under the Surveys tab.</span></div>'; return; }
-  const meals=['Breakfast','Lunch','Dinner','Snack'];
+  const meals=['Breakfast','Lunch','Dinner'];
   const total=d.byDay.reduce((s,day)=> s + meals.reduce((t,m)=> t + (day.meals[m]?day.meals[m].n:0), 0), 0);
   const cellPct=(p)=> p==null?'<span class="hint">—</span>':`<span style="color:${p>=70?'var(--good)':p>=40?'var(--gold)':'var(--danger)'}">${p}%</span>`;
   const cell=(m)=> m?`${m.dish?`<div style="font-weight:600;color:var(--navy);font-size:12px">${esc(m.dish)}</div>`:''}${cellPct(m.likedPct)} liked · ${cellPct(m.enoughPct)} enough · ${cellPct(m.againPct)} again <span class="hint">(${m.n})</span>`:'<span class="hint">—</span>';

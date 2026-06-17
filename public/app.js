@@ -130,7 +130,7 @@ const GROUP_OF={
   // Team — culture, recognition, learning, tasks
   mytasks:'team',messages:'team',team:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
-  inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',assign:'facility',staffmodel:'facility',
+  inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
   command:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
@@ -145,6 +145,7 @@ const VIEW_ROLES = {
   coverage:    ['Director of Operations'],
   schedule:    ['Director of Operations'],
   roster:      ['Director of Operations','Clinical Director'],
+  weekgrid:    ['Director of Operations'],
   assign:      ['Director of Operations'],
   staffmodel:  ['Director of Operations'],
   maintenance: ['Director of Operations','Housekeeping'],
@@ -258,6 +259,7 @@ function show(v){
   if(v==='coverage') loadCoverage();
   if(v==='schedule') loadSchedule();
   if(v==='roster') loadRoster();
+  if(v==='weekgrid') loadWeekGrid();
   if(v==='staffmodel') loadStaffModel();
   if(v==='clients') renderClients();
   if(v==='records') loadRecords();
@@ -2733,7 +2735,8 @@ async function loadRoster(){
   if(!d.shifts.length){ $('rosterBoard').innerHTML='<div class="card"><div class="empty">No one scheduled for this day. Build the week under Staffing → Build the schedule.</div></div>'; return; }
   $('rosterBoard').innerHTML = d.shifts.map(sh=>{
     const rows = sh.people.length ? sh.people.map(p=>rosterRow(p)).join('') : '<tr><td colspan="4" class="hint">No one assigned to this shift.</td></tr>';
-    return `<div class="card"><h3 style="margin:0 0 6px">${esc(sh.part)} · ${esc(sh.role)} <span class="hint" style="font-weight:400">— ${sh.people.filter(p=>p.status!=='called_off').length}/${sh.needed} scheduled</span></h3>
+    const head = sh.shift_label ? `${esc(sh.shift_label)} · ${esc(sh.role)}` : `${esc(sh.part)} · ${esc(sh.role)}`;
+    return `<div class="card"><h3 style="margin:0 0 6px">${head} <span class="hint" style="font-weight:400">— ${sh.people.filter(p=>p.status!=='called_off').length}/${sh.needed} scheduled</span></h3>
       <table class="tbl" style="width:100%"><tr><th>Person</th><th>Attendance</th><th>Clock in / out</th><th>Notes</th></tr>${rows}</table></div>`;
   }).join('');
 }
@@ -2769,6 +2772,38 @@ async function rosterCallOff(id){
 async function rosterCover(id){
   const cover=prompt('Who stepped in to cover this shift?','')||'';
   try{ await api('/staffing/assignments/'+id+'/cover',{method:'POST',body:JSON.stringify({covered_by_name:cover})}); loadRoster(); }catch(e){ alert(e.message); }
+}
+
+/* ---- Weekly schedule grid editor ---- */
+function weekShift(n){ const d=new Date(($('wg_start').value||today())+'T00:00'); d.setDate(d.getDate()+n); $('wg_start').value=d.toISOString().slice(0,10); loadWeekGrid(); }
+function startOfWeek(){ const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); }
+async function loadWeekGrid(){
+  await ensureReferralMeta().catch(()=>{});
+  if($('wg_role')) fillSelect($('wg_role'), META.jobRoles||['Nurse','BHT / Tech','Therapist','Case Manager','Front Desk','Kitchen','Housekeeping']);
+  if($('wg_start')&&!$('wg_start').value) $('wg_start').value=startOfWeek();
+  const start=$('wg_start')?$('wg_start').value:startOfWeek();
+  let d; try{ d=await api('/schedule/week?start='+start); }catch(e){ $('weekGridBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  if(!d.templates.length){ $('weekGridBoard').innerHTML='<div class="empty">No shift rows yet. Add the shifts your schedule uses above — e.g. Nurse · "Intake 7:00 AM", BHT / Tech · "Resident Tech 7p–7a".</div>'; return; }
+  const dow=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const head='<tr><th style="text-align:left">Shift</th>'+d.days.map(dt=>{const x=new Date(dt+'T00:00');return `<th>${dow[x.getDay()]}<br><span class="hint">${dt.slice(5)}</span></th>`;}).join('')+'</tr>';
+  const rows=d.templates.map(t=>{
+    const cells=d.days.map(dt=>{const k=t.id+'|'+dt;const v=d.cells[k]||'';return `<td style="padding:2px"><input class="wg-cell sans" data-k="${k}" value="${esc(v)}" style="width:90px;font-size:13px;padding:6px"/></td>`;}).join('');
+    return `<tr><td style="white-space:nowrap"><strong>${esc(t.shift_label)}</strong><div class="hint">${esc(t.role)} <a onclick="delShiftRow(${t.id})" title="Remove row" style="cursor:pointer;color:var(--muted)">✕</a></div></td>${cells}</tr>`;
+  }).join('');
+  $('weekGridBoard').innerHTML=`<table class="tbl" style="width:100%">${head}${rows}</table>`;
+}
+async function addShiftRow(){
+  const role=$('wg_role')?$('wg_role').value:''; const label=$('wg_label')?$('wg_label').value.trim():'';
+  if(!label){ if($('wg_row_msg'))$('wg_row_msg').textContent='Add a shift label (e.g. Intake · 7:00 AM).'; return; }
+  try{ await api('/schedule/templates',{method:'POST',body:JSON.stringify({role,shift_label:label})}); $('wg_label').value=''; if($('wg_row_msg'))$('wg_row_msg').textContent='✓ Row added'; setTimeout(()=>{if($('wg_row_msg'))$('wg_row_msg').textContent='';},1500); loadWeekGrid(); }
+  catch(e){ if($('wg_row_msg'))$('wg_row_msg').textContent=e.message; }
+}
+async function delShiftRow(id){ if(!confirm('Remove this shift row from the grid?'))return; try{ await api('/schedule/templates/'+id,{method:'DELETE'}); loadWeekGrid(); }catch(e){ alert(e.message); } }
+async function saveWeekGrid(){
+  const cells={}; document.querySelectorAll('.wg-cell').forEach(i=>{ cells[i.dataset.k]=i.value; });
+  if($('wg_msg'))$('wg_msg').textContent='Saving…';
+  try{ await api('/schedule/week',{method:'POST',body:JSON.stringify({start:$('wg_start').value,cells})}); if($('wg_msg'))$('wg_msg').textContent='✓ Saved — Roster & Coverage updated.'; setTimeout(()=>{if($('wg_msg'))$('wg_msg').textContent='';},2500); loadWeekGrid(); }
+  catch(e){ if($('wg_msg'))$('wg_msg').textContent=e.message; }
 }
 async function addSlot(){ try{ await api('/staffing/slots',{method:'POST',body:JSON.stringify({date:$('sc_date').value||today(),part:$('sc_part').value,role:$('sc_role').value,needed:$('sc_needed').value})}); $('sc_msg').textContent='✓ Added'; setTimeout(()=>$('sc_msg').textContent='',2000); loadSchedule(); }catch(e){ $('sc_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function delSlot(id){ if(!confirm('Delete this shift need?'))return; await api('/staffing/slots/'+id,{method:'DELETE'}); loadSchedule(); }

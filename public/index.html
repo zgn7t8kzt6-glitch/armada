@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616Y" />
+<link rel="stylesheet" href="/styles.css?v=20260616Z" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -83,6 +83,7 @@
     <button data-view="coverage" data-subview>Coverage</button>
     <button data-view="schedule" data-admin>Staffing</button>
     <button data-view="roster" data-admin>Roster</button>
+    <button data-view="weekgrid" data-admin data-subview>Weekly grid</button>
     <button data-view="staffmodel" data-admin data-subview>Staffing Model</button>
     <button data-view="training">Training</button>
     <button data-view="library">Library / SOPs</button>
@@ -1554,7 +1555,7 @@
 
     <!-- SCHEDULE BUILDER -->
     <section id="schedule" class="view">
-      <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-bottom:10px"><button class="btn btn-ghost btn-sm sans" onclick="show('staffmodel')">Staffing Model ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('coverage')">Coverage ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('assign')">Assign Staff ↗</button></div>
+      <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-bottom:10px"><button class="btn btn-gold btn-sm sans" onclick="show('weekgrid')">🗓️ Weekly grid editor</button><button class="btn btn-ghost btn-sm sans" onclick="show('roster')">Roster ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('staffmodel')">Staffing Model ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('coverage')">Coverage ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('assign')">Assign Staff ↗</button></div>
       <div class="card"><div class="cmd-hero-row"><div><h3>👥 Who's on shift today</h3><p class="sub sans">Live coverage and call-offs by shift — so you know who's working and where you're short.</p></div><button class="btn btn-ghost sans" onclick="loadSchedule()">Refresh</button></div><div id="schOnShift"></div></div>
       <div class="card no-print">
         <h3>Build the Schedule</h3>
@@ -1577,6 +1578,35 @@
         <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="addSlot()">Add to schedule</button><span class="hint" id="sc_msg"></span></div>
       </div>
       <div id="scBoard"></div>
+    </section>
+
+    <!-- WEEKLY GRID EDITOR: fill the whole week in one screen -->
+    <section id="weekgrid" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🗓️ Weekly schedule grid</h3><p class="sub sans" style="margin:0">Type each person's name into the day they work — like your spreadsheet. Use first names; we'll match them to logins for clock tracking. Multiple people in one cell: separate with commas.</p></div>
+          <div class="controls" style="margin:0">
+            <button class="btn btn-ghost sans" onclick="weekShift(-7)">← Prev week</button>
+            <input id="wg_start" type="date" onchange="loadWeekGrid()"/>
+            <button class="btn btn-ghost sans" onclick="weekShift(7)">Next week →</button>
+          </div>
+        </div>
+        <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-top:8px">
+          <button class="btn btn-gold sans" onclick="saveWeekGrid()">💾 Save week</button>
+          <span class="hint" id="wg_msg"></span>
+        </div>
+      </div>
+      <div class="card no-print">
+        <h3>Add a shift row</h3>
+        <p class="sub sans">Each row is a role + shift (e.g. Nurse · "Intake 7:00 AM"). Add the rows your schedule uses once; they stay every week.</p>
+        <div class="grid3">
+          <div><label>Role (mapped)</label><select id="wg_role"></select></div>
+          <div><label>Shift label</label><input id="wg_label" placeholder="e.g. Intake · 7:00 AM"/></div>
+          <div style="align-self:end"><button class="btn btn-ghost sans" onclick="addShiftRow()">+ Add row</button></div>
+        </div>
+        <span class="hint" id="wg_row_msg"></span>
+      </div>
+      <div class="card" style="overflow-x:auto"><div id="weekGridBoard"></div></div>
     </section>
 
     <!-- ROSTER / ATTENDANCE: did the scheduled people show up? -->
@@ -1765,6 +1795,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616Y"></script>
+<script src="/app.js?v=20260616Z"></script>
 </body>
 </html>

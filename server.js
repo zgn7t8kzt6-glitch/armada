@@ -4604,7 +4604,7 @@ app.get('/api/roster', requireAuth, (req, res) => {
         attendance: a.attendance || null, calloff_reason: a.calloff_reason || '', covered_by_name: a.covered_by_name || '',
         clockIn, clockOut, hasPunch, discrepancy };
     });
-    return { slot_id: s.id, part: s.part, role: s.role, needed: s.needed, people };
+    return { slot_id: s.id, part: s.part, role: s.role, shift_label: s.shift_label || '', needed: s.needed, people };
   });
   res.json({ date, shifts, summary: { present, absent, unmarked, calledOff, covered, discrepancies,
     scheduled: shifts.reduce((n, s) => n + s.people.filter((p) => p.status !== 'called_off').length, 0) } });
@@ -4614,6 +4614,94 @@ app.post('/api/roster/attendance/:id', requireAuth, requireStaffingManager, (req
   db.prepare(`UPDATE schedule_assignments SET attendance=?, attendance_by=?, attendance_at=datetime('now') WHERE id = ?`)
     .run(att, req.user.name, req.params.id);
   res.json({ ok: true });
+});
+
+// ── Weekly schedule grid editor ─────────────────────────────────────────────
+// Derive the coarse shift part from a time in the label (for coverage grouping).
+function partFromLabel(label) {
+  const m = String(label || '').match(/(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m?/i);
+  let h = m ? +m[1] % 12 + (/p/i.test(m[3]) ? 12 : 0) : null;
+  if (h == null) { const m2 = String(label || '').match(/\b(\d{1,2})(?::\d{2})?\b/); if (m2) h = +m2[1]; }
+  if (h == null) return 'Day';
+  if (h >= 5 && h < 11) return 'Morning';
+  if (h >= 11 && h < 16) return 'Day';
+  if (h >= 16 && h < 21) return 'Evening';
+  return 'Night';
+}
+// Best-effort match a typed name (often just a first name) to a user account, so
+// the roster can reconcile their clock punches. Null when unsure (still stored).
+function resolveUserByName(name) {
+  const n = (name || '').trim();
+  if (!n) return null;
+  const exact = db.prepare(`SELECT id FROM users WHERE active=1 AND lower(name)=lower(?)`).all(n);
+  if (exact.length === 1) return exact[0].id;
+  const starts = db.prepare(`SELECT id FROM users WHERE active=1 AND lower(name) LIKE lower(?)`).all(n + ' %');
+  if (starts.length === 1) return starts[0].id;
+  return null;
+}
+app.get('/api/schedule/templates', requireAuth, (req, res) => {
+  res.json({ templates: db.prepare(`SELECT id, role, shift_label, part, sort FROM shift_templates WHERE active=1 ORDER BY sort, id`).all() });
+});
+app.post('/api/schedule/templates', requireAuth, requireStaffingManager, (req, res) => {
+  const role = (req.body?.role || '').trim();
+  const label = (req.body?.shift_label || '').trim();
+  if (!role || !label) return res.status(400).json({ error: 'Role and shift label required' });
+  const maxSort = db.prepare(`SELECT COALESCE(MAX(sort),0) m FROM shift_templates`).get().m;
+  const info = db.prepare(`INSERT INTO shift_templates (role, shift_label, part, sort) VALUES (?,?,?,?)`)
+    .run(role, label, partFromLabel(label), maxSort + 1);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/schedule/templates/:id', requireAuth, requireStaffingManager, (req, res) => {
+  db.prepare(`UPDATE shift_templates SET active=0 WHERE id=?`).run(req.params.id);
+  res.json({ ok: true });
+});
+function weekDays(start) {
+  const d = new Date(start + 'T00:00'); const out = [];
+  for (let i = 0; i < 7; i++) { const x = new Date(d); x.setDate(d.getDate() + i); out.push(x.toISOString().slice(0, 10)); }
+  return out;
+}
+app.get('/api/schedule/week', requireAuth, (req, res) => {
+  const start = (req.query.start || appToday()).slice(0, 10);
+  const days = weekDays(start);
+  const templates = db.prepare(`SELECT id, role, shift_label, part, sort FROM shift_templates WHERE active=1 ORDER BY sort, id`).all();
+  // Existing names per template×day (from slots created by the grid).
+  const cells = {};
+  const rows = db.prepare(`SELECT s.template_id, s.date, a.user_name FROM schedule_slots s
+    JOIN schedule_assignments a ON a.slot_id = s.id
+    WHERE s.template_id IS NOT NULL AND s.date >= ? AND s.date <= ? AND a.status='scheduled'`).all(days[0], days[6]);
+  for (const r of rows) { const k = r.template_id + '|' + r.date; cells[k] = cells[k] ? cells[k] + ', ' + r.user_name : r.user_name; }
+  res.json({ start, days, templates, cells });
+});
+app.post('/api/schedule/week', requireAuth, requireStaffingManager, (req, res) => {
+  const cells = req.body?.cells || {};
+  const tpl = {}; db.prepare(`SELECT id, role, shift_label, part FROM shift_templates`).all().forEach((t) => { tpl[t.id] = t; });
+  let saved = 0;
+  const findSlot = db.prepare(`SELECT id FROM schedule_slots WHERE template_id=? AND date=?`);
+  for (const [key, raw] of Object.entries(cells)) {
+    const [tid, date] = key.split('|'); const t = tpl[tid];
+    if (!t || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) continue;
+    const names = String(raw || '').split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+    let slot = findSlot.get(tid, date);
+    if (!names.length) { if (slot) db.prepare(`DELETE FROM schedule_slots WHERE id=?`).run(slot.id); continue; }
+    if (!slot) {
+      const info = db.prepare(`INSERT INTO schedule_slots (date, part, role, needed, shift_label, template_id, created_by) VALUES (?,?,?,?,?,?,?)`)
+        .run(date, t.part, t.role, names.length, t.shift_label, +tid, req.user.id);
+      slot = { id: info.lastInsertRowid };
+    } else {
+      db.prepare(`UPDATE schedule_slots SET needed=?, role=?, shift_label=?, part=? WHERE id=?`).run(names.length, t.role, t.shift_label, t.part, slot.id);
+    }
+    const existing = db.prepare(`SELECT id, user_name FROM schedule_assignments WHERE slot_id=? AND status='scheduled'`).all(slot.id);
+    const lower = names.map((n) => n.toLowerCase());
+    // Remove names no longer in the cell.
+    for (const e of existing) if (!lower.includes((e.user_name || '').toLowerCase())) db.prepare(`DELETE FROM schedule_assignments WHERE id=?`).run(e.id);
+    // Add new names.
+    const have = new Set(existing.map((e) => (e.user_name || '').toLowerCase()));
+    for (const n of names) if (!have.has(n.toLowerCase())) {
+      db.prepare(`INSERT INTO schedule_assignments (slot_id, user_id, user_name) VALUES (?,?,?)`).run(slot.id, resolveUserByName(n), n);
+      saved++;
+    }
+  }
+  res.json({ ok: true, saved });
 });
 
 // ── Clock-in geofence: optionally limit punches to the facility location ──────

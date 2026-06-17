@@ -871,6 +871,17 @@ CREATE TABLE IF NOT EXISTS schedule_slots (
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Reusable shift rows for the weekly grid editor (role mapped to a standard role,
+-- plus a free-text label that keeps the real detail e.g. "Intake · 7:00 AM").
+CREATE TABLE IF NOT EXISTS shift_templates (
+  id INTEGER PRIMARY KEY,
+  role TEXT NOT NULL,
+  shift_label TEXT NOT NULL,
+  part TEXT NOT NULL DEFAULT 'Day',
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Who is assigned to a slot, and whether they called off.
 CREATE TABLE IF NOT EXISTS schedule_assignments (
   id INTEGER PRIMARY KEY,
@@ -1123,6 +1134,8 @@ addColumn('schedule_assignments', 'attendance_by', 'TEXT');
 addColumn('schedule_assignments', 'attendance_at', 'TEXT');
 addColumn('schedule_assignments', 'covered_by_name', 'TEXT');  // who stepped in for a call-off
 addColumn('schedule_assignments', 'covered_by_id', 'INTEGER');
+addColumn('schedule_slots', 'shift_label', 'TEXT');            // weekly-grid label e.g. "Intake · 7:00 AM"
+addColumn('schedule_slots', 'template_id', 'INTEGER');         // which shift-row created it
 // Analytics dimensions: time-of-admit + staff attribution + discharge destination.
 addColumn('clients', 'admit_time', 'TEXT');            // HH:MM (24h) — for time-of-admit analysis
 addColumn('clients', 'therapist', 'TEXT');             // primary therapist (for outcome attribution)

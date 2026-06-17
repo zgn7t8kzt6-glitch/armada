@@ -539,15 +539,37 @@ app.post('/api/inventory/reorders/send', requireAuth, requireAdmin, async (req, 
     res.json({ sent: true, to, count: rows.length });
   } catch (err) { res.status(502).json({ sent: false, reason: err.message }); }
 });
-// Mark a reorder ordered / received.
+// Mark a reorder ordered / received. Receiving AUTO-RESTOCKS the item: it writes
+// a new inventory count so on-hand reflects the delivery (no separate re-count
+// needed). Default brings the item to par; an explicit { qty } adds that many to
+// the current on-hand instead (for partial / oversized deliveries).
 app.post('/api/inventory/reorders/:id', requireAuth, (req, res) => {
   const id = parseInt(req.params.id, 10);
   const status = req.body?.status;
   if (!['ordered', 'received'].includes(status)) return res.status(400).json({ error: 'status must be ordered|received' });
   const col = status === 'ordered' ? 'ordered' : 'received';
+  let restock = null;
+  if (status === 'received') {
+    const r = db.prepare(`SELECT r.qty_on_hand, i.id item_id, i.par_level, i.reorder_point, i.critical
+      FROM reorder_requests r JOIN inventory_items i ON i.id = r.item_id WHERE r.id = ?`).get(id);
+    if (r) {
+      const item = db.prepare(`SELECT * FROM inventory_items WHERE id = ?`).get(r.item_id);
+      const last = db.prepare(`SELECT qty FROM inventory_counts WHERE item_id = ? ORDER BY id DESC LIMIT 1`).get(r.item_id);
+      const base = last ? last.qty : (r.qty_on_hand || 0);
+      const received = (req.body?.qty != null && req.body.qty !== '') ? Math.max(0, parseInt(req.body.qty, 10) || 0) : null;
+      // Explicit received amount adds to current on-hand; otherwise restock to par.
+      const newQty = received != null ? base + received : Math.max(r.par_level || 0, base);
+      const st = invStatus(newQty, item);
+      db.prepare(`INSERT INTO inventory_counts (item_id, qty, status, shift, note, by_id, by_name) VALUES (?,?,?,?,?,?,?)`)
+        .run(r.item_id, newQty, st, currentShift(), received != null ? `Received order (+${received})` : 'Received order — auto-restocked to par', req.user.id, req.user.name);
+      // Restocked above the line → clear any standing supply-out alert.
+      if (st === 'ok') db.prepare(`UPDATE alerts SET status='Resolved' WHERE kind=? AND status='New'`).run('supply_out_' + item.id);
+      restock = { from: base, to: newQty, status: st };
+    }
+  }
   db.prepare(`UPDATE reorder_requests SET status = ?, ${col}_at = datetime('now'), ${col}_by = ?, updated_at = datetime('now') WHERE id = ?`).run(status, req.user.name, id);
-  audit({ user: req.user, action: 'REORDER_' + status.toUpperCase(), entity_id: id, ip: req.ip });
-  res.json({ ok: true });
+  audit({ user: req.user, action: 'REORDER_' + status.toUpperCase(), entity_id: id, detail: restock ? `restock ${restock.from}→${restock.to}` : null, ip: req.ip });
+  res.json({ ok: true, restock });
 });
 
 // Admin: manage the catalog (add / edit / deactivate an item).

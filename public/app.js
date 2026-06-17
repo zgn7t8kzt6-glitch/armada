@@ -3306,7 +3306,13 @@ async function loadReorders(){
     <td style="white-space:nowrap">${r.status==='open'?`<button class="btn btn-sm btn-ghost sans" onclick="markReorder(${r.id},'ordered')">Ordered</button> `:''}${r.status!=='received'?`<button class="btn btn-sm btn-gold sans" onclick="markReorder(${r.id},'received')">Received</button>`:'✓ received'}</td>
   </tr>`).join('')}</table>` : '<div class="hint">Nothing on order.</div>';
 }
-async function markReorder(id,status){ try{ await api('/inventory/reorders/'+id,{method:'POST',body:JSON.stringify({status})}); loadInventory(); }catch(e){ alert(e.message); } }
+async function markReorder(id,status){
+  try{
+    const r=await api('/inventory/reorders/'+id,{method:'POST',body:JSON.stringify({status})});
+    if(status==='received' && r.restock){ const m=$('inv_corp_msg'); if(m){ m.textContent=`✓ Received — on-hand updated ${r.restock.from} → ${r.restock.to}.`; setTimeout(()=>{ if(m.textContent.startsWith('✓ Received'))m.textContent=''; },4000); } }
+    loadInventory();
+  }catch(e){ alert(e.message); }
+}
 async function saveInvSettings(){
   const corp=($('inv_corp_email')||{}).value||''; const pollak=($('inv_pollak_email')||{}).value||'';
   try{ await api('/inventory/settings',{method:'POST',body:JSON.stringify({corporate_email:corp.trim(),pollak_email:pollak.trim()})});

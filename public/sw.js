@@ -1,6 +1,6 @@
 // Network-first service worker — stays fresh online, works offline from cache.
-const C = 'armada-v78';
-const SHELL = ['/', '/index.html', '/styles.css?v=20260616X', '/app.js?v=20260616X', '/logo.png', '/logo.svg', '/manifest.webmanifest'];
+const C = 'armada-v79';
+const SHELL = ['/', '/index.html', '/styles.css?v=20260616Y', '/app.js?v=20260616Y', '/logo.png', '/logo.svg', '/manifest.webmanifest'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(C).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });

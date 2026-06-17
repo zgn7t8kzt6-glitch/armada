@@ -4550,11 +4550,69 @@ app.delete('/api/staffing/assignments/:id', requireAuth, requireStaffingManager,
 app.post('/api/staffing/assignments/:id/calloff', requireAuth, (req, res) => {
   const a = db.prepare(`SELECT a.*, s.date, s.part, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.id = ?`).get(req.params.id);
   if (!a) return res.status(404).json({ error: 'Not found' });
-  db.prepare(`UPDATE schedule_assignments SET status='called_off', calloff_reason=?, calloff_at=datetime('now') WHERE id = ?`).run(req.body?.reason || null, req.params.id);
-  // Flag the coverage gap to the on-call leader.
+  // Optionally capture who stepped in to cover the call-off (may be a non-user name).
+  const cover = (req.body?.covered_by_name || '').trim() || null;
+  const coverId = req.body?.covered_by_id ? +req.body.covered_by_id : null;
+  db.prepare(`UPDATE schedule_assignments SET status='called_off', calloff_reason=?, calloff_at=datetime('now'), covered_by_name=?, covered_by_id=? WHERE id = ?`)
+    .run(req.body?.reason || null, cover, coverId, req.params.id);
+  // Flag the coverage gap to the on-call leader — only if nobody covered it.
   const open = db.prepare(`SELECT s.needed - (SELECT COUNT(*) FROM schedule_assignments x WHERE x.slot_id=s.id AND x.status='scheduled') AS gap FROM schedule_slots s WHERE s.id=?`).get(a.slot_id);
-  if (open && open.gap > 0) createAlert(null, 'coverage', 'Elevated', `Call-off: ${a.user_name} for ${a.date} ${a.part} ${a.role}. Coverage short by ${open.gap}.`);
-  audit({ user: req.user, action: 'CALLOFF', entity: 'assignment', entity_id: +req.params.id, detail: `${a.user_name} ${a.date} ${a.part}`, ip: req.ip });
+  if (!cover && open && open.gap > 0) createAlert(null, 'coverage', 'Elevated', `Call-off: ${a.user_name} for ${a.date} ${a.part} ${a.role}. Coverage short by ${open.gap}.`);
+  audit({ user: req.user, action: 'CALLOFF', entity: 'assignment', entity_id: +req.params.id, detail: `${a.user_name} ${a.date} ${a.part}${cover ? ' — covered by ' + cover : ''}`, ip: req.ip });
+  res.json({ ok: true });
+});
+// Record (or change) who covered a call-off, without re-entering the reason.
+app.post('/api/staffing/assignments/:id/cover', requireAuth, requireStaffingManager, (req, res) => {
+  const cover = (req.body?.covered_by_name || '').trim() || null;
+  db.prepare(`UPDATE schedule_assignments SET covered_by_name=?, covered_by_id=? WHERE id = ?`)
+    .run(cover, req.body?.covered_by_id ? +req.body.covered_by_id : null, req.params.id);
+  res.json({ ok: true });
+});
+
+// ── Daily roster / attendance dashboard ─────────────────────────────────────
+// Did the scheduled people show up? Supervisor marks present/absent; we also
+// reconcile against the time clock and flag any discrepancy.
+app.get('/api/roster', requireAuth, (req, res) => {
+  const date = (req.query.date || appToday()).slice(0, 10);
+  const slots = db.prepare(`SELECT * FROM schedule_slots WHERE date = ? ORDER BY
+    CASE part WHEN 'Morning' THEN 0 WHEN 'Day' THEN 1 WHEN 'Evening' THEN 2 WHEN 'Night' THEN 3 ELSE 4 END, role`).all(date);
+  const getA = db.prepare(`SELECT * FROM schedule_assignments WHERE slot_id = ? ORDER BY id`);
+  // Clock punches on this date, by user.
+  const punches = {};
+  db.prepare(`SELECT user_id, MIN(clock_in) ci, MAX(clock_out) co, SUM(clock_out IS NULL) open FROM time_entries
+    WHERE date(clock_in) = ? GROUP BY user_id`).all(date).forEach((p) => { punches[p.user_id] = p; });
+  let present = 0, absent = 0, unmarked = 0, calledOff = 0, covered = 0, discrepancies = 0;
+  const shifts = slots.map((s) => {
+    const people = getA.all(s.id).map((a) => {
+      const p = a.user_id ? punches[a.user_id] : null;
+      const clockIn = p ? String(p.ci || '').slice(11, 16) : '';
+      const clockOut = p && p.co && !p.open ? String(p.co).slice(11, 16) : '';
+      const hasPunch = !!p;
+      // Reconcile supervisor mark vs the clock.
+      let discrepancy = '';
+      if (a.status !== 'called_off') {
+        if (a.attendance === 'present' && !hasPunch) discrepancy = 'Marked here — no clock-in';
+        else if (a.attendance === 'absent' && hasPunch) discrepancy = 'Marked absent — but clocked in';
+        else if (!a.attendance && hasPunch) discrepancy = 'Clocked in — confirm present';
+      }
+      if (a.status === 'called_off') { calledOff++; if (a.covered_by_name) covered++; }
+      else if (a.attendance === 'present') present++;
+      else if (a.attendance === 'absent') absent++;
+      else unmarked++;
+      if (discrepancy) discrepancies++;
+      return { assignment_id: a.id, name: a.user_name, user_id: a.user_id, status: a.status,
+        attendance: a.attendance || null, calloff_reason: a.calloff_reason || '', covered_by_name: a.covered_by_name || '',
+        clockIn, clockOut, hasPunch, discrepancy };
+    });
+    return { slot_id: s.id, part: s.part, role: s.role, needed: s.needed, people };
+  });
+  res.json({ date, shifts, summary: { present, absent, unmarked, calledOff, covered, discrepancies,
+    scheduled: shifts.reduce((n, s) => n + s.people.filter((p) => p.status !== 'called_off').length, 0) } });
+});
+app.post('/api/roster/attendance/:id', requireAuth, requireStaffingManager, (req, res) => {
+  const att = ['present', 'absent'].includes(req.body?.attendance) ? req.body.attendance : null;
+  db.prepare(`UPDATE schedule_assignments SET attendance=?, attendance_by=?, attendance_at=datetime('now') WHERE id = ?`)
+    .run(att, req.user.name, req.params.id);
   res.json({ ok: true });
 });
 

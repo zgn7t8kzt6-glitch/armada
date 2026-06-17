@@ -130,7 +130,7 @@ const GROUP_OF={
   // Team — culture, recognition, learning, tasks
   mytasks:'team',messages:'team',team:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
-  inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',assign:'facility',staffmodel:'facility',
+  inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
   command:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
@@ -144,6 +144,7 @@ const VIEW_ROLES = {
   operations:  ['Director of Operations'],
   coverage:    ['Director of Operations'],
   schedule:    ['Director of Operations'],
+  roster:      ['Director of Operations','Clinical Director'],
   assign:      ['Director of Operations'],
   staffmodel:  ['Director of Operations'],
   maintenance: ['Director of Operations','Housekeeping'],
@@ -256,6 +257,7 @@ function show(v){
   if(v==='analytics') loadAnalytics();
   if(v==='coverage') loadCoverage();
   if(v==='schedule') loadSchedule();
+  if(v==='roster') loadRoster();
   if(v==='staffmodel') loadStaffModel();
   if(v==='clients') renderClients();
   if(v==='records') loadRecords();
@@ -2713,6 +2715,61 @@ async function loadCareHealth(){
     <p class="hint">${h.clockedInCount} clocked in · ${h.scheduledCount} scheduled this shift.${empty?' <strong style="color:var(--danger)">Nothing populated — residents will only see their assigned CM/therapist, no on-shift names. Build today\'s schedule above or have staff clock in.</strong>':''}</p>`;
 }
 function schShift(n){ const d=new Date($('sc_date').value||today()); d.setDate(d.getDate()+n); $('sc_date').value=d.toISOString().slice(0,10); loadSchedule(); }
+
+/* ---- Daily roster / attendance ---- */
+function rosterShift(n){ const d=new Date($('ros_date').value||today()); d.setDate(d.getDate()+n); $('ros_date').value=d.toISOString().slice(0,10); loadRoster(); }
+async function loadRoster(){
+  if($('ros_date')&&!$('ros_date').value) $('ros_date').value=today();
+  const date=$('ros_date')?$('ros_date').value:today();
+  let d; try{ d=await api('/roster?date='+date); }catch(e){ $('rosterBoard').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const s=d.summary;
+  $('rosterKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${s.scheduled}</div><div class="l">Scheduled</div></div>
+    <div class="ret-card ${s.present?'':''}"><div class="n" style="color:var(--good)">${s.present}</div><div class="l">Here</div></div>
+    <div class="ret-card ${s.absent?'rc-high':''}"><div class="n">${s.absent}</div><div class="l">No-show</div></div>
+    <div class="ret-card ${s.unmarked?'rc-warn':''}"><div class="n">${s.unmarked}</div><div class="l">Unmarked</div></div>
+    <div class="ret-card ${s.calledOff?'rc-elev':''}"><div class="n">${s.calledOff}</div><div class="l">Called off (${s.covered} covered)</div></div>
+    <div class="ret-card ${s.discrepancies?'rc-high':''}"><div class="n">${s.discrepancies}</div><div class="l">Clock mismatches</div></div>`;
+  if(!d.shifts.length){ $('rosterBoard').innerHTML='<div class="card"><div class="empty">No one scheduled for this day. Build the week under Staffing → Build the schedule.</div></div>'; return; }
+  $('rosterBoard').innerHTML = d.shifts.map(sh=>{
+    const rows = sh.people.length ? sh.people.map(p=>rosterRow(p)).join('') : '<tr><td colspan="4" class="hint">No one assigned to this shift.</td></tr>';
+    return `<div class="card"><h3 style="margin:0 0 6px">${esc(sh.part)} · ${esc(sh.role)} <span class="hint" style="font-weight:400">— ${sh.people.filter(p=>p.status!=='called_off').length}/${sh.needed} scheduled</span></h3>
+      <table class="tbl" style="width:100%"><tr><th>Person</th><th>Attendance</th><th>Clock in / out</th><th>Notes</th></tr>${rows}</table></div>`;
+  }).join('');
+}
+function rosterRow(p){
+  const calledOff = p.status==='called_off';
+  let attendance;
+  if(calledOff){
+    attendance = `<span class="risk risk-elev">Called off</span>`;
+  } else {
+    const on=p.attendance==='present', off=p.attendance==='absent';
+    attendance = `<button class="btn btn-sm sans ${on?'btn-gold':'btn-ghost'}" onclick="markAttendance(${p.assignment_id},'${on?'clear':'present'}')">✓ Here</button>
+      <button class="btn btn-sm sans ${off?'btn-danger':'btn-ghost'}" onclick="markAttendance(${p.assignment_id},'${off?'clear':'absent'}')">✗ No-show</button>`;
+  }
+  const clock = p.hasPunch ? `${esc(p.clockIn||'—')}${p.clockOut?' – '+esc(p.clockOut):' <span class="hint">(still in)</span>'}` : '<span class="hint">no punch</span>';
+  let notes = '';
+  if(calledOff){
+    notes = p.covered_by_name
+      ? `<span class="risk risk-low">Covered by ${esc(p.covered_by_name)}</span> <a onclick="rosterCover(${p.assignment_id})" style="cursor:pointer;color:var(--muted)">change</a>`
+      : `<button class="btn btn-ghost btn-sm sans" onclick="rosterCover(${p.assignment_id})">+ Who covered?</button>`;
+    if(p.calloff_reason) notes += ` <span class="hint">· ${esc(p.calloff_reason)}</span>`;
+  } else {
+    if(p.discrepancy) notes += `<span class="risk risk-high">⚠ ${esc(p.discrepancy)}</span> `;
+    notes += `<button class="btn btn-ghost btn-sm sans" onclick="rosterCallOff(${p.assignment_id})">Call-off</button>`;
+  }
+  return `<tr><td><strong>${esc(p.name||'?')}</strong>${!p.user_id?' <span class="hint">(no login)</span>':''}</td><td style="white-space:nowrap">${attendance}</td><td>${clock}</td><td>${notes}</td></tr>`;
+}
+async function markAttendance(id, val){ try{ await api('/roster/attendance/'+id,{method:'POST',body:JSON.stringify({attendance:val==='clear'?null:val})}); loadRoster(); }catch(e){ alert(e.message); } }
+async function rosterCallOff(id){
+  const reason=prompt('Call-off reason (optional):'); if(reason===null) return;
+  const cover=prompt('Who covered this shift? (leave blank if no one — you can add later)','')||'';
+  try{ await api('/staffing/assignments/'+id+'/calloff',{method:'POST',body:JSON.stringify({reason,covered_by_name:cover})}); loadRoster(); }catch(e){ alert(e.message); }
+}
+async function rosterCover(id){
+  const cover=prompt('Who stepped in to cover this shift?','')||'';
+  try{ await api('/staffing/assignments/'+id+'/cover',{method:'POST',body:JSON.stringify({covered_by_name:cover})}); loadRoster(); }catch(e){ alert(e.message); }
+}
 async function addSlot(){ try{ await api('/staffing/slots',{method:'POST',body:JSON.stringify({date:$('sc_date').value||today(),part:$('sc_part').value,role:$('sc_role').value,needed:$('sc_needed').value})}); $('sc_msg').textContent='✓ Added'; setTimeout(()=>$('sc_msg').textContent='',2000); loadSchedule(); }catch(e){ $('sc_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function delSlot(id){ if(!confirm('Delete this shift need?'))return; await api('/staffing/slots/'+id,{method:'DELETE'}); loadSchedule(); }
 async function assignSlot(id){ const u=$('asgn_'+id).value; if(!u)return; await api('/staffing/slots/'+id+'/assign',{method:'POST',body:JSON.stringify({user_id:u})}); loadSchedule(); }

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616X" />
+<link rel="stylesheet" href="/styles.css?v=20260616Y" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -82,6 +82,7 @@
     <button data-view="operations" data-admin>Operations</button>
     <button data-view="coverage" data-subview>Coverage</button>
     <button data-view="schedule" data-admin>Staffing</button>
+    <button data-view="roster" data-admin>Roster</button>
     <button data-view="staffmodel" data-admin data-subview>Staffing Model</button>
     <button data-view="training">Training</button>
     <button data-view="library">Library / SOPs</button>
@@ -1578,6 +1579,23 @@
       <div id="scBoard"></div>
     </section>
 
+    <!-- ROSTER / ATTENDANCE: did the scheduled people show up? -->
+    <section id="roster" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>Daily Roster — did they show up?</h3><p class="sub sans" style="margin:0">Mark each scheduled person here or no-show. Clock in/out is matched automatically and flagged if it doesn't agree. If someone calls off, record who covered.</p></div>
+          <div class="controls" style="margin:0">
+            <button class="btn btn-ghost sans" onclick="rosterShift(-1)">← Prev</button>
+            <input id="ros_date" type="date" onchange="loadRoster()"/>
+            <button class="btn btn-ghost sans" onclick="rosterShift(1)">Next →</button>
+          </div>
+        </div>
+        <div id="rosterKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="show('schedule')">Build the schedule ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('coverage')">Coverage ↗</button></div>
+      </div>
+      <div id="rosterBoard"></div>
+    </section>
+
     <!-- STAFFING MODEL: standard + per-shift coverage + AMA trend -->
     <section id="staffmodel" class="view">
       <div class="card">
@@ -1747,6 +1765,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616X"></script>
+<script src="/app.js?v=20260616Y"></script>
 </body>
 </html>

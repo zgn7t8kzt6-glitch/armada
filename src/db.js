@@ -1117,6 +1117,12 @@ addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (fr
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');
 addColumn('clients', 'anchor_why', 'TEXT');
+// Daily roster / attendance: supervisor's present-or-not mark + who covered a call-off.
+addColumn('schedule_assignments', 'attendance', 'TEXT');       // present | absent | null (unmarked)
+addColumn('schedule_assignments', 'attendance_by', 'TEXT');
+addColumn('schedule_assignments', 'attendance_at', 'TEXT');
+addColumn('schedule_assignments', 'covered_by_name', 'TEXT');  // who stepped in for a call-off
+addColumn('schedule_assignments', 'covered_by_id', 'INTEGER');
 // Analytics dimensions: time-of-admit + staff attribution + discharge destination.
 addColumn('clients', 'admit_time', 'TEXT');            // HH:MM (24h) — for time-of-admit analysis
 addColumn('clients', 'therapist', 'TEXT');             // primary therapist (for outcome attribution)

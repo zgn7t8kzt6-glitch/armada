@@ -892,6 +892,15 @@ CREATE TABLE IF NOT EXISTS time_entries (
   source TEXT NOT NULL DEFAULT 'app',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Manually-added on-shift staff (for people who don't have a user login yet).
+-- Counted as "on shift now" for the day they were added; cleared automatically.
+CREATE TABLE IF NOT EXISTS manual_on_shift (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Safety rounds (from Kipu when charted there; manual fallback otherwise).
 CREATE TABLE IF NOT EXISTS rounds (
   id INTEGER PRIMARY KEY,

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616V" />
+<link rel="stylesheet" href="/styles.css?v=20260616W" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1536,24 +1536,17 @@
         <div id="wfKpis" class="ret-cards" style="margin-top:14px"></div>
       </div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
-        <div class="card" style="flex:1;min-width:260px"><h3>On shift now</h3><div id="wfOnNow"></div></div>
+        <div class="card" style="flex:1;min-width:260px"><h3>On shift now</h3><div id="wfOnNow"></div>
+          <div class="no-print" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+            <label class="sans" style="font-size:13px;font-weight:600">Add someone on shift (no login needed)</label>
+            <p class="hint" style="margin:2px 0 6px">For people who don't have a user account yet. Clears automatically at end of day.</p>
+            <div class="handoff-add" style="gap:6px;flex-wrap:wrap"><input id="mos_name" placeholder="Name" style="min-width:130px"/><select id="mos_role" style="min-width:120px"></select><button class="btn btn-gold btn-sm sans" onclick="addManualOnShift()">Add</button></div>
+            <span class="hint" id="mos_msg"></span>
+            <div id="mosList" style="margin-top:8px"></div>
+          </div>
+        </div>
         <div class="card" style="flex:1;min-width:260px"><h3>Call-offs by person</h3><p class="sub sans">Last 30 days.</p><div id="wfByPerson"></div></div>
         <div class="card" style="flex:1;min-width:240px"><h3>Call-offs by weekday</h3><div id="wfByDow"></div></div>
-      </div>
-      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
-        <div class="card no-print" style="flex:1;min-width:300px">
-          <h3>Log a safety round</h3>
-          <div class="grid2"><div><label>Area / unit</label><input id="rd_area" placeholder="e.g. East hall"/></div><div><label>Note (optional)</label><input id="rd_note" placeholder="all quiet"/></div></div>
-          <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="logRound()">Log round</button><span class="hint" id="rd_msg"></span></div>
-          <div id="rdList"></div>
-        </div>
-        <div class="card no-print" style="flex:1;min-width:300px">
-          <h3>Log a completed duty</h3>
-          <div class="grid3"><div><label>Shift</label><select id="du_part"></select></div><div><label>Role</label><select id="du_role"></select></div><div></div></div>
-          <label>What was completed</label>
-          <div class="handoff-add"><input id="du_text" placeholder="e.g. kitchen reset · linens stocked · meds room checked"/><button class="btn btn-gold sans" onclick="logDuty()">Log</button></div>
-          <span class="hint" id="du_msg"></span>
-        </div>
       </div>
     </section>
 
@@ -1753,6 +1746,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616V"></script>
+<script src="/app.js?v=20260616W"></script>
 </body>
 </html>

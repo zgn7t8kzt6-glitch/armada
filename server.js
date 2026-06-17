@@ -4598,6 +4598,8 @@ app.get('/api/workforce/summary', requireAuth, (req, res) => {
   const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
   const today = appToday();
   const onNow = db.prepare(`SELECT user_name, clock_in FROM time_entries WHERE clock_out IS NULL ORDER BY clock_in`).all();
+  // Manually-added on-shift staff (no login) — surfaced alongside clock-ins.
+  const onNowManual = db.prepare(`SELECT id, name, role FROM manual_on_shift WHERE date(created_at) = date('now') ORDER BY id DESC`).all();
   // Today coverage roll-up.
   const slotsToday = db.prepare(`SELECT s.id, s.needed,
     (SELECT COUNT(*) FROM schedule_assignments a WHERE a.slot_id=s.id AND a.status='scheduled') AS sched
@@ -4616,7 +4618,7 @@ app.get('/api/workforce/summary', requireAuth, (req, res) => {
   const dutiesToday = db.prepare(`SELECT COUNT(*) n FROM duty_logs WHERE date = ?`).get(today).n;
   const calloffsWeek = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?`).get(new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10)).n;
   res.json({
-    onNow, coverage: { needed, scheduled, gaps, pct: needed ? Math.round(scheduled / needed * 100) : null },
+    onNow, onNowManual, coverage: { needed, scheduled, gaps, pct: needed ? Math.round(scheduled / needed * 100) : null },
     calloffsWeek, byPerson, byDow, roundsToday, dutiesToday,
   });
 });
@@ -5236,8 +5238,26 @@ function computeOnShift() {
   const scheduled = db.prepare(`SELECT a.user_name, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
     WHERE s.date = date('now') AND s.part = ? AND a.status = 'scheduled'`).all(part);
   scheduled.forEach((r) => add(r.user_name, r.role));
-  return { buckets, shift: part, clockedInCount: clocked.length, scheduledCount: scheduled.length };
+  // Manually-added on-shift staff (no user login) for today.
+  const manual = db.prepare(`SELECT name, role FROM manual_on_shift WHERE date(created_at) = date('now')`).all();
+  manual.forEach((r) => add(r.name, r.role));
+  return { buckets, shift: part, clockedInCount: clocked.length, scheduledCount: scheduled.length, manualCount: manual.length };
 }
+// Manually-added on-shift staff — for people who don't have a login yet.
+app.get('/api/onshift/manual', requireAuth, (req, res) => {
+  res.json({ rows: db.prepare(`SELECT id, name, role, by_name, substr(created_at,12,5) at FROM manual_on_shift WHERE date(created_at) = date('now') ORDER BY id DESC`).all() });
+});
+app.post('/api/onshift/manual', requireAuth, (req, res) => {
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Name required' });
+  const role = (req.body?.role || '').trim() || null;
+  db.prepare(`INSERT INTO manual_on_shift (name, role, by_name) VALUES (?,?,?)`).run(name.slice(0, 80), role, req.user.name);
+  res.json({ ok: true });
+});
+app.delete('/api/onshift/manual/:id', requireAuth, (req, res) => {
+  db.prepare(`DELETE FROM manual_on_shift WHERE id = ?`).run(req.params.id);
+  res.json({ ok: true });
+});
 app.get('/api/kiosk/careteam', (req, res) => {
   if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
   const c = req.query.client_id

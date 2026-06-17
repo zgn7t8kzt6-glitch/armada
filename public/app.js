@@ -2577,27 +2577,36 @@ async function loadCoverage(){
   }catch(e){}
   const s = await api('/workforce/summary?range=30');
   const cov = s.coverage;
+  const manual = s.onNowManual||[];
+  const onTotal = s.onNow.length + manual.length;
   $('wfKpis').innerHTML = `
-    <div class="ret-card"><div class="n">${s.onNow.length}</div><div class="l">On shift now</div></div>
+    <div class="ret-card"><div class="n">${onTotal}</div><div class="l">On shift now</div></div>
     <div class="ret-card ${cov.pct!=null&&cov.pct<100?'rc-warn':''}"><div class="n">${cov.pct!=null?cov.pct+'%':'—'}</div><div class="l">Today covered (${cov.scheduled}/${cov.needed})</div></div>
     <div class="ret-card ${cov.gaps?'rc-high':''}"><div class="n">${cov.gaps}</div><div class="l">Coverage gaps today</div></div>
-    <div class="ret-card ${s.calloffsWeek?'rc-elev':''}"><div class="n">${s.calloffsWeek}</div><div class="l">Call-offs this week</div></div>
-    <div class="ret-card"><div class="n">${s.roundsToday}</div><div class="l">Rounds today</div></div>
-    <div class="ret-card"><div class="n">${s.dutiesToday}</div><div class="l">Duties logged today</div></div>`;
-  $('wfOnNow').innerHTML = s.onNow.length ? s.onNow.map(p=>`<div class="pc-note">🟢 <strong>${esc(p.user_name||'')}</strong> <span class="hint">since ${esc((p.clock_in||'').slice(11,16))}</span></div>`).join('') : '<div class="hint">No one clocked in right now.</div>';
+    <div class="ret-card ${s.calloffsWeek?'rc-elev':''}"><div class="n">${s.calloffsWeek}</div><div class="l">Call-offs this week</div></div>`;
+  const clockedHtml = s.onNow.map(p=>`<div class="pc-note">🟢 <strong>${esc(p.user_name||'')}</strong> <span class="hint">clocked in ${esc((p.clock_in||'').slice(11,16))}</span></div>`).join('');
+  const manualHtml = manual.map(p=>`<div class="pc-note">🟢 <strong>${esc(p.name)}</strong> ${p.role?`<span class="hint">${esc(p.role)} · </span>`:''}<span class="hint">added manually</span></div>`).join('');
+  $('wfOnNow').innerHTML = (clockedHtml+manualHtml) || '<div class="hint">No one on shift right now. Add people below or have them clock in.</div>';
   const bars=(rows)=>{ const max=Math.max(1,...rows.map(r=>r.n)); return rows.length&&rows.some(r=>r.n)?rows.map(r=>`<div class="pc-note" style="display:flex;justify-content:space-between"><span>${esc(r.k)}</span><span class="hint">${r.n}</span></div><div style="height:5px;background:var(--gold);width:${Math.round(r.n/max*100)}%;border-radius:3px;margin:2px 0 8px"></div>`).join(''):'<div class="hint">No call-offs in this window. 🎉</div>'; };
   $('wfByPerson').innerHTML = bars(s.byPerson);
   $('wfByDow').innerHTML = bars(s.byDow);
-  // duty/round selects
   await ensureReferralMeta().catch(()=>{});
-  fillSelect($('du_part'), META.shifts||['Morning','Day','Evening','Night']);
-  fillSelect($('du_role'), ['All',...(META.jobRoles||['BHT / Tech','Nurse','Therapist','Kitchen'])]);
-  loadRoundsToday();
+  if($('mos_role')) fillSelect($('mos_role'), ['(role optional)',...(META.jobRoles||['BHT / Tech','Nurse','Therapist','Case Manager'])]);
+  loadManualOnShift();
 }
+async function loadManualOnShift(){
+  const box=$('mosList'); if(!box) return;
+  let d; try{ d=await api('/onshift/manual'); }catch(e){ return; }
+  box.innerHTML = d.rows.length ? d.rows.map(r=>`<div class="pc-note" style="display:flex;justify-content:space-between;align-items:center"><span>👤 <strong>${esc(r.name)}</strong>${r.role?' <span class="hint">· '+esc(r.role)+'</span>':''} <span class="hint">· added ${esc(r.at)} by ${esc(r.by_name||'')}</span></span><button class="btn btn-ghost btn-sm sans" onclick="delManualOnShift(${r.id})">Remove</button></div>`).join('') : '';
+}
+async function addManualOnShift(){
+  const name=($('mos_name')||{}).value?.trim(); if(!name){ if($('mos_msg'))$('mos_msg').textContent='Enter a name.'; return; }
+  let role=($('mos_role')||{}).value||''; if(role==='(role optional)') role='';
+  try{ await api('/onshift/manual',{method:'POST',body:JSON.stringify({name,role})}); $('mos_name').value=''; if($('mos_msg'))$('mos_msg').textContent='✓ Added'; setTimeout(()=>{if($('mos_msg'))$('mos_msg').textContent='';},2000); loadCoverage(); }
+  catch(e){ if($('mos_msg'))$('mos_msg').textContent=e.message; }
+}
+async function delManualOnShift(id){ try{ await api('/onshift/manual/'+id,{method:'DELETE'}); loadCoverage(); }catch(e){ alert(e.message); } }
 async function clockToggle(inn){ await api('/clock/'+(inn?'in':'out'),{method:'POST'}); loadCoverage(); }
-async function logRound(){ const area=$('rd_area').value.trim(); await api('/rounds',{method:'POST',body:JSON.stringify({area,note:$('rd_note').value})}); $('rd_area').value='';$('rd_note').value=''; $('rd_msg').textContent='✓ Logged'; setTimeout(()=>$('rd_msg').textContent='',2000); loadRoundsToday(); loadCoverage(); }
-async function loadRoundsToday(){ try{ const {rounds}=await api('/rounds/today'); $('rdList').innerHTML = rounds.length?rounds.map(r=>`<div class="pc-note">✓ ${esc((r.ts||'').slice(11,16))} · ${esc(r.area||'round')} <span class="hint">${esc(r.by_name||'')}${r.note?' · '+esc(r.note):''}</span></div>`).join(''):'<div class="hint">No rounds logged today yet.</div>'; }catch(e){} }
-async function logDuty(){ const text=$('du_text').value.trim(); if(!text){return;} await api('/duties',{method:'POST',body:JSON.stringify({part:$('du_part').value,role:$('du_role').value,text})}); $('du_text').value=''; $('du_msg').textContent='✓ Logged'; setTimeout(()=>$('du_msg').textContent='',2000); loadCoverage(); }
 
 let SCHED_STAFF=null;
 async function loadStaffModel(){

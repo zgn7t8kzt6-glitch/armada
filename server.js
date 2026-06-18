@@ -2642,6 +2642,7 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     lineupEmail: getState('lineup_email') || process.env.LINEUP_EMAIL || '',
     lineupHorst: getState('lineup_horst') === 'on',
     lineupReward: getState('lineup_reward') || '',
+    purpose: companyPurpose(),
   });
 });
 app.post('/api/settings/kiosk-code', requireAuth, requireAdmin, (req, res) => {
@@ -2963,7 +2964,7 @@ app.post('/api/delights', requireAuth, (req, res) => {
 app.get('/api/lineup', requireAuth, (req, res) => {
   const value = SERVICE_VALUES[Math.floor(Date.now() / 864e5) % SERVICE_VALUES.length];
   const wows = db.prepare(`SELECT w.*, c.pref FROM wows w LEFT JOIN clients c ON c.id = w.client_id ORDER BY w.id DESC LIMIT 20`).all();
-  res.json({ value, wows });
+  res.json({ value, wows, purpose: companyPurpose() });
 });
 
 // ── Daily Lineup email: one-tap, no client info — live census + today's rotating
@@ -3075,6 +3076,10 @@ function buildLineupEmail() {
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:620px;line-height:1.55">
     <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#c8a44d;font-weight:bold">Armada Daily Lineup</div>
     <div style="color:#888;margin:0 0 14px">${dateLabel}</div>
+    <div style="text-align:center;background:#0b2a4a;color:#fff;padding:16px 18px;border-radius:6px;margin:0 0 18px">
+      <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#c8a44d">Why we're here</div>
+      <div style="font-family:Georgia,serif;font-size:17px;line-height:1.5;margin-top:6px">${htmlEsc(companyPurpose())}</div>
+    </div>
     <p>Good morning, team —</p>
     <p>We're caring for <b>${clients}</b> today — ${census} ${people} who came to us on one of the hardest days of their lives. That's ${census} ${chances} to be the reason someone stays.</p>
     <h2 style="margin:18px 0 2px;color:#0b2a4a">Today's focus: ${htmlEsc(focus.t)}</h2>
@@ -3090,6 +3095,8 @@ function buildLineupEmail() {
   </div>`;
   return { subject, html, census, focus: focus.t, guidance: focus.g };
 }
+const DEFAULT_PURPOSE = 'We give people their life back — meeting everyone who comes to us with dignity, safety, and the feeling of being genuinely cared for, from the first moment to the last.';
+function companyPurpose() { return (getState('purpose') || process.env.COMPANY_PURPOSE || DEFAULT_PURPOSE).trim(); }
 function lineupEmailTo() { return (getState('lineup_email') || process.env.LINEUP_EMAIL || '').trim(); }
 function canSendLineup(req) { return req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role); }
 app.get('/api/lineup/email-preview', requireAuth, (req, res) => {
@@ -3113,6 +3120,47 @@ app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => 
   if (b.email != null) setState('lineup_email', String(b.email).trim());
   if (b.horst != null) setState('lineup_horst', b.horst ? 'on' : 'off');
   if (b.reward != null) setState('lineup_reward', String(b.reward).trim().slice(0, 120));
+  if (b.purpose != null) setState('purpose', String(b.purpose).trim().slice(0, 400));
+  res.json({ ok: true });
+});
+
+// ── Principle of the Day ────────────────────────────────────────────────────
+// Each day's focus, explained from the CLIENT's perspective (why it works), with
+// a feed where staff share how they lived it and what the client did in response.
+const PRINCIPLE_WHY = {
+  'Greet every client by their preferred name': "When you're at your lowest, hearing your own name said warmly tells you you're a person here — not a number, not a diagnosis. It's the very first sign that this place actually sees you.",
+  'Fix the fixable in under 5 minutes': "Early in treatment a small unmet need — a blanket, a call home — can feel enormous. Solving it fast says 'your comfort matters and we move for you,' and it heads off the frustration that makes people want to walk out.",
+  'Deliver one unprompted delight': "Being handed something you never had to ask for says 'someone was thinking about me.' For people who feel like a burden, that one gesture can be the moment they decide to stay.",
+  'Run the Save — Pause before you react': "In a spike of fear or anger, the client is watching whether we get rattled. When we stay calm and acknowledge first, their nervous system borrows our steadiness and the crisis softens instead of exploding.",
+  'Person-first language all shift': "Words land as identity. Hearing 'you had a setback' instead of a label tells a client they are not their worst day — and that hope is still on the table here.",
+  'Close the loop out loud': "Telling a client 'you asked, so we did' turns a request into proof they were heard. For many it's the first time in a long time they've felt heard at all — and that's the trust treatment runs on.",
+  'No one hungry': "Hunger in early recovery feels like neglect and can trip old survival stress. A full plate, offered before they ask, says 'you're safe and cared for here' — the foundation everything else is built on.",
+  'Recognize a teammate by name': "Clients feel the temperature of the team. When staff lift each other the whole unit feels warmer and safer — and a recognized teammate brings more patience and presence to the next client.",
+  'Ask the Listening question': "Asking 'what would make today better?' hands a sliver of control back to someone who feels they've lost all of it. Being asked — and then seeing it acted on — is dignity in practice.",
+  'Sit at eye level': "Standing over someone in distress feels like authority bearing down. Sitting at eye level says 'I'm with you, not above you,' and lets a frightened person actually hear you.",
+  'A human goes to the patient': "Distress answered by a message feels like being dismissed. A person showing up in the room says 'you matter enough for me to come' — presence itself calms and reassures.",
+  'Hold the open door': "Shame whispers 'you don't belong here.' Hearing 'you're welcome here, and welcome back' out loud fights that shame — and makes it likelier someone reaches for help again instead of disappearing.",
+};
+app.get('/api/principle/today', requireAuth, (req, res) => {
+  const focus = todaysFocus();
+  // Stories from the last 7 days that lived out a principle (any principle), newest first.
+  const stories = db.prepare(`SELECT principle, text, client_response, by_name, substr(created_at,1,16) at
+    FROM wows WHERE principle IS NOT NULL AND principle != '' AND created_at >= datetime('now','-7 day')
+    ORDER BY id DESC LIMIT 30`).all();
+  res.json({
+    title: focus.t,
+    practice: focus.g,
+    why: PRINCIPLE_WHY[focus.t] || '',
+    stories: stories.map((s) => ({ principle: s.principle, action: s.text, clientResponse: s.client_response || '', by: s.by_name || '', at: s.at })),
+  });
+});
+app.post('/api/principle/story', requireAuth, (req, res) => {
+  const action = (req.body?.action || '').trim();
+  if (!action) return res.status(400).json({ error: 'Tell us what you did.' });
+  const clientResponse = (req.body?.client_response || '').trim() || null;
+  const principle = (req.body?.principle || todaysFocus().t).slice(0, 120);
+  db.prepare(`INSERT INTO wows (text, principle, client_response, by_id, by_name) VALUES (?,?,?,?,?)`)
+    .run(action.slice(0, 1000), principle, clientResponse ? clientResponse.slice(0, 1000) : null, req.user.id, req.user.name);
   res.json({ ok: true });
 });
 app.post('/api/wows', requireAuth, (req, res) => {

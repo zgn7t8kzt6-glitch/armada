@@ -986,6 +986,7 @@ async function loadSettings(){
   $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
   $('kc_code').value = st.kioskCode||'';
   if($('lineup_email')) $('lineup_email').value = st.lineupEmail||'';
+  if($('purpose')) $('purpose').value = st.purpose||'';
   if($('lineup_reward')) $('lineup_reward').value = st.lineupReward||'';
   if($('lineup_horst')) $('lineup_horst').checked = !!st.lineupHorst;
   if($('kc_warn')) $('kc_warn').innerHTML = st.kioskCodeWeak ? '<span style="color:var(--danger);font-weight:600">⚠ This kiosk code is weak/default. Set a strong code (6+ chars) and re-enter it on the iPads — anyone on the internet can otherwise reach the kiosk.</span>' : '<span class="risk risk-low">Strong code set ✓</span>';
@@ -1123,7 +1124,7 @@ async function whSync(){ $('whResult').textContent='Syncing census…'; try{ con
 async function whSyncNotes(){ $('whResult').textContent='Scanning recent notes for red flags…'; try{ const r=await api('/warehouse/sync-notes',{method:'POST',body:JSON.stringify({days:3})}); $('whResult').textContent=`Scanned ${r.scanned} notes · ${r.flagged} red-flagged.`; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function whCols(){ $('whResult').textContent='Reading census columns…'; try{ const r=await api('/warehouse/columns',{method:'POST'}); $('whResult').innerHTML = r.columns.length ? 'Census columns: <code style="font-size:11px">'+r.columns.map(esc).join(', ')+'</code>' : '<span class="hint">Connected, but the census query returned no rows.</span>'; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function saveKioskCode(){ try{ await api('/settings/kiosk-code',{method:'POST',body:JSON.stringify({code:$('kc_code').value})}); alert('Kiosk code saved. Re-enter it on each iPad/kiosk to reconnect.'); if($('kc_warn')) $('kc_warn').innerHTML='<span class="risk risk-low">Strong code set ✓</span>'; }catch(e){ alert(e.message); } }
-async function saveLineupEmail(){ try{ await api('/settings/lineup-email',{method:'POST',body:JSON.stringify({email:$('lineup_email').value,reward:($('lineup_reward')||{}).value||'',horst:$('lineup_horst')?$('lineup_horst').checked:false})}); if($('lineup_email_msg')) $('lineup_email_msg').textContent='✓ Saved'; setTimeout(()=>{if($('lineup_email_msg'))$('lineup_email_msg').textContent='';},2000); }catch(e){ if($('lineup_email_msg')) $('lineup_email_msg').textContent=e.message; } }
+async function saveLineupEmail(){ try{ await api('/settings/lineup-email',{method:'POST',body:JSON.stringify({email:$('lineup_email').value,purpose:($('purpose')||{}).value||'',reward:($('lineup_reward')||{}).value||'',horst:$('lineup_horst')?$('lineup_horst').checked:false})}); if($('lineup_email_msg')) $('lineup_email_msg').textContent='✓ Saved'; setTimeout(()=>{if($('lineup_email_msg'))$('lineup_email_msg').textContent='';},2000); }catch(e){ if($('lineup_email_msg')) $('lineup_email_msg').textContent=e.message; } }
 async function testAlert(){ const r=await api('/settings/test-alert',{method:'POST'}); alert(`Test sent. Email ${r.emailReady?'attempted':'not configured'}, SMS ${r.smsReady?'attempted':'not configured'}.`); }
 
 /* ---- huddle mode: the start-of-shift lineup as a paced, stepped ritual ---- */
@@ -2838,9 +2839,30 @@ async function sendLineupEmail(){
   try{ const r=await api('/lineup/send',{method:'POST'}); const ok='✓ Sent to '+r.to+' (census '+r.census+').'; if(msg){ msg.textContent=ok; } else { alert(ok); } }
   catch(e){ if(msg){ msg.textContent=e.message; } else { alert(e.message); } }
 }
+async function loadPrinciple(){
+  let d; try{ d=await api('/principle/today'); }catch(e){ return; }
+  if($('principleTitle')) $('principleTitle').textContent = d.title||'';
+  if($('principleWhy')) $('principleWhy').textContent = d.why||'';
+  if($('principlePractice')) $('principlePractice').innerHTML = d.practice?('<b>Today:</b> '+esc(d.practice)):'';
+  const feed=$('principleFeed'); if(!feed) return;
+  feed.innerHTML = (d.stories&&d.stories.length) ? d.stories.map(s=>`<div class="pc-note" style="border-left:3px solid #7a5cc0">
+    <div>${esc(s.action)}</div>
+    ${s.clientResponse?`<div style="margin-top:4px;font-style:italic;color:#555">“${esc(s.clientResponse)}”</div>`:''}
+    <div class="hint" style="margin-top:4px">${esc(s.by||'')}${s.principle?' · '+esc(s.principle):''}${s.at?' · '+esc(s.at):''}</div>
+  </div>`).join('') : '<div class="hint">Be the first to show the team how you lived a principle this week.</div>';
+}
+async function sharePrinciple(){
+  const action=$('pr_action')?$('pr_action').value.trim():'';
+  if(!action){ if($('pr_msg')) $('pr_msg').textContent='Tell us what you did first.'; return; }
+  const cr=$('pr_response')?$('pr_response').value.trim():'';
+  try{ await api('/principle/story',{method:'POST',body:JSON.stringify({action,client_response:cr})}); $('pr_action').value=''; if($('pr_response'))$('pr_response').value=''; if($('pr_msg')) $('pr_msg').textContent='✓ Shared — thank you!'; setTimeout(()=>{if($('pr_msg'))$('pr_msg').textContent='';},2500); loadPrinciple(); }
+  catch(e){ if($('pr_msg')) $('pr_msg').textContent=e.message; }
+}
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
-  const { value, wows } = await api('/lineup');
+  const { value, wows, purpose } = await api('/lineup');
+  if(purpose && $('purposeText')){ $('purposeText').textContent = purpose; $('purposeBanner').style.display=''; }
+  loadPrinciple();
   $('lineValue').textContent = value;
   // client dropdown for wow
   try { const { clients } = await api('/clients');

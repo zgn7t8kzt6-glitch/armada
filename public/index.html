@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616AL" />
+<link rel="stylesheet" href="/styles.css?v=20260616AM" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1131,7 +1131,8 @@
       <div class="card">
         <h3>Daily Lineup email</h3>
         <p class="sub sans">Where the one-tap Lineup email goes (a team distribution list / all-staff alias). Leadership sends it from the Lineup page or My Shift. No client information is ever included.</p>
-        <div class="controls"><div class="field"><label for="lineup_email">Team email</label><input id="lineup_email" type="email" placeholder="team@armadarecovery.com"/></div></div>
+        <div class="field"><label for="purpose">Our purpose <span class="hint" style="font-weight:400">(shown first on the Lineup page and at the top of the email)</span></label><textarea id="purpose" rows="2" placeholder="Why we're here…"></textarea></div>
+        <div class="controls" style="margin-top:8px"><div class="field"><label for="lineup_email">Team email</label><input id="lineup_email" type="email" placeholder="team@armadarecovery.com"/></div></div>
         <div class="field" style="margin-top:8px"><label for="lineup_reward">Today's recognition reward <span class="hint" style="font-weight:400">(optional — shows in the "lift a teammate" challenge)</span></label><input id="lineup_reward" placeholder="e.g., a $25 gift card / lunch on us / first pick of shifts"/></div>
         <label class="trg" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="lineup_horst"/> Include the “What would Horst do?” line <span class="hint">(turn on once you've introduced the team to Horst Schulze)</span></label>
         <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-primary sans" onclick="saveLineupEmail()">Save</button><span class="hint" id="lineup_email_msg"></span></div>
@@ -1689,9 +1690,13 @@
 
     <!-- LINEUP -->
     <section id="lineup" class="view">
+      <div id="purposeBanner" class="card" style="display:none;background:linear-gradient(135deg,var(--navy),var(--navy-2));color:#fff;text-align:center">
+        <div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--gold)">Why we're here</div>
+        <div id="purposeText" style="font-family:Georgia,serif;font-size:20px;line-height:1.5;margin-top:8px"></div>
+      </div>
       <div class="card" style="border-left:4px solid var(--gold)">
         <h3>Daily Lineup</h3>
-        <p class="sub sans">Take two minutes at the start of the shift. Read today's value aloud. Share one moment of care.</p>
+        <p class="sub sans">Start every shift here. Read our purpose, then today's principle, aloud. Share one moment of care.</p>
         <div class="h sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Service Value of the day</div>
         <div id="lineValue" class="line-value"></div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:10px"><button class="btn btn-gold sans" onclick="startHuddle()">▶ Start huddle (full screen)</button><a class="btn btn-ghost sans" href="/display.html" target="_blank">Open break-room display ↗</a></div>
@@ -1705,6 +1710,23 @@
           <span class="hint" id="lineupEmailMsg"></span>
         </div>
         <div id="lineupEmailPreview" style="display:none;margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:16px;background:#fff;max-height:440px;overflow:auto"></div>
+      </div>
+      <div class="card" style="border-left:4px solid #7a5cc0">
+        <div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#7a5cc0;font-weight:600">Principle of the day</div>
+        <h2 id="principleTitle" style="margin:4px 0 6px;color:#0b2a4a"></h2>
+        <p id="principleWhy" style="font-size:16px;line-height:1.6;color:#333;margin:0 0 6px"></p>
+        <p id="principlePractice" class="sub sans" style="margin:0"></p>
+        <details style="margin-top:12px">
+          <summary class="sans" style="cursor:pointer;font-weight:600;color:#7a5cc0">✍️ Share how you lived it today</summary>
+          <div style="margin-top:10px">
+            <label>What did you do? How did you go out of your way?</label>
+            <textarea id="pr_action" rows="2" placeholder="e.g. Brought Mr. R a second plate and sat with him while he ate."></textarea>
+            <label style="margin-top:8px;display:block">What did the client say or do in response? (optional — share the impact)</label>
+            <textarea id="pr_response" rows="2" placeholder="e.g. He teared up and said it was the first time he'd felt looked after in years."></textarea>
+            <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="sharePrinciple()">Share with the team</button><span class="hint" id="pr_msg"></span></div>
+          </div>
+        </details>
+        <div style="margin-top:14px"><div class="sans" style="font-weight:600;color:var(--navy);margin-bottom:6px">💜 How the team is living it</div><div id="principleFeed"></div></div>
       </div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
         <div class="card" style="flex:2;min-width:320px">
@@ -1814,6 +1836,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616AL"></script>
+<script src="/app.js?v=20260616AM"></script>
 </body>
 </html>

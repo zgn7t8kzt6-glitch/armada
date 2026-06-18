@@ -1137,6 +1137,8 @@ addColumn('schedule_assignments', 'covered_by_id', 'INTEGER');
 addColumn('schedule_slots', 'shift_label', 'TEXT');            // weekly-grid label e.g. "Intake · 7:00 AM"
 addColumn('schedule_slots', 'template_id', 'INTEGER');         // which shift-row created it
 addColumn('manual_on_shift', 'for_date', 'TEXT');              // local business day (APP_TZ) the entry is for
+addColumn('wows', 'principle', 'TEXT');                        // the day's principle this story lived out
+addColumn('wows', 'client_response', 'TEXT');                  // how the client responded (the impact)
 // Analytics dimensions: time-of-admit + staff attribution + discharge destination.
 addColumn('clients', 'admit_time', 'TEXT');            // HH:MM (24h) — for time-of-admit analysis
 addColumn('clients', 'therapist', 'TEXT');             // primary therapist (for outcome attribution)

@@ -3117,6 +3117,7 @@ function buildLineupEmail() {
     ${horstOn ? `<p><b>What would Horst do?</b> ${pep.horst}</p>` : ''}
     <p style="background:#faf6ee;border-left:3px solid #c8a44d;padding:12px 16px;margin:14px 0"><b>Your one move today:</b> ${pep.move}</p>
     ${recognitionBlock}
+    <p style="margin:14px 0;color:#444"><b>🗣️ One more thing:</b> invite a client to fill out a quick survey on the kiosk today. Every response shows us exactly how to make their stay better — we can't improve what they don't tell us.</p>
     ${winsBlock}
     <p>You are the difference between a facility and a <i>home</i> for these ${clients} today. Thank you for showing up and being exactly that.</p>
     <p>Let's have a great day. 💙</p>

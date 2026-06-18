@@ -5014,6 +5014,7 @@ app.post('/api/turnovers', requireAuth, (req, res) => {
 app.post('/api/turnovers/:id/clean', requireAuth, (req, res) => {
   db.prepare(`UPDATE bed_turnovers SET status='clean', cleaned_by=?, cleaned_at=datetime('now'), cleaned_shift=? WHERE id=?`)
     .run(req.user.name, currentShift(), req.params.id);
+  db.prepare(`UPDATE alerts SET status='Resolved' WHERE kind=? AND status='New'`).run('bed_overdue_' + req.params.id);
   res.json({ ok: true });
 });
 app.post('/api/turnovers/:id/reopen', requireAuth, (req, res) => {
@@ -5022,8 +5023,19 @@ app.post('/api/turnovers/:id/reopen', requireAuth, (req, res) => {
 });
 app.delete('/api/turnovers/:id', requireAuth, (req, res) => {
   db.prepare(`DELETE FROM bed_turnovers WHERE id=?`).run(req.params.id);
+  db.prepare(`UPDATE alerts SET status='Resolved' WHERE kind=? AND status='New'`).run('bed_overdue_' + req.params.id);
   res.json({ ok: true });
 });
+// Overdue bed turnovers: a bed still dirty more than a shift (~8h) after discharge
+// raises an alert for the on-call leader (in-app, like the coverage alerts).
+setInterval(() => {
+  try {
+    const overdue = db.prepare(`SELECT id, room FROM bed_turnovers WHERE status='dirty' AND flagged_at <= datetime('now','-8 hours')`).all();
+    for (const b of overdue) {
+      createAlert(null, 'bed_overdue_' + b.id, 'Elevated', `Bed ${b.room} still needs turnover — discharged over 8 hours ago and not cleaned. Get it flipped this shift.`);
+    }
+  } catch (e) { console.error('[bed overdue]', e.message); }
+}, 20 * 60 * 1000).unref?.();
 
 // ── Daily roster / attendance dashboard ─────────────────────────────────────
 // Did the scheduled people show up? Supervisor marks present/absent; we also

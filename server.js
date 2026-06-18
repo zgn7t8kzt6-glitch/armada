@@ -3161,7 +3161,9 @@ app.post('/api/lineup/send', requireAuth, async (req, res) => {
   if (!recipients) return res.status(400).json({ error: 'Set the team email address first (Settings → Daily Lineup email).' });
   const e = buildLineupEmail();
   const senderEmail = (req.user?.username && /@/.test(req.user.username)) ? req.user.username : '';
-  const replyTo = senderEmail || getState('lineup_reply_to') || recipients;
+  // Reply-To must be a single address — never the recipient list. If we don't have
+  // the sender's email or a configured reply address, omit it (replies go to From).
+  const replyTo = senderEmail || (getState('lineup_reply_to') || '').trim() || '';
   const list = recipients.split(',').map((s) => s.trim()).filter(Boolean);
   // Default (private mode ON): send each recipient their OWN copy. Best
   // deliverability (a normal personal email, not BCC that M365 tends to junk),

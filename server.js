@@ -3097,6 +3097,7 @@ function buildLineupEmail() {
       <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#c8a44d">Why we're here</div>
       <div style="font-family:Georgia,serif;font-size:17px;line-height:1.5;margin-top:6px">${htmlEsc(companyPurpose())}</div>
     </div>
+    <div style="text-align:center;color:#8a6d1f;font-style:italic;margin:0 0 16px">Today's service value: “${htmlEsc(SERVICE_VALUES[Math.floor(Date.now() / 864e5) % SERVICE_VALUES.length])}”</div>
     <p>Good morning, team —</p>
     <p>We're caring for <b>${clients}</b> today — ${census} ${people} who came to us on one of the hardest days of their lives. That's ${census} ${chances} to be the reason someone stays.</p>
     <h2 style="margin:18px 0 2px;color:#0b2a4a">Today's focus: ${htmlEsc(focus.t)}</h2>

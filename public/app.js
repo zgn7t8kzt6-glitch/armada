@@ -2686,8 +2686,8 @@ async function loadSchedule(){
   $('scBoard').innerHTML = slots.length ? slots.map(s=>{
     const opt = SCHED_STAFF.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('');
     const people = s.assignments.map(a=>`<span class="chip" style="${a.status==='called_off'?'text-decoration:line-through;opacity:.6':''}">${esc(a.user_name||'?')}${a.status==='called_off'?' (off)':''}
-      ${a.status!=='called_off'?`<a onclick="callOff(${a.id})" title="Mark call-off" style="cursor:pointer;color:var(--danger);margin-left:4px">⊘</a>`:''}
-      <a onclick="unassign(${a.id})" title="Remove" style="cursor:pointer;color:var(--muted);margin-left:4px">✕</a></span>`).join(' ');
+      ${a.status!=='called_off'?`<button type="button" onclick="callOff(${a.id})" title="Mark call-off" aria-label="Mark ${esc(a.user_name||'').replace(/'/g,"\\'")} as called off" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--danger);margin-left:4px">⊘</button>`:''}
+      <button type="button" onclick="unassign(${a.id})" title="Remove" aria-label="Remove ${esc(a.user_name||'').replace(/'/g,"\\'")} from this shift" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--muted);margin-left:4px">✕</button></span>`).join(' ');
     return `<div class="card" style="border-left:4px solid ${s.covered?'var(--good)':'var(--gold)'}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <strong>${esc(s.part)}</strong> · ${esc(s.role)}
@@ -2755,7 +2755,7 @@ function rosterRow(p){
   let notes = '';
   if(calledOff){
     notes = p.covered_by_name
-      ? `<span class="risk risk-low">Covered by ${esc(p.covered_by_name)}</span> <a onclick="rosterCover(${p.assignment_id})" style="cursor:pointer;color:var(--muted)">change</a>`
+      ? `<span class="risk risk-low">Covered by ${esc(p.covered_by_name)}</span> <button type="button" onclick="rosterCover(${p.assignment_id})" aria-label="Change who covered this shift" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--muted)">change</button>`
       : `<button class="btn btn-ghost btn-sm sans" onclick="rosterCover(${p.assignment_id})">+ Who covered?</button>`;
     if(p.calloff_reason) notes += ` <span class="hint">· ${esc(p.calloff_reason)}</span>`;
   } else {
@@ -2789,7 +2789,7 @@ async function loadWeekGrid(){
   const head='<tr><th style="text-align:left">Shift</th>'+d.days.map(dt=>{const x=new Date(dt+'T00:00');return `<th>${dow[x.getDay()]}<br><span class="hint">${dt.slice(5)}</span></th>`;}).join('')+'</tr>';
   const rows=d.templates.map(t=>{
     const cells=d.days.map(dt=>{const k=t.id+'|'+dt;const v=d.cells[k]||'';return `<td style="padding:2px"><input class="wg-cell sans" data-k="${k}" value="${esc(v)}" style="width:90px;font-size:13px;padding:6px"/></td>`;}).join('');
-    return `<tr><td style="white-space:nowrap"><strong>${esc(t.shift_label)}</strong><div class="hint">${esc(t.role)} <a onclick="delShiftRow(${t.id})" title="Remove row" style="cursor:pointer;color:var(--muted)">✕</a></div></td>${cells}</tr>`;
+    return `<tr><td style="white-space:nowrap"><strong>${esc(t.shift_label)}</strong><div class="hint">${esc(t.role)} <button type="button" onclick="delShiftRow(${t.id})" title="Remove row" aria-label="Remove shift row ${esc(t.shift_label).replace(/'/g,"\\'")}" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--muted)">✕</button></div></td>${cells}</tr>`;
   }).join('');
   $('weekGridBoard').innerHTML=`<table class="tbl" style="width:100%">${head}${rows}</table>`;
 }

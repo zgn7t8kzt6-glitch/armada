@@ -986,6 +986,7 @@ async function loadSettings(){
   $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
   $('kc_code').value = st.kioskCode||'';
   if($('set_principle')){ try{ const p=await api('/principle/today'); $('set_principle').innerHTML=(p.options||[]).map(o=>`<option ${o===p.title?'selected':''}>${esc(o)}</option>`).join(''); }catch(e){} }
+  if($('set_value')){ try{ const lv=await api('/lineup'); $('set_value').innerHTML=(lv.valueOptions||[]).map(o=>`<option ${o===lv.value?'selected':''}>${esc(o)}</option>`).join(''); }catch(e){} }
   if($('lineup_email')) $('lineup_email').value = st.lineupEmail||'';
   if($('purpose')) $('purpose').value = st.purpose||'';
   if($('lineup_reward')) $('lineup_reward').value = st.lineupReward||'';
@@ -2861,6 +2862,7 @@ async function loadPrinciple(){
   </div>`).join('') : '<div class="hint">Be the first to show the team how you lived a principle this week.</div>';
 }
 async function setPrinciple(title){ try{ await api('/principle/set',{method:'POST',body:JSON.stringify({title})}); loadPrinciple(); }catch(e){ alert(e.message); } }
+async function setValue(value){ try{ await api('/lineup/value/set',{method:'POST',body:JSON.stringify({value})}); if($('lineValue'))$('lineValue').textContent=value; }catch(e){ alert(e.message); } }
 async function sharePrinciple(){
   const action=$('pr_action')?$('pr_action').value.trim():'';
   if(!action){ if($('pr_msg')) $('pr_msg').textContent='Tell us what you did first.'; return; }
@@ -2870,10 +2872,14 @@ async function sharePrinciple(){
 }
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
-  const { value, wows, purpose } = await api('/lineup');
+  const d = await api('/lineup');
+  const { value, wows, purpose } = d;
   if(purpose && $('purposeText')){ $('purposeText').textContent = purpose; $('purposeBanner').style.display=''; }
   loadPrinciple();
   $('lineValue').textContent = value;
+  if($('valueSet')) $('valueSet').innerHTML = d.canSet
+    ? `<div style="padding:8px 12px;background:#faf6ee;border:1px solid #e7d9b6;border-radius:8px"><label class="sans" for="valueSelect" style="font-weight:600;color:#8a6d1f;font-size:13px">🎯 Set today's service value:</label> <select id="valueSelect" onchange="setValue(this.value)" class="sans" style="margin-left:8px;min-width:260px">${(d.valueOptions||[]).map(o=>`<option ${o===value?'selected':''}>${esc(o)}</option>`).join('')}</select></div>`
+    : '';
   // client dropdown for wow
   try { const { clients } = await api('/clients');
     $('w_client').innerHTML = '<option value="">—</option>' + clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}</option>`).join('');

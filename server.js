@@ -2964,9 +2964,12 @@ app.post('/api/delights', requireAuth, (req, res) => {
 
 // Lineup + Wow Stories (culture)
 app.get('/api/lineup', requireAuth, (req, res) => {
-  const value = SERVICE_VALUES[Math.floor(Date.now() / 864e5) % SERVICE_VALUES.length];
   const wows = db.prepare(`SELECT w.*, c.pref FROM wows w LEFT JOIN clients c ON c.id = w.client_id ORDER BY w.id DESC LIMIT 20`).all();
-  res.json({ value, wows, purpose: companyPurpose() });
+  res.json({
+    value: effectiveValue(), wows, purpose: companyPurpose(),
+    valueOptions: SERVICE_VALUES,
+    canSet: req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role),
+  });
 });
 
 // ── Daily Lineup email: one-tap, no client info — live census + today's rotating
@@ -3060,6 +3063,12 @@ function effectiveFocus() {
   if (ov) { const i = ov.indexOf('|'); const d = ov.slice(0, i), t = ov.slice(i + 1); if (d === appToday()) { const f = FOCUS_TOPICS.find((x) => x.t === t); if (f) return f; } }
   return todaysFocus();
 }
+// Today's service value: same idea — a same-day override wins, else the rotation.
+function effectiveValue() {
+  const ov = getState('value_override');
+  if (ov) { const i = ov.indexOf('|'); const d = ov.slice(0, i), v = ov.slice(i + 1); if (d === appToday() && SERVICE_VALUES.includes(v)) return v; }
+  return SERVICE_VALUES[Math.floor(Date.now() / 864e5) % SERVICE_VALUES.length];
+}
 function buildLineupEmail() {
   const focus = effectiveFocus();
   const census = censusNow();
@@ -3099,7 +3108,7 @@ function buildLineupEmail() {
       <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#c8a44d">Why we're here</div>
       <div style="font-family:Georgia,serif;font-size:17px;line-height:1.5;margin-top:6px">${htmlEsc(companyPurpose())}</div>
     </div>
-    <div style="text-align:center;color:#8a6d1f;font-style:italic;margin:0 0 16px">Today's service value: “${htmlEsc(SERVICE_VALUES[Math.floor(Date.now() / 864e5) % SERVICE_VALUES.length])}”</div>
+    <div style="text-align:center;color:#8a6d1f;font-style:italic;margin:0 0 16px">Today's service value: “${htmlEsc(effectiveValue())}”</div>
     <p>Good morning, team —</p>
     <p>We're caring for <b>${clients}</b> today — ${census} ${people} who came to us on one of the hardest days of their lives. That's ${census} ${chances} to be the reason someone stays.</p>
     <h2 style="margin:18px 0 2px;color:#0b2a4a">Today's focus: ${htmlEsc(focus.t)}</h2>
@@ -3200,6 +3209,15 @@ app.post('/api/principle/set', requireAuth, (req, res) => {
   if (!FOCUS_TOPICS.some((f) => f.t === title)) return res.status(400).json({ error: 'Unknown principle.' });
   setState('principle_override', appToday() + '|' + title);
   res.json({ ok: true, title });
+});
+// Leadership can set TODAY's service value (overrides the rotation, just for today).
+app.post('/api/lineup/value/set', requireAuth, (req, res) => {
+  if (!(req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role)))
+    return res.status(403).json({ error: 'Leadership only.' });
+  const v = (req.body?.value || '').trim();
+  if (!SERVICE_VALUES.includes(v)) return res.status(400).json({ error: 'Unknown service value.' });
+  setState('value_override', appToday() + '|' + v);
+  res.json({ ok: true, value: v });
 });
 app.post('/api/principle/story', requireAuth, (req, res) => {
   const action = (req.body?.action || '').trim();

@@ -2023,7 +2023,7 @@ async function diagnoseSchedule(){
 }
 async function arrivalsSync(){
   $('arrivals_msg').textContent='Pulling from Salesforce…';
-  try{ const r=await api('/arrivals/sync',{method:'POST'}); $('arrivals_msg').textContent=`✓ ${r.pulled} scheduled · ${r.admitted||0} admitted in Salesforce · ${r.matched} matched in Kipu.${r.facilityValue?(' Scoped to '+r.facilityValue+(r.scopedTo?'':' (⚠ location field not found — run Diagnose)')):''}`; loadArrivals(); }
+  try{ const r=await api('/arrivals/sync',{method:'POST'}); $('arrivals_msg').textContent=`✓ ${r.pulled} scheduled · ${r.admitted||0} admitted in the last 7 days · ${r.matched} matched in Kipu.${r.facilityValue?(' Scoped to '+r.facilityValue+(r.scopedTo?'':' (⚠ location field not found — run Diagnose)')):''}`; loadArrivals(); }
   catch(e){ $('arrivals_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function syncSalesforce(){

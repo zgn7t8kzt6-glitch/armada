@@ -3295,17 +3295,48 @@ app.post('/api/lineup/value/set', requireAuth, (req, res) => {
   setState('value_override', appToday() + '|' + v);
   res.json({ ok: true, value: v });
 });
-// Draw a recognition-raffle winner: each teammate-recognition this week is one
-// entry for the person who gave it. Picks a random entry.
+// Recognition raffle. Entries come from (a) app recognitions (Wow Stories with a
+// teammate named) and (b) manual entries typed in for staff not yet in the app.
+function raffleManual() {
+  return db.prepare(`SELECT id, name, count, note, by_name, substr(created_at,1,16) at FROM raffle_entries
+    WHERE created_at >= datetime('now','-7 day') ORDER BY id DESC`).all();
+}
+function raffleApp() {
+  return db.prepare(`SELECT by_name name, COUNT(*) count FROM wows
+    WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= datetime('now','-7 day')
+    GROUP BY by_name`).all();
+}
+app.get('/api/lineup/raffle', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const manual = raffleManual();
+  const app_ = raffleApp();
+  const total = manual.reduce((n, r) => n + (r.count || 1), 0) + app_.reduce((n, r) => n + (r.count || 1), 0);
+  res.json({ manual, app: app_, total });
+});
+app.post('/api/lineup/raffle/entry', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Enter a name.' });
+  const count = Math.min(50, Math.max(1, parseInt(req.body?.count, 10) || 1));
+  db.prepare(`INSERT INTO raffle_entries (name, count, note, by_name) VALUES (?,?,?,?)`)
+    .run(name.slice(0, 80), count, (req.body?.note || '').trim().slice(0, 200) || null, req.user.name);
+  res.json({ ok: true });
+});
+app.delete('/api/lineup/raffle/entry/:id', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  db.prepare(`DELETE FROM raffle_entries WHERE id = ?`).run(req.params.id);
+  res.json({ ok: true });
+});
+// Draw a winner from the combined ticket pool (manual entries + app recognitions).
 app.post('/api/lineup/raffle/draw', requireAuth, (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
-  const rows = db.prepare(`SELECT by_name FROM wows
-    WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= datetime('now','-7 day')`).all();
-  const entries = rows.map((r) => (r.by_name || 'A teammate'));
-  if (!entries.length) return res.json({ ok: true, winner: null, entries: 0, participants: 0 });
-  const winner = entries[Math.floor(Math.random() * entries.length)];
-  const participants = new Set(entries.map((e) => e.toLowerCase())).size;
-  res.json({ ok: true, winner, entries: entries.length, participants });
+  const pool = [];
+  for (const r of raffleManual()) for (let i = 0; i < (r.count || 1); i++) pool.push(r.name);
+  for (const r of raffleApp()) for (let i = 0; i < (r.count || 1); i++) pool.push(r.name || 'A teammate');
+  if (!pool.length) return res.json({ ok: true, winner: null, entries: 0, participants: 0 });
+  const winner = pool[Math.floor(Math.random() * pool.length)];
+  const participants = new Set(pool.map((p) => p.toLowerCase())).size;
+  res.json({ ok: true, winner, entries: pool.length, participants });
 });
 app.post('/api/principle/story', requireAuth, (req, res) => {
   const action = (req.body?.action || '').trim();

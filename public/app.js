@@ -2872,12 +2872,28 @@ async function loadPrinciple(){
 }
 async function setPrinciple(title){ try{ await api('/principle/set',{method:'POST',body:JSON.stringify({title})}); loadPrinciple(); }catch(e){ alert(e.message); } }
 async function setValue(value){ try{ await api('/lineup/value/set',{method:'POST',body:JSON.stringify({value})}); if($('lineValue'))$('lineValue').textContent=value; }catch(e){ alert(e.message); } }
+async function loadRaffle(){
+  const box=$('raffleList'); if(!box) return;
+  let d; try{ d=await api('/lineup/raffle'); }catch(e){ return; }
+  const rows=[
+    ...(d.manual||[]).map(r=>`<div class="pc-note" style="display:flex;justify-content:space-between;align-items:center"><span>🎟️ <strong>${esc(r.name)}</strong> × ${r.count}${r.note?' <span class="hint">· '+esc(r.note)+'</span>':''} <span class="hint">· added by ${esc(r.by_name||'')}</span></span><button class="btn btn-ghost btn-sm sans" onclick="delRaffleEntry(${r.id})">Remove</button></div>`),
+    ...(d.app||[]).map(r=>`<div class="pc-note">🎟️ <strong>${esc(r.name||'A teammate')}</strong> × ${r.count} <span class="hint">· from the app</span></div>`),
+  ];
+  box.innerHTML = `<div class="hint" style="margin-bottom:4px">${d.total||0} total entr${(d.total===1)?'y':'ies'} this week</div>`+(rows.length?rows.join(''):'<div class="hint">No entries yet — add the names as recognitions come in.</div>');
+}
+async function addRaffleEntry(){
+  const name=$('raffle_name')?$('raffle_name').value.trim():''; const count=($('raffle_count')||{}).value||1;
+  if(!name){ if($('raffleMsg')) $('raffleMsg').textContent='Enter a name.'; return; }
+  try{ await api('/lineup/raffle/entry',{method:'POST',body:JSON.stringify({name,count})}); $('raffle_name').value=''; if($('raffle_count'))$('raffle_count').value=1; if($('raffleMsg'))$('raffleMsg').textContent=''; loadRaffle(); }
+  catch(e){ if($('raffleMsg')) $('raffleMsg').textContent=e.message; }
+}
+async function delRaffleEntry(id){ try{ await api('/lineup/raffle/entry/'+id,{method:'DELETE'}); loadRaffle(); }catch(e){ alert(e.message); } }
 async function drawRaffle(){
   const m=$('raffleMsg'); if(m) m.textContent='Drawing…';
   try{
     const r=await api('/lineup/raffle/draw',{method:'POST'});
-    if(!r.entries){ if(m) m.textContent='No recognitions logged this week yet — nothing to draw.'; return; }
-    if(m) m.innerHTML='🎉 Winner: <strong>'+esc(r.winner)+'</strong> — drawn from '+r.entries+' entr'+(r.entries===1?'y':'ies')+' across '+r.participants+' teammate'+(r.participants===1?'':'s')+'.';
+    if(!r.entries){ if(m) m.textContent='No entries yet — add some above first.'; return; }
+    if(m) m.innerHTML='🎉 Winner: <strong>'+esc(r.winner)+'</strong> — drawn from '+r.entries+' entr'+(r.entries===1?'y':'ies')+' across '+r.participants+' name'+(r.participants===1?'':'s')+'.';
   }catch(e){ if(m) m.textContent=e.message; }
 }
 async function sharePrinciple(){
@@ -2889,7 +2905,7 @@ async function sharePrinciple(){
 }
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
-  if($('raffleCard')) $('raffleCard').style.display = canSendLineup() ? '' : 'none';
+  if($('raffleCard')){ $('raffleCard').style.display = canSendLineup() ? '' : 'none'; if(canSendLineup()) loadRaffle(); }
   const d = await api('/lineup');
   const { value, wows, purpose } = d;
   if(purpose && $('purposeText')){ $('purposeText').textContent = purpose; $('purposeBanner').style.display=''; }

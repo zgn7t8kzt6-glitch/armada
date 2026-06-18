@@ -196,6 +196,16 @@ CREATE TABLE IF NOT EXISTS wows (
   by_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Manual recognition-raffle entries (for staff not yet in the app — added from
+-- email replies). Each row carries a ticket count for the weekly drawing.
+CREATE TABLE IF NOT EXISTS raffle_entries (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 1,
+  note TEXT,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
 CREATE TABLE IF NOT EXISTS staff_pulses (

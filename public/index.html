@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616BB" />
+<link rel="stylesheet" href="/styles.css?v=20260616BC" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1719,8 +1719,14 @@
       </div>
       <div class="card no-print" id="raffleCard" style="display:none;border-left:4px solid #7a5cc0">
         <h3>🎁 Recognition raffle</h3>
-        <p class="sub sans">Every teammate-recognition logged this week is one entry for the person who gave it. Draw a winner anytime.</p>
-        <div class="toolbar" style="justify-content:flex-start;gap:8px"><button class="btn btn-gold sans" onclick="drawRaffle()">🎲 Draw a winner</button><span class="hint" id="raffleMsg"></span></div>
+        <p class="sub sans">Each recognition this week is one entry. Add entries by hand as the email replies come in (staff who aren't in the app yet), then draw a winner.</p>
+        <div class="handoff-add" style="gap:6px;flex-wrap:wrap;align-items:end">
+          <div class="field" style="margin:0"><label>Name</label><input id="raffle_name" placeholder="who recognized a teammate"/></div>
+          <div class="field" style="margin:0"><label>Entries</label><input id="raffle_count" type="number" min="1" max="50" value="1" style="width:70px"/></div>
+          <button class="btn btn-ghost btn-sm sans" onclick="addRaffleEntry()">+ Add entry</button>
+        </div>
+        <div id="raffleList" style="margin-top:10px"></div>
+        <div class="toolbar" style="justify-content:flex-start;gap:8px;margin-top:8px"><button class="btn btn-gold sans" onclick="drawRaffle()">🎲 Draw a winner</button><span class="hint" id="raffleMsg"></span></div>
       </div>
       <div class="card" style="border-left:4px solid #7a5cc0">
         <div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#7a5cc0;font-weight:600">Principle of the day</div>
@@ -1848,6 +1854,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616BB"></script>
+<script src="/app.js?v=20260616BC"></script>
 </body>
 </html>

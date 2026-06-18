@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616AK" />
+<link rel="stylesheet" href="/styles.css?v=20260616AL" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1130,8 +1130,11 @@
       </div>
       <div class="card">
         <h3>Daily Lineup email</h3>
-        <p class="sub sans">Where the one-tap Lineup email goes (a team distribution list / all-staff alias). Leadership sends it from the Lineup page. No client information is ever included.</p>
-        <div class="controls"><div class="field"><label for="lineup_email">Team email</label><input id="lineup_email" type="email" placeholder="team@armadarecovery.com"/></div><button class="btn btn-primary sans" onclick="saveLineupEmail()">Save</button><span class="hint" id="lineup_email_msg"></span></div>
+        <p class="sub sans">Where the one-tap Lineup email goes (a team distribution list / all-staff alias). Leadership sends it from the Lineup page or My Shift. No client information is ever included.</p>
+        <div class="controls"><div class="field"><label for="lineup_email">Team email</label><input id="lineup_email" type="email" placeholder="team@armadarecovery.com"/></div></div>
+        <div class="field" style="margin-top:8px"><label for="lineup_reward">Today's recognition reward <span class="hint" style="font-weight:400">(optional — shows in the "lift a teammate" challenge)</span></label><input id="lineup_reward" placeholder="e.g., a $25 gift card / lunch on us / first pick of shifts"/></div>
+        <label class="trg" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="lineup_horst"/> Include the “What would Horst do?” line <span class="hint">(turn on once you've introduced the team to Horst Schulze)</span></label>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-primary sans" onclick="saveLineupEmail()">Save</button><span class="hint" id="lineup_email_msg"></span></div>
       </div>
     </section>
 
@@ -1811,6 +1814,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616AK"></script>
+<script src="/app.js?v=20260616AL"></script>
 </body>
 </html>

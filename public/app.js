@@ -440,7 +440,7 @@ function renderInterestChips(){
   const box=$('interestChips'); if(!box) return;
   const cur = ($('f_interests').value||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
   box.innerHTML = AMENITIES.map(a=>{ const on=cur.includes(a.toLowerCase());
-    return `<button type="button" class="btn ${on?'btn-gold':'btn-ghost'} btn-sm sans" style="margin:2px" onclick="toggleInterest('${esc(a)}')">${on?'✓ ':''}${esc(a)}</button>`; }).join('');
+    return `<button type="button" class="btn ${on?'btn-gold':'btn-ghost'} btn-sm sans" style="margin:2px" onclick="toggleInterest('${esc(a).replace(/'/g,"\\'")}')">${on?'✓ ':''}${esc(a)}</button>`; }).join('');
 }
 function toggleInterest(a){
   let cur = ($('f_interests').value||'').split(',').map(s=>s.trim()).filter(Boolean);
@@ -1736,7 +1736,6 @@ async function doRoundScan(code, opts){
     if($('roundscan')&&$('roundscan').classList.contains('active')){ loadScanCoverage(); if(ME&&ME.role==='admin') loadScanReview(); }
   }catch(e){ scanBanner('✗ '+esc(e.message), false); }
 }
-async function manualScan(){ const c=$('scanCodeInput')?$('scanCodeInput').value.trim():''; if(!c){return;} await doRoundScan(c, {manual:true}); if($('scanCodeInput'))$('scanCodeInput').value=''; }
 let SCAN_STREAM=null, SCAN_RAF=null;
 async function startScanner(){
   if(typeof jsQR!=='function'){ scanBanner('Scanner library not loaded — reload the page and try again.', false); return; }
@@ -2117,11 +2116,7 @@ async function loadRounds(){
 async function loadShiftQuestions(){ if(!($('sq_text')&&ME&&ME.role==='admin')) return; try{ const q=await api('/checkins/questions'); if(!$('sq_text').value) $('sq_text').value=q.text||''; }catch(e){} }
 async function saveShiftQuestions(){ try{ await api('/checkins/questions',{method:'POST',body:JSON.stringify({text:$('sq_text').value})}); $('sq_msg').textContent='✓ Saved'; loadRounds(); }catch(e){ $('sq_msg').textContent=e.message; } }
 async function resetShiftQuestions(){ try{ await api('/checkins/questions',{method:'POST',body:JSON.stringify({text:''})}); $('sq_text').value=''; const q=await api('/checkins/questions'); $('sq_text').value=q.text||''; $('sq_msg').textContent='✓ Reset to defaults'; loadRounds(); }catch(e){ $('sq_msg').textContent=e.message; } }
-async function roundAsk(id, name){ const answer=prompt('Their answer to this shift\'s question'+(name?' — '+name:'')+':\n(needs become requests automatically)'); if(answer===null) return; try{ await api('/checkins',{method:'POST',body:JSON.stringify({client_id:id,answer})}); loadRounds(); }catch(e){ alert(e.message); } }
-async function roundCheck(id, status){ await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:status||'ok'})}); loadRounds(); }
-async function roundConcern(id){ const note=prompt('What did you observe? (logs a safety concern)'); if(note===null) return; await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:'concern',note})}); loadRounds(); }
 async function roundNote(id, current){ const note=prompt('Optional note for this client:', current||''); if(note===null) return; try{ await api('/rounds/check',{method:'POST',body:JSON.stringify({client_id:id,status:'note',note})}); loadRounds(); }catch(e){ alert(e.message); } }
-async function roundsSweep(){ if(!confirm('Log a completed safety check for EVERY client right now?')) return; await api('/rounds/sweep',{method:'POST'}); loadRounds(); }
 async function setRoundsEscalation(on){ await api('/rounds/escalation',{method:'POST',body:JSON.stringify({on})}); }
 
 /* ---- Dignity Kits ---- */
@@ -3975,7 +3970,7 @@ async function loadAccountability(){
   $('championCard').innerHTML = d.champion ? `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee">
     <h3 style="margin:0">🏅 Care Champion — ${esc(d.month)}</h3>
     <p class="sans" style="margin:6px 0 0"><strong>${esc(d.champion.name)}</strong> (${esc(d.champion.job_role)}) — ${d.champion.missed} missed · ${d.champion.actions} care actions logged.</p>
-    <button class="btn btn-gold btn-sm sans" style="margin-top:8px" onclick="recognizeChampion('${esc(d.champion.name)}')">Recognize publicly</button></div>` : '';
+    <button class="btn btn-gold btn-sm sans" style="margin-top:8px" onclick="recognizeChampion('${esc(d.champion.name).replace(/'/g,"\\'")}')">Recognize publicly</button></div>` : '';
   $('acTable').innerHTML = `<table class="tbl"><tr><th>Teammate</th><th>Role</th><th>Used (care actions)</th><th>Assigned</th><th>Covered</th><th>Missed</th><th>Training</th></tr>${
     d.staff.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.job_role)}</td><td><strong>${s.actions}</strong> <span class="hint">${Object.entries(s.breakdown).map(([k,v])=>k+':'+v).join(' · ')}</span></td><td>${s.assigned}</td><td>${s.covered}</td><td>${s.missed?'<span class="risk risk-high">'+s.missed+'</span>':'0'}</td><td>${s.trainingDue?'<span class="risk risk-high">'+s.trainingCurrent+'/'+s.trainingTotal+'</span>':'<span class="risk risk-low">'+s.trainingCurrent+'/'+s.trainingTotal+'</span>'}</td></tr>`).join('')}</table>`;
   $('acGaps').innerHTML = `<p class="sub sans">${d.gaps.count} client-day check-in${d.gaps.count===1?'':'s'} missed this month.</p>` +

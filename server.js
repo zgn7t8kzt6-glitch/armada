@@ -4722,13 +4722,19 @@ app.post('/api/schedule/week', requireAuth, requireStaffingManager, (req, res) =
     } else {
       db.prepare(`UPDATE schedule_slots SET needed=?, role=?, shift_label=?, part=? WHERE id=?`).run(names.length, t.role, t.shift_label, t.part, slot.id);
     }
-    const existing = db.prepare(`SELECT id, user_name FROM schedule_assignments WHERE slot_id=? AND status='scheduled'`).all(slot.id);
-    const lower = names.map((n) => n.toLowerCase());
-    // Remove names no longer in the cell.
-    for (const e of existing) if (!lower.includes((e.user_name || '').toLowerCase())) db.prepare(`DELETE FROM schedule_assignments WHERE id=?`).run(e.id);
-    // Add new names.
-    const have = new Set(existing.map((e) => (e.user_name || '').toLowerCase()));
-    for (const n of names) if (!have.has(n.toLowerCase())) {
+    // Reconcile assignments against the typed names WITHOUT destroying state.
+    // Match across ALL statuses so we never duplicate a called-off person and
+    // never wipe an existing row's attendance / call-off / substitute on re-save.
+    const existing = db.prepare(`SELECT id, user_name, status FROM schedule_assignments WHERE slot_id=?`).all(slot.id);
+    const inCell = new Set(names.map((n) => n.toLowerCase()));
+    const existingNames = new Set(existing.map((e) => (e.user_name || '').toLowerCase()));
+    // Remove only SCHEDULED people no longer typed in the cell; leave call-off
+    // rows in place so the roster keeps the record of who was off and who covered.
+    for (const e of existing) {
+      if (e.status === 'scheduled' && !inCell.has((e.user_name || '').toLowerCase())) db.prepare(`DELETE FROM schedule_assignments WHERE id=?`).run(e.id);
+    }
+    // Add only genuinely new names (preserves existing rows + their state).
+    for (const n of names) if (!existingNames.has(n.toLowerCase())) {
       db.prepare(`INSERT INTO schedule_assignments (slot_id, user_id, user_name) VALUES (?,?,?)`).run(slot.id, resolveUserByName(n), n);
       saved++;
     }

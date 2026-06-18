@@ -28,7 +28,9 @@ export function sfConfigured() {
 export function sfStatus() {
   return { configured: sfConfigured(), instanceUrl: scfg('instance_url', 'SF_INSTANCE_URL'), hasSecret: !!scfg('client_secret', 'SF_CLIENT_SECRET'), apiVersion: scfg('api_version', 'SF_API_VERSION') || 'v60.0',
     facilityField: scfg('facility_field', 'SF_FACILITY_FIELD'), facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || 'Armada Detox of Akron',
-    facilityFieldAuto: getState('sf_facility_field_auto') || '' };
+    facilityFieldAuto: getState('sf_facility_field_auto') || '',
+    scheduleStages: scfg('schedule_stages', 'SF_SCHEDULE_STAGES') || 'Admission Scheduled',
+    admitDateField: scfg('admit_date_field', 'SF_ADMIT_DATE_FIELD') || 'Admission_Date__c' };
 }
 
 function sfBase() {
@@ -280,7 +282,7 @@ export async function sfSyncArrivals(db) {
   // The schedule lives on OPPORTUNITIES: a Lead converts to an Opportunity the
   // moment someone is scheduled to admit. Stage "Admission Scheduled" = coming
   // in; CloseDate = the planned admit date. Configurable per org.
-  const stages = (process.env.SF_SCHEDULE_STAGES || 'Admission Scheduled')
+  const stages = (scfg('schedule_stages', 'SF_SCHEDULE_STAGES') || 'Admission Scheduled')
     .split(',').map((s) => `'${s.trim().replace(/'/g, '')}'`).join(',');
   // Facility scope: only pull Opportunities for one site (e.g. Armada Detox of
   // Akron). You only need to set the VALUE in Settings → Salesforce; if no field
@@ -288,17 +290,23 @@ export async function sfSyncArrivals(db) {
   // cache it. Without a value set, everything (all locations) is pulled.
   const fac = await facilityClause();
   const facClause = fac.clause;
+  // Which field holds the real scheduled/admit date (e.g. Admission_Date__c, or a
+  // custom field). Configurable so we don't fall back to CloseDate and show the
+  // wrong day. CloseDate is always selected as a fallback.
+  const adf = (scfg('admit_date_field', 'SF_ADMIT_DATE_FIELD') || 'Admission_Date__c').replace(/[^A-Za-z0-9_.]/g, '');
+  const adfSel = (adf && adf.toLowerCase() !== 'closedate') ? `, ${adf}` : '';
+  const admitDateOf = (r) => (r[adf] || r.CloseDate || '');
   const soql = process.env.SF_ARRIVALS_SOQL || `
-    SELECT Id, Name, StageName, CloseDate, Admission_Date__c, CreatedDate
+    SELECT Id, Name, StageName, CloseDate${adfSel}, CreatedDate
     FROM Opportunity
     WHERE IsClosed = false AND StageName IN (${stages})${facClause}
-    ORDER BY Admission_Date__c ASC NULLS LAST`;
+    ORDER BY CreatedDate DESC`;
   const records = await sfQueryAll(soql);
   // ALSO pull recently ADMITTED (Closed-Won) opps: Salesforce closes the opp on
   // admit, so the open query above drops them — without this they vanish from the
   // board instead of showing as "arrived." (Network fetch happens before the txn.)
   const wonSoql = process.env.SF_ADMITTED_SOQL || `
-    SELECT Id, Name, StageName, CloseDate, Admission_Date__c
+    SELECT Id, Name, StageName, CloseDate${adfSel}
     FROM Opportunity
     WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${facClause}
     ORDER BY CloseDate DESC`;
@@ -335,7 +343,7 @@ export async function sfSyncArrivals(db) {
   db.exec('BEGIN');
   try {
     for (const r of records) {
-      const sched = (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || null;
+      const sched = admitDateOf(r).slice(0, 10) || null;
       if (!sched) continue;
       const { first, last } = parseName(r.Name);
       const vals = [first || null, last || null, first || null, null, null, sched, r.StageName || null, null, null];
@@ -349,7 +357,7 @@ export async function sfSyncArrivals(db) {
     // matched arrivals (client_id set) and front-desk actions (auto=0) are kept.
     db.prepare(`DELETE FROM expected_arrivals WHERE auto=1 AND client_id IS NULL AND status='arrived' AND scheduled_date >= date('now','-7 day')`).run();
     for (const r of wonRecords) {
-      const sched = (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || null;
+      const sched = admitDateOf(r).slice(0, 10) || null;
       const { first, last } = parseName(r.Name);
       const existing = find.get(r.Id);
       if (existing) { markArrived.run(sched, r.Id); admitted++; }
@@ -436,6 +444,25 @@ export async function sfArrivalsDiagnose(nameQuery) {
       } catch (e) { /* field not groupable */ }
     }
   } catch (e) { /* describe optional */ }
+  // What the APP actually pulls right now, scoped to the configured facility —
+  // so it can be compared line-for-line against the Salesforce schedule.
+  try {
+    const fac = await facilityClause();
+    const stages = (scfg('schedule_stages', 'SF_SCHEDULE_STAGES') || 'Admission Scheduled').split(',').map((s) => `'${s.trim().replace(/'/g, '')}'`).join(',');
+    out.appScope = {
+      facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || 'Armada Detox of Akron',
+      facilityField: fac.field || '(none found — pulling ALL locations)',
+      scheduleStages: scfg('schedule_stages', 'SF_SCHEDULE_STAGES') || 'Admission Scheduled',
+    };
+    try {
+      const s = await sfQuery(`SELECT Name, StageName, CloseDate, Admission_Date__c FROM Opportunity WHERE IsClosed = false AND StageName IN (${stages})${fac.clause} ORDER BY Admission_Date__c ASC NULLS LAST LIMIT 30`);
+      out.appScheduled = (s.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', admit: (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || '(blank)' }));
+    } catch (e) { out.appScheduledError = e.message; }
+    try {
+      const w = await sfQuery(`SELECT Name, StageName, CloseDate, Admission_Date__c FROM Opportunity WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${fac.clause} ORDER BY CloseDate DESC LIMIT 30`);
+      out.appAdmitted = (w.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', admit: (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || '(blank)' }));
+    } catch (e) { out.appAdmittedError = e.message; }
+  } catch (e) { out.appScopeError = e.message; }
   const nq = (nameQuery || '').trim();
   if (nq) {
     const q = nq.replace(/['\\%_]/g, '');

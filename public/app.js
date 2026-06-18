@@ -836,12 +836,15 @@ async function loadSfConfig(){
     if($('sf_client_secret')) $('sf_client_secret').placeholder = c.hasSecret?'•••••• (saved)':'consumer secret';
     if($('sf_facility_field')) $('sf_facility_field').value=c.facilityField||'';
     if($('sf_facility_value')) $('sf_facility_value').value=c.facilityValue||'';
+    if($('sf_schedule_stages')) $('sf_schedule_stages').value=c.scheduleStages||'';
+    if($('sf_admit_date_field')) $('sf_admit_date_field').value=c.admitDateField||'';
   }catch(e){}
 }
 async function saveSfConfig(){
   $('sf_msg').textContent='Saving…';
   const body={ instance_url:$('sf_instance_url').value, api_version:$('sf_api_version').value, client_id:$('sf_client_id').value,
-    facility_field:$('sf_facility_field').value, facility_value:$('sf_facility_value').value };
+    facility_field:$('sf_facility_field').value, facility_value:$('sf_facility_value').value,
+    schedule_stages:($('sf_schedule_stages')||{}).value||'', admit_date_field:($('sf_admit_date_field')||{}).value||'' };
   if($('sf_client_secret').value) body.client_secret=$('sf_client_secret').value;
   try{ const r=await api('/salesforce/config',{method:'POST',body:JSON.stringify(body)}); $('sf_msg').textContent='✓ Saved'+(r.status&&r.status.configured?' (configured)':''); $('sf_client_secret').value=''; loadSfConfig(); }
   catch(e){ $('sf_msg').textContent='Error: '+e.message; }
@@ -862,6 +865,19 @@ async function sfDiagnoseSchedule(){
     html += '<p class="hint" style="margin-top:6px">Click a value to set the filter, then <strong>Save</strong>. The schedule re-pulls automatically; to apply now go to <strong>Front Desk → Pull from Salesforce</strong>.</p>';
   }
   html+='</div>';
+  // What the app ACTUALLY pulls right now (scoped) — compare this to Salesforce.
+  if(d.appScope){
+    const sc=d.appScope;
+    html += `<div class="card" style="margin-top:8px"><h4 class="sans">What the app pulls right now</h4>
+      <div class="pc-note">Facility value: <strong>${esc(sc.facilityValue||'')}</strong> · matched field: <strong>${esc(sc.facilityField||'')}</strong></div>
+      <div class="pc-note">Scheduled stage(s): <strong>${esc(sc.scheduleStages||'')}</strong></div>`;
+    html += `<div class="cmd-sub">Scheduled (open) it would show</div>`;
+    html += (d.appScheduled&&d.appScheduled.length) ? d.appScheduled.map(r=>`<div class="pc-note"><strong>${esc(r.name)}</strong> · admit <strong>${esc(r.admit)}</strong> · ${esc(r.stage)}</div>`).join('') : '<div class="hint">None — check the stage name &amp; facility match Salesforce.</div>';
+    html += `<div class="cmd-sub">Admitted (last 7 days) it would mark arrived</div>`;
+    html += (d.appAdmitted&&d.appAdmitted.length) ? d.appAdmitted.map(r=>`<div class="pc-note">✅ <strong>${esc(r.name)}</strong> · ${esc(r.admit)} · ${esc(r.stage)}</div>`).join('') : '<div class="hint">None in the last 7 days for this facility.</div>';
+    if(d.oppDateFields&&d.oppDateFields.length){ html += `<div class="cmd-sub">Date fields on Opportunity (pick the real admit date)</div><div class="hint">${d.oppDateFields.map(esc).join(', ')}</div>`; }
+    html += '</div>';
+  }
   $('sf_discover').innerHTML = html;
 }
 function pickFacility(field, value){ if($('sf_facility_field'))$('sf_facility_field').value=field; if($('sf_facility_value'))$('sf_facility_value').value=value; $('sf_msg').textContent='Set — click Save'; window.scrollTo({top:0}); }

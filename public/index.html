@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616BH" />
+<link rel="stylesheet" href="/styles.css?v=20260616BI" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1096,8 +1096,10 @@
         <h4 class="sans" style="margin:14px 0 4px">Schedule facility filter</h4>
         <p class="sub sans" style="margin:0 0 8px">Only pull the arrivals schedule for one site (e.g. Armada Detox of Akron). Leave blank to pull all facilities. Use <strong>Diagnose schedule</strong> below to see the available facility fields &amp; their exact values.</p>
         <div class="grid2">
-          <div><label>Facility field (Opportunity)</label><input id="sf_facility_field" placeholder="e.g. Facility__c"/></div>
+          <div><label>Facility field (Opportunity) <span class="hint" style="font-weight:400">(blank = auto-detect from the value)</span></label><input id="sf_facility_field" placeholder="e.g. Location_Preferred__c or Location__r.Name"/></div>
           <div><label>Facility value</label><input id="sf_facility_value" placeholder="e.g. Armada Detox of Akron"/></div>
+          <div><label>Scheduled stage(s) <span class="hint" style="font-weight:400">(comma-separated)</span></label><input id="sf_schedule_stages" placeholder="Admission Scheduled"/></div>
+          <div><label>Admit-date field <span class="hint" style="font-weight:400">(the real scheduled date)</span></label><input id="sf_admit_date_field" placeholder="Admission_Date__c"/></div>
         </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:10px">
           <button class="btn btn-gold sans" onclick="saveSfConfig()">Save</button>
@@ -1874,6 +1876,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616BH"></script>
+<script src="/app.js?v=20260616BI"></script>
 </body>
 </html>

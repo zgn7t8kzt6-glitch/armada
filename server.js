@@ -4381,6 +4381,8 @@ app.post('/api/salesforce/config', requireAuth, requireAdmin, (req, res) => {
   const set = (k, v) => { if (v !== undefined) setState('sf_' + k, (v == null ? '' : String(v)).trim()); };
   set('instance_url', b.instance_url); set('client_id', b.client_id); set('api_version', b.api_version);
   set('facility_field', b.facility_field); set('facility_value', b.facility_value);
+  set('schedule_stages', b.schedule_stages); set('admit_date_field', b.admit_date_field);
+  if (b.facility_field !== undefined || b.facility_value !== undefined) setState('sf_facility_field_auto', '');   // re-detect on next sync
   if (b.client_secret) set('client_secret', b.client_secret);   // only overwrite if provided
   audit({ user: req.user, action: 'SF_CONFIG', ip: req.ip });
   res.json({ ok: true, status: sfStatus() });

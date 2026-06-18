@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616BD" />
+<link rel="stylesheet" href="/styles.css?v=20260616BC" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -58,7 +58,6 @@
     <button data-view="dignity" data-subview>Dignity Kits</button>
     <button data-view="rounds">Rounds</button>
     <button data-view="roundscan">Scan Rounds</button>
-    <button data-view="beds">Beds</button>
     <button data-view="engagement">Engagement</button>
     <button data-view="program">Program</button>
     <button data-view="meals">Meals</button>
@@ -1569,25 +1568,6 @@
       <div id="geofenceBox" class="card no-print" style="display:none"></div>
     </section>
 
-    <!-- BED TURNOVER BOARD -->
-    <section id="beds" class="view">
-      <div class="card">
-        <div class="cmd-hero-row">
-          <div><h3>🛏️ Bed Board</h3><p class="sub sans" style="margin:0">When a client is discharged, their bed flags here to be cleaned. Mark it clean when it's flipped and ready — get every bed turned over before the shift ends.</p></div>
-          <button class="btn btn-ghost sans" onclick="loadBeds()">Refresh</button>
-        </div>
-        <div id="bedsKpis" class="ret-cards" style="margin-top:12px"></div>
-        <div class="handoff-add no-print" style="gap:6px;flex-wrap:wrap;align-items:end;margin-top:10px">
-          <div class="field" style="margin:0"><label>Flag a bed to clean (room/bed)</label><input id="bed_room" placeholder="e.g. A02B"/></div>
-          <div class="field" style="margin:0"><label>Who left (optional)</label><input id="bed_who" placeholder="first name"/></div>
-          <button class="btn btn-ghost btn-sm sans" onclick="addBed()">+ Flag bed</button>
-          <span class="hint" id="bed_msg"></span>
-        </div>
-      </div>
-      <div class="card"><h3>Needs cleaning</h3><div id="bedsDirty"></div></div>
-      <div class="card"><h3>Cleaned — open <span class="hint" style="font-weight:400">(last 24h)</span></h3><div id="bedsClean"></div></div>
-    </section>
-
     <!-- SCHEDULE BUILDER -->
     <section id="schedule" class="view">
       <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-bottom:10px"><button class="btn btn-gold btn-sm sans" onclick="show('weekgrid')">🗓️ Weekly grid editor</button><button class="btn btn-ghost btn-sm sans" onclick="show('roster')">Roster ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('staffmodel')">Staffing Model ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('coverage')">Coverage ↗</button><button class="btn btn-ghost btn-sm sans" onclick="show('assign')">Assign Staff ↗</button></div>
@@ -1874,6 +1854,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616BD"></script>
+<script src="/app.js?v=20260616BC"></script>
 </body>
 </html>

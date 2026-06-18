@@ -483,14 +483,6 @@ export async function kipuSyncRoster() {
       // Discharge (or AMA) transition: only when they were active until now.
       if (discharged && existing.active === 1) {
         evt.run(existing.id, kid || null, isAma(dischStatus) ? 'ama' : 'discharge', existing.loc || newLoc || null, null, (dischDate ? String(dischDate).slice(0, 10) : today), dischStatus ? String(dischStatus) : null);
-        // Flag the vacated bed for turnover (RT bed board), unless already flagged.
-        try {
-          const c = db.prepare(`SELECT room, pref, name FROM clients WHERE id = ?`).get(existing.id);
-          const bed = (c && c.room ? String(c.room).trim() : '');
-          if (bed && !db.prepare(`SELECT 1 FROM bed_turnovers WHERE room = ? AND status = 'dirty' LIMIT 1`).get(bed)) {
-            db.prepare(`INSERT INTO bed_turnovers (room, who, reason) VALUES (?,?,?)`).run(bed, (c.pref || (c.name || '').split(/\s+/)[0] || null), 'discharge');
-          }
-        } catch { /* bed board optional */ }
       }
       // Kipu is the source of truth: set source, backfill blank descriptive
       // fields, and authoritatively set active/discharge from the census.

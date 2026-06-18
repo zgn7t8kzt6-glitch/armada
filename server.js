@@ -3079,7 +3079,7 @@ function buildLineupEmail() {
         <ul style="margin:0;padding-left:20px">${wins.map((w) => `<li style="margin:2px 0">${w}</li>`).join('')}</ul>
       </div>`
     : '';
-  const rewardLine = reward ? `<br><br>🎁 <b>Today's reward for recognizing a teammate: ${htmlEsc(reward)}.</b>` : '';
+  const rewardLine = reward ? `<br><br>🎁 <b>Every teammate you recognize is an entry to win ${htmlEsc(reward)} — we'll raffle it off this week.</b>` : '';
   // While the app is rolling out, ask the team to REPLY to this email; once it's
   // live for everyone, point them to Wow Stories in the app.
   const recognitionBlock = live

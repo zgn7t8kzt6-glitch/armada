@@ -2846,7 +2846,12 @@ async function loadPrinciple(){
   if($('principleTitle')) $('principleTitle').textContent = d.title||'';
   if($('principleWhy')) $('principleWhy').textContent = d.why||'';
   if($('principlePractice')) $('principlePractice').innerHTML = d.practice?('<b>Today:</b> '+esc(d.practice)):'';
-  if($('principleSet')) $('principleSet').innerHTML = d.canSet ? `<label class="hint">Set today's principle: <select onchange="setPrinciple(this.value)" class="sans">${(d.options||[]).map(o=>`<option ${o===d.title?'selected':''}>${esc(o)}</option>`).join('')}</select></label>` : '';
+  if($('principleSet')) $('principleSet').innerHTML = d.canSet
+    ? `<div style="margin-top:8px;padding:10px 12px;background:#f3eefc;border:1px solid #d9cdf0;border-radius:8px">
+         <label class="sans" for="principleSelect" style="font-weight:600;color:#5b3fa0;font-size:13px">📌 Set today's principle:</label>
+         <select id="principleSelect" onchange="setPrinciple(this.value)" class="sans" style="margin-left:8px;min-width:240px">${(d.options||[]).map(o=>`<option ${o===d.title?'selected':''}>${esc(o)}</option>`).join('')}</select>
+       </div>`
+    : '<div class="hint" style="margin-top:6px">Today\'s principle is set by a leader (Admin / Executive Director / Director of Operations / Clinical Director).</div>';
   const feed=$('principleFeed'); if(!feed) return;
   feed.innerHTML = (d.stories&&d.stories.length) ? d.stories.map(s=>`<div class="pc-note" style="border-left:3px solid #7a5cc0">
     <div>${esc(s.action)}</div>

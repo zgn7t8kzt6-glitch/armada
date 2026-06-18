@@ -321,9 +321,10 @@ export async function sfSyncArrivals(db) {
     scheduled_date=?, program=?, referral_source=?, insurance=?, updated_at=datetime('now')
     WHERE sf_lead_id=? AND status='expected'`);
 
-  // Opportunity Name is usually "First Last m/d/yyyy" — strip a trailing date.
+  // Opportunity Name is usually "First Last m/d/yyyy" — strip a trailing date
+  // (with OR without a space before it, e.g. "Myron Banks6/18/2026").
   const parseName = (name) => {
-    const clean = String(name || '').replace(/\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/, '').trim();
+    const clean = String(name || '').replace(/\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/, '').trim();
     const parts = clean.split(/\s+/);
     return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
   };
@@ -361,9 +362,20 @@ export async function sfSyncArrivals(db) {
       if (existing) { markArrived.run(sched, r.Id); admitted++; }
       else { insArrived.run(r.Id, first || null, last || null, first || null, sched, r.StageName || null); admitted++; }
     }
+    // Drop stale 'expected' rows that no longer qualify — i.e. their SF opp wasn't
+    // in this (facility-scoped) scheduled/won pull anymore: moved facility (e.g.
+    // Spark Recovery), opp closed/lost, or stage changed. This clears leftovers
+    // from earlier all-locations syncs. Front-desk decisions (no_show/cancelled)
+    // and arrivals are left alone.
+    let removed = 0;
+    const seen = new Set([...records.map((r) => r.Id), ...wonRecords.map((r) => r.Id)]);
+    const del = db.prepare(`DELETE FROM expected_arrivals WHERE id=?`);
+    for (const e of db.prepare(`SELECT id, sf_lead_id FROM expected_arrivals WHERE sf_lead_id IS NOT NULL AND status='expected'`).all()) {
+      if (!seen.has(e.sf_lead_id)) { del.run(e.id); removed++; }
+    }
     db.exec('COMMIT');
+    return { pulled, created, updated, admitted, removed, scopedTo: fac.field || null, facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || null };
   } catch (e) { db.exec('ROLLBACK'); throw e; }
-  return { pulled, created, updated, admitted, scopedTo: fac.field || null, facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || null };
 }
 
 // Build the SOQL facility filter. Uses the configured field if set; otherwise

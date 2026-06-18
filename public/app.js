@@ -2338,8 +2338,12 @@ async function loadCommand(){
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   const f = d.flow;
   const clk=(key)=>`data-cmd="${key}" onclick="cmdFlowPanel('${key}')" style="cursor:pointer"`;
+  // Kipu freshness, shown right on the Census tile so drift is obvious at a glance.
+  const syncAgo = d.syncedAt ? Math.round((Date.now() - new Date(d.syncedAt.replace(' ','T')+'Z').getTime())/60000) : null;
+  const syncTxt = syncAgo==null ? 'never synced' : syncAgo<1 ? 'just now' : syncAgo<60 ? syncAgo+'m ago' : Math.floor(syncAgo/60)+'h '+(syncAgo%60)+'m ago';
+  const syncStale = syncAgo!=null && syncAgo>420;   // auto-sync runs every 6h; >7h means it's lagging
   $('cmdFlow').innerHTML = `
-    <div class="ret-card" ${clk('census')}><div class="n">${f.census}</div><div class="l">Census ›</div></div>
+    <div class="ret-card ${syncStale?'rc-warn':''}" ${clk('census')}><div class="n">${f.census}</div><div class="l">Census ›</div><div class="hint" style="font-size:10px;margin-top:2px">Kipu · ${syncTxt}</div></div>
     ${d.scheduled?`<div class="ret-card ${d.scheduled.waiting?'rc-warn':''}" ${clk('scheduled')}><div class="n">${d.scheduled.waiting}</div><div class="l">Scheduled to arrive ›</div></div>`:''}
     <div class="ret-card" ${clk('admits')}><div class="n">${f.admitsToday}</div><div class="l">Admits today ›</div></div>
     <div class="ret-card" ${clk('dcToday')}><div class="n">${f.dischargesToday}</div><div class="l">Discharges today ›</div></div>

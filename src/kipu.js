@@ -6,7 +6,7 @@
 // version; this implements the documented v3 pattern and is verified on first
 // connect via /api/kipu/test before any sync.
 import crypto from 'node:crypto';
-import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './db.js';
+import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ, setState } from './db.js';
 
 // Kipu timestamps are UTC; admit time-of-day only makes sense in local time.
 // Convert an ISO/timestamp to local HH:MM (24h). Module-level so both the sync
@@ -644,6 +644,9 @@ export async function kipuSyncRoster() {
     for (const x of got) if (x.ph) { setP.run(x.ph, x.id); photos++; }
   }
   rollupDailyMetrics(today);   // refresh today's intake/discharge/LOC-change/AMA snapshot
+  // Record the real moment of this sync (SQLite-UTC format) so the Command Center
+  // can show "Kipu · synced Xm ago" accurately — clients.updated_at is insert-only.
+  setState('kipu_last_sync', new Date().toISOString().slice(0, 19).replace('T', ' '));
   return { total: list.length, created, matched, deactivated, importedDischarges, photos, activeNow: activeKids.length };
 }
 

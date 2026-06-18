@@ -2088,7 +2088,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     list: schedRows.map((r) => ({ name: r.name, status: r.status })),
   };
 
-  const syncedAt = db.prepare(`SELECT max(updated_at) m FROM clients WHERE source = 'kipu'`).get()?.m || null;
+  const syncedAt = getState('kipu_last_sync') || db.prepare(`SELECT max(updated_at) m FROM clients WHERE source = 'kipu'`).get()?.m || null;
   res.json({
     asOf: new Date().toISOString(),
     syncedAt,

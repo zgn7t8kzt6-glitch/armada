@@ -16,7 +16,7 @@
 // Until credentials exist this stays inert; the app's own referral tracking
 // works fully without it.
 
-import { getState } from './db.js';
+import { getState, setState } from './db.js';
 
 let _token = null, _tokenExp = 0;
 
@@ -27,7 +27,8 @@ export function sfConfigured() {
 }
 export function sfStatus() {
   return { configured: sfConfigured(), instanceUrl: scfg('instance_url', 'SF_INSTANCE_URL'), hasSecret: !!scfg('client_secret', 'SF_CLIENT_SECRET'), apiVersion: scfg('api_version', 'SF_API_VERSION') || 'v60.0',
-    facilityField: scfg('facility_field', 'SF_FACILITY_FIELD'), facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') };
+    facilityField: scfg('facility_field', 'SF_FACILITY_FIELD'), facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || 'Armada Detox of Akron',
+    facilityFieldAuto: getState('sf_facility_field_auto') || '' };
 }
 
 function sfBase() {
@@ -281,12 +282,12 @@ export async function sfSyncArrivals(db) {
   // in; CloseDate = the planned admit date. Configurable per org.
   const stages = (process.env.SF_SCHEDULE_STAGES || 'Admission Scheduled')
     .split(',').map((s) => `'${s.trim().replace(/'/g, '')}'`).join(',');
-  // Optional facility scope: only pull Opportunities for one site (e.g. Armada
-  // Detox of Akron). Set the field + value in Settings → Salesforce (the
-  // diagnostic lists the candidate fields and their values to choose from).
-  const facField = scfg('facility_field', 'SF_FACILITY_FIELD');
-  const facValue = scfg('facility_value', 'SF_FACILITY_VALUE');
-  const facClause = (facField && facValue) ? ` AND ${facField} = '${String(facValue).replace(/'/g, "\\'")}'` : '';
+  // Facility scope: only pull Opportunities for one site (e.g. Armada Detox of
+  // Akron). You only need to set the VALUE in Settings → Salesforce; if no field
+  // is given we auto-detect which location/facility field holds that value and
+  // cache it. Without a value set, everything (all locations) is pulled.
+  const fac = await facilityClause();
+  const facClause = fac.clause;
   const soql = process.env.SF_ARRIVALS_SOQL || `
     SELECT Id, Name, StageName, CloseDate, Admission_Date__c, CreatedDate
     FROM Opportunity
@@ -342,16 +343,51 @@ export async function sfSyncArrivals(db) {
       if (existing) { upd.run(...vals, r.Id); updated++; }
       else { ins.run(r.Id, ...vals); created++; }
     }
+    // Re-own the SF-confirmed arrivals so a facility filter actually drops the
+    // ones that no longer qualify: clear recent SF-auto arrivals (auto=1, no Kipu
+    // client link), then re-create from the current (filtered) won set. Kipu-
+    // matched arrivals (client_id set) and front-desk actions (auto=0) are kept.
+    db.prepare(`DELETE FROM expected_arrivals WHERE auto=1 AND client_id IS NULL AND status='arrived' AND scheduled_date >= date('now','-7 day')`).run();
     for (const r of wonRecords) {
       const sched = (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || null;
       const { first, last } = parseName(r.Name);
       const existing = find.get(r.Id);
-      if (existing) { if (existing.status !== 'arrived') { markArrived.run(sched, r.Id); admitted++; } }
+      if (existing) { markArrived.run(sched, r.Id); admitted++; }
       else { insArrived.run(r.Id, first || null, last || null, first || null, sched, r.StageName || null); admitted++; }
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
-  return { pulled, created, updated, admitted };
+  return { pulled, created, updated, admitted, scopedTo: fac.field || null, facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || null };
+}
+
+// Build the SOQL facility filter. Uses the configured field if set; otherwise
+// auto-detects (and caches) which location/facility field holds the configured
+// value — so the user only has to enter the value. Returns { clause, field }.
+async function facilityClause() {
+  const facValue = scfg('facility_value', 'SF_FACILITY_VALUE') || 'Armada Detox of Akron';
+  if (!facValue) return { clause: '', field: null };
+  const esc = String(facValue).replace(/'/g, "\\'");
+  let field = scfg('facility_field', 'SF_FACILITY_FIELD') || getState('sf_facility_field_auto') || '';
+  if (!field) {
+    try {
+      const d = await sfDescribe('Opportunity');
+      const cands = (d.fields || []).filter((f) => /facility|location|program|site|center|campus|detox|office|building|branch|region/i.test((f.name || '') + ' ' + (f.label || '')));
+      for (const f of cands) {
+        try {
+          if (['string', 'picklist'].includes(f.type)) {
+            const q = await sfQuery(`SELECT COUNT(Id) c FROM Opportunity WHERE ${f.name} = '${esc}'`);
+            if ((q.records?.[0]?.c || 0) > 0) { field = f.name; break; }
+          } else if (f.type === 'reference' && f.relationship) {
+            const q = await sfQuery(`SELECT COUNT(Id) c FROM Opportunity WHERE ${f.relationship}.Name = '${esc}'`);
+            if ((q.records?.[0]?.c || 0) > 0) { field = `${f.relationship}.Name`; break; }
+          }
+        } catch { /* field not filterable */ }
+      }
+      if (field) setState('sf_facility_field_auto', field);
+    } catch { /* describe optional */ }
+  }
+  if (!field) return { clause: '', field: null };
+  return { clause: ` AND ${field} = '${esc}'`, field };
 }
 
 // Why isn't someone on the schedule? Reports whether matching Leads carry a

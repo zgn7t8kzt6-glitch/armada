@@ -450,13 +450,14 @@ async function sendWeeklyPollakOrder() {
 app.get('/api/inventory', requireAuth, (req, res) => {
   const items = db.prepare(`SELECT * FROM inventory_items WHERE active = 1 ORDER BY department, sort, name`).all();
   const shift = currentShift();
+  const tday = dayBoundsUtc(appToday());   // UTC window for the Eastern business day (counts are UTC-stamped)
   const openByItem = {};
   db.prepare(`SELECT item_id, level FROM reorder_requests WHERE status = 'open'`).all().forEach((r) => { openByItem[r.item_id] = r.level; });
   const depts = {};
   let low = 0, out = 0, criticalOut = 0;
   for (const it of items) {
     const last = db.prepare(`SELECT qty, status, shift, expiry, by_name, created_at FROM inventory_counts WHERE item_id = ? ORDER BY id DESC LIMIT 1`).get(it.id);
-    const checkedToday = last && String(last.created_at).slice(0, 10) === appToday() ;
+    const checkedToday = !!(last && last.created_at >= tday.start && last.created_at < tday.end);
     const checkedThisShift = checkedToday && last.shift === shift;
     const status = last ? last.status : 'unknown';
     if (status === 'low') low++; if (status === 'out') { out++; if (it.critical) criticalOut++; }
@@ -475,7 +476,7 @@ app.get('/api/inventory', requireAuth, (req, res) => {
   const pastCutoff = localHour() >= checkHour;
   const deptStatus = (d) => {
     const last = db.prepare(`SELECT MAX(c.created_at) m FROM inventory_counts c JOIN inventory_items i ON i.id = c.item_id WHERE i.department = ?`).get(d).m;
-    const countedToday = last && String(last).slice(0, 10) === appToday();
+    const countedToday = !!(last && last >= tday.start && last < tday.end);
     return { countedToday, overdue: checkOn && !countedToday && pastCutoff, lastAt: last ? String(last).slice(0, 16) : '' };
   };
   res.json({
@@ -2846,7 +2847,8 @@ function runFlowAutomations() {
       const hasItems = db.prepare(`SELECT 1 FROM inventory_items WHERE department = ? AND active = 1 LIMIT 1`).get(d);
       if (!hasItems) continue;
       const last = db.prepare(`SELECT MAX(c.created_at) m FROM inventory_counts c JOIN inventory_items i ON i.id = c.item_id WHERE i.department = ?`).get(d).m;
-      const countedToday = last && String(last).slice(0, 10) === today;
+      const invDay = dayBoundsUtc(appToday());
+      const countedToday = last && last >= invDay.start && last < invDay.end;
       if (!countedToday) createAlert(null, 'inv_check_' + d, 'Elevated', `${d} supplies not counted today (due by ${(+autoCfg('inv_check_hour', 14))}:00). Run the shift inventory check.`);
     }
   }
@@ -3142,7 +3144,7 @@ app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
     schedule: db.prepare(`SELECT * FROM schedule_items WHERE client_id = ? AND date = ? ORDER BY time`).all(c.id, today),
     followups: db.prepare(`SELECT * FROM followups WHERE client_id = ? AND status = 'Pending' ORDER BY due_date`).all(c.id),
     family: db.prepare(`SELECT * FROM family_contacts WHERE client_id = ? ORDER BY id`).all(c.id),
-    visits: db.prepare(`SELECT * FROM visits WHERE client_id = ? AND date >= date('now') AND status = 'Scheduled' ORDER BY date, time`).all(c.id),
+    visits: db.prepare(`SELECT * FROM visits WHERE client_id = ? AND date >= ? AND status = 'Scheduled' ORDER BY date, time`).all(c.id, appToday()),
     activities: db.prepare(`SELECT type, note, by_name, substr(created_at,1,10) d FROM activities WHERE client_id = ? ORDER BY id DESC LIMIT 8`).all(c.id),
     activityWeek: db.prepare(`SELECT COUNT(*) n FROM activities WHERE client_id = ? AND created_at >= datetime('now','-7 day')`).get(c.id).n,
   } });
@@ -3237,7 +3239,7 @@ function buildClientContext(c) {
   const goals = db.prepare(`SELECT text, status FROM goals WHERE client_id = ?`).all(c.id);
   const reqs = db.prepare(`SELECT department, text FROM requests WHERE client_id = ? AND status != 'Done'`).all(c.id);
   const concerns = db.prepare(`SELECT text FROM concerns WHERE client_id = ? AND status = 'Open'`).all(c.id);
-  const visit = db.prepare(`SELECT contact_name, date FROM visits WHERE client_id = ? AND date >= date('now') AND status = 'Scheduled' ORDER BY date LIMIT 1`).get(c.id);
+  const visit = db.prepare(`SELECT contact_name, date FROM visits WHERE client_id = ? AND date >= ? AND status = 'Scheduled' ORDER BY date LIMIT 1`).get(c.id, appToday());
   return `Brief this client for the team today.\n\n` +
     (DEID ? 'Client: the client (name & dates withheld for privacy)\n' : (line('Preferred name', c.pref) + line('Name', c.name) + line('Admitted', c.admit) + line('Sobriety date', c.sober) + line('Support', c.support))) +
     line('Program', c.program) + line('Personal touch', c.touch) +
@@ -4807,7 +4809,8 @@ app.post('/api/clock/out', requireAuth, (req, res) => {
 
 // Safety rounds + job-duty completions.
 app.get('/api/rounds/today', requireAuth, (req, res) => {
-  res.json({ rounds: db.prepare(`SELECT * FROM rounds WHERE date(ts) = date('now') ORDER BY ts DESC`).all() });
+  const d = dayBoundsUtc(appToday());
+  res.json({ rounds: db.prepare(`SELECT * FROM rounds WHERE ts >= ? AND ts < ? ORDER BY ts DESC`).all(d.start, d.end) });
 });
 app.post('/api/rounds', requireAuth, (req, res) => {
   db.prepare(`INSERT INTO rounds (by_id, by_name, area, note) VALUES (?,?,?,?)`).run(req.user.id, req.user.name, req.body?.area || null, req.body?.note || null);
@@ -4815,8 +4818,8 @@ app.post('/api/rounds', requireAuth, (req, res) => {
 });
 app.post('/api/duties', requireAuth, (req, res) => {
   if (!(req.body?.text || '').trim()) return res.status(400).json({ error: 'What was done?' });
-  db.prepare(`INSERT INTO duty_logs (date, part, role, text, by_id, by_name) VALUES (date('now'),?,?,?,?,?)`)
-    .run(req.body.part || null, req.body.role || null, req.body.text.trim(), req.user.id, req.user.name);
+  db.prepare(`INSERT INTO duty_logs (date, part, role, text, by_id, by_name) VALUES (?,?,?,?,?,?)`)
+    .run(appToday(), req.body.part || null, req.body.role || null, req.body.text.trim(), req.user.id, req.user.name);
   res.json({ ok: true });
 });
 
@@ -4845,7 +4848,8 @@ app.get('/api/workforce/summary', requireAuth, (req, res) => {
   const calloffRows = db.prepare(`SELECT s.date FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?`).all(since);
   const byDow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => ({ k: d, n: 0 }));
   calloffRows.forEach((r) => { const d = dowNames[new Date(r.date + 'T00:00').getDay()]; const e = byDow.find((x) => x.k === d); if (e) e.n++; });
-  const roundsToday = db.prepare(`SELECT COUNT(*) n FROM rounds WHERE date(ts) = date('now')`).get().n;
+  const rday = dayBoundsUtc(today);
+  const roundsToday = db.prepare(`SELECT COUNT(*) n FROM rounds WHERE ts >= ? AND ts < ?`).get(rday.start, rday.end).n;
   const dutiesToday = db.prepare(`SELECT COUNT(*) n FROM duty_logs WHERE date = ?`).get(today).n;
   const calloffsWeek = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?`).get(new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10)).n;
   res.json({

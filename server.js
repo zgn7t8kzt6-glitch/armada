@@ -2639,6 +2639,7 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     emailReady: emailConfigured(), smsReady: smsConfigured(), claudeReady: claudeConfigured(),
     aiProvider: aiProvider(), deidentify: DEID,
     kioskCode: kioskCode(), kioskCodeWeak: kioskCodeIsWeak(),
+    lineupEmail: getState('lineup_email') || process.env.LINEUP_EMAIL || '',
   });
 });
 app.post('/api/settings/kiosk-code', requireAuth, requireAdmin, (req, res) => {
@@ -2961,6 +2962,119 @@ app.get('/api/lineup', requireAuth, (req, res) => {
   const value = SERVICE_VALUES[Math.floor(Date.now() / 864e5) % SERVICE_VALUES.length];
   const wows = db.prepare(`SELECT w.*, c.pref FROM wows w LEFT JOIN clients c ON c.id = w.client_id ORDER BY w.id DESC LIMIT 20`).all();
   res.json({ value, wows });
+});
+
+// ── Daily Lineup email: one-tap, no client info — live census + today's rotating
+// focus + a Horst-Schulze-style pep talk. One pep talk per focus topic. ──────────
+const LINEUP_PEP = {
+  'Greet every client by their preferred name': {
+    hook: "A person's name is the first dignity addiction tries to take. Using it says: you are a person here, not a case.",
+    horst: "Horst trained every employee to learn and use a guest's name — being recognized is the difference between a transaction and a relationship. He'd know every name on the unit by lunch.",
+    move: "Use each client's preferred name in your very first sentence to them today.",
+  },
+  'Fix the fixable in under 5 minutes': {
+    hook: "Most 'behaviors' start as a small unmet need that waited too long. The blanket, the smoke break, the phone call — fixed fast, it never becomes a crisis.",
+    horst: "Horst gave every employee permission to solve a guest's problem on the spot, no manager needed. Speed is the apology.",
+    move: "When someone's frustrated, go to them within 5 minutes and solve the small thing — before it grows.",
+  },
+  'Deliver one unprompted delight': {
+    hook: "Having to ask makes a person feel like a burden; being surprised makes them feel known.",
+    horst: "Horst called it anticipating the unexpressed wish — the favorite coffee already waiting. That's not luxury, it's attention.",
+    move: "Do one small, personal thing for a client before they ask — then log it so we can do it again.",
+  },
+  'Run the Save — Pause before you react': {
+    hook: "In a hard moment the client's nervous system borrows ours. Stay calm and they can too; react and it escalates.",
+    horst: "Horst taught: never argue, never defend — acknowledge first. The pause is where the relationship is saved.",
+    move: "In every hard moment today, pause your own reaction first. Acknowledge before you solve.",
+  },
+  'Person-first language all shift': {
+    hook: "Words become identity. 'Returned to use' is a setback; the other word becomes who someone is. We describe behavior, never label character.",
+    horst: "Horst insisted his team were ladies and gentlemen serving ladies and gentlemen — language sets the standard of respect, both ways.",
+    move: "All shift: describe the behavior, never the person — and catch each other, gently.",
+  },
+  'Close the loop out loud': {
+    hook: "Being heard only counts if the person knows it. Silent fixes feel like luck; named fixes feel like care.",
+    horst: "Horst made follow-through visible — the guest always knew their request had been received and acted on.",
+    move: "Tell at least one client: 'You said X — so we did Y.' Make being heard visible.",
+  },
+  'No one hungry': {
+    hook: "A guest who never has to ask for food is a guest who feels safe. In early recovery, feeling cared for is the treatment.",
+    horst: "Horst would already be walking the room with a tray — and treat a snack like room service at the Ritz, because the dignity is identical.",
+    move: "Before shift's end, make sure no one in the building is hungry — offer seconds, check the snack station, ask about the food.",
+  },
+  'Recognize a teammate by name': {
+    hook: "Burnout shows up in client care. The fastest fuel for a tired team is specific, same-day recognition.",
+    horst: "Horst opened every lineup with recognition by name. People who feel seen, serve seen.",
+    move: "Catch a teammate doing something great and say it out loud, specifically, today.",
+  },
+  'Ask the Listening question': {
+    hook: "The people we serve are the experts on their own day. One question turns us from a facility into their team.",
+    horst: "Horst built the finest service in the world by listening and acting — a defect only becomes an improvement if we hear it.",
+    move: "Ask each client: 'What's one thing that would make today better?' — and write it down.",
+  },
+  'Sit at eye level': {
+    hook: "Standing over someone in distress is a power posture, even when we mean well. Sitting says: I'm with you, not above you.",
+    horst: "Horst's standard was warmth and equality in every interaction — meet people where they are, literally.",
+    move: "For every hard conversation today, sit down and meet them at eye level.",
+  },
+  'A human goes to the patient': {
+    hook: "Distress is never managed through a message. Presence is the intervention — a person, in the room, every time.",
+    horst: "Horst would never let a guest's problem be handled by a note slid under a door. You go.",
+    move: "Today, no distress handled by phone or message — a human goes to the person, in person.",
+  },
+  'Hold the open door': {
+    hook: "Shame says 'you don't belong here.' We answer it out loud: you're welcome here, and you're welcome back.",
+    horst: "Horst's third step of service was a fond farewell — the goodbye matters as much as the welcome. No one leaves feeling like a failure.",
+    move: "Remind at least one client, warmly, that they belong here — and that the door is open if they ever need to come back.",
+  },
+};
+function lineupDateLabel() { return new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' }).format(new Date()); }
+function buildLineupEmail() {
+  const focus = todaysFocus();
+  const census = censusNow();
+  const pep = LINEUP_PEP[focus.t] || { hook: '', horst: '', move: focus.g };
+  const dateLabel = lineupDateLabel();
+  const guests = `${census} ${census === 1 ? 'guest' : 'guests'}`;
+  const people = census === 1 ? 'person' : 'people';
+  const chances = census === 1 ? 'chance' : 'chances';
+  const subject = `Armada Daily Lineup — ${dateLabel} · ${focus.t}`;
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:620px;line-height:1.55">
+    <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#c8a44d;font-weight:bold">Armada Daily Lineup</div>
+    <div style="color:#888;margin:0 0 14px">${dateLabel}</div>
+    <p>Good morning, team —</p>
+    <p>We're caring for <b>${guests}</b> today — ${census} ${people} who came to us on one of the hardest days of their lives. That's ${census} ${chances} to be the reason someone stays.</p>
+    <h2 style="margin:18px 0 2px;color:#0b2a4a">Today's focus: ${htmlEsc(focus.t)}</h2>
+    <p style="font-style:italic;color:#555;margin-top:0">${htmlEsc(focus.g)}</p>
+    <p>${pep.hook}</p>
+    <p><b>What would Horst do?</b> ${pep.horst}</p>
+    <p style="background:#faf6ee;border-left:3px solid #c8a44d;padding:12px 16px;margin:14px 0"><b>Your one move today:</b> ${pep.move}</p>
+    <p>You are the difference between a facility and a <i>home</i> for these ${guests} today. Thank you for showing up and being exactly that.</p>
+    <p>Let's have a great day. 💙</p>
+    <p style="color:#999;font-size:12px;margin-top:20px">Sent from the Armada Daily Lineup. No client information is included in this message.</p>
+  </div>`;
+  return { subject, html, census, focus: focus.t, guidance: focus.g };
+}
+function lineupEmailTo() { return (getState('lineup_email') || process.env.LINEUP_EMAIL || '').trim(); }
+function canSendLineup(req) { return req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role); }
+app.get('/api/lineup/email-preview', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  res.json({ ...buildLineupEmail(), to: lineupEmailTo(), emailReady: emailConfigured() });
+});
+app.post('/api/lineup/send', requireAuth, async (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  if (!emailConfigured()) return res.status(400).json({ error: 'Email isn’t connected yet — set it up in Settings → Email.' });
+  const to = lineupEmailTo();
+  if (!to) return res.status(400).json({ error: 'Set the team email address first (Settings → Daily Lineup email).' });
+  const e = buildLineupEmail();
+  try {
+    await sendEmail({ to, subject: e.subject, html: e.html });
+    audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `to ${to} · census ${e.census} · ${e.focus}`, ip: req.ip });
+    res.json({ ok: true, to, census: e.census });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => {
+  setState('lineup_email', (req.body?.email || '').trim());
+  res.json({ ok: true });
 });
 app.post('/api/wows', requireAuth, (req, res) => {
   if (!req.body?.text?.trim()) return res.status(400).json({ error: 'Missing' });

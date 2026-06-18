@@ -3037,7 +3037,8 @@ function lineupDateLabel() { return new Intl.DateTimeFormat('en-US', { timeZone:
 function lineupWins() {
   const wkStart = addDays(appToday(), -6);   // local date columns
   const c7 = (sql, ...a) => db.prepare(sql).get(...a).n;
-  const admits = c7(`SELECT COUNT(*) n FROM flow_events WHERE kind='admit' AND date >= ?`, wkStart);
+  // Real admits this week = clients whose admission date is within the last 7 days.
+  const admits = c7(`SELECT COUNT(*) n FROM clients WHERE admit IS NOT NULL AND admit != '' AND substr(admit,1,10) >= ?`, wkStart);
   const moments = c7(`SELECT COUNT(*) n FROM wows WHERE created_at >= datetime('now','-7 day')`);
   const recognized = c7(`SELECT COUNT(*) n FROM wows WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= datetime('now','-7 day')`);
   let voices = c7(`SELECT COUNT(*) n FROM survey_responses WHERE created_at >= datetime('now','-7 day')`);

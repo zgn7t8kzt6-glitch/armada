@@ -1,6 +1,6 @@
 // Network-first service worker — stays fresh online, works offline from cache.
-const C = 'armada-v84';
-const SHELL = ['/', '/index.html', '/styles.css?v=20260616AD', '/app.js?v=20260616AD', '/logo.png', '/logo.svg', '/manifest.webmanifest'];
+const C = 'armada-v85';
+const SHELL = ['/', '/index.html', '/kiosk.html', '/display.html', '/styles.css?v=20260616AE', '/app.js?v=20260616AE', '/logo.png', '/logo.svg', '/manifest.webmanifest'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(C).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
@@ -10,8 +10,10 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.pathname.startsWith('/api/')) return; // let the network handle the API
+  // Offline fallback: serve the right shell for the surface (kiosk/display vs staff app).
+  const fallback = u.pathname.startsWith('/kiosk') ? '/kiosk.html' : u.pathname.startsWith('/display') ? '/display.html' : '/index.html';
   e.respondWith(
     fetch(e.request).then((r) => { const cp = r.clone(); caches.open(C).then((c) => c.put(e.request, cp)); return r; })
-      .catch(() => caches.match(e.request).then((m) => m || caches.match('/index.html')))
+      .catch(() => caches.match(e.request).then((m) => m || caches.match(fallback)))
   );
 });

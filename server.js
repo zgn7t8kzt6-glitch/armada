@@ -296,13 +296,13 @@ async function emailReorder(item, qty, level, user) {
   if (!to || !emailConfigured()) return false;
   const urgency = level === 'out' ? (item.critical ? 'CRITICAL — OUT OF STOCK' : 'OUT OF STOCK') : 'Running low';
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
-    <h2 style="margin:0 0 4px">Reorder needed — ${item.name}</h2>
+    <h2 style="margin:0 0 4px">Reorder needed — ${htmlEsc(item.name)}</h2>
     <p style="color:#${level === 'out' ? 'b00' : 'a60'};font-weight:bold;margin:0 0 12px">${urgency}</p>
     <table style="border-collapse:collapse">
-      <tr><td style="padding:3px 12px 3px 0;color:#666">Department</td><td><b>${item.department}</b>${item.category ? ' · ' + item.category : ''}</td></tr>
-      <tr><td style="padding:3px 12px 3px 0;color:#666">On hand</td><td><b>${qty}</b> ${item.unit} (par ${item.par_level}, reorder at ${item.reorder_point})</td></tr>
-      <tr><td style="padding:3px 12px 3px 0;color:#666">Suggested order</td><td><b>${Math.max(item.par_level - qty, 1)}</b> ${item.unit} to reach par</td></tr>
-      <tr><td style="padding:3px 12px 3px 0;color:#666">Flagged by</td><td>${user?.name || 'Staff'}</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#666">Department</td><td><b>${htmlEsc(item.department)}</b>${item.category ? ' · ' + htmlEsc(item.category) : ''}</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#666">On hand</td><td><b>${qty}</b> ${htmlEsc(item.unit)} (par ${item.par_level}, reorder at ${item.reorder_point})</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#666">Suggested order</td><td><b>${Math.max(item.par_level - qty, 1)}</b> ${htmlEsc(item.unit)} to reach par</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#666">Flagged by</td><td>${htmlEsc(user?.name || 'Staff')}</td></tr>
     </table>
     <p style="color:#888;margin-top:14px">Sent automatically by Armada Care Standards — Supply Standards.</p>
   </div>`;

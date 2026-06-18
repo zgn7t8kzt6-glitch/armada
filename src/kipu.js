@@ -215,12 +215,16 @@ function nameFrom(v) {
   }
   return null;
 }
+// Keys that match a role word but hold something other than a person's name
+// (e.g. therapist_notes, case_manager_id, therapist_signature) — never a name.
+const NOISE_KEY = /(notes?|comments?|signature|reason|plan|summary|status|count|score|date|_id|^id|_at)$/i;
 function deepFind(obj, keyRe, depth = 0) {
   if (!obj || typeof obj !== 'object' || depth > 4) return null;
   for (const [k, v] of Object.entries(obj)) {
     // Match the key, then pull a name whether the value is a string OR an object
-    // ({primary_therapist: {name: "..."}}). Objects were previously skipped.
-    if (keyRe.test(k)) { const nm = nameFrom(v); if (nm) return nm; }
+    // ({primary_therapist: {name: "..."}}). Skip noise keys so we don't grab a
+    // note/signature/id as the "name".
+    if (keyRe.test(k) && !NOISE_KEY.test(k)) { const nm = nameFrom(v); if (nm) return nm; }
   }
   for (const v of Object.values(obj)) {
     if (v && typeof v === 'object') { const f = deepFind(v, keyRe, depth + 1); if (f) return f; }

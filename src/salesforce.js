@@ -478,6 +478,18 @@ export async function sfArrivalsDiagnose(nameQuery) {
       const w = await sfQuery(`SELECT ${cols} FROM Opportunity WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${fac.clause} ORDER BY CloseDate DESC LIMIT 30`);
       out.appAdmitted = (w.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', admit: admitOf(r) }));
     } catch (e) { out.appAdmittedError = e.message; }
+    // Dump the ACTUAL values of every candidate date field for the scheduled opps,
+    // so we can see which field equals TODAY for people scheduled today and pick
+    // the right admit-date field. Only fields that exist on Opportunity are queried.
+    try {
+      const candidates = ['CloseDate', 'Admission_Date__c', 'Admission_Date_Time__c', 'Scheduled_Admission_Date__c', 'Scheduled_Admission_Date_Time__c', 'Scheduled_Date_Only__c', 'Scheduled_Date__c', 'Date_Looking_to_Admit__c', 'Expected_Admission_Date__c', 'Anticipated_Admission_Date__c'];
+      const present = candidates.filter((c) => c === 'CloseDate' || (out.oppDateFields || []).includes(c));
+      if (present.length) {
+        const sel = ['Name', ...present].join(', ');
+        const q = await sfQuery(`SELECT ${sel} FROM Opportunity WHERE IsClosed = false AND StageName IN (${stages})${fac.clause} ORDER BY CreatedDate DESC LIMIT 15`);
+        out.scheduledDateValues = { fields: present, rows: (q.records || []).map((r) => { const o = { name: (r.Name || '').replace(/\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/, '') }; for (const f of present) o[f] = (r[f] ? String(r[f]).slice(0, 10) : '—'); return o; }) };
+      }
+    } catch (e) { out.dateValuesError = e.message; }
   } catch (e) { out.appScopeError = e.message; }
   const nq = (nameQuery || '').trim();
   if (nq) {

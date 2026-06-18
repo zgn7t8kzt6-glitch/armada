@@ -876,7 +876,14 @@ async function sfDiagnoseSchedule(){
     html += (d.appScheduled&&d.appScheduled.length) ? d.appScheduled.map(r=>`<div class="pc-note"><strong>${esc(r.name)}</strong> · admit <strong>${esc(r.admit)}</strong> · ${esc(r.stage)}</div>`).join('') : '<div class="hint">None — check the stage name &amp; facility match Salesforce.</div>';
     html += `<div class="cmd-sub">Admitted (last 7 days) it would mark arrived</div>`;
     html += (d.appAdmitted&&d.appAdmitted.length) ? d.appAdmitted.map(r=>`<div class="pc-note">✅ <strong>${esc(r.name)}</strong> · ${esc(r.admit)} · ${esc(r.stage)}</div>`).join('') : '<div class="hint">None in the last 7 days for this facility.</div>';
-    if(d.oppDateFields&&d.oppDateFields.length){ html += `<div class="cmd-sub">Date fields on Opportunity (pick the real admit date)</div><div class="hint">${d.oppDateFields.map(esc).join(', ')}</div>`; }
+    if(d.scheduledDateValues&&d.scheduledDateValues.rows&&d.scheduledDateValues.rows.length){
+      const f=d.scheduledDateValues.fields;
+      html += `<div class="cmd-sub">📅 Date values for scheduled people — find the column that shows TODAY for someone scheduled today, then set that as the Admit-date field</div>`;
+      html += `<div style="overflow-x:auto"><table class="tbl" style="font-size:12px"><tr><th>Name</th>${f.map(x=>`<th>${esc(x)}</th>`).join('')}</tr>`;
+      html += d.scheduledDateValues.rows.map(r=>`<tr><td>${esc(r.name)}</td>${f.map(x=>`<td>${esc(r[x]||'—')}</td>`).join('')}</tr>`).join('');
+      html += `</table></div>`;
+    }
+    if(d.oppDateFields&&d.oppDateFields.length){ html += `<div class="cmd-sub">All date fields on Opportunity</div><div class="hint">${d.oppDateFields.map(esc).join(', ')}</div>`; }
     html += '</div>';
   }
   $('sf_discover').innerHTML = html;

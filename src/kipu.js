@@ -322,8 +322,10 @@ export async function kipuSyncRoster() {
   const data = await kipuGet(path);
   const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
   let created = 0, matched = 0;
+  const seenKids = new Set();    // de-dupe: the census feed can return the same casefile twice
+  const claimedRows = new Set(); // app rows already taken this sync — never merge two people onto one
   const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ?`);
-  const byName = db.prepare(`SELECT id, loc, active FROM clients WHERE name = ? OR pref = ?`);
+  const byName = db.prepare(`SELECT id, loc, active, kipu_id FROM clients WHERE name = ? OR pref = ?`);
   const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, payment_method, next_loc, anticipated_dc, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
   const admRef = db.prepare(`SELECT referral_source FROM admissions WHERE referral_source IS NOT NULL AND referral_source != '' AND (name = ? OR name = ?) ORDER BY id DESC LIMIT 1`);
   // Flow-event recorder: one row per real transition, so re-running the sync
@@ -392,6 +394,8 @@ export async function kipuSyncRoster() {
     if (!name) continue;
     if (!matchesLoc(p)) continue;
     const kid = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn') && String(pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'));
+    if (kid && seenKids.has(kid)) continue;   // same casefile twice in the feed — process it once
+    if (kid) seenKids.add(kid);
     const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
     const admit = admitRaw ? String(admitRaw).slice(0, 10) : null;
     if (admitCutoff && admit && admit < admitCutoff) continue;   // opt-in recency filter
@@ -437,7 +441,15 @@ export async function kipuSyncRoster() {
     const discharged = Boolean((dischDate && String(dischDate).trim()) ||
       (dischStatus && !['active', 'admitted', 'current'].includes(String(dischStatus).toLowerCase())));
     if (!discharged && kid) activeKids.push(kid);
-    const existing = (kid && byKipu.get(kid)) || byName.get(name, name);
+    // Match by casefile id first. Only fall back to a NAME match when that row
+    // isn't already tied to a DIFFERENT Kipu casefile — otherwise two different
+    // people who happen to share a name collapse onto one record, under-counting
+    // the census and today's admits. (A row with no kipu_id is a manually-added
+    // client that's safe to link.)
+    const nameRow = byName.get(name, name);
+    const safeName = nameRow && (!nameRow.kipu_id || nameRow.kipu_id === kid) ? nameRow : null;
+    let existing = (kid && byKipu.get(kid)) || safeName;
+    if (existing && claimedRows.has(existing.id)) existing = null;   // row already taken this sync → make a new one
 
     // The census carries none of the clinical fields — pull them from the
     // patient detail (the only source of level of care, program, room,
@@ -475,6 +487,7 @@ export async function kipuSyncRoster() {
     const adm = !refSrcRaw ? admRef.get(name, p.first_name || name) : null;
     const refSource = (refSrcRaw && String(refSrcRaw)) || (adm && adm.referral_source) || null;
     if (existing) {
+      claimedRows.add(existing.id);   // this app row is now spoken for this sync
       // Level-of-care change: record it once, then advance the stored level.
       if (newLoc && existing.loc && newLoc !== existing.loc) {
         evt.run(existing.id, kid || null, 'loc_change', existing.loc, newLoc, today, null);

@@ -4988,6 +4988,43 @@ app.post('/api/staffing/assignments/:id/cover', requireAuth, requireStaffingMana
   res.json({ ok: true });
 });
 
+// ── Bed turnover board (RT bed flips) ───────────────────────────────────────
+// A bed flags 'dirty' when a client discharges (auto via Kipu sync) or by hand
+// for a room switch; RTs mark it clean/open. Overdue = still dirty past a shift.
+app.get('/api/turnovers', requireAuth, (req, res) => {
+  const dirty = db.prepare(`SELECT id, room, who, reason, flagged_at FROM bed_turnovers WHERE status = 'dirty' ORDER BY flagged_at`).all();
+  const cleaned = db.prepare(`SELECT id, room, who, cleaned_by, substr(cleaned_at,1,16) at FROM bed_turnovers
+    WHERE status = 'clean' AND cleaned_at >= datetime('now','-1 day') ORDER BY cleaned_at DESC LIMIT 30`).all();
+  const now = Date.now();
+  const dirtyOut = dirty.map((b) => {
+    const ts = Date.parse(String(b.flagged_at).replace(' ', 'T') + 'Z');
+    const mins = ts ? Math.floor((now - ts) / 60000) : 0;
+    return { ...b, mins, overdue: mins > 480 };
+  });
+  res.json({ dirty: dirtyOut, cleaned, openCount: dirtyOut.length, overdue: dirtyOut.filter((b) => b.overdue).length });
+});
+app.post('/api/turnovers', requireAuth, (req, res) => {
+  const room = (req.body?.room || '').trim();
+  if (!room) return res.status(400).json({ error: 'Which bed/room?' });
+  if (db.prepare(`SELECT 1 FROM bed_turnovers WHERE room = ? AND status = 'dirty' LIMIT 1`).get(room)) return res.json({ ok: true, already: true });
+  db.prepare(`INSERT INTO bed_turnovers (room, who, reason, flagged_shift) VALUES (?,?,?,?)`)
+    .run(room.slice(0, 40), (req.body?.who || '').trim().slice(0, 60) || null, 'manual', currentShift());
+  res.json({ ok: true });
+});
+app.post('/api/turnovers/:id/clean', requireAuth, (req, res) => {
+  db.prepare(`UPDATE bed_turnovers SET status='clean', cleaned_by=?, cleaned_at=datetime('now'), cleaned_shift=? WHERE id=?`)
+    .run(req.user.name, currentShift(), req.params.id);
+  res.json({ ok: true });
+});
+app.post('/api/turnovers/:id/reopen', requireAuth, (req, res) => {
+  db.prepare(`UPDATE bed_turnovers SET status='dirty', cleaned_by=NULL, cleaned_at=NULL, cleaned_shift=NULL WHERE id=?`).run(req.params.id);
+  res.json({ ok: true });
+});
+app.delete('/api/turnovers/:id', requireAuth, (req, res) => {
+  db.prepare(`DELETE FROM bed_turnovers WHERE id=?`).run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ── Daily roster / attendance dashboard ─────────────────────────────────────
 // Did the scheduled people show up? Supervisor marks present/absent; we also
 // reconcile against the time clock and flag any discrepancy.

@@ -4442,7 +4442,7 @@ app.post('/api/arrivals/sync', requireAuth, async (req, res) => {
     if (!sfConfigured()) return res.status(400).json({ error: 'Salesforce not connected.' });
     const r = await sfSyncArrivals(db);
     const rec = reconcileArrivals();
-    audit({ user: req.user, action: 'ARRIVALS_SYNC', detail: `${r.pulled} pulled, ${rec.matched} arrived`, ip: req.ip });
+    audit({ user: req.user, action: 'ARRIVALS_SYNC', detail: `${r.pulled} scheduled, ${r.admitted || 0} admitted (SF), ${rec.matched} matched (Kipu)`, ip: req.ip });
     res.json({ ...r, ...rec });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });

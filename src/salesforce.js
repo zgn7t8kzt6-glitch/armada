@@ -293,6 +293,16 @@ export async function sfSyncArrivals(db) {
     WHERE IsClosed = false AND StageName IN (${stages})${facClause}
     ORDER BY Admission_Date__c ASC NULLS LAST`;
   const records = await sfQueryAll(soql);
+  // ALSO pull recently ADMITTED (Closed-Won) opps: Salesforce closes the opp on
+  // admit, so the open query above drops them — without this they vanish from the
+  // board instead of showing as "arrived." (Network fetch happens before the txn.)
+  const wonSoql = process.env.SF_ADMITTED_SOQL || `
+    SELECT Id, Name, StageName, CloseDate, Admission_Date__c
+    FROM Opportunity
+    WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${facClause}
+    ORDER BY CloseDate DESC`;
+  let wonRecords = [];
+  try { wonRecords = await sfQueryAll(wonSoql); } catch (e) { /* admitted pull optional */ }
 
   const find = db.prepare(`SELECT id, status FROM expected_arrivals WHERE sf_lead_id = ?`);
   const ins = db.prepare(`INSERT INTO expected_arrivals
@@ -311,7 +321,16 @@ export async function sfSyncArrivals(db) {
     return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
   };
 
-  let pulled = records.length, created = 0, updated = 0;
+  // Mark an admitted (Closed-Won) opp as arrived — SF is the source of truth for
+  // an admit, so this overrides expected/no_show, but never un-marks an arrival.
+  const markArrived = db.prepare(`UPDATE expected_arrivals SET status='arrived',
+    arrived_at=COALESCE(arrived_at, datetime('now')), auto=1, scheduled_date=COALESCE(?, scheduled_date), updated_at=datetime('now')
+    WHERE sf_lead_id=? AND status != 'arrived'`);
+  const insArrived = db.prepare(`INSERT INTO expected_arrivals
+    (sf_lead_id, first_name, last_name, preferred_name, scheduled_date, program, status, arrived_at, auto)
+    VALUES (?,?,?,?,?,?, 'arrived', datetime('now'), 1)`);
+
+  let pulled = records.length, created = 0, updated = 0, admitted = 0;
   db.exec('BEGIN');
   try {
     for (const r of records) {
@@ -323,9 +342,16 @@ export async function sfSyncArrivals(db) {
       if (existing) { upd.run(...vals, r.Id); updated++; }
       else { ins.run(r.Id, ...vals); created++; }
     }
+    for (const r of wonRecords) {
+      const sched = (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || null;
+      const { first, last } = parseName(r.Name);
+      const existing = find.get(r.Id);
+      if (existing) { if (existing.status !== 'arrived') { markArrived.run(sched, r.Id); admitted++; } }
+      else { insArrived.run(r.Id, first || null, last || null, first || null, sched, r.StageName || null); admitted++; }
+    }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
-  return { pulled, created, updated };
+  return { pulled, created, updated, admitted };
 }
 
 // Why isn't someone on the schedule? Reports whether matching Leads carry a

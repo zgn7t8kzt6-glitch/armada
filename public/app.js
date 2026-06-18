@@ -2006,7 +2006,7 @@ async function diagnoseSchedule(){
 }
 async function arrivalsSync(){
   $('arrivals_msg').textContent='Pulling from Salesforce…';
-  try{ const r=await api('/arrivals/sync',{method:'POST'}); $('arrivals_msg').textContent=`✓ ${r.pulled} scheduled · ${r.matched} already arrived (Kipu).`; loadArrivals(); }
+  try{ const r=await api('/arrivals/sync',{method:'POST'}); $('arrivals_msg').textContent=`✓ ${r.pulled} scheduled · ${r.admitted||0} admitted in Salesforce · ${r.matched} matched in Kipu.`; loadArrivals(); }
   catch(e){ $('arrivals_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function syncSalesforce(){

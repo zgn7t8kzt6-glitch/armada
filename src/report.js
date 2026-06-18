@@ -142,7 +142,7 @@ export function renderReportHtml(d) {
   </div>`;
 }
 
-export async function sendEmail({ subject, html, to, cc }) {
+export async function sendEmail({ subject, html, to, cc, replyTo }) {
   const dest = (to || ecfg('to', 'CENSUS_EMAIL_TO') || process.env.REPORT_TO || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!dest.length) throw new Error('No recipient address.');
   // Always CC the owner (or whoever's set in Settings → Email) on every send, so
@@ -164,7 +164,7 @@ export async function sendEmail({ subject, html, to, cc }) {
       auth: { user: ecfg('smtp_user', 'SMTP_USER'), pass: ecfg('smtp_pass', 'SMTP_PASS') },
     });
     const from = ecfg('from', 'SMTP_FROM') || ecfg('from', 'REPORT_FROM') || ecfg('smtp_user', 'SMTP_USER');
-    await transport.sendMail({ from, to: dest, ...(ccList.length ? { cc: ccList } : {}), subject, html });
+    await transport.sendMail({ from, to: dest, ...(ccList.length ? { cc: ccList } : {}), ...(replyTo ? { replyTo } : {}), subject, html });
     return;
   }
   // Fallback: Resend API.
@@ -178,7 +178,7 @@ export async function sendEmail({ subject, html, to, cc }) {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to: dest, ...(ccList.length ? { cc: ccList } : {}), subject, html }),
+      body: JSON.stringify({ from, to: dest, ...(ccList.length ? { cc: ccList } : {}), ...(replyTo ? { reply_to: replyTo } : {}), subject, html }),
     });
     if (r.ok) return;
     lastBody = (await r.text()).slice(0, 200);

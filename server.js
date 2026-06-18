@@ -2643,6 +2643,7 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     lineupHorst: getState('lineup_horst') === 'on',
     lineupReward: getState('lineup_reward') || '',
     purpose: companyPurpose(),
+    appLive: getState('app_live') === 'on',
   });
 });
 app.post('/api/settings/kiosk-code', requireAuth, requireAdmin, (req, res) => {
@@ -3050,28 +3051,44 @@ function lineupWins() {
   if (mealsLoved) lines.push(`<b>${mealsLoved}</b> meals our clients enjoyed`);
   return lines;
 }
+function appLive() { return getState('app_live') === 'on'; }
+// Today's principle: a leadership-set override for today wins; otherwise the rotation.
+function effectiveFocus() {
+  const ov = getState('principle_override');
+  if (ov) { const i = ov.indexOf('|'); const d = ov.slice(0, i), t = ov.slice(i + 1); if (d === appToday()) { const f = FOCUS_TOPICS.find((x) => x.t === t); if (f) return f; } }
+  return todaysFocus();
+}
 function buildLineupEmail() {
-  const focus = todaysFocus();
+  const focus = effectiveFocus();
   const census = censusNow();
   const pep = LINEUP_PEP[focus.t] || { hook: '', horst: '', move: focus.g };
   const dateLabel = lineupDateLabel();
   const horstOn = getState('lineup_horst') === 'on';   // off until the team's been introduced to Horst
   const reward = (getState('lineup_reward') || '').trim();
+  const live = appLive();
   const clients = `${census} ${census === 1 ? 'client' : 'clients'}`;
   const people = census === 1 ? 'person' : 'people';
   const chances = census === 1 ? 'chance' : 'chances';
   const wins = lineupWins();
   const winsBlock = wins.length
     ? `<div style="margin:18px 0;padding:12px 16px;background:#f4f8f4;border-left:3px solid #3f8c5a;border-radius:4px">
-        <div style="font-weight:bold;color:#2f6b44;margin-bottom:6px">🏆 This week's wins</div>
+        <div style="font-weight:bold;color:#2f6b44">🏆 This week's wins</div>
+        <div style="font-size:13px;color:#666;margin-bottom:6px">What the team did over the last 7 days:</div>
         <ul style="margin:0;padding-left:20px">${wins.map((w) => `<li style="margin:2px 0">${w}</li>`).join('')}</ul>
       </div>`
     : '';
-  // Momentum driver: notice a teammate → recognize them → (optional) reward.
-  const recognitionBlock = `<div style="margin:16px 0;padding:12px 16px;background:#f3eefc;border-left:3px solid #7a5cc0;border-radius:4px">
-    <div style="font-weight:bold;color:#5b3fa0;margin-bottom:4px">✨ Today's challenge: lift a teammate</div>
-    <p style="margin:0">Catch a coworker doing something great today — then say it to their face <i>and</i> log it in the app under <b>Lineup → Wow Stories</b>. The teams that win are the ones that notice each other.${reward ? `<br><br>🎁 <b>Today's reward for recognizing a teammate: ${htmlEsc(reward)}.</b>` : ''}</p>
-  </div>`;
+  const rewardLine = reward ? `<br><br>🎁 <b>Today's reward for recognizing a teammate: ${htmlEsc(reward)}.</b>` : '';
+  // While the app is rolling out, ask the team to REPLY to this email; once it's
+  // live for everyone, point them to Wow Stories in the app.
+  const recognitionBlock = live
+    ? `<div style="margin:16px 0;padding:12px 16px;background:#f3eefc;border-left:3px solid #7a5cc0;border-radius:4px">
+        <div style="font-weight:bold;color:#5b3fa0;margin-bottom:4px">✨ Today's challenge: lift a teammate</div>
+        <p style="margin:0">Catch a coworker doing something great today — say it to their face <i>and</i> log it in the app under <b>Lineup → Wow Stories</b>. The teams that win are the ones that notice each other.${rewardLine}</p>
+      </div>`
+    : `<div style="margin:16px 0;padding:12px 16px;background:#f3eefc;border-left:3px solid #7a5cc0;border-radius:4px">
+        <div style="font-weight:bold;color:#5b3fa0;margin-bottom:4px">✨ Today's challenge — just hit reply</div>
+        <p style="margin:0">Reply to this email and tell us two things:<br>1) How did you live today's focus — and how did a client respond?<br>2) Who's a teammate you caught going above and beyond?<br>We'll share the wins with the whole team.${rewardLine}</p>
+      </div>`;
   const subject = `Armada Daily Lineup — ${dateLabel} · ${focus.t}`;
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:620px;line-height:1.55">
     <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#c8a44d;font-weight:bold">Armada Daily Lineup</div>
@@ -3109,8 +3126,10 @@ app.post('/api/lineup/send', requireAuth, async (req, res) => {
   const to = lineupEmailTo();
   if (!to) return res.status(400).json({ error: 'Set the team email address first (Settings → Daily Lineup email).' });
   const e = buildLineupEmail();
+  // Replies should reach a person: prefer the sender's email, else the team list.
+  const replyTo = (req.user?.username && /@/.test(req.user.username)) ? req.user.username : (getState('lineup_reply_to') || to);
   try {
-    await sendEmail({ to, subject: e.subject, html: e.html });
+    await sendEmail({ to, subject: e.subject, html: e.html, replyTo });
     audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `to ${to} · census ${e.census} · ${e.focus}`, ip: req.ip });
     res.json({ ok: true, to, census: e.census });
   } catch (err) { res.status(502).json({ error: err.message }); }
@@ -3121,6 +3140,7 @@ app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => 
   if (b.horst != null) setState('lineup_horst', b.horst ? 'on' : 'off');
   if (b.reward != null) setState('lineup_reward', String(b.reward).trim().slice(0, 120));
   if (b.purpose != null) setState('purpose', String(b.purpose).trim().slice(0, 400));
+  if (b.appLive != null) setState('app_live', b.appLive ? 'on' : 'off');
   res.json({ ok: true });
 });
 
@@ -3142,7 +3162,7 @@ const PRINCIPLE_WHY = {
   'Hold the open door': "Shame whispers 'you don't belong here.' Hearing 'you're welcome here, and welcome back' out loud fights that shame — and makes it likelier someone reaches for help again instead of disappearing.",
 };
 app.get('/api/principle/today', requireAuth, (req, res) => {
-  const focus = todaysFocus();
+  const focus = effectiveFocus();
   // Stories from the last 7 days that lived out a principle (any principle), newest first.
   const stories = db.prepare(`SELECT principle, text, client_response, by_name, substr(created_at,1,16) at
     FROM wows WHERE principle IS NOT NULL AND principle != '' AND created_at >= datetime('now','-7 day')
@@ -3151,8 +3171,19 @@ app.get('/api/principle/today', requireAuth, (req, res) => {
     title: focus.t,
     practice: focus.g,
     why: PRINCIPLE_WHY[focus.t] || '',
+    options: FOCUS_TOPICS.map((f) => f.t),   // for the leadership "set today's principle" picker
+    canSet: req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role),
     stories: stories.map((s) => ({ principle: s.principle, action: s.text, clientResponse: s.client_response || '', by: s.by_name || '', at: s.at })),
   });
+});
+// Leadership can set TODAY's principle (overrides the rotation, just for today).
+app.post('/api/principle/set', requireAuth, (req, res) => {
+  if (!(req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role)))
+    return res.status(403).json({ error: 'Leadership only.' });
+  const title = (req.body?.title || '').trim();
+  if (!FOCUS_TOPICS.some((f) => f.t === title)) return res.status(400).json({ error: 'Unknown principle.' });
+  setState('principle_override', appToday() + '|' + title);
+  res.json({ ok: true, title });
 });
 app.post('/api/principle/story', requireAuth, (req, res) => {
   const action = (req.body?.action || '').trim();

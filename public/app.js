@@ -2720,7 +2720,7 @@ async function loadSchedule(){
   await ensureReferralMeta().catch(()=>{});
   fillSelect($('sc_part'), META.shifts||['Morning','Day','Evening','Night']);
   fillSelect($('sc_role'), META.jobRoles||['BHT / Tech','Nurse','Therapist','Kitchen']);
-  if(!SCHED_STAFF){ try{ const {users}=await api('/users'); SCHED_STAFF=users.filter(u=>u.active!==0); }catch(e){ SCHED_STAFF=[]; } }
+  if(!SCHED_STAFF){ try{ const {staff}=await api('/staff'); SCHED_STAFF=staff; }catch(e){ SCHED_STAFF=[]; } }
   const { slots } = await api('/staffing?date='+$('sc_date').value);
   $('scBoard').innerHTML = slots.length ? slots.map(s=>{
     const opt = SCHED_STAFF.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('');
@@ -4235,7 +4235,7 @@ async function cycleBed(id,cur){ const order=['Open','Hold','Cleaning','Occupied
 function isLeadershipUser(){ return !!(ME && (ME.role==='admin' || ['Executive Director','Director of Operations','Clinical Director'].includes(ME.job_role))); }
 async function loadStaffVoice(){
   const feed=$('voiceFeed'); if(!feed) return;
-  let d; try{ d=await api('/voice'); }catch(e){ return; }
+  let d; try{ d=await api('/staff-voice'); }catch(e){ return; }
   feed.innerHTML = d.rows.length ? d.rows.map(v=>`<div class="pc-note" style="border-left:3px solid ${v.status==='done'?'#3f8c5a':'#c8a44d'}">
     <div>${esc(v.text)}</div>
     <div class="hint" style="margin-top:2px">${esc(v.by_name||'')} · ${esc(v.at||'')}${v.status==='done'?'':' · <span style="color:#a60">awaiting response</span>'}</div>
@@ -4245,12 +4245,12 @@ async function loadStaffVoice(){
 }
 async function submitVoice(){
   const text=$('voice_text')?$('voice_text').value.trim():''; if(!text){ if($('voice_msg'))$('voice_msg').textContent='Share something first.'; return; }
-  try{ await api('/voice',{method:'POST',body:JSON.stringify({text,anonymous:$('voice_anon')?$('voice_anon').checked:false})}); $('voice_text').value=''; if($('voice_anon'))$('voice_anon').checked=false; if($('voice_msg'))$('voice_msg').textContent='✓ Thank you — we read every one.'; setTimeout(()=>{if($('voice_msg'))$('voice_msg').textContent='';},2500); loadStaffVoice(); }
+  try{ await api('/staff-voice',{method:'POST',body:JSON.stringify({text,anonymous:$('voice_anon')?$('voice_anon').checked:false})}); $('voice_text').value=''; if($('voice_anon'))$('voice_anon').checked=false; if($('voice_msg'))$('voice_msg').textContent='✓ Thank you — we read every one.'; setTimeout(()=>{if($('voice_msg'))$('voice_msg').textContent='';},2500); loadStaffVoice(); }
   catch(e){ if($("voice_msg"))$('voice_msg').textContent=e.message; }
 }
 async function respondVoice(id){
   const response=prompt('How are we responding / what did we do about it? (this is shown to the team)'); if(response===null) return;
-  try{ await api('/voice/'+id+'/respond',{method:'POST',body:JSON.stringify({response})}); loadStaffVoice(); if($('wpVoice')&&$('workplace')&&$('workplace').classList.contains('active')) loadWorkplace(); }catch(e){ alert(e.message); }
+  try{ await api('/staff-voice/'+id+'/respond',{method:'POST',body:JSON.stringify({response})}); loadStaffVoice(); if($('wpVoice')&&$('workplace')&&$('workplace').classList.contains('active')) loadWorkplace(); }catch(e){ alert(e.message); }
 }
 async function loadWorkplace(){
   // staff pickers
@@ -4269,7 +4269,7 @@ async function loadWorkplace(){
 }
 async function loadVoiceInto(elId){
   const feed=$(elId); if(!feed) return;
-  let d; try{ d=await api('/voice'); }catch(e){ return; }
+  let d; try{ d=await api('/staff-voice'); }catch(e){ return; }
   feed.innerHTML = d.rows.length ? d.rows.map(v=>`<div class="pc-note" style="border-left:3px solid ${v.status==='done'?'#3f8c5a':'#c8a44d'};display:flex;justify-content:space-between;gap:8px"><span><div>${esc(v.text)}</div><div class="hint">${esc(v.by_name||'')} · ${esc(v.at||'')}</div>${v.response?`<div style="margin-top:4px;font-style:italic;color:#555">✓ ${esc(v.response)}</div>`:''}</span>${v.status!=='done'?`<button class="btn btn-gold btn-sm sans" style="white-space:nowrap" onclick="respondVoice(${v.id})">Respond</button>`:''}</div>`).join('') : '<div class="hint">No staff voice yet.</div>';
 }
 async function leaderRecognize(){

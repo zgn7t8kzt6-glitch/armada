@@ -2537,7 +2537,9 @@ app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
   const d = date || new Date().toISOString().slice(0, 10);
   const b = req.body || {};
   const steps = b.steps ? JSON.stringify(b.steps) : null;
-  db.prepare(`UPDATE clients SET discharge_status = ?, discharge_date = ?, discharge_destination = ?, departure_steps = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
+  // active=0 too, so a manual discharge matches Kipu-sync behavior and can't
+  // linger in any count that filters on active alone (keeps census consistent).
+  db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, departure_steps = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
     .run(status, d, b.destination || null, steps, b.reason || null, b.followthrough || null, b.improve || null, req.params.id);
   if (status !== 'Transferred') {
     // Aftercare calls are REQUIRED tasks, auto-assigned to the Aftercare Coordinator.
@@ -5455,11 +5457,13 @@ app.get('/api/team', requireAuth, (req, res) => {
 // ── Best Place to Work: staff voice, morale dashboard, recognition, growth ──
 function isLeadership(req) { return req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role); }
 // Staff Voice — anyone can submit; leadership responds and closes the loop.
-app.get('/api/voice', requireAuth, (req, res) => {
+// NOTE: namespaced /api/staff-voice to avoid colliding with the pre-existing
+// admin "Voice of the guest" GET /api/voice (Express matches the first route).
+app.get('/api/staff-voice', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT id, text, anonymous, by_name, status, response, responded_by, substr(created_at,1,16) at, substr(responded_at,1,16) rat FROM staff_voice ORDER BY (status='open') DESC, id DESC LIMIT 60`).all();
   res.json({ rows: rows.map((r) => ({ ...r, by_name: r.anonymous ? 'Anonymous' : (r.by_name || '') })), canRespond: isLeadership(req) });
 });
-app.post('/api/voice', requireAuth, (req, res) => {
+app.post('/api/staff-voice', requireAuth, (req, res) => {
   const text = (req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Tell us what would make this a better place to work.' });
   const anon = req.body?.anonymous ? 1 : 0;
@@ -5467,7 +5471,7 @@ app.post('/api/voice', requireAuth, (req, res) => {
   createAlert(null, 'staff_voice_' + id, 'Elevated', `New Staff Voice: “${text.slice(0, 90)}” — read it and close the loop on the Best Place to Work page.`);
   res.json({ ok: true });
 });
-app.post('/api/voice/:id/respond', requireAuth, (req, res) => {
+app.post('/api/staff-voice/:id/respond', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
   const response = (req.body?.response || '').trim();
   const status = response ? 'done' : 'open';

@@ -2639,11 +2639,12 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     emailReady: emailConfigured(), smsReady: smsConfigured(), claudeReady: claudeConfigured(),
     aiProvider: aiProvider(), deidentify: DEID,
     kioskCode: kioskCode(), kioskCodeWeak: kioskCodeIsWeak(),
-    lineupEmail: getState('lineup_email') || process.env.LINEUP_EMAIL || '',
+    lineupEmail: lineupEmailTo(),
     lineupHorst: getState('lineup_horst') === 'on',
     lineupReward: getState('lineup_reward') || '',
     purpose: companyPurpose(),
     appLive: getState('app_live') === 'on',
+    lineupBcc: getState('lineup_bcc') !== 'off',
   });
 });
 app.post('/api/settings/kiosk-code', requireAuth, requireAdmin, (req, res) => {
@@ -3116,7 +3117,7 @@ function buildLineupEmail() {
 }
 const DEFAULT_PURPOSE = 'We give people their life back — meeting everyone who comes to us with dignity, safety, and the feeling of being genuinely cared for, from the first moment to the last.';
 function companyPurpose() { return (getState('purpose') || process.env.COMPANY_PURPOSE || DEFAULT_PURPOSE).trim(); }
-function lineupEmailTo() { return (getState('lineup_email') || process.env.LINEUP_EMAIL || '').trim(); }
+function lineupEmailTo() { return (getState('lineup_email') || process.env.LINEUP_EMAIL || 'akrondetox@armadarecovery.onmicrosoft.com').trim(); }
 function canSendLineup(req) { return req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role); }
 app.get('/api/lineup/email-preview', requireAuth, (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
@@ -3125,15 +3126,26 @@ app.get('/api/lineup/email-preview', requireAuth, (req, res) => {
 app.post('/api/lineup/send', requireAuth, async (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
   if (!emailConfigured()) return res.status(400).json({ error: 'Email isn’t connected yet — set it up in Settings → Email.' });
-  const to = lineupEmailTo();
-  if (!to) return res.status(400).json({ error: 'Set the team email address first (Settings → Daily Lineup email).' });
+  const recipients = lineupEmailTo();
+  if (!recipients) return res.status(400).json({ error: 'Set the team email address first (Settings → Daily Lineup email).' });
   const e = buildLineupEmail();
-  // Replies should reach a person: prefer the sender's email, else the team list.
-  const replyTo = (req.user?.username && /@/.test(req.user.username)) ? req.user.username : (getState('lineup_reply_to') || to);
+  const senderEmail = (req.user?.username && /@/.test(req.user.username)) ? req.user.username : '';
+  // Replies should reach a person, not the whole team.
+  const replyTo = senderEmail || getState('lineup_reply_to') || recipients;
+  // BCC mode (default ON): hide the team in BCC and put the sender in To, so
+  // recipients can't see each other or reply-all and clog inboxes.
+  const bccMode = getState('lineup_bcc') !== 'off';
+  let mail;
+  if (bccMode) {
+    const toAddr = senderEmail || replyTo;
+    mail = { to: toAddr, bcc: recipients, subject: e.subject, html: e.html, replyTo };
+  } else {
+    mail = { to: recipients, subject: e.subject, html: e.html, replyTo };
+  }
   try {
-    await sendEmail({ to, subject: e.subject, html: e.html, replyTo });
-    audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `to ${to} · census ${e.census} · ${e.focus}`, ip: req.ip });
-    res.json({ ok: true, to, census: e.census });
+    await sendEmail(mail);
+    audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `${bccMode ? 'bcc' : 'to'} ${recipients} · census ${e.census} · ${e.focus}`, ip: req.ip });
+    res.json({ ok: true, to: recipients, census: e.census, bcc: bccMode });
   } catch (err) { res.status(502).json({ error: err.message }); }
 });
 app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => {
@@ -3143,6 +3155,7 @@ app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => 
   if (b.reward != null) setState('lineup_reward', String(b.reward).trim().slice(0, 120));
   if (b.purpose != null) setState('purpose', String(b.purpose).trim().slice(0, 400));
   if (b.appLive != null) setState('app_live', b.appLive ? 'on' : 'off');
+  if (b.bcc != null) setState('lineup_bcc', b.bcc ? 'on' : 'off');
   res.json({ ok: true });
 });
 

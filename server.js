@@ -3129,33 +3129,52 @@ function companyPurpose() { return (getState('purpose') || process.env.COMPANY_P
 const LINEUP_DEFAULT_TO = 'akrondetox@armadarecovery.onmicrosoft.com, jay@armadarecovery.com, thall@armadarecovery.com, agilpin@armadarecovery.com, avalenti@armadarecovery.com';
 function lineupEmailTo() { return (getState('lineup_email') || process.env.LINEUP_EMAIL || LINEUP_DEFAULT_TO).trim(); }
 function canSendLineup(req) { return req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role); }
+// On Resend, sending from the shared test address (onboarding@resend.dev) — which
+// is what happens when From is blank — only delivers to the Resend account owner;
+// everyone else is silently dropped. A real custom-domain From is required to
+// reach the team.
+function lineupFromIssue() {
+  const st = emailStatus();
+  if (st.provider !== 'resend') return null;   // SMTP sends from the mailbox — fine
+  const from = st.from || '';
+  if (!/@/.test(from) || /resend\.dev/i.test(from)) {
+    return 'Your email From address is blank (so it sends from Resend’s test address, which only reaches your own inbox). Set From to an address on your verified domain — e.g. lineup@armadarecovery.com — in Settings → Email, then resend.';
+  }
+  return null;
+}
 app.get('/api/lineup/email-preview', requireAuth, (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
-  res.json({ ...buildLineupEmail(), to: lineupEmailTo(), emailReady: emailConfigured() });
+  res.json({ ...buildLineupEmail(), to: lineupEmailTo(), emailReady: emailConfigured(), from: emailStatus().from || '', fromIssue: lineupFromIssue() });
 });
 app.post('/api/lineup/send', requireAuth, async (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
   if (!emailConfigured()) return res.status(400).json({ error: 'Email isn’t connected yet — set it up in Settings → Email.' });
+  const fromIssue = lineupFromIssue();
+  if (fromIssue) return res.status(400).json({ error: fromIssue });
   const recipients = lineupEmailTo();
   if (!recipients) return res.status(400).json({ error: 'Set the team email address first (Settings → Daily Lineup email).' });
   const e = buildLineupEmail();
   const senderEmail = (req.user?.username && /@/.test(req.user.username)) ? req.user.username : '';
-  // Replies should reach a person, not the whole team.
   const replyTo = senderEmail || getState('lineup_reply_to') || recipients;
-  // BCC mode (default ON): hide the team in BCC and put the sender in To, so
-  // recipients can't see each other or reply-all and clog inboxes.
-  const bccMode = getState('lineup_bcc') !== 'off';
-  let mail;
-  if (bccMode) {
-    const toAddr = senderEmail || replyTo;
-    mail = { to: toAddr, bcc: recipients, subject: e.subject, html: e.html, replyTo, suppressCc: true };
-  } else {
-    mail = { to: recipients, subject: e.subject, html: e.html, replyTo, suppressCc: true };
-  }
+  const list = recipients.split(',').map((s) => s.trim()).filter(Boolean);
+  // Default (private mode ON): send each recipient their OWN copy. Best
+  // deliverability (a normal personal email, not BCC that M365 tends to junk),
+  // nobody sees anyone else, and reply-all is impossible. Off → one shared email.
+  const individual = getState('lineup_bcc') !== 'off';
   try {
-    await sendEmail(mail);
-    audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `${bccMode ? 'bcc' : 'to'} ${recipients} · census ${e.census} · ${e.focus}`, ip: req.ip });
-    res.json({ ok: true, to: recipients, census: e.census, bcc: bccMode });
+    if (individual) {
+      let sent = 0; const failed = [];
+      for (const r of list) {
+        try { await sendEmail({ to: r, subject: e.subject, html: e.html, replyTo, suppressCc: true }); sent += 1; }
+        catch (err) { failed.push(`${r} (${err.message})`); }
+      }
+      audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `individual ${sent}/${list.length} · census ${e.census} · ${e.focus}`, ip: req.ip });
+      if (!sent) return res.status(502).json({ error: 'Could not send to anyone. ' + (failed[0] || '') });
+      return res.json({ ok: true, sent, total: list.length, failed, census: e.census });
+    }
+    await sendEmail({ to: recipients, subject: e.subject, html: e.html, replyTo, suppressCc: true });
+    audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `to ${recipients} · census ${e.census} · ${e.focus}`, ip: req.ip });
+    res.json({ ok: true, sent: list.length, total: list.length, failed: [], census: e.census });
   } catch (err) { res.status(502).json({ error: err.message }); }
 });
 app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => {

@@ -2831,8 +2831,10 @@ async function previewLineupEmail(){
     const d=await api('/lineup/email-preview');
     const toLine = d.to ? esc(d.to) : '<span style="color:var(--danger)">not set — add it in Settings → Daily Lineup email</span>';
     const readyLine = d.emailReady ? 'email ready' : '<span style="color:var(--danger)">email not connected (Settings → Email)</span>';
+    const fromLine = d.from ? esc(d.from) : '<span style="color:var(--danger)">blank — set a From on your verified domain (Settings → Email)</span>';
+    const warn = d.fromIssue ? `<div style="margin-bottom:8px;padding:8px 10px;background:#fdecea;border:1px solid #f5b7b1;border-radius:6px;color:#922">⚠ ${esc(d.fromIssue)}</div>` : '';
     box.style.display='block';
-    box.innerHTML = `<div class="hint" style="margin-bottom:6px">To: <strong>${toLine}</strong> · ${readyLine}</div><div class="hint" style="margin-bottom:10px">Subject: ${esc(d.subject)}</div>`+d.html;
+    box.innerHTML = warn + `<div class="hint" style="margin-bottom:4px">From: <strong>${fromLine}</strong></div><div class="hint" style="margin-bottom:4px">To (BCC): <strong>${toLine}</strong> · ${readyLine}</div><div class="hint" style="margin-bottom:10px">Subject: ${esc(d.subject)}</div>`+d.html;
     if(msg) msg.textContent='';
   }catch(e){ if(msg) msg.textContent=e.message; }
 }
@@ -2840,7 +2842,12 @@ async function sendLineupEmail(){
   const msg=$('lineupEmailMsg');
   if(!confirm("Send today's Lineup email to the team now?")) return;
   if(msg) msg.textContent='Sending…';
-  try{ const r=await api('/lineup/send',{method:'POST'}); const ok='✓ Sent to '+r.to+' (census '+r.census+').'; if(msg){ msg.textContent=ok; } else { alert(ok); } }
+  try{
+    const r=await api('/lineup/send',{method:'POST'});
+    let ok='✓ Sent to '+r.sent+' of '+r.total+' recipients.';
+    if(r.failed && r.failed.length) ok+=' ⚠ Failed: '+r.failed.join('; ');
+    if(msg){ msg.textContent=ok; } else { alert(ok); }
+  }
   catch(e){ if(msg){ msg.textContent=e.message; } else { alert(e.message); } }
 }
 async function loadPrinciple(){

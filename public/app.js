@@ -985,6 +985,7 @@ async function loadSettings(){
   $('oc_email').value=st.oncallEmail||''; $('oc_phone').value=st.oncallPhone||''; if($('oc_email_alerts')) $('oc_email_alerts').checked=!!st.oncallEmailAlerts;
   $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
   $('kc_code').value = st.kioskCode||'';
+  if($('kc_warn')) $('kc_warn').innerHTML = st.kioskCodeWeak ? '<span style="color:var(--danger);font-weight:600">⚠ This kiosk code is weak/default. Set a strong code (6+ chars) and re-enter it on the iPads — anyone on the internet can otherwise reach the kiosk.</span>' : '<span class="risk risk-low">Strong code set ✓</span>';
   try { const k = await api('/kipu/status'); $('kipuStatus').innerHTML = k.configured ? '<span class="risk risk-low">credentials set</span>' : '<span class="risk risk-warn">not configured — set Kipu env vars on your host</span>'; } catch(e){}
   try { const w = await api('/warehouse/status'); $('whStatus').innerHTML = w.configured ? '<span class="risk risk-low">credentials set</span>' : '<span class="risk risk-warn">not configured — set WH_* env vars on your host</span>'; } catch(e){}
 }
@@ -1118,7 +1119,7 @@ async function whTestConn(){ $('whResult').textContent='Connecting… (first con
 async function whSync(){ $('whResult').textContent='Syncing census…'; try{ const r=await api('/warehouse/sync',{method:'POST'}); $('whResult').textContent=`Synced: ${r.created} new, ${r.matched} updated (of ${r.total} in warehouse).`; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function whSyncNotes(){ $('whResult').textContent='Scanning recent notes for red flags…'; try{ const r=await api('/warehouse/sync-notes',{method:'POST',body:JSON.stringify({days:3})}); $('whResult').textContent=`Scanned ${r.scanned} notes · ${r.flagged} red-flagged.`; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function whCols(){ $('whResult').textContent='Reading census columns…'; try{ const r=await api('/warehouse/columns',{method:'POST'}); $('whResult').innerHTML = r.columns.length ? 'Census columns: <code style="font-size:11px">'+r.columns.map(esc).join(', ')+'</code>' : '<span class="hint">Connected, but the census query returned no rows.</span>'; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
-async function saveKioskCode(){ await api('/settings/kiosk-code',{method:'POST',body:JSON.stringify({code:$('kc_code').value})}); alert('Kiosk/display code saved.'); }
+async function saveKioskCode(){ try{ await api('/settings/kiosk-code',{method:'POST',body:JSON.stringify({code:$('kc_code').value})}); alert('Kiosk code saved. Re-enter it on each iPad/kiosk to reconnect.'); if($('kc_warn')) $('kc_warn').innerHTML='<span class="risk risk-low">Strong code set ✓</span>'; }catch(e){ alert(e.message); } }
 async function testAlert(){ const r=await api('/settings/test-alert',{method:'POST'}); alert(`Test sent. Email ${r.emailReady?'attempted':'not configured'}, SMS ${r.smsReady?'attempted':'not configured'}.`); }
 
 /* ---- huddle mode: the start-of-shift lineup as a paced, stepped ritual ---- */

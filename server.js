@@ -67,22 +67,44 @@ app.use((req, res, next) => {
   next();
 });
 
+// Lightweight in-memory rate limiter (no dependency). Fixed window per key.
+// We count only FAILED attempts, so legitimate traffic is never throttled.
+const rlBuckets = new Map();
+function rlState(key, windowMs) {
+  const now = Date.now();
+  let b = rlBuckets.get(key);
+  if (!b || now >= b.reset) { b = { count: 0, reset: now + windowMs }; rlBuckets.set(key, b); }
+  return b;
+}
+function rlOver(key, max, windowMs) { return rlState(key, windowMs).count >= max; }
+function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
+setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
+
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
 const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping'];
 const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nurse / Medical (comfort, not feeling well)', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
 /* ---------------- auth ---------------- */
+const W10 = 10 * 60 * 1000;
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
+  const ipKey = 'login:' + req.ip, uKey = 'login:u:' + String(username || '').toLowerCase();
+  // Throttle brute force on too many FAILED attempts (per-IP and per-username).
+  if (rlOver(ipKey, 20, W10) || rlOver(uKey, 10, W10))
+    return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
   const result = login(req, res, username || '', password || '');
-  if (!result) return res.status(401).json({ error: 'Invalid username or password' });
+  if (!result) { rlHit(ipKey, W10); rlHit(uKey, W10); return res.status(401).json({ error: 'Invalid username or password' }); }
   if (result.mfaRequired) return res.json({ mfaRequired: true, ticket: result.ticket });
   res.json({ user: result });
 });
 app.post('/api/login/mfa', (req, res) => {
+  // The 6-digit code is brute-forceable; cap FAILED attempts per ticket and per IP.
+  const tKey = 'mfa:' + (req.body?.ticket || req.ip), ipKey = 'mfa:ip:' + req.ip;
+  if (rlOver(tKey, 10, W10) || rlOver(ipKey, 30, W10))
+    return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
   const user = completeMfa(req, res, req.body?.ticket || '', req.body?.code || '');
-  if (!user) return res.status(401).json({ error: 'Invalid or expired code' });
+  if (!user) { rlHit(tKey, W10); rlHit(ipKey, W10); return res.status(401).json({ error: 'Invalid or expired code' }); }
   res.json({ user });
 });
 app.get('/api/mfa/setup', requireAuth, (req, res) => res.json(mfaSetup(req.user.id, req.user.username)));
@@ -2613,12 +2635,16 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     oncallEmailAlerts: autoCfg('oncall_email_on', 'off') !== 'off',
     emailReady: emailConfigured(), smsReady: smsConfigured(), claudeReady: claudeConfigured(),
     aiProvider: aiProvider(), deidentify: DEID,
-    kioskCode: kioskCode(),
+    kioskCode: kioskCode(), kioskCodeWeak: kioskCodeIsWeak(),
   });
 });
 app.post('/api/settings/kiosk-code', requireAuth, requireAdmin, (req, res) => {
-  setState('kiosk_code', (req.body?.code || '').trim());
-  res.json({ ok: true });
+  const code = (req.body?.code || '').trim();
+  if (code.length < 6 || code.toLowerCase() === 'armada') return res.status(400).json({ error: 'Choose a code of at least 6 characters that isn’t “armada”.' });
+  setState('kiosk_code', code);
+  // Rotating the code revokes existing device tokens.
+  setState('kiosk_token_secret', crypto.randomBytes(32).toString('hex'));
+  res.json({ ok: true, weak: kioskCodeIsWeak() });
 });
 app.post('/api/settings/test-alert', requireAuth, requireAdmin, (req, res) => {
   notifyOnCall('TEST — your on-call alerts are working. (No action needed.)');
@@ -5317,13 +5343,42 @@ app.post('/api/alumni/:id/notes', requireAuth, (req, res) => {
 
 /* ---------------- Client-facing kiosk (no staff login; guarded by a code) ---------------- */
 function kioskCode() { return getState('kiosk_code') || process.env.KIOSK_CODE || 'armada'; }
-function kioskOk(req) {
+function kioskCodeIsWeak() { const c = kioskCode(); return !c || c.toLowerCase() === 'armada' || c.length < 6; }
+function kioskCodeValid(req) {
   const got = String(req.query.code || req.body?.code || ''), want = String(kioskCode());
   if (!got || got.length !== want.length) return false;
   try { return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want)); } catch { return false; }
 }
-app.get('/api/kiosk/data', (req, res) => {
-  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+// Per-device kiosk token, so the raw shared code stops riding on every request
+// once a device has authenticated. Signed with a server secret; expires in 12h.
+function kioskSecret() { let s = getState('kiosk_token_secret'); if (!s) { s = crypto.randomBytes(32).toString('hex'); setState('kiosk_token_secret', s); } return s; }
+function signKioskToken() {
+  const exp = Date.now() + 12 * 3600e3;
+  const sig = crypto.createHmac('sha256', kioskSecret()).update(String(exp)).digest('hex').slice(0, 32);
+  return `${exp}.${sig}`;
+}
+function verifyKioskToken(tok) {
+  if (!tok || typeof tok !== 'string') return false;
+  const [expStr, sig] = tok.split('.');
+  const exp = +expStr;
+  if (!exp || exp < Date.now()) return false;
+  const want = crypto.createHmac('sha256', kioskSecret()).update(String(exp)).digest('hex').slice(0, 32);
+  try { return crypto.timingSafeEqual(Buffer.from(sig || ''), Buffer.from(want)); } catch { return false; }
+}
+// Gate every kiosk endpoint: accept an already-authenticated device token, else
+// validate the code (rate-limited per IP) and mint a token cookie for the device.
+function requireKiosk(req, res, next) {
+  if (verifyKioskToken(req.cookies?.kioskToken)) return next();   // already-authed device — never throttled
+  const key = 'kioskfail:' + req.ip;
+  if (rlOver(key, 15, 10 * 60 * 1000)) return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes.' });
+  if (kioskCodeValid(req)) {
+    res.cookie('kioskToken', signKioskToken(), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', expires: new Date(Date.now() + 12 * 3600e3) });
+    return next();
+  }
+  rlHit(key, 10 * 60 * 1000);   // only wrong-code guesses count toward the limit
+  return res.status(401).json({ error: 'Invalid kiosk code' });
+}
+app.get('/api/kiosk/data', requireKiosk, (req, res) => {
   // The dining-room kiosk shows every active survey EXCEPT Discharge (that one is
   // administered at discharge, not in the dining room). The Meal & Food survey
   // stays — it sits alongside the quick per-meal pulse.
@@ -5336,8 +5391,7 @@ app.get('/api/kiosk/data', (req, res) => {
     departments: DEPARTMENTS, surveys, menu: menuForDate(appToday()),
   });
 });
-app.post('/api/kiosk/request', (req, res) => {
-  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+app.post('/api/kiosk/request', requireKiosk, (req, res) => {
   const b = req.body || {}; if (!b.text?.trim()) return res.status(400).json({ error: 'Tell us what you need' });
   // A request must name the client — we can't deliver a blanket to "anonymous".
   const reqClient = b.client_id ? db.prepare(`SELECT id FROM clients WHERE id = ?`).get(b.client_id) : null;
@@ -5356,8 +5410,7 @@ app.post('/api/kiosk/request', (req, res) => {
   }
   res.json({ ok: true });
 });
-app.post('/api/kiosk/survey', (req, res) => {
-  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+app.post('/api/kiosk/survey', requireKiosk, (req, res) => {
   const b = req.body || {};
   const survey = db.prepare(`SELECT id FROM surveys WHERE id = ?`).get(b.survey_id);
   if (!survey || !Array.isArray(b.answers) || !b.answers.length) return res.status(400).json({ error: 'No answers' });
@@ -5375,8 +5428,7 @@ app.post('/api/kiosk/survey', (req, res) => {
 // meal + meal_date come from the iPad's local clock (the real dining-room time), so
 // the date is correct regardless of server timezone; we validate and clamp anyway.
 const MEALS3 = ['Breakfast', 'Lunch', 'Dinner'];
-app.post('/api/kiosk/meal', (req, res) => {
-  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+app.post('/api/kiosk/meal', requireKiosk, (req, res) => {
   const b = req.body || {};
   const meal = MEALS3.includes(b.meal) ? b.meal : null;
   if (!meal) return res.status(400).json({ error: 'Which meal?' });
@@ -5395,8 +5447,7 @@ app.post('/api/kiosk/meal', (req, res) => {
 });
 // Suggestion box — a resident's idea to make the stay better. Anonymous-friendly;
 // lands on the requests board under its own heading so leadership sees it.
-app.post('/api/kiosk/suggestion', (req, res) => {
-  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+app.post('/api/kiosk/suggestion', requireKiosk, (req, res) => {
   const text = (req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Tell us your idea' });
   db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, 'Normal', 'Client (kiosk)')`)
@@ -5458,15 +5509,14 @@ app.delete('/api/onshift/manual/:id', requireAuth, (req, res) => {
   db.prepare(`DELETE FROM manual_on_shift WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
 });
-app.get('/api/kiosk/careteam', (req, res) => {
-  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid kiosk code' });
+app.get('/api/kiosk/careteam', requireKiosk, (req, res) => {
   const c = req.query.client_id
     ? db.prepare(`SELECT pref, name, room, case_manager, therapist FROM clients WHERE id = ? AND active = 1 AND discharge_status IS NULL`).get(req.query.client_id)
     : null;
   if (!c) return res.status(400).json({ error: 'Please choose your name first.' });
   const { buckets, shift } = computeOnShift();
   res.json({
-    client: { name: c.pref || c.name, room: c.room || '' },
+    client: { name: c.pref || c.name },   // room intentionally omitted from this weakly-authed surface
     caseManager: c.case_manager || '',
     therapist: c.therapist || '',
     onShift: buckets,
@@ -5621,8 +5671,7 @@ app.post('/api/ingest/note', async (req, res) => {
 });
 
 /* ---------------- Break-room display (code-gated, no PHI) ---------------- */
-app.get('/api/display/data', (req, res) => {
-  if (!kioskOk(req)) return res.status(401).json({ error: 'Invalid code' });
+app.get('/api/display/data', requireKiosk, (req, res) => {
   const f = focusForDate(new Date().toISOString().slice(0, 10));
   const month = new Date().toISOString().slice(0, 7);
   // Care Champion (most care actions this month) — name only, no client data

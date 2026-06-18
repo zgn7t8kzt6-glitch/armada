@@ -3059,17 +3059,42 @@ function lineupWins() {
   return lines;
 }
 function appLive() { return getState('app_live') === 'on'; }
-// Today's principle: a leadership-set override for today wins; otherwise the rotation.
+// A deliberate daily curriculum (curated order), pairing each principle with a
+// fitting service value. Auto-advances one step per day; cycles every 12 days.
+const LINEUP_CURRICULUM = [
+  { p: 'Greet every client by their preferred name', v: 0 },
+  { p: 'Sit at eye level', v: 9 },
+  { p: 'Ask the Listening question', v: 1 },
+  { p: 'Close the loop out loud', v: 5 },
+  { p: 'Person-first language all shift', v: 10 },
+  { p: 'Deliver one unprompted delight', v: 2 },
+  { p: 'No one hungry', v: 3 },
+  { p: 'Fix the fixable in under 5 minutes', v: 4 },
+  { p: 'Run the Save — Pause before you react', v: 11 },
+  { p: 'A human goes to the patient', v: 6 },
+  { p: 'Hold the open door', v: 7 },
+  { p: 'Recognize a teammate by name', v: 8 },
+];
+function lineupProgramStart() { let s = getState('lineup_program_start'); if (!s) { s = appToday(); setState('lineup_program_start', s); } return s; }
+function curriculumIndex() {
+  const a = new Date(lineupProgramStart() + 'T12:00:00Z'), b = new Date(appToday() + 'T12:00:00Z');
+  const days = Math.round((b - a) / 864e5);
+  const n = LINEUP_CURRICULUM.length;
+  return ((days % n) + n) % n;
+}
+// Today's principle: manual override for today wins; else the curated curriculum.
 function effectiveFocus() {
   const ov = getState('principle_override');
   if (ov) { const i = ov.indexOf('|'); const d = ov.slice(0, i), t = ov.slice(i + 1); if (d === appToday()) { const f = FOCUS_TOPICS.find((x) => x.t === t); if (f) return f; } }
-  return todaysFocus();
+  const c = LINEUP_CURRICULUM[curriculumIndex()];
+  return FOCUS_TOPICS.find((x) => x.t === c.p) || todaysFocus();
 }
-// Today's service value: same idea — a same-day override wins, else the rotation.
+// Today's service value: manual override for today wins; else the curated pairing.
 function effectiveValue() {
   const ov = getState('value_override');
   if (ov) { const i = ov.indexOf('|'); const d = ov.slice(0, i), v = ov.slice(i + 1); if (d === appToday() && SERVICE_VALUES.includes(v)) return v; }
-  return SERVICE_VALUES[Math.floor(Date.now() / 864e5) % SERVICE_VALUES.length];
+  const c = LINEUP_CURRICULUM[curriculumIndex()];
+  return SERVICE_VALUES[c.v] || SERVICE_VALUES[0];
 }
 function buildLineupEmail() {
   const focus = effectiveFocus();
@@ -3269,6 +3294,18 @@ app.post('/api/lineup/value/set', requireAuth, (req, res) => {
   if (!SERVICE_VALUES.includes(v)) return res.status(400).json({ error: 'Unknown service value.' });
   setState('value_override', appToday() + '|' + v);
   res.json({ ok: true, value: v });
+});
+// Draw a recognition-raffle winner: each teammate-recognition this week is one
+// entry for the person who gave it. Picks a random entry.
+app.post('/api/lineup/raffle/draw', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const rows = db.prepare(`SELECT by_name FROM wows
+    WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= datetime('now','-7 day')`).all();
+  const entries = rows.map((r) => (r.by_name || 'A teammate'));
+  if (!entries.length) return res.json({ ok: true, winner: null, entries: 0, participants: 0 });
+  const winner = entries[Math.floor(Math.random() * entries.length)];
+  const participants = new Set(entries.map((e) => e.toLowerCase())).size;
+  res.json({ ok: true, winner, entries: entries.length, participants });
 });
 app.post('/api/principle/story', requireAuth, (req, res) => {
   const action = (req.body?.action || '').trim();

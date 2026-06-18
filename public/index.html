@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616BA" />
+<link rel="stylesheet" href="/styles.css?v=20260616BB" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1717,6 +1717,11 @@
         </div>
         <div id="lineupEmailPreview" style="display:none;margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:16px;background:#fff;max-height:440px;overflow:auto"></div>
       </div>
+      <div class="card no-print" id="raffleCard" style="display:none;border-left:4px solid #7a5cc0">
+        <h3>🎁 Recognition raffle</h3>
+        <p class="sub sans">Every teammate-recognition logged this week is one entry for the person who gave it. Draw a winner anytime.</p>
+        <div class="toolbar" style="justify-content:flex-start;gap:8px"><button class="btn btn-gold sans" onclick="drawRaffle()">🎲 Draw a winner</button><span class="hint" id="raffleMsg"></span></div>
+      </div>
       <div class="card" style="border-left:4px solid #7a5cc0">
         <div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#7a5cc0;font-weight:600">Principle of the day</div>
         <h2 id="principleTitle" style="margin:4px 0 6px;color:#0b2a4a"></h2>
@@ -1843,6 +1848,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616BA"></script>
+<script src="/app.js?v=20260616BB"></script>
 </body>
 </html>

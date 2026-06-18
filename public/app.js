@@ -2872,6 +2872,14 @@ async function loadPrinciple(){
 }
 async function setPrinciple(title){ try{ await api('/principle/set',{method:'POST',body:JSON.stringify({title})}); loadPrinciple(); }catch(e){ alert(e.message); } }
 async function setValue(value){ try{ await api('/lineup/value/set',{method:'POST',body:JSON.stringify({value})}); if($('lineValue'))$('lineValue').textContent=value; }catch(e){ alert(e.message); } }
+async function drawRaffle(){
+  const m=$('raffleMsg'); if(m) m.textContent='Drawing…';
+  try{
+    const r=await api('/lineup/raffle/draw',{method:'POST'});
+    if(!r.entries){ if(m) m.textContent='No recognitions logged this week yet — nothing to draw.'; return; }
+    if(m) m.innerHTML='🎉 Winner: <strong>'+esc(r.winner)+'</strong> — drawn from '+r.entries+' entr'+(r.entries===1?'y':'ies')+' across '+r.participants+' teammate'+(r.participants===1?'':'s')+'.';
+  }catch(e){ if(m) m.textContent=e.message; }
+}
 async function sharePrinciple(){
   const action=$('pr_action')?$('pr_action').value.trim():'';
   if(!action){ if($('pr_msg')) $('pr_msg').textContent='Tell us what you did first.'; return; }
@@ -2881,6 +2889,7 @@ async function sharePrinciple(){
 }
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
+  if($('raffleCard')) $('raffleCard').style.display = canSendLineup() ? '' : 'none';
   const d = await api('/lineup');
   const { value, wows, purpose } = d;
   if(purpose && $('purposeText')){ $('purposeText').textContent = purpose; $('purposeBanner').style.display=''; }

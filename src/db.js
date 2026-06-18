@@ -206,6 +206,20 @@ CREATE TABLE IF NOT EXISTS raffle_entries (
   by_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Bed turnover board: a bed is flagged dirty when a client discharges (or by hand
+-- for a room switch); RTs mark it clean/open. Tracks who/when for shift accountability.
+CREATE TABLE IF NOT EXISTS bed_turnovers (
+  id INTEGER PRIMARY KEY,
+  room TEXT NOT NULL,
+  who TEXT,                                  -- first name of who vacated (staff-facing)
+  reason TEXT,                               -- discharge | transfer | manual
+  status TEXT NOT NULL DEFAULT 'dirty',      -- dirty | clean
+  flagged_at TEXT NOT NULL DEFAULT (datetime('now')),
+  flagged_shift TEXT,
+  cleaned_by TEXT,
+  cleaned_at TEXT,
+  cleaned_shift TEXT
+);
 
 -- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
 CREATE TABLE IF NOT EXISTS staff_pulses (

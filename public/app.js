@@ -123,7 +123,7 @@ const GROUP_OF={
   arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
   // Stay — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
-  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',engagement:'stay',program:'stay',meals:'stay',
+  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',beds:'stay',engagement:'stay',program:'stay',meals:'stay',
   casemgmt:'stay',retention:'stay',surveys:'stay',incidents:'stay',compliance:'stay',
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
@@ -158,6 +158,7 @@ const VIEW_ROLES = {
   records:     ['Nurse','Case Manager','Therapist','Clinical Director'],
   rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
+  beds:        ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
   dignity:     ['BHT / Tech','Nurse','Clinical Director'],
   engagement:  ['BHT / Tech','Therapist','Clinical Director'],
   program:     ['BHT / Tech','Therapist','Clinical Director'],
@@ -259,6 +260,7 @@ function show(v){
   if(v==='coverage') loadCoverage();
   if(v==='schedule') loadSchedule();
   if(v==='roster') loadRoster();
+  if(v==='beds') loadBeds();
   if(v==='weekgrid') loadWeekGrid();
   if(v==='staffmodel') loadStaffModel();
   if(v==='clients') renderClients();
@@ -2729,6 +2731,32 @@ async function loadCareHealth(){
     <p class="hint">${h.clockedInCount} clocked in · ${h.scheduledCount} scheduled this shift.${empty?' <strong style="color:var(--danger)">Nothing populated — residents will only see their assigned CM/therapist, no on-shift names. Build today\'s schedule above or have staff clock in.</strong>':''}</p>`;
 }
 function schShift(n){ const d=new Date($('sc_date').value||today()); d.setDate(d.getDate()+n); $('sc_date').value=d.toISOString().slice(0,10); loadSchedule(); }
+
+/* ---- Bed turnover board ---- */
+async function loadBeds(){
+  let d; try{ d=await api('/beds'); }catch(e){ if($('bedsDirty'))$('bedsDirty').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('bedsKpis').innerHTML=`
+    <div class="ret-card ${d.openCount?'rc-warn':''}"><div class="n">${d.openCount}</div><div class="l">Beds to clean</div></div>
+    <div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.overdue}</div><div class="l">Overdue (past a shift)</div></div>
+    <div class="ret-card"><div class="n">${(d.cleaned||[]).length}</div><div class="l">Cleaned (24h)</div></div>`;
+  const fmtAge=m=>m>=60?Math.floor(m/60)+'h '+(m%60)+'m':m+'m';
+  $('bedsDirty').innerHTML = d.dirty.length ? d.dirty.map(b=>`<div class="cmd-row ${b.overdue?'cmd-row-flag':''}">
+      <div class="cmd-row-main"><strong>🛏️ ${esc(b.room)}</strong>${b.who?' <span class="hint">· '+esc(b.who)+' left</span>':''}
+        <div class="hint">${b.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}waiting ${fmtAge(b.mins)}${b.reason?' · '+esc(b.reason):''}</div></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-gold btn-sm sans" onclick="cleanBed(${b.id})">✓ Cleaned / open</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="removeBed(${b.id})" title="Remove (flagged by mistake)">✕</button>
+      </div></div>`).join('') : '<div class="hint">All beds clean — nothing waiting. 🎉</div>';
+  $('bedsClean').innerHTML = (d.cleaned||[]).length ? d.cleaned.map(b=>`<div class="pc-note">✅ <strong>${esc(b.room)}</strong> <span class="hint">· cleaned by ${esc(b.cleaned_by||'')} · ${esc(b.at||'')}</span> <a onclick="reopenBed(${b.id})" style="cursor:pointer;color:var(--muted);margin-left:6px">undo</a></div>`).join('') : '<div class="hint">No beds cleaned in the last 24 hours.</div>';
+}
+async function addBed(){
+  const room=$('bed_room')?$('bed_room').value.trim():''; if(!room){ if($('bed_msg'))$('bed_msg').textContent='Enter a room/bed.'; return; }
+  try{ await api('/beds',{method:'POST',body:JSON.stringify({room,who:($('bed_who')||{}).value||''})}); $('bed_room').value=''; if($('bed_who'))$('bed_who').value=''; if($('bed_msg'))$('bed_msg').textContent=''; loadBeds(); }
+  catch(e){ if($('bed_msg'))$('bed_msg').textContent=e.message; }
+}
+async function cleanBed(id){ try{ await api('/beds/'+id+'/clean',{method:'POST'}); loadBeds(); }catch(e){ alert(e.message); } }
+async function reopenBed(id){ try{ await api('/beds/'+id+'/reopen',{method:'POST'}); loadBeds(); }catch(e){ alert(e.message); } }
+async function removeBed(id){ if(!confirm('Remove this bed from the board?'))return; try{ await api('/beds/'+id,{method:'DELETE'}); loadBeds(); }catch(e){ alert(e.message); } }
 
 /* ---- Daily roster / attendance ---- */
 function rosterShift(n){ const d=new Date($('ros_date').value||today()); d.setDate(d.getDate()+n); $('ros_date').value=d.toISOString().slice(0,10); loadRoster(); }

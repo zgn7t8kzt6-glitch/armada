@@ -142,7 +142,7 @@ export function renderReportHtml(d) {
   </div>`;
 }
 
-export async function sendEmail({ subject, html, to, cc, bcc, replyTo }) {
+export async function sendEmail({ subject, html, to, cc, bcc, replyTo, suppressCc }) {
   const bccList = bcc ? String(bcc).split(',').map((s) => s.trim()).filter(Boolean) : [];
   const dest = (to || ecfg('to', 'CENSUS_EMAIL_TO') || process.env.REPORT_TO || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!dest.length) throw new Error('No recipient address.');
@@ -152,7 +152,9 @@ export async function sendEmail({ subject, html, to, cc, bcc, replyTo }) {
   // to a blank-ish value ('-' / 'none') to turn the global CC off.
   const ccGlobal = ecfg('cc', 'EMAIL_CC');
   const ccSetting = ccGlobal === '' ? DEFAULT_CC : ccGlobal; // default to leadership
-  const ccRaw = [...(cc ? String(cc).split(',') : []), ...(/^(-|none|off)$/i.test(ccSetting) ? [] : ccSetting.split(','))];
+  // suppressCc: skip the automatic leadership CC entirely (e.g. team blasts that
+  // shouldn't copy leadership on every send).
+  const ccRaw = suppressCc ? [] : [...(cc ? String(cc).split(',') : []), ...(/^(-|none|off)$/i.test(ccSetting) ? [] : ccSetting.split(','))];
   const lowerDest = dest.map((d) => d.toLowerCase());
   const ccList = [...new Set(ccRaw.map((s) => s.trim()).filter(Boolean))]
     .filter((c) => !lowerDest.includes(c.toLowerCase()));

@@ -3148,9 +3148,9 @@ app.post('/api/lineup/send', requireAuth, async (req, res) => {
   let mail;
   if (bccMode) {
     const toAddr = senderEmail || replyTo;
-    mail = { to: toAddr, bcc: recipients, subject: e.subject, html: e.html, replyTo };
+    mail = { to: toAddr, bcc: recipients, subject: e.subject, html: e.html, replyTo, suppressCc: true };
   } else {
-    mail = { to: recipients, subject: e.subject, html: e.html, replyTo };
+    mail = { to: recipients, subject: e.subject, html: e.html, replyTo, suppressCc: true };
   }
   try {
     await sendEmail(mail);

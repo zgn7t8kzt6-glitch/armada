@@ -3127,7 +3127,12 @@ function buildLineupEmail() {
 }
 const DEFAULT_PURPOSE = 'We give people their life back — meeting everyone who comes to us with dignity, safety, and the feeling of being genuinely cared for, from the first moment to the last.';
 function companyPurpose() { return (getState('purpose') || process.env.COMPANY_PURPOSE || DEFAULT_PURPOSE).trim(); }
-const LINEUP_DEFAULT_TO = 'akrondetox@armadarecovery.onmicrosoft.com, jay@armadarecovery.com, thall@armadarecovery.com, agilpin@armadarecovery.com, avalenti@armadarecovery.com';
+const LINEUP_DEFAULT_TO = [
+  'ademshar', 'amartin', 'amoss', 'arobertson', 'bmiller', 'dmastache', 'dmcgrady', 'emorabito',
+  'hluckey', 'jcole', 'jhodous', 'jjinks', 'kmastache', 'kschultz', 'lmartin', 'lmiller', 'lshaull',
+  'mstrasser', 'nadia', 'nashcraft', 'nrodgers', 'pbiscardi', 'sbriggs', 'sferrebee', 'sjackson',
+  'smorgan', 'sparsons', 'staylor', 'strego', 'tadeleke', 'tfoss', 'tjohnson', 'tmurphy', 'whovey', 'zmoore',
+].map((u) => u + '@armadarecovery.com').join(', ');
 function lineupEmailTo() { return (getState('lineup_email') || process.env.LINEUP_EMAIL || LINEUP_DEFAULT_TO).trim(); }
 function canSendLineup(req) { return req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role); }
 // On Resend, sending from the shared test address (onboarding@resend.dev) — which

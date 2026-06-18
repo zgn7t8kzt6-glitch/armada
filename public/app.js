@@ -153,7 +153,7 @@ const VIEW_ROLES = {
   meals:       ['Director of Operations','Kitchen','BHT / Tech'],
   // Clinical / care pages — the care team (+ Clinical Director)
   clients:     [...CARE,'Front Desk'],
-  journey:     CARE,
+  journey:     [...CARE,'Front Desk'],   // Front Desk can open a client's 360 from the Clients grid
   editor:      CARE,
   records:     ['Nurse','Case Manager','Therapist','Clinical Director'],
   rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],

@@ -9,7 +9,7 @@ import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, e
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
-import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ } from './src/db.js';
+import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
@@ -1605,7 +1605,9 @@ try {
   }
 } catch { /* */ }
 function createAlert(client_id, kind, level, message) {
-  const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id = ? AND kind = ? AND status = 'New' AND created_at >= datetime('now','-1 day') LIMIT 1`).get(client_id, kind);
+  // `client_id IS ?` (not `=`) so facility-wide alerts (client_id NULL, e.g.
+  // supply-out / coverage) dedup correctly — `= NULL` is never true in SQL.
+  const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id IS ? AND kind = ? AND status = 'New' AND created_at >= datetime('now','-1 day') LIMIT 1`).get(client_id || null, kind);
   if (dup) return;
   db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles) VALUES (?, ?, ?, ?, ?)`).run(client_id || null, kind, level || null, message, rolesForAlert(kind, message));
   if (level === 'High' || level === 'Critical') {
@@ -4518,8 +4520,9 @@ app.get('/api/staffing', requireAuth, (req, res) => {
   const slots = db.prepare(`SELECT * FROM schedule_slots WHERE date = ? ORDER BY
     CASE part WHEN 'Morning' THEN 0 WHEN 'Day' THEN 1 WHEN 'Evening' THEN 2 WHEN 'Night' THEN 3 ELSE 4 END, role`).all(date);
   const getA = db.prepare(`SELECT * FROM schedule_assignments WHERE slot_id = ? ORDER BY id`);
-  // Who is clocked in right now (open punch today).
-  const onNow = new Set(db.prepare(`SELECT user_id FROM time_entries WHERE clock_out IS NULL AND date(clock_in) = date('now')`).all().map((r) => r.user_id));
+  // Who is clocked in right now (open punch on the local business day).
+  const tb = dayBoundsUtc(appToday());
+  const onNow = new Set(db.prepare(`SELECT user_id FROM time_entries WHERE clock_out IS NULL AND clock_in >= ? AND clock_in < ? AND user_id IS NOT NULL`).all(tb.start, tb.end).map((r) => r.user_id));
   const out = slots.map((s) => {
     const a = getA.all(s.id);
     const scheduled = a.filter((x) => x.status === 'scheduled');
@@ -4578,10 +4581,12 @@ app.get('/api/roster', requireAuth, (req, res) => {
   const slots = db.prepare(`SELECT * FROM schedule_slots WHERE date = ? ORDER BY
     CASE part WHEN 'Morning' THEN 0 WHEN 'Day' THEN 1 WHEN 'Evening' THEN 2 WHEN 'Night' THEN 3 ELSE 4 END, role`).all(date);
   const getA = db.prepare(`SELECT * FROM schedule_assignments WHERE slot_id = ? ORDER BY id`);
-  // Clock punches on this date, by user.
+  // Clock punches on this date, by user. clock_in is UTC, so match against the
+  // UTC window that bounds the local (Eastern) business day — not date('now').
   const punches = {};
+  const bounds = dayBoundsUtc(date);
   db.prepare(`SELECT user_id, MIN(clock_in) ci, MAX(clock_out) co, SUM(clock_out IS NULL) open FROM time_entries
-    WHERE date(clock_in) = ? GROUP BY user_id`).all(date).forEach((p) => { punches[p.user_id] = p; });
+    WHERE clock_in >= ? AND clock_in < ? AND user_id IS NOT NULL GROUP BY user_id`).all(bounds.start, bounds.end).forEach((p) => { punches[p.user_id] = p; });
   let present = 0, absent = 0, unmarked = 0, calledOff = 0, covered = 0, discrepancies = 0;
   const shifts = slots.map((s) => {
     const people = getA.all(s.id).map((a) => {

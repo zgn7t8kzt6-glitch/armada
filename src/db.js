@@ -1329,6 +1329,21 @@ export function addDays(dateStr, n) {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
+// UTC [start, end) datetime strings ("YYYY-MM-DD HH:MM:SS") bounding one APP_TZ
+// calendar day. Lets UTC-stored timestamps (clock punches) be matched to the
+// local (Eastern) business day without relying on the server process timezone.
+export function dayBoundsUtc(dateStr) {
+  const offsetMs = (instant) => {
+    const dtf = new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const p = {}; for (const part of dtf.formatToParts(instant)) p[part.type] = part.value;
+    const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
+    return asUTC - instant.getTime();
+  };
+  const midnightUtc = (ds) => { const g = new Date(ds + 'T00:00:00Z'); return new Date(g.getTime() - offsetMs(g)); };
+  const fmt = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
+  return { start: fmt(midnightUtc(dateStr)), end: fmt(midnightUtc(addDays(dateStr, 1))) };
+}
 // Recompute a day's metrics from its flow events (idempotent upsert).
 export function rollupDailyMetrics(date) {
   // Only count events still tied to a live client — events orphaned by a

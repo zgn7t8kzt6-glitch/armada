@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616AZ" />
+<link rel="stylesheet" href="/styles.css?v=20260616BA" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1136,6 +1136,7 @@
         <div class="field"><label for="purpose">Our purpose <span class="hint" style="font-weight:400">(shown first on the Lineup page and at the top of the email)</span></label><textarea id="purpose" rows="2" placeholder="Why we're here…"></textarea></div>
         <div class="controls" style="margin-top:8px"><div class="field"><label for="lineup_email">Team email</label><input id="lineup_email" type="email" placeholder="team@armadarecovery.com"/></div></div>
         <div class="field" style="margin-top:8px"><label for="lineup_reward">Recognition raffle prize <span class="hint" style="font-weight:400">(optional — recognizing a teammate earns a raffle entry to win this)</span></label><input id="lineup_reward" placeholder="e.g., a $50 gift card / a day off / first pick of shifts"/></div>
+        <label class="trg" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="lineup_auto"/> Send automatically every morning at <input id="lineup_auto_hour" type="number" min="0" max="23" value="8" style="width:56px"/>:00 <span class="hint">(Eastern — goes out on its own, no need to press send)</span></label>
         <label class="trg" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="lineup_bcc"/> Send privately <span class="hint">(each person gets their own copy — no one sees the list, no reply-all, best delivery; replies come to you)</span></label>
         <label class="trg" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="app_live"/> The app is live for all staff <span class="hint">(off = the email asks the team to reply to it instead of using the app)</span></label>
         <label class="trg" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="lineup_horst"/> Include the “What would Horst do?” line <span class="hint">(turn on once you've introduced the team to Horst Schulze)</span></label>
@@ -1842,6 +1843,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616AZ"></script>
+<script src="/app.js?v=20260616BA"></script>
 </body>
 </html>

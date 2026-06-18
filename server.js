@@ -2645,6 +2645,8 @@ app.get('/api/settings', requireAuth, requireAdmin, (req, res) => {
     purpose: companyPurpose(),
     appLive: getState('app_live') === 'on',
     lineupBcc: getState('lineup_bcc') !== 'off',
+    lineupAuto: getState('lineup_auto') === 'on',
+    lineupAutoHour: +(getState('lineup_auto_hour') || 8),
   });
 });
 app.post('/api/settings/kiosk-code', requireAuth, requireAdmin, (req, res) => {
@@ -3152,39 +3154,59 @@ app.get('/api/lineup/email-preview', requireAuth, (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
   res.json({ ...buildLineupEmail(), to: lineupEmailTo(), emailReady: emailConfigured(), from: emailStatus().from || '', fromIssue: lineupFromIssue() });
 });
+// Shared sender used by the button AND the daily scheduler. replyTo must be a
+// single address (or ''). Returns { error } if blocked, else { sent, total, failed }.
+async function deliverLineup(replyTo) {
+  if (!emailConfigured()) return { error: 'Email isn’t connected yet — set it up in Settings → Email.' };
+  const fromIssue = lineupFromIssue();
+  if (fromIssue) return { error: fromIssue };
+  const recipients = lineupEmailTo();
+  if (!recipients) return { error: 'Set the team email address first (Settings → Daily Lineup email).' };
+  const e = buildLineupEmail();
+  const rt = (replyTo || '').trim() || undefined;
+  const list = recipients.split(',').map((s) => s.trim()).filter(Boolean);
+  // Private mode (default ON): each recipient gets their own copy — best delivery,
+  // no shared list, no reply-all. Off → one shared email.
+  const individual = getState('lineup_bcc') !== 'off';
+  if (individual) {
+    let sent = 0; const failed = [];
+    for (const r of list) {
+      try { await sendEmail({ to: r, subject: e.subject, html: e.html, replyTo: rt, suppressCc: true }); sent += 1; }
+      catch (err) { failed.push(`${r} (${err.message})`); }
+    }
+    return { sent, total: list.length, failed, census: e.census, focus: e.focus };
+  }
+  await sendEmail({ to: recipients, subject: e.subject, html: e.html, replyTo: rt, suppressCc: true });
+  return { sent: list.length, total: list.length, failed: [], census: e.census, focus: e.focus };
+}
 app.post('/api/lineup/send', requireAuth, async (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
-  if (!emailConfigured()) return res.status(400).json({ error: 'Email isn’t connected yet — set it up in Settings → Email.' });
-  const fromIssue = lineupFromIssue();
-  if (fromIssue) return res.status(400).json({ error: fromIssue });
-  const recipients = lineupEmailTo();
-  if (!recipients) return res.status(400).json({ error: 'Set the team email address first (Settings → Daily Lineup email).' });
-  const e = buildLineupEmail();
   const senderEmail = (req.user?.username && /@/.test(req.user.username)) ? req.user.username : '';
-  // Reply-To must be a single address — never the recipient list. If we don't have
-  // the sender's email or a configured reply address, omit it (replies go to From).
   const replyTo = senderEmail || (getState('lineup_reply_to') || '').trim() || '';
-  const list = recipients.split(',').map((s) => s.trim()).filter(Boolean);
-  // Default (private mode ON): send each recipient their OWN copy. Best
-  // deliverability (a normal personal email, not BCC that M365 tends to junk),
-  // nobody sees anyone else, and reply-all is impossible. Off → one shared email.
-  const individual = getState('lineup_bcc') !== 'off';
   try {
-    if (individual) {
-      let sent = 0; const failed = [];
-      for (const r of list) {
-        try { await sendEmail({ to: r, subject: e.subject, html: e.html, replyTo, suppressCc: true }); sent += 1; }
-        catch (err) { failed.push(`${r} (${err.message})`); }
-      }
-      audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `individual ${sent}/${list.length} · census ${e.census} · ${e.focus}`, ip: req.ip });
-      if (!sent) return res.status(502).json({ error: 'Could not send to anyone. ' + (failed[0] || '') });
-      return res.json({ ok: true, sent, total: list.length, failed, census: e.census });
-    }
-    await sendEmail({ to: recipients, subject: e.subject, html: e.html, replyTo, suppressCc: true });
-    audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `to ${recipients} · census ${e.census} · ${e.focus}`, ip: req.ip });
-    res.json({ ok: true, sent: list.length, total: list.length, failed: [], census: e.census });
+    const r = await deliverLineup(replyTo);
+    if (r.error) return res.status(400).json({ error: r.error });
+    audit({ user: req.user, action: 'LINEUP_EMAIL', detail: `${r.sent}/${r.total} · census ${r.census} · ${r.focus}`, ip: req.ip });
+    if (!r.sent) return res.status(502).json({ error: 'Could not send to anyone. ' + (r.failed[0] || '') });
+    res.json({ ok: true, sent: r.sent, total: r.total, failed: r.failed, census: r.census });
   } catch (err) { res.status(502).json({ error: err.message }); }
 });
+// Daily scheduler: send the Lineup automatically at the configured ET hour.
+setInterval(async () => {
+  try {
+    if (getState('lineup_auto') !== 'on') return;
+    const hour = Math.min(23, Math.max(0, +(getState('lineup_auto_hour') || 8)));
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(new Date());
+    const h = (+parts.find((p) => p.type === 'hour').value) % 24;
+    const m = +parts.find((p) => p.type === 'minute').value;
+    if (h !== hour || m > 9) return;               // fire within the first 10 min of the hour
+    const today = appToday();
+    if (getState('lineup_auto_last') === today) return;   // already sent today
+    setState('lineup_auto_last', today);           // mark BEFORE sending to prevent double-fire
+    const r = await deliverLineup((getState('lineup_reply_to') || '').trim());
+    audit({ user: { name: 'System (auto-lineup)' }, action: 'LINEUP_EMAIL_AUTO', detail: r.error ? ('blocked: ' + r.error) : `${r.sent}/${r.total} · census ${r.census}`, ip: 'scheduler' });
+  } catch (e) { console.error('[lineup auto]', e.message); }
+}, 60 * 1000).unref?.();
 app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
   if (b.email != null) setState('lineup_email', String(b.email).trim());
@@ -3193,6 +3215,8 @@ app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => 
   if (b.purpose != null) setState('purpose', String(b.purpose).trim().slice(0, 400));
   if (b.appLive != null) setState('app_live', b.appLive ? 'on' : 'off');
   if (b.bcc != null) setState('lineup_bcc', b.bcc ? 'on' : 'off');
+  if (b.auto != null) setState('lineup_auto', b.auto ? 'on' : 'off');
+  if (b.autoHour != null) setState('lineup_auto_hour', String(Math.min(23, Math.max(0, parseInt(b.autoHour, 10) || 8))));
   res.json({ ok: true });
 });
 

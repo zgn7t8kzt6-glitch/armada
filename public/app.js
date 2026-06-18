@@ -985,6 +985,7 @@ async function loadSettings(){
   $('oc_email').value=st.oncallEmail||''; $('oc_phone').value=st.oncallPhone||''; if($('oc_email_alerts')) $('oc_email_alerts').checked=!!st.oncallEmailAlerts;
   $('ocStatus').textContent = `Email ${st.emailReady?'ready':'needs RESEND_API_KEY'} · SMS ${st.smsReady?'ready':'needs Twilio env vars'}.`;
   $('kc_code').value = st.kioskCode||'';
+  if($('set_principle')){ try{ const p=await api('/principle/today'); $('set_principle').innerHTML=(p.options||[]).map(o=>`<option ${o===p.title?'selected':''}>${esc(o)}</option>`).join(''); }catch(e){} }
   if($('lineup_email')) $('lineup_email').value = st.lineupEmail||'';
   if($('purpose')) $('purpose').value = st.purpose||'';
   if($('lineup_reward')) $('lineup_reward').value = st.lineupReward||'';

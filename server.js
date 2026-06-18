@@ -1619,6 +1619,8 @@ function rolesForAlert(kind, message = '') {
   if (k.startsWith('meal_')) return wrap(['Kitchen', OPS]);
   if (k.startsWith('maint')) return wrap([OPS]);   // no dedicated Maintenance role
   if (k.startsWith('supply_out_') || k.startsWith('inv_check_')) return wrap([...(byDept() || []), OPS]);
+  if (k.startsWith('bed_overdue')) return wrap([OPS]);                       // bed turnover not done in time
+  if (k.startsWith('staff_voice') || k === 'morale_dip') return wrap([OPS, CLIN]);   // team morale — leadership
   return null;   // unknown kind → everyone (a safety net; all current kinds are mapped above)
 }
 // Re-tag every New alert on startup so any change to the mapping above takes
@@ -5461,7 +5463,8 @@ app.post('/api/voice', requireAuth, (req, res) => {
   const text = (req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Tell us what would make this a better place to work.' });
   const anon = req.body?.anonymous ? 1 : 0;
-  db.prepare(`INSERT INTO staff_voice (text, anonymous, by_id, by_name) VALUES (?,?,?,?)`).run(text.slice(0, 1000), anon, req.user.id, req.user.name);
+  const id = db.prepare(`INSERT INTO staff_voice (text, anonymous, by_id, by_name) VALUES (?,?,?,?)`).run(text.slice(0, 1000), anon, req.user.id, req.user.name).lastInsertRowid;
+  createAlert(null, 'staff_voice_' + id, 'Elevated', `New Staff Voice: “${text.slice(0, 90)}” — read it and close the loop on the Best Place to Work page.`);
   res.json({ ok: true });
 });
 app.post('/api/voice/:id/respond', requireAuth, (req, res) => {
@@ -5469,8 +5472,18 @@ app.post('/api/voice/:id/respond', requireAuth, (req, res) => {
   const response = (req.body?.response || '').trim();
   const status = response ? 'done' : 'open';
   db.prepare(`UPDATE staff_voice SET response=?, status=?, responded_by=?, responded_at=datetime('now') WHERE id=?`).run(response || null, status, req.user.name, req.params.id);
+  if (status === 'done') db.prepare(`UPDATE alerts SET status='Resolved' WHERE kind=? AND status='New'`).run('staff_voice_' + req.params.id);
   res.json({ ok: true });
 });
+// Morale watch: if recent staff pulses skew low, flag leadership (once/day).
+setInterval(() => {
+  try {
+    const pulse = db.prepare(`SELECT load, COUNT(*) n FROM staff_pulses WHERE created_at >= datetime('now','-7 day') GROUP BY load`).all();
+    const score = { 'Good': 100, 'Okay': 70, 'Stretched': 40, 'Burnt out': 10 };
+    let sum = 0, cnt = 0; for (const p of pulse) { if (score[p.load] != null) { sum += score[p.load] * p.n; cnt += p.n; } }
+    if (cnt >= 3) { const morale = Math.round(sum / cnt); if (morale < 50) createAlert(null, 'morale_dip', 'Elevated', `Team morale is running low (${morale}/100 over the last week). Check Best Place to Work, recognize someone, and answer open Staff Voice.`); }
+  } catch (e) { console.error('[morale watch]', e.message); }
+}, 6 * 60 * 60 * 1000).unref?.();
 // Best Place to Work dashboard (leadership).
 app.get('/api/workplace', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });

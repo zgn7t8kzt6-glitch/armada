@@ -294,30 +294,22 @@ export async function sfSyncArrivals(db) {
   // custom field). Configurable so we don't fall back to CloseDate and show the
   // wrong day. CloseDate is always selected as a fallback.
   const adf = (scfg('admit_date_field', 'SF_ADMIT_DATE_FIELD') || 'Admission_Date__c').replace(/[^A-Za-z0-9_.]/g, '');
-  const admitDateOf = (r) => (r[adf] || r.CloseDate || '');
-  // Build the SELECT column list deduped (case-insensitive) so the admit-date
-  // field can never collide with a base column and trigger a "duplicate column" 400.
-  const colList = (extra) => {
-    const out = []; const seen = new Set();
-    for (const c of [...extra, adf]) { const k = (c || '').toLowerCase(); if (c && !seen.has(k)) { seen.add(k); out.push(c); } }
-    return out.join(', ');
-  };
-  const soql = process.env.SF_ARRIVALS_SOQL || `
-    SELECT ${colList(['Id', 'Name', 'StageName', 'CloseDate', 'CreatedDate'])}
-    FROM Opportunity
-    WHERE IsClosed = false AND StageName IN (${stages})${facClause}
-    ORDER BY CreatedDate DESC`;
-  const records = await sfQueryAll(soql);
-  // ALSO pull recently ADMITTED (Closed-Won) opps: Salesforce closes the opp on
-  // admit, so the open query above drops them — without this they vanish from the
-  // board instead of showing as "arrived." (Network fetch happens before the txn.)
-  const wonSoql = process.env.SF_ADMITTED_SOQL || `
-    SELECT ${colList(['Id', 'Name', 'StageName', 'CloseDate'])}
-    FROM Opportunity
-    WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${facClause}
-    ORDER BY CloseDate DESC`;
+  // Prefer the configured admit-date field, then Admission_Date__c, then CloseDate.
+  const admitDateOf = (r) => (r[adf] || r.Admission_Date__c || r.CloseDate || '');
+  const dedup = (arr) => { const out = [], seen = new Set(); for (const c of arr) { const k = (c || '').toLowerCase(); if (c && !seen.has(k)) { seen.add(k); out.push(c); } } return out.join(', '); };
+  // Always include Admission_Date__c + CloseDate as reliable fallbacks; add the
+  // configured field too. If that field doesn't exist, we retry WITHOUT it so a
+  // bad field name can never break the sync.
+  const schedSafe = ['Id', 'Name', 'StageName', 'CloseDate', 'CreatedDate', 'Admission_Date__c'];
+  const wonSafe = ['Id', 'Name', 'StageName', 'CloseDate', 'Admission_Date__c'];
+  const buildSched = (cols) => process.env.SF_ARRIVALS_SOQL || `SELECT ${dedup(cols)} FROM Opportunity WHERE IsClosed = false AND StageName IN (${stages})${facClause} ORDER BY CreatedDate DESC`;
+  const buildWon = (cols) => process.env.SF_ADMITTED_SOQL || `SELECT ${dedup(cols)} FROM Opportunity WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${facClause} ORDER BY CloseDate DESC`;
+  let records;
+  try { records = await sfQueryAll(buildSched([...schedSafe, adf])); }
+  catch (e) { records = await sfQueryAll(buildSched(schedSafe)); }   // bad admit-date field → fall back
   let wonRecords = [];
-  try { wonRecords = await sfQueryAll(wonSoql); } catch (e) { /* admitted pull optional */ }
+  try { wonRecords = await sfQueryAll(buildWon([...wonSafe, adf])); }
+  catch (e) { try { wonRecords = await sfQueryAll(buildWon(wonSafe)); } catch (e2) { /* admitted pull optional */ } }
 
   const find = db.prepare(`SELECT id, status FROM expected_arrivals WHERE sf_lead_id = ?`);
   const ins = db.prepare(`INSERT INTO expected_arrivals
@@ -456,8 +448,9 @@ export async function sfArrivalsDiagnose(nameQuery) {
     const fac = await facilityClause();
     const stages = (scfg('schedule_stages', 'SF_SCHEDULE_STAGES') || 'Admission Scheduled').split(',').map((s) => `'${s.trim().replace(/'/g, '')}'`).join(',');
     const adf = (scfg('admit_date_field', 'SF_ADMIT_DATE_FIELD') || 'Admission_Date__c').replace(/[^A-Za-z0-9_.]/g, '');
-    const cols = (() => { const out = [], seen = new Set(); for (const c of ['Name', 'StageName', 'CloseDate', adf]) { const k = (c || '').toLowerCase(); if (c && !seen.has(k)) { seen.add(k); out.push(c); } } return out.join(', '); })();
-    const admitOf = (r) => (r[adf] || r.CloseDate || '').slice(0, 10) || '(blank)';
+    const cols = (() => { const out = [], seen = new Set(); for (const c of ['Name', 'StageName', 'CloseDate', 'Admission_Date__c', adf]) { const k = (c || '').toLowerCase(); if (c && !seen.has(k)) { seen.add(k); out.push(c); } } return out.join(', '); })();
+    const colsSafe = 'Name, StageName, CloseDate, Admission_Date__c';
+    const admitOf = (r) => ((r[adf] || r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || '(blank)');
     out.appScope = {
       facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || 'Armada Detox of Akron',
       facilityField: fac.field || '(none found — pulling ALL locations)',
@@ -465,7 +458,8 @@ export async function sfArrivalsDiagnose(nameQuery) {
       admitDateField: adf,
     };
     try {
-      const s = await sfQuery(`SELECT ${cols} FROM Opportunity WHERE IsClosed = false AND StageName IN (${stages})${fac.clause} ORDER BY CreatedDate DESC LIMIT 30`);
+      let s; try { s = await sfQuery(`SELECT ${cols} FROM Opportunity WHERE IsClosed = false AND StageName IN (${stages})${fac.clause} ORDER BY CreatedDate DESC LIMIT 30`); }
+      catch (e1) { s = await sfQuery(`SELECT ${colsSafe} FROM Opportunity WHERE IsClosed = false AND StageName IN (${stages})${fac.clause} ORDER BY CreatedDate DESC LIMIT 30`); out.admitFieldInvalid = adf; }
       out.appScheduled = (s.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', admit: admitOf(r) }));
     } catch (e) { out.appScheduledError = e.message; }
     try {

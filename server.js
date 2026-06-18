@@ -2977,12 +2977,12 @@ app.get('/api/lineup', requireAuth, (req, res) => {
 const LINEUP_PEP = {
   'Greet every client by their preferred name': {
     hook: "A person's name is the first dignity addiction tries to take. Using it says: you are a person here, not a case.",
-    horst: "Horst trained every employee to learn and use a guest's name — being recognized is the difference between a transaction and a relationship. He'd know every name on the unit by lunch.",
+    horst: "Horst trained every employee to learn and use a client's name — being recognized is the difference between a transaction and a relationship. He'd know every name on the unit by lunch.",
     move: "Use each client's preferred name in your very first sentence to them today.",
   },
   'Fix the fixable in under 5 minutes': {
     hook: "Most 'behaviors' start as a small unmet need that waited too long. The blanket, the smoke break, the phone call — fixed fast, it never becomes a crisis.",
-    horst: "Horst gave every employee permission to solve a guest's problem on the spot, no manager needed. Speed is the apology.",
+    horst: "Horst gave every employee permission to solve a client's problem on the spot, no manager needed. Speed is the apology.",
     move: "When someone's frustrated, go to them within 5 minutes and solve the small thing — before it grows.",
   },
   'Deliver one unprompted delight': {
@@ -3002,11 +3002,11 @@ const LINEUP_PEP = {
   },
   'Close the loop out loud': {
     hook: "Being heard only counts if the person knows it. Silent fixes feel like luck; named fixes feel like care.",
-    horst: "Horst made follow-through visible — the guest always knew their request had been received and acted on.",
+    horst: "Horst made follow-through visible — the client always knew their request had been received and acted on.",
     move: "Tell at least one client: 'You said X — so we did Y.' Make being heard visible.",
   },
   'No one hungry': {
-    hook: "A guest who never has to ask for food is a guest who feels safe. In early recovery, feeling cared for is the treatment.",
+    hook: "A client who never has to ask for food is a client who feels safe. In early recovery, feeling cared for is the treatment.",
     horst: "Horst would already be walking the room with a tray — and treat a snack like room service at the Ritz, because the dignity is identical.",
     move: "Before shift's end, make sure no one in the building is hungry — offer seconds, check the snack station, ask about the food.",
   },
@@ -3027,7 +3027,7 @@ const LINEUP_PEP = {
   },
   'A human goes to the patient': {
     hook: "Distress is never managed through a message. Presence is the intervention — a person, in the room, every time.",
-    horst: "Horst would never let a guest's problem be handled by a note slid under a door. You go.",
+    horst: "Horst would never let a client's problem be handled by a note slid under a door. You go.",
     move: "Today, no distress handled by phone or message — a human goes to the person, in person.",
   },
   'Hold the open door': {
@@ -3822,7 +3822,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'arrivals', title: 'Welcome — expected today', items: waiting.map(arrItem), cta: { label: 'Open Front Desk →', view: 'arrivals' } });
     sections.push({ key: 'board', title: 'Already arrived', items: arrived.map(arrItem) });
   } else if (jr === 'Housekeeping') {
-    subtitle = 'The Environment Standard — the physical stage is spotless, calm, and ready for the next guest.';
+    subtitle = 'The Environment Standard — the physical stage is spotless, calm, and ready for the next client.';
     const beds = db.prepare(`SELECT room, label, unit, status FROM beds`).all();
     const cleaning = beds.filter((b) => /clean/i.test(b.status || ''));
     const hold = beds.filter((b) => /hold/i.test(b.status || ''));
@@ -3839,7 +3839,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     ];
     sections.push({ key: 'turnover', title: 'Turn over — discharged today (refresh the room with care)', items: freedToday.map((c) => ({ name: c.pref || c.name, room: c.room || '', sub: c.discharge_status || 'discharged', badge: 'TURN OVER' })) });
     if (cleaning.length) sections.push({ key: 'cleaning', title: 'Beds marked Cleaning', items: cleaning.map((b) => ({ name: (b.room || '') + (b.label ? ' · ' + b.label : ''), sub: b.unit || '', badge: 'CLEANING' })) });
-    sections.push({ key: 'prep', title: 'Prep — guests arriving today (ready a warm, spotless room)', items: arrivals.map((a) => ({ name: ((a.preferred_name || a.first_name || '') + ' ' + (a.last_name || '')).trim() })), cta: { label: 'See arrivals →', view: 'arrivals' } });
+    sections.push({ key: 'prep', title: 'Prep — clients arriving today (ready a warm, spotless room)', items: arrivals.map((a) => ({ name: ((a.preferred_name || a.first_name || '') + ' ' + (a.last_name || '')).trim() })), cta: { label: 'See arrivals →', view: 'arrivals' } });
     if (hold.length) sections.push({ key: 'hold', title: 'On hold', items: hold.map((b) => ({ name: b.room || '', sub: b.unit || '' })) });
     sections.push({ key: 'standard', title: 'The senses — every space, every shift', items: [
       { name: 'Sight', sub: 'No clutter, no trash, surfaces clear, beds made tight.' },

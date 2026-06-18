@@ -1947,7 +1947,7 @@ async function loadArrivals(){
       return `<tr><td><strong>${greet}</strong>${sub?`<div class="hint">${sub}</div>`:''}</td><td>${badge(a.status)}</td><td style="text-align:right">${acts}</td></tr>`;
     }).join('');
     $('arrivalsList').innerHTML = rows
-      ? `<table class="tbl"><tr><th>Guest</th><th>Status</th><th></th></tr>${rows}</table>`
+      ? `<table class="tbl"><tr><th>Client</th><th>Status</th><th></th></tr>${rows}</table>`
       : (d.configured?'<div class="hint">No one scheduled to admit today.</div>':'<div class="hint">Connect Salesforce in Settings, then click “Pull from Salesforce.”</div>');
     const up=(d.upcoming||[]);
     if($('arrivalsUpcomingCard')){
@@ -1966,7 +1966,7 @@ async function loadArrivals(){
     const fu=(d.followUps||[]).map(a=>`<tr><td><strong>${esc((a.first_name||'')+' '+(a.last_name||''))}</strong><div class="hint">was due ${esc(a.scheduled_date||'')}${a.phone?' · '+esc(a.phone):''}</div></td>`+
       `<td><input class="sans" style="width:100%" placeholder="Follow-up note (what happened / next step)" value="${esc(a.follow_up||'')}" onchange="setArrivalNote(${a.id}, this.value)"/></td>`+
       `<td style="text-align:right"><button class="btn btn-ghost btn-sm sans" onclick="setArrival(${a.id},'cancelled')">Close</button></td></tr>`).join('');
-    $('arrivalsFollow').innerHTML = fu ? `<table class="tbl"><tr><th>Guest</th><th>Follow-up</th><th></th></tr>${fu}</table>` : '<div class="hint">No outstanding no-shows. 🎉</div>';
+    $('arrivalsFollow').innerHTML = fu ? `<table class="tbl"><tr><th>Client</th><th>Follow-up</th><th></th></tr>${fu}</table>` : '<div class="hint">No outstanding no-shows. 🎉</div>';
   }catch(e){ $('arrivalsList').innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; }
   clearTimeout(_arrivalsTimer); _arrivalsTimer=setTimeout(()=>{ if(document.getElementById('arrivals').classList.contains('active')) loadArrivals(); }, 60000);
 }
@@ -2264,7 +2264,7 @@ async function loadVoice(){
   try{ const v=await api('/voice');
     const reqs=(v.requests||[]).map(r=>`<div class="pc-note">🛎 <strong>${esc(r.client)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''} asked: “${esc(r.text)}”${r.priority==='Urgent'?' <span class="risk risk-high">urgent</span>':''} <span class="hint">— ${esc((r.at||'').slice(5))}</span></div>`).join('');
     const chk=(v.checkins||[]).map(x=>`<div class="pc-note">💬 <strong>${esc(x.client||'Client')}</strong>${x.room?' <span class="hint">· '+esc(x.room)+'</span>':''}: “${esc(x.answer)}” <span class="hint">— ${esc(x.shift||'')} ${esc((x.at||'').slice(5))}${x.by?' · '+esc(x.by):''}</span></div>`).join('');
-    $('cmdVoice').innerHTML = (reqs||chk) ? ((reqs?`<div class="cmd-sub">What they're asking for (kiosk)</div>${reqs}`:'')+(chk?`<div class="cmd-sub">What they're telling us (rounds)</div>${chk}`:'')) : '<div class="hint">No guest voice yet. Ask the shift question on Rounds, and put the kiosk on the unit.</div>';
+    $('cmdVoice').innerHTML = (reqs||chk) ? ((reqs?`<div class="cmd-sub">What they're asking for (kiosk)</div>${reqs}`:'')+(chk?`<div class="cmd-sub">What they're telling us (rounds)</div>${chk}`:'')) : '<div class="hint">No client voice yet. Ask the shift question on Rounds, and put the kiosk on the unit.</div>';
   }catch(e){ $('cmdVoice').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; }
 }
 async function loadLeadership(){

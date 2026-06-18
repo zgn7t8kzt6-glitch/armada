@@ -944,7 +944,9 @@ app.get('/api/rounds/board', requireAuth, (req, res) => {
   const lastNote = db.prepare(`SELECT note, by_name FROM obs_checks WHERE client_id = ? AND status = 'note' AND note IS NOT NULL AND note != '' ORDER BY id DESC LIMIT 1`);
   const now = Date.now();
   const shift = currentShift();
-  const askedSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM client_checkins WHERE date(created_at) = date('now') AND shift = ?`).all(shift).map((r) => r.client_id));
+  // "Today" = the Eastern business day; created_at/ts are stored UTC, so match a UTC window.
+  const tday = dayBoundsUtc(appToday());
+  const askedSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM client_checkins WHERE created_at >= ? AND created_at < ? AND shift = ?`).all(tday.start, tday.end, shift).map((r) => r.client_id));
   const rows = active.map((c) => {
     const l = lastChk.get(c.id);
     const n = lastNote.get(c.id);
@@ -956,8 +958,8 @@ app.get('/api/rounds/board', requireAuth, (req, res) => {
       note: n?.note || null, noteBy: n?.by_name || null };
   });
   const overdue = rows.filter((r) => r.overdue).length;
-  // Accountability: checks logged today, by person.
-  const byPerson = db.prepare(`SELECT COALESCE(by_name,'—') k, COUNT(*) n FROM obs_checks WHERE date(ts) = date('now') GROUP BY by_name ORDER BY n DESC`).all();
+  // Accountability: checks logged today (Eastern day), by person.
+  const byPerson = db.prepare(`SELECT COALESCE(by_name,'—') k, COUNT(*) n FROM obs_checks WHERE ts >= ? AND ts < ? GROUP BY by_name ORDER BY n DESC`).all(tday.start, tday.end);
   res.json({ rows, total: rows.length, onTime: rows.length - overdue, overdue, defaultMin: OBS_DEFAULT_MIN, statuses: OBS_STATUSES, byPerson, shift, question: currentQuestion(), askedThisShift: askedSet.size });
 });
 app.post('/api/rounds/check', requireAuth, (req, res) => {

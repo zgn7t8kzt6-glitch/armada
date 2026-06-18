@@ -78,6 +78,7 @@
     <button data-view="alumni">Alumni</button>
     <button data-view="accountability" data-admin data-subview>Accountability</button>
     <button data-view="team">Team</button>
+    <button data-view="workplace" data-admin data-subview>Best Place to Work</button>
     <button data-view="inventory">Supplies</button>
     <button data-view="maintenance">Maintenance</button>
     <button data-view="operations" data-admin>Operations</button>
@@ -1348,6 +1349,37 @@
         <p class="sub sans">Engagement with the day's focus over time.</p>
         <div id="focusHistory"></div>
       </div>
+      <div class="card" style="border-left:4px solid #3f8c5a">
+        <div class="cmd-hero-row"><div><h3>🗣️ Staff Voice</h3><p class="sub sans" style="margin:0">What would make this a better place to work? What's getting in your way? We read every one — and tell you what we did about it.</p></div><button class="btn btn-ghost btn-sm sans" id="workplaceLink" style="display:none" onclick="show('workplace')">Best Place to Work ↗</button></div>
+        <textarea id="voice_text" rows="2" placeholder="An idea, a frustration, something that would help…"></textarea>
+        <label class="trg" style="display:inline-flex;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="voice_anon"/> Send anonymously</label>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold sans" onclick="submitVoice()">Share</button><span class="hint" id="voice_msg"></span></div>
+        <div id="voiceFeed" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <!-- BEST PLACE TO WORK (leadership) -->
+    <section id="workplace" class="view">
+      <div class="card">
+        <div class="cmd-hero-row"><div><h3>🏆 Best Place to Work</h3><p class="sub sans" style="margin:0">Ladies and Gentlemen serving Ladies and Gentlemen. Morale, recognition, voice, and growth — the leadership view.</p></div><button class="btn btn-ghost sans" onclick="loadWorkplace()">Refresh</button></div>
+        <div id="wpKpis" class="ret-cards" style="margin-top:12px"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:280px">
+          <h3>🙌 Recognize a teammate (from leadership)</h3>
+          <div class="grid2"><div><label>Teammate</label><select id="wp_rec_to"></select></div><div></div></div>
+          <div class="handoff-add"><input id="wp_rec_text" placeholder="Name the specific thing they did well"/><button class="btn btn-gold sans" onclick="leaderRecognize()">Recognize</button></div>
+          <div class="cmd-sub">Most recognized this week</div>
+          <div id="wpMostRecognized"></div>
+        </div>
+        <div class="card" style="flex:1;min-width:280px">
+          <h3>🌱 Growth check-ins</h3>
+          <div class="grid2"><div><label>Teammate</label><select id="wp_growth_to"></select></div><div><label>Goal (optional)</label><input id="wp_growth_goal" placeholder="e.g. lead a shift"/></div></div>
+          <div class="handoff-add"><input id="wp_growth_note" placeholder="1:1 note / next step"/><button class="btn btn-gold sans" onclick="addGrowth()">Log</button></div>
+          <div id="wpGrowthFeed"></div>
+        </div>
+      </div>
+      <div class="card"><h3>🗣️ Staff Voice — open & answered</h3><div id="wpVoice"></div></div>
     </section>
 
     <!-- SURVEYS -->

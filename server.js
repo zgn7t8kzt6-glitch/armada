@@ -5450,6 +5450,63 @@ app.get('/api/team', requireAuth, (req, res) => {
       : null,
   });
 });
+// ── Best Place to Work: staff voice, morale dashboard, recognition, growth ──
+function isLeadership(req) { return req.user?.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(req.user?.job_role); }
+// Staff Voice — anyone can submit; leadership responds and closes the loop.
+app.get('/api/voice', requireAuth, (req, res) => {
+  const rows = db.prepare(`SELECT id, text, anonymous, by_name, status, response, responded_by, substr(created_at,1,16) at, substr(responded_at,1,16) rat FROM staff_voice ORDER BY (status='open') DESC, id DESC LIMIT 60`).all();
+  res.json({ rows: rows.map((r) => ({ ...r, by_name: r.anonymous ? 'Anonymous' : (r.by_name || '') })), canRespond: isLeadership(req) });
+});
+app.post('/api/voice', requireAuth, (req, res) => {
+  const text = (req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Tell us what would make this a better place to work.' });
+  const anon = req.body?.anonymous ? 1 : 0;
+  db.prepare(`INSERT INTO staff_voice (text, anonymous, by_id, by_name) VALUES (?,?,?,?)`).run(text.slice(0, 1000), anon, req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/voice/:id/respond', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const response = (req.body?.response || '').trim();
+  const status = response ? 'done' : 'open';
+  db.prepare(`UPDATE staff_voice SET response=?, status=?, responded_by=?, responded_at=datetime('now') WHERE id=?`).run(response || null, status, req.user.name, req.params.id);
+  res.json({ ok: true });
+});
+// Best Place to Work dashboard (leadership).
+app.get('/api/workplace', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const since7 = `datetime('now','-7 day')`;
+  const pulse = db.prepare(`SELECT load, COUNT(*) n FROM staff_pulses WHERE created_at >= datetime('now','-14 day') GROUP BY load`).all();
+  const score = { 'Good': 100, 'Okay': 70, 'Stretched': 40, 'Burnt out': 10 };
+  let sum = 0, cnt = 0; for (const p of pulse) { if (score[p.load] != null) { sum += score[p.load] * p.n; cnt += p.n; } }
+  const morale = cnt ? Math.round(sum / cnt) : null;
+  const kudosWeek = db.prepare(`SELECT COUNT(*) n FROM kudos WHERE created_at >= ${since7}`).get().n;
+  const wowRecWeek = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= ${since7}`).get().n;
+  const callOffsWeek = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= date('now','-7 day')`).get().n;
+  const openVoice = db.prepare(`SELECT COUNT(*) n FROM staff_voice WHERE status='open'`).get().n;
+  const voiceClosedWeek = db.prepare(`SELECT COUNT(*) n FROM staff_voice WHERE status='done' AND responded_at >= ${since7}`).get().n;
+  // Most-recognized teammates this week (kudos recipients + wow recognitions).
+  const tally = {};
+  db.prepare(`SELECT to_name FROM kudos WHERE to_name IS NOT NULL AND to_name != '' AND created_at >= ${since7}`).all().forEach((r) => { const k = r.to_name.trim(); tally[k] = (tally[k] || 0) + 1; });
+  db.prepare(`SELECT recognize FROM wows WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= ${since7}`).all().forEach((r) => { const k = r.recognize.trim(); tally[k] = (tally[k] || 0) + 1; });
+  const mostRecognized = Object.entries(tally).map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n).slice(0, 8);
+  res.json({ morale, pulse, kudosWeek, wowRecWeek, recognitionsWeek: kudosWeek + wowRecWeek, callOffsWeek, openVoice, voiceClosedWeek, mostRecognized });
+});
+// Growth check-ins (leadership logs goals + 1:1 notes per teammate).
+app.get('/api/growth', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const rows = db.prepare(`SELECT id, staff_id, staff_name, goal, note, by_name, substr(created_at,1,16) at FROM growth_checkins ORDER BY id DESC LIMIT 100`).all();
+  res.json({ rows });
+});
+app.post('/api/growth', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const b = req.body || {};
+  const name = (b.staff_name || '').trim() || (b.staff_id ? db.prepare(`SELECT name FROM users WHERE id=?`).get(b.staff_id)?.name : '') || '';
+  if (!name) return res.status(400).json({ error: 'Pick a teammate.' });
+  if (!(b.goal || '').trim() && !(b.note || '').trim()) return res.status(400).json({ error: 'Add a goal or a note.' });
+  db.prepare(`INSERT INTO growth_checkins (staff_id, staff_name, goal, note, by_name) VALUES (?,?,?,?,?)`)
+    .run(b.staff_id || null, name.slice(0, 80), (b.goal || '').trim().slice(0, 300) || null, (b.note || '').trim().slice(0, 1000) || null, req.user.name);
+  res.json({ ok: true });
+});
 app.post('/api/kudos', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.text?.trim()) return res.status(400).json({ error: 'Missing' });
   const to = b.to_user_id ? db.prepare(`SELECT name FROM users WHERE id = ?`).get(b.to_user_id) : null;

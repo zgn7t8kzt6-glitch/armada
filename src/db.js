@@ -220,6 +220,30 @@ CREATE TABLE IF NOT EXISTS bed_turnovers (
   cleaned_at TEXT,
   cleaned_shift TEXT
 );
+-- Staff Voice: employees say what would make this a better place to work
+-- (anonymous-friendly); leadership responds and closes the loop, visible to all.
+CREATE TABLE IF NOT EXISTS staff_voice (
+  id INTEGER PRIMARY KEY,
+  text TEXT NOT NULL,
+  anonymous INTEGER NOT NULL DEFAULT 0,
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  status TEXT NOT NULL DEFAULT 'open',       -- open | done
+  response TEXT,
+  responded_by TEXT,
+  responded_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Growth check-ins: per-teammate development goals + 1:1 notes, so people see a future here.
+CREATE TABLE IF NOT EXISTS growth_checkins (
+  id INTEGER PRIMARY KEY,
+  staff_id INTEGER REFERENCES users(id),
+  staff_name TEXT NOT NULL,
+  goal TEXT,
+  note TEXT,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
 CREATE TABLE IF NOT EXISTS staff_pulses (

@@ -128,7 +128,7 @@ const GROUP_OF={
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
   // Team — culture, recognition, learning, tasks
-  mytasks:'team',messages:'team',team:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
+  mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
@@ -159,6 +159,7 @@ const VIEW_ROLES = {
   rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
+  workplace:   ['Executive Director','Director of Operations','Clinical Director'],
   dignity:     ['BHT / Tech','Nurse','Clinical Director'],
   engagement:  ['BHT / Tech','Therapist','Clinical Director'],
   program:     ['BHT / Tech','Therapist','Clinical Director'],
@@ -261,6 +262,7 @@ function show(v){
   if(v==='schedule') loadSchedule();
   if(v==='roster') loadRoster();
   if(v==='bedboard') loadBedBoard();
+  if(v==='workplace') loadWorkplace();
   if(v==='weekgrid') loadWeekGrid();
   if(v==='staffmodel') loadStaffModel();
   if(v==='clients') renderClients();
@@ -4229,8 +4231,67 @@ async function loadBeds(){
 async function addBed(){ if(!$('bed_room').value.trim())return; await api('/beds',{method:'POST',body:JSON.stringify({room:$('bed_room').value,label:$('bed_label').value,unit:$('bed_unit').value})}); $('bed_room').value=$('bed_label').value=''; loadBeds(); }
 async function cycleBed(id,cur){ const order=['Open','Hold','Cleaning','Occupied']; const next=order[(order.indexOf(cur)+1)%order.length]; await api('/beds/'+id,{method:'POST',body:JSON.stringify({status:next})}); loadBeds(); }
 
+/* ---- Staff Voice + Best Place to Work ---- */
+function isLeadershipUser(){ return !!(ME && (ME.role==='admin' || ['Executive Director','Director of Operations','Clinical Director'].includes(ME.job_role))); }
+async function loadStaffVoice(){
+  const feed=$('voiceFeed'); if(!feed) return;
+  let d; try{ d=await api('/voice'); }catch(e){ return; }
+  feed.innerHTML = d.rows.length ? d.rows.map(v=>`<div class="pc-note" style="border-left:3px solid ${v.status==='done'?'#3f8c5a':'#c8a44d'}">
+    <div>${esc(v.text)}</div>
+    <div class="hint" style="margin-top:2px">${esc(v.by_name||'')} · ${esc(v.at||'')}${v.status==='done'?'':' · <span style="color:#a60">awaiting response</span>'}</div>
+    ${v.response?`<div style="margin-top:6px;background:#f4f8f4;border-radius:6px;padding:8px"><b style="color:#2f6b44">✓ We heard you — ${esc(v.responded_by||'')}:</b> ${esc(v.response)}</div>`:''}
+    ${d.canRespond&&v.status!=='done'?`<button class="btn btn-ghost btn-sm sans" style="margin-top:6px" onclick="respondVoice(${v.id})">Respond &amp; close the loop</button>`:''}
+  </div>`).join('') : '<div class="hint">No staff voice yet — be the first to share what would make this better.</div>';
+}
+async function submitVoice(){
+  const text=$('voice_text')?$('voice_text').value.trim():''; if(!text){ if($('voice_msg'))$('voice_msg').textContent='Share something first.'; return; }
+  try{ await api('/voice',{method:'POST',body:JSON.stringify({text,anonymous:$('voice_anon')?$('voice_anon').checked:false})}); $('voice_text').value=''; if($('voice_anon'))$('voice_anon').checked=false; if($('voice_msg'))$('voice_msg').textContent='✓ Thank you — we read every one.'; setTimeout(()=>{if($('voice_msg'))$('voice_msg').textContent='';},2500); loadStaffVoice(); }
+  catch(e){ if($("voice_msg"))$('voice_msg').textContent=e.message; }
+}
+async function respondVoice(id){
+  const response=prompt('How are we responding / what did we do about it? (this is shown to the team)'); if(response===null) return;
+  try{ await api('/voice/'+id+'/respond',{method:'POST',body:JSON.stringify({response})}); loadStaffVoice(); if($('wpVoice')&&$('workplace')&&$('workplace').classList.contains('active')) loadWorkplace(); }catch(e){ alert(e.message); }
+}
+async function loadWorkplace(){
+  // staff pickers
+  try{ const {staff}=await api('/staff'); const opts='<option value="">— teammate —</option>'+staff.filter(s=>s.active!==0).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join(''); if($('wp_rec_to'))$('wp_rec_to').innerHTML=opts; if($('wp_growth_to'))$('wp_growth_to').innerHTML=opts; }catch(e){}
+  let d; try{ d=await api('/workplace'); }catch(e){ $('wpKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const moraleLabel = d.morale==null?'—':(d.morale>=80?'Strong':d.morale>=60?'Okay':d.morale>=40?'Stretched':'At risk');
+  $('wpKpis').innerHTML=`
+    <div class="ret-card ${d.morale!=null&&d.morale<60?'rc-high':''}"><div class="n">${d.morale==null?'—':d.morale}</div><div class="l">Morale ${d.morale!=null?'('+moraleLabel+')':''}</div></div>
+    <div class="ret-card"><div class="n">${d.recognitionsWeek}</div><div class="l">Recognitions this week</div></div>
+    <div class="ret-card ${d.callOffsWeek?'rc-warn':''}"><div class="n">${d.callOffsWeek}</div><div class="l">Call-offs this week</div></div>
+    <div class="ret-card ${d.openVoice?'rc-warn':''}"><div class="n">${d.openVoice}</div><div class="l">Open staff voice</div></div>
+    <div class="ret-card"><div class="n">${d.voiceClosedWeek}</div><div class="l">Loops closed this week</div></div>`;
+  $('wpMostRecognized').innerHTML = (d.mostRecognized||[]).length ? d.mostRecognized.map(r=>`<div class="pc-note">🏅 <strong>${esc(r.name)}</strong> <span class="hint">· ${r.n}×</span></div>`).join('') : '<div class="hint">No recognitions logged this week yet.</div>';
+  loadVoiceInto('wpVoice');
+  loadGrowth();
+}
+async function loadVoiceInto(elId){
+  const feed=$(elId); if(!feed) return;
+  let d; try{ d=await api('/voice'); }catch(e){ return; }
+  feed.innerHTML = d.rows.length ? d.rows.map(v=>`<div class="pc-note" style="border-left:3px solid ${v.status==='done'?'#3f8c5a':'#c8a44d'};display:flex;justify-content:space-between;gap:8px"><span><div>${esc(v.text)}</div><div class="hint">${esc(v.by_name||'')} · ${esc(v.at||'')}</div>${v.response?`<div style="margin-top:4px;font-style:italic;color:#555">✓ ${esc(v.response)}</div>`:''}</span>${v.status!=='done'?`<button class="btn btn-gold btn-sm sans" style="white-space:nowrap" onclick="respondVoice(${v.id})">Respond</button>`:''}</div>`).join('') : '<div class="hint">No staff voice yet.</div>';
+}
+async function leaderRecognize(){
+  const to=$('wp_rec_to')?$('wp_rec_to').value:''; const text=$('wp_rec_text')?$('wp_rec_text').value.trim():'';
+  if(!text){ alert('Say what they did.'); return; }
+  try{ await api('/kudos',{method:'POST',body:JSON.stringify({to_user_id:to||null,text:'🙌 '+text})}); $('wp_rec_text').value=''; loadWorkplace(); }catch(e){ alert(e.message); }
+}
+async function loadGrowth(){
+  const box=$('wpGrowthFeed'); if(!box) return;
+  let d; try{ d=await api('/growth'); }catch(e){ return; }
+  box.innerHTML = d.rows.length ? d.rows.map(g=>`<div class="pc-note"><strong>${esc(g.staff_name)}</strong>${g.goal?' <span class="hint">· goal: '+esc(g.goal)+'</span>':''}${g.note?'<div>'+esc(g.note)+'</div>':''}<div class="hint">${esc(g.by_name||'')} · ${esc(g.at||'')}</div></div>`).join('') : '<div class="hint">No growth check-ins yet.</div>';
+}
+async function addGrowth(){
+  const sel=$('wp_growth_to'); const staff_id=sel?sel.value:''; const goal=($('wp_growth_goal')||{}).value||''; const note=($('wp_growth_note')||{}).value||'';
+  if(!staff_id){ alert('Pick a teammate.'); return; }
+  try{ await api('/growth',{method:'POST',body:JSON.stringify({staff_id,staff_name:sel.options[sel.selectedIndex].text,goal,note})}); $('wp_growth_goal').value='';$('wp_growth_note').value=''; loadGrowth(); }catch(e){ alert(e.message); }
+}
+
 /* ---- team ---- */
 async function loadTeam(){
+  if($('workplaceLink')) $('workplaceLink').style.display = isLeadershipUser() ? '' : 'none';
+  loadStaffVoice();
   const [{value}, t, {staff}] = await Promise.all([api('/lineup'), api('/team'), api('/staff')]);
   $('teamValue').textContent = value;
   $('trainBtn').disabled = t.trainedToday; $('trainMsg').textContent = t.trainedToday ? `✓ reviewed · ${t.trainingCount} on the team today` : `${t.trainingCount} teammates reviewed today`;

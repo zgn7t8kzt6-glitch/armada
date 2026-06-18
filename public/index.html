@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616AJ" />
+<link rel="stylesheet" href="/styles.css?v=20260616AK" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -141,7 +141,7 @@
           <div><h3 style="margin:0">Today at Armada</h3><p class="sub sans" id="todayDate" style="margin:2px 0 0"></p></div>
           <button class="btn btn-gold sans" id="todayBriefBtn" onclick="todayBriefing()" style="margin-left:auto;display:none">✦ AI house briefing</button>
         </div>
-        <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="show('lineup')">Daily Lineup ↗</button></div>
+        <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="show('lineup')">Daily Lineup ↗</button><button class="btn btn-gold btn-sm sans" id="dashSendLineup" style="display:none" onclick="sendLineupEmail()">✉ Send the Lineup</button></div>
         <div id="todayBrief"></div>
       </div>
       <div class="card" id="focusCard" style="border-left:4px solid var(--gold);background:#faf6ee"></div>
@@ -1811,6 +1811,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616AJ"></script>
+<script src="/app.js?v=20260616AK"></script>
 </body>
 </html>

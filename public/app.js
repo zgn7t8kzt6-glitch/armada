@@ -2833,8 +2833,8 @@ async function sendLineupEmail(){
   const msg=$('lineupEmailMsg');
   if(!confirm("Send today's Lineup email to the team now?")) return;
   if(msg) msg.textContent='Sending…';
-  try{ const r=await api('/lineup/send',{method:'POST'}); if(msg) msg.textContent='✓ Sent to '+esc(r.to)+' (census '+r.census+').'; }
-  catch(e){ if(msg) msg.textContent=e.message; }
+  try{ const r=await api('/lineup/send',{method:'POST'}); const ok='✓ Sent to '+r.to+' (census '+r.census+').'; if(msg){ msg.textContent=ok; } else { alert(ok); } }
+  catch(e){ if(msg){ msg.textContent=e.message; } else { alert(e.message); } }
 }
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
@@ -3781,6 +3781,7 @@ function dashScrollTo(key){ const el=$('dash-'+key); if(!el) return; el.scrollIn
 let DASH_PREVIEW=null;
 function setDashPreview(role){ DASH_PREVIEW=role||null; loadDashboard(); }
 async function loadDashboard(){
+  if($('dashSendLineup')) $('dashSendLineup').style.display = canSendLineup() ? '' : 'none';
   const qs = DASH_PREVIEW ? '?as='+encodeURIComponent(DASH_PREVIEW) : '';
   let d; try{ d=await api('/dashboard'+qs); }catch(e){ $('dashSections').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
   $('dashGreeting').textContent = `${d.greeting} · ${d.jobRole}`;

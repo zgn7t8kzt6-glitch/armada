@@ -294,10 +294,16 @@ export async function sfSyncArrivals(db) {
   // custom field). Configurable so we don't fall back to CloseDate and show the
   // wrong day. CloseDate is always selected as a fallback.
   const adf = (scfg('admit_date_field', 'SF_ADMIT_DATE_FIELD') || 'Admission_Date__c').replace(/[^A-Za-z0-9_.]/g, '');
-  const adfSel = (adf && adf.toLowerCase() !== 'closedate') ? `, ${adf}` : '';
   const admitDateOf = (r) => (r[adf] || r.CloseDate || '');
+  // Build the SELECT column list deduped (case-insensitive) so the admit-date
+  // field can never collide with a base column and trigger a "duplicate column" 400.
+  const colList = (extra) => {
+    const out = []; const seen = new Set();
+    for (const c of [...extra, adf]) { const k = (c || '').toLowerCase(); if (c && !seen.has(k)) { seen.add(k); out.push(c); } }
+    return out.join(', ');
+  };
   const soql = process.env.SF_ARRIVALS_SOQL || `
-    SELECT Id, Name, StageName, CloseDate${adfSel}, CreatedDate
+    SELECT ${colList(['Id', 'Name', 'StageName', 'CloseDate', 'CreatedDate'])}
     FROM Opportunity
     WHERE IsClosed = false AND StageName IN (${stages})${facClause}
     ORDER BY CreatedDate DESC`;
@@ -306,7 +312,7 @@ export async function sfSyncArrivals(db) {
   // admit, so the open query above drops them — without this they vanish from the
   // board instead of showing as "arrived." (Network fetch happens before the txn.)
   const wonSoql = process.env.SF_ADMITTED_SOQL || `
-    SELECT Id, Name, StageName, CloseDate${adfSel}
+    SELECT ${colList(['Id', 'Name', 'StageName', 'CloseDate'])}
     FROM Opportunity
     WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${facClause}
     ORDER BY CloseDate DESC`;
@@ -449,18 +455,22 @@ export async function sfArrivalsDiagnose(nameQuery) {
   try {
     const fac = await facilityClause();
     const stages = (scfg('schedule_stages', 'SF_SCHEDULE_STAGES') || 'Admission Scheduled').split(',').map((s) => `'${s.trim().replace(/'/g, '')}'`).join(',');
+    const adf = (scfg('admit_date_field', 'SF_ADMIT_DATE_FIELD') || 'Admission_Date__c').replace(/[^A-Za-z0-9_.]/g, '');
+    const cols = (() => { const out = [], seen = new Set(); for (const c of ['Name', 'StageName', 'CloseDate', adf]) { const k = (c || '').toLowerCase(); if (c && !seen.has(k)) { seen.add(k); out.push(c); } } return out.join(', '); })();
+    const admitOf = (r) => (r[adf] || r.CloseDate || '').slice(0, 10) || '(blank)';
     out.appScope = {
       facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || 'Armada Detox of Akron',
       facilityField: fac.field || '(none found — pulling ALL locations)',
       scheduleStages: scfg('schedule_stages', 'SF_SCHEDULE_STAGES') || 'Admission Scheduled',
+      admitDateField: adf,
     };
     try {
-      const s = await sfQuery(`SELECT Name, StageName, CloseDate, Admission_Date__c FROM Opportunity WHERE IsClosed = false AND StageName IN (${stages})${fac.clause} ORDER BY Admission_Date__c ASC NULLS LAST LIMIT 30`);
-      out.appScheduled = (s.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', admit: (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || '(blank)' }));
+      const s = await sfQuery(`SELECT ${cols} FROM Opportunity WHERE IsClosed = false AND StageName IN (${stages})${fac.clause} ORDER BY CreatedDate DESC LIMIT 30`);
+      out.appScheduled = (s.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', admit: admitOf(r) }));
     } catch (e) { out.appScheduledError = e.message; }
     try {
-      const w = await sfQuery(`SELECT Name, StageName, CloseDate, Admission_Date__c FROM Opportunity WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${fac.clause} ORDER BY CloseDate DESC LIMIT 30`);
-      out.appAdmitted = (w.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', admit: (r.Admission_Date__c || r.CloseDate || '').slice(0, 10) || '(blank)' }));
+      const w = await sfQuery(`SELECT ${cols} FROM Opportunity WHERE IsWon = true AND CloseDate >= LAST_N_DAYS:7${fac.clause} ORDER BY CloseDate DESC LIMIT 30`);
+      out.appAdmitted = (w.records || []).map((r) => ({ name: r.Name || '', stage: r.StageName || '', admit: admitOf(r) }));
     } catch (e) { out.appAdmittedError = e.message; }
   } catch (e) { out.appScopeError = e.message; }
   const nq = (nameQuery || '').trim();

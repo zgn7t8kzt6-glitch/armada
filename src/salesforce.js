@@ -26,7 +26,7 @@ export function sfConfigured() {
   return Boolean(scfg('instance_url', 'SF_INSTANCE_URL') && scfg('client_id', 'SF_CLIENT_ID') && scfg('client_secret', 'SF_CLIENT_SECRET'));
 }
 export function sfStatus() {
-  return { configured: sfConfigured(), instanceUrl: scfg('instance_url', 'SF_INSTANCE_URL'), hasSecret: !!scfg('client_secret', 'SF_CLIENT_SECRET'), apiVersion: scfg('api_version', 'SF_API_VERSION') || 'v60.0',
+  return { configured: sfConfigured(), instanceUrl: scfg('instance_url', 'SF_INSTANCE_URL'), clientId: scfg('client_id', 'SF_CLIENT_ID'), hasSecret: !!scfg('client_secret', 'SF_CLIENT_SECRET'), apiVersion: scfg('api_version', 'SF_API_VERSION') || 'v60.0',
     facilityField: scfg('facility_field', 'SF_FACILITY_FIELD'), facilityValue: scfg('facility_value', 'SF_FACILITY_VALUE') || 'Armada Detox of Akron',
     facilityFieldAuto: getState('sf_facility_field_auto') || '',
     scheduleStages: scfg('schedule_stages', 'SF_SCHEDULE_STAGES') || 'Admission Scheduled',

@@ -832,6 +832,7 @@ async function testSms(){
 async function loadSfConfig(){
   try{ const c=await api('/salesforce/config');
     if($('sf_instance_url')) $('sf_instance_url').value=c.instanceUrl||'';
+    if($('sf_client_id')) $('sf_client_id').value=c.clientId||'';
     if($('sf_api_version')) $('sf_api_version').value=c.apiVersion||'v60.0';
     if($('sf_client_secret')) $('sf_client_secret').placeholder = c.hasSecret?'•••••• (saved)':'consumer secret';
     if($('sf_facility_field')) $('sf_facility_field').value=c.facilityField||'';

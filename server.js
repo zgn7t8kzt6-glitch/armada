@@ -3029,6 +3029,24 @@ const LINEUP_PEP = {
   },
 };
 function lineupDateLabel() { return new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' }).format(new Date()); }
+// Aggregate, no-PHI wins from the last 7 days (counts only — never names).
+function lineupWins() {
+  const wkStart = addDays(appToday(), -6);   // local date columns
+  const c7 = (sql, ...a) => db.prepare(sql).get(...a).n;
+  const admits = c7(`SELECT COUNT(*) n FROM flow_events WHERE kind='admit' AND date >= ?`, wkStart);
+  const moments = c7(`SELECT COUNT(*) n FROM wows WHERE created_at >= datetime('now','-7 day')`);
+  const recognized = c7(`SELECT COUNT(*) n FROM wows WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= datetime('now','-7 day')`);
+  let voices = c7(`SELECT COUNT(*) n FROM survey_responses WHERE created_at >= datetime('now','-7 day')`);
+  try { voices += c7(`SELECT COUNT(*) n FROM client_checkins WHERE created_at >= datetime('now','-7 day')`); } catch { /* table optional */ }
+  let mealsLoved = 0; try { mealsLoved = c7(`SELECT COUNT(*) n FROM meal_feedback WHERE liked = 1 AND meal_date >= ?`, wkStart); } catch { /* optional */ }
+  const lines = [];
+  if (admits) lines.push(`<b>${admits}</b> new ${admits === 1 ? 'guest' : 'guests'} welcomed`);
+  if (moments) lines.push(`<b>${moments}</b> ${moments === 1 ? 'moment' : 'moments'} of care logged`);
+  if (recognized) lines.push(`<b>${recognized}</b> teammate ${recognized === 1 ? 'shout-out' : 'shout-outs'}`);
+  if (voices) lines.push(`<b>${voices}</b> guest ${voices === 1 ? 'voice' : 'voices'} heard (surveys &amp; check-ins)`);
+  if (mealsLoved) lines.push(`<b>${mealsLoved}</b> meals our guests enjoyed`);
+  return lines;
+}
 function buildLineupEmail() {
   const focus = todaysFocus();
   const census = censusNow();
@@ -3037,6 +3055,13 @@ function buildLineupEmail() {
   const guests = `${census} ${census === 1 ? 'guest' : 'guests'}`;
   const people = census === 1 ? 'person' : 'people';
   const chances = census === 1 ? 'chance' : 'chances';
+  const wins = lineupWins();
+  const winsBlock = wins.length
+    ? `<div style="margin:18px 0;padding:12px 16px;background:#f4f8f4;border-left:3px solid #3f8c5a;border-radius:4px">
+        <div style="font-weight:bold;color:#2f6b44;margin-bottom:6px">🏆 This week's wins</div>
+        <ul style="margin:0;padding-left:20px">${wins.map((w) => `<li style="margin:2px 0">${w}</li>`).join('')}</ul>
+      </div>`
+    : '';
   const subject = `Armada Daily Lineup — ${dateLabel} · ${focus.t}`;
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:620px;line-height:1.55">
     <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#c8a44d;font-weight:bold">Armada Daily Lineup</div>
@@ -3048,6 +3073,7 @@ function buildLineupEmail() {
     <p>${pep.hook}</p>
     <p><b>What would Horst do?</b> ${pep.horst}</p>
     <p style="background:#faf6ee;border-left:3px solid #c8a44d;padding:12px 16px;margin:14px 0"><b>Your one move today:</b> ${pep.move}</p>
+    ${winsBlock}
     <p>You are the difference between a facility and a <i>home</i> for these ${guests} today. Thank you for showing up and being exactly that.</p>
     <p>Let's have a great day. 💙</p>
     <p style="color:#999;font-size:12px;margin-top:20px">Sent from the Armada Daily Lineup. No client information is included in this message.</p>

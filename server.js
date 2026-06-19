@@ -5539,13 +5539,17 @@ app.post('/api/kudos/extract', requireAuth, requireAdmin, async (req, res) => {
   try { const r = await extractKudos(text); res.json(r); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
-// Save reviewed recognitions as kudos (links to a teammate by name when it matches).
+// Save reviewed recognitions as kudos + extra-mile moments. Kudos link to a
+// teammate by name when it matches; moments go to the team-wide Extra Mile wall.
 app.post('/api/kudos/bulk', requireAuth, requireAdmin, (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
-  if (!items.length) return res.status(400).json({ error: 'No recognitions to save.' });
+  const moments = Array.isArray(req.body?.moments) ? req.body.moments : [];
+  if (!items.length && !moments.length) return res.status(400).json({ error: 'Nothing to save.' });
   const findUser = db.prepare(`SELECT id, name FROM users WHERE active = 1 AND (lower(name) = lower(?) OR lower(name) LIKE lower(?)) LIMIT 1`);
   const insK = db.prepare(`INSERT INTO kudos (to_user_id, to_name, from_id, from_name, text) VALUES (?,?,?,?,?)`);
-  let saved = 0;
+  const insE = db.prepare(`INSERT INTO extra_mile (person, story, value_text, by_name, source) VALUES (?,?,?,?, 'lineup')`);
+  const value = effectiveValue();
+  let saved = 0, wall = 0;
   for (const it of items) {
     const to = String(it.to || '').trim(); if (!to) continue;
     const reason = String(it.reason || '').trim();
@@ -5554,7 +5558,24 @@ app.post('/api/kudos/bulk', requireAuth, requireAdmin, (req, res) => {
     insK.run(u?.id || null, u?.name || to.slice(0, 80), null, from.slice(0, 80) || req.user.name, ('🙌 ' + (reason || 'Recognized on the daily lineup')).slice(0, 500));
     saved++;
   }
-  res.json({ ok: true, saved });
+  for (const m of moments) {
+    const person = String(m.person || '').trim(); const story = String(m.story || '').trim();
+    if (!person || !story) continue;
+    insE.run(person.slice(0, 80), story.slice(0, 500), value || null, String(m.by || '').trim().slice(0, 80) || person.slice(0, 80));
+    wall++;
+  }
+  res.json({ ok: true, saved, wall });
+});
+// Extra Mile wall — the whole team sees how teammates lived the value (morale).
+app.get('/api/extra-mile', requireAuth, (req, res) => {
+  res.json({ rows: db.prepare(`SELECT id, person, story, value_text, by_name, substr(created_at,1,16) at FROM extra_mile ORDER BY id DESC LIMIT 40`).all() });
+});
+app.post('/api/extra-mile', requireAuth, (req, res) => {
+  const person = (req.body?.person || '').trim(); const story = (req.body?.story || '').trim();
+  if (!person || !story) return res.status(400).json({ error: 'Who, and what they did?' });
+  db.prepare(`INSERT INTO extra_mile (person, story, value_text, by_name, source) VALUES (?,?,?,?, 'manual')`)
+    .run(person.slice(0, 80), story.slice(0, 500), effectiveValue() || null, req.user.name);
+  res.json({ ok: true });
 });
 app.post('/api/training-ack', requireAuth, (req, res) => {
   const today = appToday();

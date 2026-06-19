@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616BT" />
+<link rel="stylesheet" href="/styles.css?v=20260616BU" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1339,6 +1339,13 @@
         <div id="teamValue" class="line-value"></div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-primary btn-sm sans" id="trainBtn" onclick="ackTraining()">✓ I reviewed today's value</button><span id="trainMsg" class="hint" style="align-self:center"></span></div>
       </div>
+      <div class="card" style="border-left:4px solid #c8a44d">
+        <h3>✨ Extra Mile — living our value</h3>
+        <p class="sub sans" style="margin:0 0 8px">How teammates went above and beyond. Saw someone make a resident's day? Add it — the whole team sees it.</p>
+        <div class="handoff-add"><input id="em_person" class="sans" style="max-width:140px" placeholder="Who"/><input id="em_story" class="sans" style="flex:1" placeholder="What they did (no resident names)"/><button class="btn btn-gold sans" onclick="addExtraMile()">Add</button></div>
+        <span class="hint" id="em_msg"></span>
+        <div id="extraMileFeed" style="margin-top:10px"></div>
+      </div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
         <div class="card" style="flex:2;min-width:300px">
           <h3>Kudos — recognize a teammate</h3>
@@ -1915,6 +1922,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616BT"></script>
+<script src="/app.js?v=20260616BU"></script>
 </body>
 </html>

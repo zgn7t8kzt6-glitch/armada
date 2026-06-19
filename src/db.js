@@ -244,6 +244,17 @@ CREATE TABLE IF NOT EXISTS growth_checkins (
   by_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Extra Mile wall: how teammates lived the day's value / went above and beyond.
+-- A team-wide morale feed (everyone sees it), fed from daily-lineup replies.
+CREATE TABLE IF NOT EXISTS extra_mile (
+  id INTEGER PRIMARY KEY,
+  person TEXT NOT NULL,                     -- who went the extra mile
+  story TEXT NOT NULL,                      -- what they did (no client-identifying details)
+  value_text TEXT,                          -- the day's service value, when known
+  by_name TEXT,                             -- who reported it (self or a teammate)
+  source TEXT DEFAULT 'lineup',             -- lineup | manual
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
 CREATE TABLE IF NOT EXISTS staff_pulses (
@@ -1304,6 +1315,19 @@ if (getState('lineup_kudos_2026_06_18') !== 'done') {
     insK.run(u?.id || null, u?.name || to, null, from, '🙌 ' + reason);
   }
   setState('lineup_kudos_2026_06_18', 'done');
+}
+// One-time: the extra-mile / lived-the-value moments from the same June 18 replies
+// (self-reported wins, not peer shout-outs) → the team morale wall. SEPARATE flag
+// from the kudos seed above, which already deployed — otherwise this would never run.
+if (getState('lineup_extra_mile_2026_06_18') !== 'done') {
+  const insE = db.prepare(`INSERT INTO extra_mile (person, story, by_name, source) VALUES (?,?,?, 'lineup')`);
+  const mile = [
+    ['Jasmine Hodous', 'Stayed calm with a resident in crisis when their medication was unavailable — used de-escalation, active listening and reassurance, and kept them safe through the night.'],
+    ['Tracy Foss', 'Went with a resident to dose, and when they missed lunch made sure a meal was saved for them.'],
+    ['Suzanne Parsons', 'During an assessment, offered a resident an ice cream sandwich so they felt cared for — a small touch that made their day.'],
+  ];
+  for (const [person, story] of mile) insE.run(person, story, person);
+  setState('lineup_extra_mile_2026_06_18', 'done');
 }
 // Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
 db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (

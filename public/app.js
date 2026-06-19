@@ -4296,27 +4296,52 @@ async function extractKudos(){
   if(!text){ if(msg)msg.textContent='Paste the replies first.'; return; }
   if(msg)msg.textContent='Reading…';
   let d; try{ d=await api('/kudos/extract',{method:'POST',body:JSON.stringify({text})}); }catch(e){ if(msg)msg.textContent=e.message; return; }
-  const items=d.items||[];
-  if(msg)msg.textContent = items.length?`Found ${items.length} — review, edit, then create:`:'No shout-outs found in that text.';
-  $('kx_preview').innerHTML = items.map((it,i)=>`<div class="pc-note kx-row" data-i="${i}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+  const items=d.items||[], moments=d.moments||[];
+  if(msg)msg.textContent = (items.length||moments.length)?`Found ${items.length} shout-out(s) + ${moments.length} extra-mile moment(s) — review, edit, then create:`:'Nothing found in that text.';
+  const kudosHtml = items.length ? `<div class="cmd-sub">🙌 Shout-outs → Kudos</div>`+items.map((it,i)=>`<div class="pc-note kx-row" data-i="${i}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
     <input class="kx-on" type="checkbox" checked title="Include"/>
     <input class="kx-to sans" style="width:120px" value="${esc(it.to||'')}" placeholder="to"/>
     <input class="kx-from sans" style="width:120px" value="${esc(it.from||'')}" placeholder="from"/>
     <input class="kx-reason sans" style="flex:1;min-width:180px" value="${esc(it.reason||'')}" placeholder="what they did"/>
-  </div>`).join('') + (items.length?`<div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="saveExtractedKudos()">Create kudos</button></div>`:'');
+  </div>`).join('') : '';
+  const momHtml = moments.length ? `<div class="cmd-sub">✨ Extra-mile moments → Extra Mile wall</div>`+moments.map((m,i)=>`<div class="pc-note km-row" data-i="${i}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <input class="km-on" type="checkbox" checked title="Include"/>
+    <input class="km-person sans" style="width:120px" value="${esc(m.person||'')}" placeholder="who"/>
+    <input class="km-by sans" style="width:120px" value="${esc(m.by||'')}" placeholder="noted by"/>
+    <input class="km-story sans" style="flex:1;min-width:180px" value="${esc(m.story||'')}" placeholder="what they did"/>
+  </div>`).join('') : '';
+  $('kx_preview').innerHTML = kudosHtml + momHtml + ((items.length||moments.length)?`<div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="saveExtractedKudos()">Create</button></div>`:'');
 }
 async function saveExtractedKudos(){
-  const rows=[...document.querySelectorAll('#kx_preview .kx-row')].filter(r=>r.querySelector('.kx-on').checked)
+  const items=[...document.querySelectorAll('#kx_preview .kx-row')].filter(r=>r.querySelector('.kx-on').checked)
     .map(r=>({to:r.querySelector('.kx-to').value.trim(),from:r.querySelector('.kx-from').value.trim(),reason:r.querySelector('.kx-reason').value.trim()})).filter(x=>x.to);
-  if(!rows.length){ if($('kx_msg'))$('kx_msg').textContent='Tick at least one (with a name).'; return; }
-  try{ const r=await api('/kudos/bulk',{method:'POST',body:JSON.stringify({items:rows})}); if($('kx_msg'))$('kx_msg').textContent=`✓ Created ${r.saved} kudos.`; $('kx_text').value=''; $('kx_preview').innerHTML=''; loadWorkplace(); }
+  const moments=[...document.querySelectorAll('#kx_preview .km-row')].filter(r=>r.querySelector('.km-on').checked)
+    .map(r=>({person:r.querySelector('.km-person').value.trim(),by:r.querySelector('.km-by').value.trim(),story:r.querySelector('.km-story').value.trim()})).filter(x=>x.person&&x.story);
+  if(!items.length&&!moments.length){ if($('kx_msg'))$('kx_msg').textContent='Tick at least one.'; return; }
+  try{ const r=await api('/kudos/bulk',{method:'POST',body:JSON.stringify({items,moments})}); if($('kx_msg'))$('kx_msg').textContent=`✓ ${r.saved} kudos + ${r.wall} on the Extra Mile wall.`; $('kx_text').value=''; $('kx_preview').innerHTML=''; loadWorkplace(); }
   catch(e){ if($('kx_msg'))$('kx_msg').textContent=e.message; }
+}
+
+async function loadExtraMile(){
+  const box=$('extraMileFeed'); if(!box) return;
+  let d; try{ d=await api('/extra-mile'); }catch(e){ return; }
+  box.innerHTML = (d.rows&&d.rows.length) ? d.rows.map(m=>`<div class="pc-note" style="border-left:3px solid #c8a44d">
+    <div>✨ <strong>${esc(m.person)}</strong> — ${esc(m.story)}</div>
+    <div class="hint" style="margin-top:2px">${m.by_name&&m.by_name!==m.person?'noted by '+esc(m.by_name)+' · ':''}${esc(m.at||'')}${m.value_text?' · '+esc(m.value_text):''}</div>
+  </div>`).join('') : '<div class="hint">No moments yet today — be the first to celebrate a teammate.</div>';
+}
+async function addExtraMile(){
+  const person=$('em_person')?$('em_person').value.trim():''; const story=$('em_story')?$('em_story').value.trim():'';
+  if(!person||!story){ if($('em_msg'))$('em_msg').textContent='Add who and what they did.'; return; }
+  try{ await api('/extra-mile',{method:'POST',body:JSON.stringify({person,story})}); $('em_person').value='';$('em_story').value=''; if($('em_msg'))$('em_msg').textContent='✓ Added'; setTimeout(()=>{if($('em_msg'))$('em_msg').textContent='';},2000); loadExtraMile(); }
+  catch(e){ if($('em_msg'))$('em_msg').textContent=e.message; }
 }
 
 /* ---- team ---- */
 async function loadTeam(){
   if($('workplaceLink')) $('workplaceLink').style.display = isLeadershipUser() ? '' : 'none';
   loadStaffVoice();
+  loadExtraMile();
   const [{value}, t, {staff}] = await Promise.all([api('/lineup'), api('/team'), api('/staff')]);
   $('teamValue').textContent = value;
   $('trainBtn').disabled = t.trainedToday; $('trainMsg').textContent = t.trainedToday ? `✓ reviewed · ${t.trainingCount} on the team today` : `${t.trainingCount} teammates reviewed today`;

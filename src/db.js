@@ -1329,6 +1329,11 @@ if (getState('lineup_extra_mile_2026_06_18') !== 'done') {
   for (const [person, story] of mile) insE.run(person, story, person);
   setState('lineup_extra_mile_2026_06_18', 'done');
 }
+// One-time: send concierge request alerts to Shlomo's email (per request).
+if (getState('concierge_email_seed_v1') !== 'done') {
+  setState('concierge_email', 'shlomo@armadarecovery.com');
+  setState('concierge_email_seed_v1', 'done');
+}
 // One-time: feature Jasmine as the current recognition-raffle winner on the
 // lineup (per leadership). Auto-clears after a week; editable from the raffle UI.
 if (getState('raffle_winner_seed_v1') !== 'done') {

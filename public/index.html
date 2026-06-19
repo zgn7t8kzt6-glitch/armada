@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616CA" />
+<link rel="stylesheet" href="/styles.css?v=20260616CB" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -123,7 +123,8 @@
     <header class="topbar sans">
       <button class="hamb" onclick="toggleNav()" aria-label="Menu">☰</button>
       <div class="topbar-title" id="topbarTitle">Today</div>
-      <button class="iconbtn" onclick="show('askai')" title="Ask AI" style="margin-left:auto">✦ Ask AI</button>
+      <button class="iconbtn" id="reqBell" onclick="show('concierge')" title="Concierge requests — tap to view" style="margin-left:auto;display:none">🔔<span id="reqBadge" class="badge-danger" style="display:none"></span></button>
+      <button class="iconbtn" onclick="show('askai')" title="Ask AI" style="margin-left:8px">✦ Ask AI</button>
     </header>
   <main>
     <!-- MY SHIFT — role-tailored employee dashboard -->
@@ -1933,6 +1934,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616CA"></script>
+<script src="/app.js?v=20260616CB"></script>
 </body>
 </html>

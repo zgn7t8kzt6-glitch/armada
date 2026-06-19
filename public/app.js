@@ -122,7 +122,10 @@ async function boot(){
   show(landing);
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
   if(isLeadershipUser()){ pollWpBadge(); setInterval(pollWpBadge, 60000); }   // Best Place to Work attention badge
+  if(canSeeView('concierge')){ if($('reqBell'))$('reqBell').style.display=''; pollReqBadge(); setInterval(pollReqBadge, 45000); }   // concierge request bell
 }
+function updateReqBadge(n){ const b=$('reqBadge'); if(!b) return; if(n>0){ b.textContent=n; b.style.display=''; } else { b.textContent=''; b.style.display='none'; } }
+async function pollReqBadge(){ try{ const {open}=await api('/requests/count'); updateReqBadge(open); }catch(e){} }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
 // Build a deep link to a patient's Kipu chart from the configured URL pattern.
 // Tokens: {id} full kipu_id, {master} numeric master id, {casefile} UUID.
@@ -3124,30 +3127,42 @@ function fillClientSelect(el, withBlank){
     el.innerHTML = (withBlank?'<option value="">'+withBlank+'</option>':'') + clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('');
   }).catch(()=>{});
 }
+let REQ_STAFF=null;
+function reqMins(a,b){ if(!a||!b) return null; const t1=new Date(String(a).replace(' ','T')+'Z'), t2=new Date(String(b).replace(' ','T')+'Z'); const m=Math.round((t2-t1)/60000); return m>=0?m:null; }
+function reqDur(m){ if(m==null) return ''; return m<60?m+'m':Math.floor(m/60)+'h '+(m%60)+'m'; }
+function reqTiming(r){
+  const now=new Date().toISOString().slice(0,19).replace('T',' ');
+  if(r.status==='Done'){ const resp=reqMins(r.created_at,r.acknowledged_at), tot=reqMins(r.created_at,r.done_at); return `<span class="hint">✓ done in ${reqDur(tot)}${resp!=null?' · responded in '+reqDur(resp):''}</span>`; }
+  if(r.acknowledged_at){ const resp=reqMins(r.created_at,r.acknowledged_at); const openFor=reqMins(r.acknowledged_at,now); return `<span class="hint">responded in ${reqDur(resp)} · in progress ${reqDur(openFor)}</span>`; }
+  const waiting=reqMins(r.created_at,now); const warn=waiting!=null&&waiting>=15; return `<span class="hint" style="${warn?'color:var(--danger);font-weight:600':''}">⏱ waiting ${reqDur(waiting)}${warn?' — needs a response':''}</span>`;
+}
 async function loadConcierge(){
   if(META.kioskCode && $('kioskCodeHint2')) $('kioskCodeHint2').innerHTML = 'Kiosk code: <strong>'+esc(META.kioskCode)+'</strong> — staff enter this to begin (change it in Settings → Kiosk &amp; display code).';
   await fillClientSelect($('rq_client'), 'Whole house / no client');
+  if(!REQ_STAFF){ try{ const {staff}=await api('/staff'); REQ_STAFF=staff; }catch(e){ REQ_STAFF=[]; } }
   if($('rq_dept').options.length===0){ $('rq_dept').innerHTML=(META.departments||[]).map(d=>`<option>${esc(d)}</option>`).join(''); $('rq_filter_dept').innerHTML='<option value="">All departments</option>'+(META.departments||[]).map(d=>`<option>${esc(d)}</option>`).join(''); }
   const dept=$('rq_filter_dept').value, status=$('rq_filter_status').value;
   const qs = new URLSearchParams(); if(dept) qs.set('department',dept); if(status) qs.set('status',status);
   const { requests } = await api('/requests?'+qs.toString());
-  // group by department
+  const opts=(sel)=>'<option value="">Assign…</option>'+REQ_STAFF.map(u=>`<option value="${u.id}"${+sel===u.id?' selected':''}>${esc(u.name)}</option>`).join('');
   const byDept = {}; requests.forEach(r=>{ (byDept[r.department]=byDept[r.department]||[]).push(r); });
   const board = Object.keys(byDept).sort().map(dep=>`<div class="card"><h3>${esc(dep)} <span class="hint">(${byDept[dep].length})</span></h3>
     ${byDept[dep].map(r=>`<div class="todo ${r.status==='Done'?'done':''}">
       <div class="txt"><span class="pr ${r.priority==='High'?'high':'normal'}">${r.status==='Done'?'DONE':r.status==='In progress'?'IN PROGRESS':esc(r.priority)}</span>
-        ${r.pref?'<strong>'+esc(r.pref)+'</strong> — ':''}${esc(r.text)} <span class="hint">· ${esc(r.created_by_name||'')}</span></div>
-      ${r.status!=='Done'?`<button class="btn btn-ghost btn-sm sans" onclick="setRequestStatus(${r.id},'In progress')">Start</button>
+        ${r.pref?'<strong>'+esc(r.pref)+'</strong> — ':''}${esc(r.text)} <span class="hint">· ${esc(r.created_by_name||'')}</span>
+        <div style="margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${reqTiming(r)}${r.assigned_name?'<span class="hint">· 👤 '+esc(r.assigned_name)+'</span>':''}</div></div>
+      ${r.status!=='Done'?`<select class="sans" style="max-width:130px" onchange="assignRequest(${r.id},this.value)">${opts(r.assigned_to)}</select>
         <button class="btn btn-ghost btn-sm sans" onclick="setRequestStatus(${r.id},'Done')">Done</button>`:''}
     </div>`).join('')}</div>`).join('');
   $('rqBoard').innerHTML = board || '<div class="empty">No requests. Anticipate a wish and log it.</div>';
 }
+async function assignRequest(id,uid){ try{ await api('/requests/'+id+'/assign',{method:'POST',body:JSON.stringify({user_id:uid||null})}); loadConcierge(); pollReqBadge(); }catch(e){ alert(e.message); } }
 async function addRequest(){
   const text=$('rq_text').value.trim(); if(!text) return;
   await api('/requests',{method:'POST',body:JSON.stringify({client_id:$('rq_client').value||null,department:$('rq_dept').value,text,priority:$('rq_pri').value})});
-  $('rq_text').value=''; loadConcierge();
+  $('rq_text').value=''; loadConcierge(); if(typeof pollReqBadge==='function') pollReqBadge();
 }
-async function setRequestStatus(id,status){ await api('/requests/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadConcierge(); }
+async function setRequestStatus(id,status){ await api('/requests/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadConcierge(); if(typeof pollReqBadge==='function') pollReqBadge(); }
 
 /* ---- program / schedule ---- */
 async function loadProgram(){

@@ -1508,6 +1508,11 @@ addColumn('scan_points', 'active_to', 'INTEGER');
 addColumn('round_scans', 'flagged', 'INTEGER');       // replay/burst flag (existing deploys)
 addColumn('round_scans', 'flag_reason', 'TEXT');
 addColumn('round_scans', 'photo', 'TEXT');            // camera frame at scan time (paper vs phone-screen review)
+// Concierge requests: assignment + response-time tracking.
+addColumn('requests', 'assigned_to', 'INTEGER');
+addColumn('requests', 'assigned_name', 'TEXT');
+addColumn('requests', 'acknowledged_at', 'TEXT');     // first time someone picked it up (time-to-response)
+addColumn('requests', 'acknowledged_by', 'TEXT');
 
 // ---- Medical send-outs: ED/hospital trips (the "OTHER" section of the census).
 // A client physically sent out for medical care — still on our census until

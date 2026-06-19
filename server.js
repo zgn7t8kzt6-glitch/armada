@@ -3559,19 +3559,51 @@ app.get('/api/requests', requireAuth, (req, res) => {
   sql += ` ORDER BY (r.status = 'Done'), (r.priority = 'High') DESC, r.id DESC LIMIT 200`;
   res.json({ requests: db.prepare(sql).all(...args) });
 });
-app.post('/api/requests', requireAuth, (req, res) => {
+app.get('/api/requests/count', requireAuth, (req, res) => res.json({ open: db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`).get().n }));
+function conciergeEmailTo() { return (getState('concierge_email') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '').trim(); }
+app.post('/api/requests', requireAuth, async (req, res) => {
   const { client_id, department, text, priority } = req.body || {};
   if (!department || !text?.trim()) return res.status(400).json({ error: 'Missing department or text' });
-  db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(client_id || null, department, text.trim(), priority === 'High' ? 'High' : 'Normal', req.user.id, req.user.name);
-  if (priority === 'High') createAlert(client_id || null, 'request', 'High', `High-priority request — ${department}: ${text.trim().slice(0, 80)}`);
+  const hi = priority === 'High';
+  const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(client_id || null, department, text.trim(), hi ? 'High' : 'Normal', req.user.id, req.user.name);
+  // Every request is an alert now (not just High) so it can be picked up right away.
+  const c = client_id ? db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(client_id) : null;
+  const who = c ? `${c.pref || (c.name || '').split(/\s+/)[0] || 'a client'}${c.room ? ' · Room ' + c.room : ''}` : 'House';
+  createAlert(client_id || null, 'request', hi ? 'High' : 'Elevated', `${hi ? 'High-priority request' : 'Concierge request'} — ${department}: ${text.trim().slice(0, 90)} (${who})`);
   audit({ user: req.user, action: 'REQUEST', entity: 'client', entity_id: client_id ? +client_id : null, detail: department, ip: req.ip });
+  res.json({ ok: true, id: info.lastInsertRowid });
+  // Email leadership/concierge so nothing waits for someone to open the app.
+  const to = conciergeEmailTo();
+  if (to && emailConfigured()) {
+    const subject = `${hi ? '🔴 High-priority' : 'New'} concierge request — ${department}`;
+    const html = `<div style="font-family:Georgia,serif"><h3>${hi ? '🔴 High-priority ' : ''}Concierge request</h3>
+      <p><b>${htmlEsc(department)}</b>${hi ? ' · <b style="color:#b00">High priority</b>' : ''}</p>
+      <p style="font-size:15px">${htmlEsc(text.trim())}</p>
+      <p style="color:#555">For: ${htmlEsc(who)} · logged by ${htmlEsc(req.user.name)}</p>
+      <p style="color:#888;font-size:12px">Open Armada → Concierge to assign it and start the clock.</p></div>`;
+    sendEmail({ to, subject, html, suppressCc: true }).catch((e) => console.error('[concierge email]', e.message));
+  }
+});
+app.post('/api/requests/:id/assign', requireAuth, (req, res) => {
+  const u = req.body?.user_id ? db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(+req.body.user_id) : null;
+  // Assigning is the first response — start the clock if it hasn't started.
+  db.prepare(`UPDATE requests SET assigned_to = ?, assigned_name = ?,
+      status = CASE WHEN status = 'Open' THEN 'In progress' ELSE status END,
+      acknowledged_at = COALESCE(acknowledged_at, datetime('now')),
+      acknowledged_by = COALESCE(acknowledged_by, ?) WHERE id = ?`)
+    .run(u?.id || null, u?.name || null, u?.name || req.user.name, req.params.id);
   res.json({ ok: true });
 });
 app.post('/api/requests/:id/status', requireAuth, (req, res) => {
   const st = ['Open', 'In progress', 'Done'].includes(req.body?.status) ? req.body.status : 'Done';
-  db.prepare(`UPDATE requests SET status = ?, done_by = CASE WHEN ? = 'Done' THEN ? ELSE done_by END, done_at = CASE WHEN ? = 'Done' THEN datetime('now') ELSE done_at END WHERE id = ?`)
-    .run(st, st, req.user.id, st, req.params.id);
+  // First move off 'Open' records the time-to-response.
+  db.prepare(`UPDATE requests SET status = ?,
+      acknowledged_at = CASE WHEN ? != 'Open' THEN COALESCE(acknowledged_at, datetime('now')) ELSE acknowledged_at END,
+      acknowledged_by = CASE WHEN ? != 'Open' THEN COALESCE(acknowledged_by, ?) ELSE acknowledged_by END,
+      done_by = CASE WHEN ? = 'Done' THEN ? ELSE done_by END,
+      done_at = CASE WHEN ? = 'Done' THEN datetime('now') ELSE done_at END WHERE id = ?`)
+    .run(st, st, st, req.user.name, st, req.user.id, st, req.params.id);
   res.json({ ok: true });
 });
 

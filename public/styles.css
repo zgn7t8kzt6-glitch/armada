@@ -138,6 +138,32 @@ main{max-width:1160px;margin:0;padding:34px 40px 100px;width:100%}
   .topbar{padding:12px 18px;background:var(--cream);backdrop-filter:none;-webkit-backdrop-filter:none}
   .card{padding:22px 20px}
 }
+/* ── Phones: denser, tap-friendly, no sideways blow-out ─────────────────── */
+@media(max-width:640px){
+  /* 16px keeps iOS from zooming the page when a field is focused */
+  input,select,textarea{font-size:16px}
+  main{padding:16px 13px 84px;overflow-x:hidden}
+  .card{padding:18px 15px;border-radius:14px;margin-bottom:14px}
+  .card h3{font-size:15px}
+  .topbar{padding:10px 14px}
+  .topbar-title{font-size:19px}
+  .sub{font-size:13px}
+  /* KPI tiles two-up so they're scannable, not one giant column */
+  .ret-cards{gap:10px}
+  .ret-card{flex:1 1 calc(50% - 6px);min-width:0;padding:15px 10px 13px}
+  .ret-card .n{font-size:29px}
+  .ret-card .l{font-size:9.5px;letter-spacing:.5px}
+  /* action rows + toolbars wrap instead of crushing the input */
+  .handoff-add,.toolbar,.cmd-hero-row,.cmd-hero-actions,.controls{flex-wrap:wrap}
+  .handoff-add input,.handoff-add select{flex:1 1 100%}
+  /* comfortable touch targets */
+  .btn{min-height:42px}
+  .btn-sm{min-height:0;padding:8px 12px}
+  /* wide tables scroll on their own instead of stretching the page */
+  .tbl{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* side-by-side card rows stack full-width (overrides inline min-widths) */
+  .row>*{min-width:0!important;flex-basis:100%!important}
+}
 .view{display:none}.view.active{display:block;animation:fadeIn .2s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:26px 30px;margin-bottom:20px;transition:box-shadow .2s ease,border-color .2s ease}

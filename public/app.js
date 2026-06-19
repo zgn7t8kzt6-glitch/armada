@@ -3173,8 +3173,13 @@ async function loadConciergeStats(){
 }
 async function addRequest(){
   const text=$('rq_text').value.trim(); if(!text) return;
-  await api('/requests',{method:'POST',body:JSON.stringify({client_id:$('rq_client').value||null,department:$('rq_dept').value,text,priority:$('rq_pri').value})});
-  $('rq_text').value=''; loadConcierge(); if(typeof pollReqBadge==='function') pollReqBadge();
+  const msg=$('rq_msg'); if(msg) msg.textContent='Logging…';
+  try{
+    const r=await api('/requests',{method:'POST',body:JSON.stringify({client_id:$('rq_client').value||null,department:$('rq_dept').value,text,priority:$('rq_pri').value})});
+    $('rq_text').value=''; loadConcierge(); if(typeof pollReqBadge==='function') pollReqBadge();
+    if(msg) msg.innerHTML = r.emailed ? ('✓ Logged · team alerted · emailed <b>'+esc(r.to||'concierge')+'</b>')
+      : ('✓ Logged · team alerted'+(r.emailReason?(' · <span style="color:var(--danger)">email not sent: '+esc(r.emailReason)+'</span>'):''));
+  }catch(e){ if(msg) msg.textContent=e.message; }
 }
 async function setRequestStatus(id,status){ await api('/requests/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadConcierge(); if(typeof pollReqBadge==='function') pollReqBadge(); }
 

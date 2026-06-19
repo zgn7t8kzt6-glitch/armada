@@ -3100,6 +3100,24 @@ function effectiveValue() {
   const c = LINEUP_CURRICULUM[curriculumIndex()];
   return SERVICE_VALUES[c.v] || SERVICE_VALUES[0];
 }
+// Everything recognized since yesterday morning → featured by name on this
+// morning's 8am lineup (peer shout-outs + extra-mile moments captured by midnight).
+function lineupRecognition() {
+  const since = dayBoundsUtc(addDays(appToday(), -1)).start;
+  const kudos = db.prepare(`SELECT to_name, from_name, text FROM kudos WHERE created_at >= ? AND to_name IS NOT NULL AND to_name != '' ORDER BY id DESC LIMIT 12`).all(since);
+  const moments = db.prepare(`SELECT person, story FROM extra_mile WHERE created_at >= ? ORDER BY id DESC LIMIT 8`).all(since);
+  if (!kudos.length && !moments.length) return '';
+  const clean = (s) => htmlEsc(String(s || '').replace(/^🙌\s*/, ''));
+  const li = (name, what, who) => `<li style="margin:3px 0"><b>${htmlEsc(name)}</b> — ${clean(what)}${who ? ` <span style="color:#999">— ${htmlEsc(who)}</span>` : ''}</li>`;
+  const lines = [
+    ...kudos.map((k) => li(k.to_name, k.text, k.from_name)),
+    ...moments.map((m) => li(m.person, m.story, '')),
+  ].join('');
+  return `<div style="margin:16px 0;padding:12px 16px;background:#f4f8f4;border-left:3px solid #3f8c5a;border-radius:4px">
+      <div style="font-weight:bold;color:#2f6b44;margin-bottom:4px">🌟 Caught being great yesterday</div>
+      <ul style="margin:0;padding-left:20px">${lines}</ul>
+    </div>`;
+}
 function buildLineupEmail() {
   const focus = effectiveFocus();
   const census = censusNow();
@@ -3111,48 +3129,32 @@ function buildLineupEmail() {
   const clients = `${census} ${census === 1 ? 'client' : 'clients'}`;
   const people = census === 1 ? 'person' : 'people';
   const chances = census === 1 ? 'chance' : 'chances';
-  const wins = lineupWins();
-  const winsBlock = wins.length
-    ? `<div style="margin:18px 0;padding:12px 16px;background:#f4f8f4;border-left:3px solid #3f8c5a;border-radius:4px">
-        <div style="font-weight:bold;color:#2f6b44">🏆 This week's wins</div>
-        <div style="font-size:13px;color:#666;margin-bottom:6px">What the team did over the last 7 days:</div>
-        <ul style="margin:0;padding-left:20px">${wins.map((w) => `<li style="margin:2px 0">${w}</li>`).join('')}</ul>
-      </div>`
-    : '';
-  const rewardLine = reward ? `<br><br>🎁 <b>Every teammate you recognize is an entry to win ${htmlEsc(reward)} — we'll raffle it off this week.</b>` : '';
-  // While the app is rolling out, ask the team to REPLY to this email; once it's
-  // live for everyone, point them to Wow Stories in the app.
-  const recognitionBlock = live
-    ? `<div style="margin:16px 0;padding:12px 16px;background:#f3eefc;border-left:3px solid #7a5cc0;border-radius:4px">
-        <div style="font-weight:bold;color:#5b3fa0;margin-bottom:4px">✨ Today's challenge: lift a teammate</div>
-        <p style="margin:0">Catch a coworker doing something great today — say it to their face <i>and</i> log it in the app under <b>Lineup → Wow Stories</b>. The teams that win are the ones that notice each other.${rewardLine}</p>
-      </div>`
-    : `<div style="margin:16px 0;padding:12px 16px;background:#f3eefc;border-left:3px solid #7a5cc0;border-radius:4px">
-        <div style="font-weight:bold;color:#5b3fa0;margin-bottom:4px">✨ Today's challenge — just hit reply</div>
-        <p style="margin:0">Reply to this email and tell us two things:<br>1) How did you live today's focus — and how did a client respond?<br>2) Who's a teammate you caught going above and beyond?<br>We'll share the wins with the whole team.${rewardLine}</p>
-      </div>`;
+  const recog = lineupRecognition();   // yesterday's shout-outs + extra-mile, by name
+  const rewardLine = reward ? ` 🎁 Every teammate you recognize is an entry to win ${htmlEsc(reward)}.` : '';
+  // One clear ask. While rolling out, the team REPLIES; once live, they log it in-app.
+  const ask = live
+    ? `Catch a coworker being great today — tell them, and log it under <b>Lineup → Wow Stories</b>.${rewardLine}`
+    : `Reply with one teammate you caught going above and beyond, and how you lived today's value.${rewardLine}`;
   const subject = `Armada Daily Lineup — ${dateLabel} · ${focus.t}`;
+  // Horst's lineup is short: the purpose, one value, one move, and — its heart —
+  // real people recognized by name. Kept deliberately tight.
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:620px;line-height:1.55">
     <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#c8a44d;font-weight:bold">Armada Daily Lineup</div>
     <div style="color:#888;margin:0 0 14px">${dateLabel}</div>
-    <div style="text-align:center;background:#0b2a4a;color:#fff;padding:16px 18px;border-radius:6px;margin:0 0 18px">
+    <div style="text-align:center;background:#0b2a4a;color:#fff;padding:16px 18px;border-radius:6px;margin:0 0 16px">
       <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#c8a44d">Why we're here</div>
       <div style="font-family:Georgia,serif;font-size:17px;line-height:1.5;margin-top:6px">${htmlEsc(companyPurpose())}</div>
     </div>
     <div style="text-align:center;color:#8a6d1f;font-style:italic;margin:0 0 16px">Today's service value: “${htmlEsc(effectiveValue())}”</div>
-    <p>Good morning, team —</p>
-    <p>We're caring for <b>${clients}</b> today — ${census} ${people} who came to us on one of the hardest days of their lives. That's ${census} ${chances} to be the reason someone stays.</p>
-    <h2 style="margin:18px 0 2px;color:#0b2a4a">Today's focus: ${htmlEsc(focus.t)}</h2>
-    <p style="font-style:italic;color:#555;margin-top:0">${htmlEsc(focus.g)}</p>
-    <p>${pep.hook}</p>
-    ${horstOn ? `<p><b>What would Horst do?</b> ${pep.horst}</p>` : ''}
-    <p style="background:#faf6ee;border-left:3px solid #c8a44d;padding:12px 16px;margin:14px 0"><b>Your one move today:</b> ${pep.move}</p>
-    ${recognitionBlock}
-    <p style="margin:14px 0;color:#444"><b>🗣️ One more thing:</b> invite a client to fill out a quick survey on the kiosk today. Every response shows us exactly how to make their stay better — we can't improve what they don't tell us.</p>
-    ${winsBlock}
-    <p>You are the difference between a facility and a <i>home</i> for these ${clients} today. Thank you for showing up and being exactly that.</p>
-    <p>Let's have a great day. 💙</p>
-    <p style="color:#999;font-size:12px;margin-top:20px">Sent from the Armada Daily Lineup. No client information is included in this message.</p>
+    <p>Good morning, team — we're caring for <b>${clients}</b> today: ${census} ${chances} to be the reason someone stays.</p>
+    <h2 style="margin:16px 0 2px;color:#0b2a4a">Today's focus: ${htmlEsc(focus.t)}</h2>
+    <p style="font-style:italic;color:#555;margin:0 0 8px">${htmlEsc(focus.g)}</p>
+    ${horstOn ? `<p style="margin:8px 0"><b>What would Horst do?</b> ${pep.horst}</p>` : ''}
+    <p style="background:#faf6ee;border-left:3px solid #c8a44d;padding:12px 16px;margin:12px 0"><b>Your one move today:</b> ${pep.move}</p>
+    ${recog}
+    <p style="margin:14px 0"><b>✨ Today's challenge:</b> ${ask}</p>
+    <p style="margin:14px 0 0">You're the difference between a facility and a <i>home</i>. Let's have a great day. 💙</p>
+    <p style="color:#999;font-size:12px;margin-top:18px">Sent from the Armada Daily Lineup. No client information is included in this message.</p>
   </div>`;
   return { subject, html, census, focus: focus.t, guidance: focus.g };
 }

@@ -145,6 +145,15 @@ app.post('/api/login/mfa', (req, res) => {
   res.json({ user });
 });
 app.get('/api/mfa/setup', requireAuth, (req, res) => res.json(mfaSetup(req.user.id, req.user.username)));
+// Scannable QR of the user's own otpauth URI — point Microsoft Authenticator at it
+// instead of hand-typing the key. Authed: only the signed-in user gets their own.
+app.get('/api/mfa/qr.svg', requireAuth, async (req, res) => {
+  try {
+    const { otpauth } = mfaSetup(req.user.id, req.user.username);
+    const svg = await QRCode.toString(otpauth, { type: 'svg', margin: 1, width: 220 });
+    res.set('Cache-Control', 'no-store').type('image/svg+xml').send(svg);
+  } catch (e) { res.status(500).send('QR error'); }
+});
 app.post('/api/mfa/enable', requireAuth, (req, res) => {
   if (!mfaEnable(req.user.id, req.body?.code)) return res.status(400).json({ error: 'Code did not match — try again.' });
   audit({ user: req.user, action: 'MFA_ENABLE', ip: req.ip });

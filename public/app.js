@@ -37,11 +37,30 @@ $('loginForm').addEventListener('submit', async e => {
 async function manageMfa(){
   if(!ME){ alert('Sign in first.'); return; }
   if(ME.mfaEnabled){ if(confirm('Two-factor is ON for your account. Turn it off?')){ await api('/mfa/disable',{method:'POST'}); ME.mfaEnabled=false; alert('Two-factor disabled.'); } return; }
-  const { secret } = await api('/mfa/setup');
-  const code = prompt('Set up two-factor with Microsoft Authenticator:\n\n1) Open Microsoft Authenticator → tap + → "Add account" → "Other account (Google, Facebook, etc.)".\n2) Choose "Enter code manually" — Account name: Armada Care · Key:\n\n'+secret+'\n\n3) Type the 6-digit code it shows:');
-  if(!code) return;
-  try{ await api('/mfa/enable',{method:'POST',body:JSON.stringify({code})}); ME.mfaEnabled=true; alert('✓ Two-factor enabled. You\'ll enter a code each time you sign in.'); }
-  catch(e){ alert(e.message); }
+  let secret=''; try{ const s=await api('/mfa/setup'); secret=s.secret; }catch(e){ alert(e.message); return; }
+  closeMfaDialog();
+  const ov=document.createElement('div'); ov.id='mfaOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  ov.innerHTML=`<div style="background:#fff;border-radius:10px;max-width:380px;width:100%;padding:20px;max-height:92vh;overflow:auto">
+    <h3 style="margin:0 0 6px">Set up two-factor</h3>
+    <p class="sub sans" style="margin:0 0 12px">In <b>Microsoft Authenticator</b>: tap <b>+</b> → <b>Add account</b> → <b>Other account</b> → <b>Scan a QR code</b>, then point your phone at this:</p>
+    <div style="text-align:center"><img src="/api/mfa/qr.svg?ts=${Date.now()}" alt="Two-factor QR code" style="width:220px;height:220px;border:1px solid #eee;border-radius:6px"/></div>
+    <p class="hint" style="text-align:center;margin:8px 0">Can't scan? Enter this key by hand:<br><code style="font-size:13px;word-break:break-all">${esc(secret)}</code></p>
+    <label class="sans" style="display:block;margin-top:8px;font-size:13px">Enter the 6-digit code it shows</label>
+    <input id="mfaCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456" style="width:100%;font-size:20px;letter-spacing:4px;text-align:center;padding:8px;box-sizing:border-box"/>
+    <div id="mfaErr" class="hint" style="color:var(--danger);min-height:16px;margin-top:4px"></div>
+    <div class="toolbar" style="justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn btn-ghost sans" onclick="closeMfaDialog()">Cancel</button><button class="btn btn-primary sans" onclick="confirmMfa()">Turn on</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',(e)=>{ if(e.target===ov) closeMfaDialog(); });
+  const inp=$('mfaCode'); if(inp){ inp.focus(); inp.addEventListener('keydown',(e)=>{ if(e.key==='Enter') confirmMfa(); }); }
+}
+function closeMfaDialog(){ const o=$('mfaOverlay'); if(o) o.remove(); }
+async function confirmMfa(){
+  const code=$('mfaCode')?$('mfaCode').value.trim():'';
+  if(!/^\d{6}$/.test(code)){ if($('mfaErr'))$('mfaErr').textContent='Enter the 6-digit code from the app.'; return; }
+  try{ await api('/mfa/enable',{method:'POST',body:JSON.stringify({code})}); ME.mfaEnabled=true; closeMfaDialog(); alert('✓ Two-factor enabled. You\'ll enter a code from Microsoft Authenticator each time you sign in.'); }
+  catch(e){ if($('mfaErr'))$('mfaErr').textContent=e.message; }
 }
 /* auto-logoff after inactivity (HIPAA) */
 let idleTimer=null;

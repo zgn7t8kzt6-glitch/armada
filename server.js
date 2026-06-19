@@ -5504,6 +5504,14 @@ setInterval(() => {
   } catch (e) { console.error('[recognition watch]', e.message); }
 }, 6 * 60 * 60 * 1000).unref?.();
 // Best Place to Work dashboard (leadership).
+// Lightweight badge poll — count of Best Place to Work items needing leadership:
+// open Staff Voice + any active morale/recognition nudge. 0 for non-leadership.
+app.get('/api/workplace/attention', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.json({ count: 0 });
+  const openVoice = db.prepare(`SELECT COUNT(*) n FROM staff_voice WHERE status = 'open'`).get().n;
+  const nudges = db.prepare(`SELECT COUNT(*) n FROM alerts WHERE status = 'New' AND kind IN ('morale_dip','recognition_gap')`).get().n;
+  res.json({ count: openVoice + nudges, openVoice, nudges });
+});
 app.get('/api/workplace', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
   const since7 = `datetime('now','-7 day')`;

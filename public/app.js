@@ -93,6 +93,7 @@ async function boot(){
   const landing = (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
   show(landing);
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
+  if(isLeadershipUser()){ pollWpBadge(); setInterval(pollWpBadge, 60000); }   // Best Place to Work attention badge
 }
 function fillSelect(el, items){ el.innerHTML = items.map(i=>`<option>${esc(i)}</option>`).join(''); }
 // Build a deep link to a patient's Kipu chart from the configured URL pattern.
@@ -1757,6 +1758,8 @@ async function sendMessage(){
 }
 function updateMsgBadge(n){ const b=$('msgBadge'); if(!b) return; if(n>0){ b.textContent=n; b.style.display=''; } else { b.textContent=''; b.style.display='none'; } }
 async function pollMsgUnread(){ try{ const {unread}=await api('/messages/unread'); updateMsgBadge(unread); }catch(e){} }
+function updateWpBadge(n){ const b=$('wpBadge'); if(!b) return; if(n>0){ b.textContent=n; b.style.display=''; b.title=n+' item(s) need attention — open Staff Voice or a morale/recognition nudge'; } else { b.textContent=''; b.style.display='none'; } }
+async function pollWpBadge(){ try{ const {count}=await api('/workplace/attention'); updateWpBadge(count); }catch(e){} }
 
 /* ---- Scan Rounds: QR-verified physical rounds ---- */
 function scanBanner(msg, ok){
@@ -4254,7 +4257,7 @@ async function submitVoice(){
 }
 async function respondVoice(id){
   const response=prompt('How are we responding / what did we do about it? (this is shown to the team)'); if(response===null) return;
-  try{ await api('/staff-voice/'+id+'/respond',{method:'POST',body:JSON.stringify({response})}); loadStaffVoice(); if($('wpVoice')&&$('workplace')&&$('workplace').classList.contains('active')) loadWorkplace(); }catch(e){ alert(e.message); }
+  try{ await api('/staff-voice/'+id+'/respond',{method:'POST',body:JSON.stringify({response})}); loadStaffVoice(); if(typeof pollWpBadge==='function') pollWpBadge(); if($('wpVoice')&&$('workplace')&&$('workplace').classList.contains('active')) loadWorkplace(); }catch(e){ alert(e.message); }
 }
 async function loadWorkplace(){
   // staff pickers

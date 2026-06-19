@@ -217,7 +217,12 @@ const ROLE_MENU = {
   'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedboard','clients','dignity','mytasks','messages','team','training','library'],
   'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
 };
-function flatMenu(){ return (ME && ROLE_MENU[ME.job_role]) ? ROLE_MENU[ME.job_role].filter(canSeeView) : null; }
+function flatMenu(){
+  // Admins + leadership always get the full nav (Command Center, etc.) — the flat
+  // menu is only for frontline staff, regardless of their job_role label.
+  if(!ME || ME.role==='admin' || ME.job_role==='Executive Director' || ME.job_role==='Director of Operations') return null;
+  return ROLE_MENU[ME.job_role] ? ROLE_MENU[ME.job_role].filter(canSeeView) : null;
+}
 function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role==='Director of Operations')); }
 function canSeeView(v){
   if(!ME) return true;

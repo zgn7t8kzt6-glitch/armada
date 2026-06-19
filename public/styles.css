@@ -158,11 +158,21 @@ main{max-width:1160px;margin:0;padding:34px 40px 100px;width:100%}
   .handoff-add input,.handoff-add select{flex:1 1 100%}
   /* comfortable touch targets */
   .btn{min-height:42px}
-  .btn-sm{min-height:0;padding:8px 12px}
+  .btn-sm{min-height:38px;padding:8px 12px}
   /* wide tables scroll on their own instead of stretching the page */
   .tbl{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
   /* side-by-side card rows stack full-width (overrides inline min-widths) */
   .row>*{min-width:0!important;flex-basis:100%!important}
+  /* Concierge / list rows: let the assign dropdown + buttons drop to their own
+     line instead of crushing the request text */
+  .todo{flex-wrap:wrap}
+  .todo>select{flex:1 1 auto;max-width:none!important}
+  .cmd-row{flex-wrap:wrap;row-gap:4px}
+  /* 90-Day Plan task rows + notes: a touch more breathing room */
+  .pc-note{font-size:13.5px}
+  .pc-note input[type=checkbox]{width:22px;height:22px}
+  /* period summary date pickers sit inline, not full-width */
+  .toolbar input[type=date]{width:auto;flex:0 0 auto}
 }
 .view{display:none}.view.active{display:block;animation:fadeIn .2s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
@@ -176,6 +186,7 @@ input,select,textarea{width:100%;font-family:var(--sans);font-size:14.5px;paddin
   border-radius:var(--r-sm);background:#fcfbf8;color:var(--ink);transition:border-color .15s,box-shadow .15s,background .15s}
 textarea{min-height:70px;resize:vertical;line-height:1.55}
 input:focus,select:focus,textarea:focus{outline:none;background:var(--paper);border-color:var(--aqua);box-shadow:0 0 0 3px rgba(95,176,194,.16)}
+input[type=checkbox],input[type=radio]{width:auto;flex:0 0 auto;min-height:0;padding:0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 16px}
 @media(max-width:720px){.grid2,.grid3{grid-template-columns:1fr}}

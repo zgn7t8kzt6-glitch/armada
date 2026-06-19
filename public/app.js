@@ -38,7 +38,7 @@ async function manageMfa(){
   if(!ME){ alert('Sign in first.'); return; }
   if(ME.mfaEnabled){ if(confirm('Two-factor is ON for your account. Turn it off?')){ await api('/mfa/disable',{method:'POST'}); ME.mfaEnabled=false; alert('Two-factor disabled.'); } return; }
   const { secret } = await api('/mfa/setup');
-  const code = prompt('Set up two-factor:\n\n1) Open Google Authenticator / Authy → add account → "Enter a setup key".\n2) Account: Armada Care · Key:\n\n'+secret+'\n\n3) Type the 6-digit code it shows:');
+  const code = prompt('Set up two-factor with Microsoft Authenticator:\n\n1) Open Microsoft Authenticator → tap + → "Add account" → "Other account (Google, Facebook, etc.)".\n2) Choose "Enter code manually" — Account name: Armada Care · Key:\n\n'+secret+'\n\n3) Type the 6-digit code it shows:');
   if(!code) return;
   try{ await api('/mfa/enable',{method:'POST',body:JSON.stringify({code})}); ME.mfaEnabled=true; alert('✓ Two-factor enabled. You\'ll enter a code each time you sign in.'); }
   catch(e){ alert(e.message); }

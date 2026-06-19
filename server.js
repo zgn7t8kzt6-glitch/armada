@@ -6157,6 +6157,22 @@ function careRoleBucket(s) {
 // the union of staff clocked in now and staff scheduled for the current shift
 // part, deduped and bucketed by role. Tracks how many came from each source so
 // leaders can see whether the time clock / schedule is actually being kept.
+// Real shift windows per role (local hours; [start,end), wraps past midnight):
+//  • Nurses — 12-hour: Day 7a–7p, Night 7p–7a.
+//  • BHT/Tech — three 8-hour: Day 7a–3p, Evening 3p–11p, Night 11p–7a.
+//  • Case managers — two daytime shifts, NO overnight: Day 7a–3p, Evening 3p–11p.
+//  • Therapists — daytime 8a–6p.
+// Used to decide who's genuinely "on shift right now" for the resident kiosk.
+function shiftActiveNow(bucket, part) {
+  const h = localHour();
+  const inWin = (s, e) => (s <= e ? (h >= s && h < e) : (h >= s || h < e));
+  const p = part || 'Day';
+  if (bucket === 'nurses') return /night|evening/i.test(p) ? inWin(19, 7) : inWin(7, 19);
+  if (bucket === 'rts') return /night/i.test(p) ? inWin(23, 7) : /evening/i.test(p) ? inWin(15, 23) : inWin(7, 15);
+  if (bucket === 'caseManagers') return /evening|night/i.test(p) ? inWin(15, 23) : inWin(7, 15);
+  if (bucket === 'therapists') return inWin(8, 18);
+  return true;
+}
 function computeOnShift() {
   const buckets = { nurses: [], rts: [], caseManagers: [], therapists: [] };
   const add = (name, roleStr) => {
@@ -6167,18 +6183,19 @@ function computeOnShift() {
   const clocked = db.prepare(`SELECT t.user_name, u.job_role FROM time_entries t JOIN users u ON u.id = t.user_id
     WHERE t.clock_out IS NULL AND u.active = 1`).all();
   clocked.forEach((r) => add(r.user_name, r.job_role));
-  // "On shift right now" = the CURRENT shift block only, so an evening/night
-  // assignment doesn't show under the daytime header. Anyone clocked in counts
-  // regardless (they're physically here); the schedule is scoped to this shift.
+  // "On shift right now" = staff whose assigned shift window is active at this
+  // moment, by role (nursing 12h, BHT 3×8h, case managers 2 daytime shifts, no
+  // overnight). Anyone clocked in counts regardless — they're physically here.
   const today = appToday();
   const shift = currentShift();
-  const scheduled = db.prepare(`SELECT a.user_name, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
-    WHERE s.date = ? AND s.part = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent')`).all(today, shift);
-  scheduled.forEach((r) => add(r.user_name, r.role));
+  const scheduled = db.prepare(`SELECT a.user_name, s.role, s.part FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
+    WHERE s.date = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent')`).all(today);
+  let onNowCount = 0;
+  scheduled.forEach((r) => { const b = careRoleBucket(r.role); if (b && !shiftActiveNow(b, r.part)) return; add(r.user_name, r.role); onNowCount++; });
   // Manually-added on-shift staff (no user login) for today.
   const manual = db.prepare(`SELECT name, role FROM manual_on_shift WHERE for_date = ?`).all(today);
   manual.forEach((r) => add(r.name, r.role));
-  return { buckets, shift, clockedInCount: clocked.length, scheduledCount: scheduled.length, manualCount: manual.length };
+  return { buckets, shift, clockedInCount: clocked.length, scheduledCount: onNowCount, manualCount: manual.length };
 }
 // Manually-added on-shift staff — for people who don't have a login yet.
 app.get('/api/onshift/manual', requireAuth, (req, res) => {

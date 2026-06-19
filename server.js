@@ -6167,17 +6167,18 @@ function computeOnShift() {
   const clocked = db.prepare(`SELECT t.user_name, u.job_role FROM time_entries t JOIN users u ON u.id = t.user_id
     WHERE t.clock_out IS NULL AND u.active = 1`).all();
   clocked.forEach((r) => add(r.user_name, r.job_role));
-  // Everyone scheduled for TODAY (the local business day) is on shift by default —
-  // unless they called off or a supervisor marked them a no-show. We intentionally
-  // do NOT filter by time-of-day block, so the whole day's roster shows.
+  // "On shift right now" = the CURRENT shift block only, so an evening/night
+  // assignment doesn't show under the daytime header. Anyone clocked in counts
+  // regardless (they're physically here); the schedule is scoped to this shift.
   const today = appToday();
+  const shift = currentShift();
   const scheduled = db.prepare(`SELECT a.user_name, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
-    WHERE s.date = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent')`).all(today);
+    WHERE s.date = ? AND s.part = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent')`).all(today, shift);
   scheduled.forEach((r) => add(r.user_name, r.role));
   // Manually-added on-shift staff (no user login) for today.
   const manual = db.prepare(`SELECT name, role FROM manual_on_shift WHERE for_date = ?`).all(today);
   manual.forEach((r) => add(r.name, r.role));
-  return { buckets, shift: currentShift(), clockedInCount: clocked.length, scheduledCount: scheduled.length, manualCount: manual.length };
+  return { buckets, shift, clockedInCount: clocked.length, scheduledCount: scheduled.length, manualCount: manual.length };
 }
 // Manually-added on-shift staff — for people who don't have a login yet.
 app.get('/api/onshift/manual', requireAuth, (req, res) => {

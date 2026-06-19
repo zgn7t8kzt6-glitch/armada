@@ -3560,6 +3560,33 @@ app.get('/api/requests', requireAuth, (req, res) => {
   res.json({ requests: db.prepare(sql).all(...args) });
 });
 app.get('/api/requests/count', requireAuth, (req, res) => res.json({ open: db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`).get().n }));
+// Concierge performance: team averages + a fastest-responder leaderboard.
+app.get('/api/requests/stats', requireAuth, (req, res) => {
+  const days = Math.min(90, Math.max(1, +(req.query.days || 7)));
+  const since = `-${days} day`;
+  const respMin = `(julianday(acknowledged_at) - julianday(created_at)) * 1440`;
+  const team = db.prepare(`SELECT
+      COUNT(*) total,
+      SUM(CASE WHEN status='Done' THEN 1 ELSE 0 END) done,
+      SUM(CASE WHEN status!='Done' THEN 1 ELSE 0 END) open,
+      AVG(CASE WHEN acknowledged_at IS NOT NULL THEN ${respMin} END) avgResp,
+      AVG(CASE WHEN done_at IS NOT NULL THEN (julianday(done_at)-julianday(created_at))*1440 END) avgResolve,
+      SUM(CASE WHEN acknowledged_at IS NOT NULL THEN 1 ELSE 0 END) respondedN,
+      SUM(CASE WHEN acknowledged_at IS NOT NULL AND ${respMin} <= 15 THEN 1 ELSE 0 END) within15
+    FROM requests WHERE created_at >= datetime('now', ?)`).get(since);
+  const board = db.prepare(`SELECT acknowledged_by name, COUNT(*) n, AVG(${respMin}) avgResp
+    FROM requests WHERE acknowledged_at IS NOT NULL AND acknowledged_by IS NOT NULL AND acknowledged_by != ''
+      AND created_at >= datetime('now', ?)
+    GROUP BY acknowledged_by HAVING n >= 1 ORDER BY avgResp ASC LIMIT 10`).all(since);
+  const r1 = (x) => x == null ? null : Math.round(x);
+  res.json({
+    days,
+    total: team.total || 0, done: team.done || 0, open: team.open || 0,
+    avgRespMin: r1(team.avgResp), avgResolveMin: r1(team.avgResolve),
+    within15Pct: team.respondedN ? Math.round(team.within15 / team.respondedN * 100) : null,
+    leaderboard: board.map((b) => ({ name: b.name, n: b.n, avgRespMin: r1(b.avgResp) })),
+  });
+});
 function conciergeEmailTo() { return (getState('concierge_email') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '').trim(); }
 app.post('/api/requests', requireAuth, async (req, res) => {
   const { client_id, department, text, priority } = req.body || {};

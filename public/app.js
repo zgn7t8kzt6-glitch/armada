@@ -3155,8 +3155,22 @@ async function loadConcierge(){
         <button class="btn btn-ghost btn-sm sans" onclick="setRequestStatus(${r.id},'Done')">Done</button>`:''}
     </div>`).join('')}</div>`).join('');
   $('rqBoard').innerHTML = board || '<div class="empty">No requests. Anticipate a wish and log it.</div>';
+  loadConciergeStats();
 }
 async function assignRequest(id,uid){ try{ await api('/requests/'+id+'/assign',{method:'POST',body:JSON.stringify({user_id:uid||null})}); loadConcierge(); pollReqBadge(); }catch(e){ alert(e.message); } }
+async function loadConciergeStats(){
+  const el=$('rqStats'); if(!el) return;
+  let d; try{ d=await api('/requests/stats?days=7'); }catch(e){ return; }
+  const fmt=(m)=> m==null?'—':(m<60?m+'m':Math.floor(m/60)+'h '+(m%60)+'m');
+  el.innerHTML=`<div class="ret-cards" style="margin:10px 0">
+      <div class="ret-card"><div class="n">${fmt(d.avgRespMin)}</div><div class="l">Avg response</div></div>
+      <div class="ret-card"><div class="n">${fmt(d.avgResolveMin)}</div><div class="l">Avg to done</div></div>
+      <div class="ret-card ${d.within15Pct!=null&&d.within15Pct<70?'rc-warn':''}"><div class="n">${d.within15Pct==null?'—':d.within15Pct+'%'}</div><div class="l">Responded ≤15m</div></div>
+      <div class="ret-card"><div class="n">${d.total}</div><div class="l">Requests (7d)</div></div>
+    </div>
+    <div class="cmd-sub">🏅 Fastest responders</div>
+    ${d.leaderboard.length?`<table class="tbl"><thead><tr><th>Teammate</th><th style="text-align:right">Handled</th><th style="text-align:right">Avg response</th></tr></thead><tbody>${d.leaderboard.map((b,i)=>`<tr><td>${i===0?'🥇 ':''}${esc(b.name)}</td><td style="text-align:right">${b.n}</td><td style="text-align:right">${fmt(b.avgRespMin)}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No responses logged yet this week.</div>'}`;
+}
 async function addRequest(){
   const text=$('rq_text').value.trim(); if(!text) return;
   await api('/requests',{method:'POST',body:JSON.stringify({client_id:$('rq_client').value||null,department:$('rq_dept').value,text,priority:$('rq_pri').value})});

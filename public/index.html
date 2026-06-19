@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616BZ" />
+<link rel="stylesheet" href="/styles.css?v=20260616CA" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -27,7 +27,16 @@
     <input id="l_user" autocomplete="username" />
     <label>Password</label>
     <input id="l_pass" type="password" autocomplete="current-password" />
-    <div id="mfaRow" style="display:none"><label>Authenticator code</label><input id="l_code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code"/></div>
+    <div id="mfaRow" style="display:none">
+      <div id="mfaEnrollBox" style="display:none;margin:6px 0 10px;text-align:center">
+        <div class="sub sans" style="text-align:left">Set up two-factor (required). In <b>Microsoft Authenticator</b>: <b>+</b> → <b>Add account</b> → <b>Other account</b> → <b>Scan a QR code</b>:</div>
+        <img id="mfaQr" alt="Two-factor QR code" style="width:200px;height:200px;border:1px solid #eee;border-radius:6px;margin:8px auto 0;display:block"/>
+        <div class="hint">Can't scan? Key: <code id="mfaKey" style="word-break:break-all"></code></div>
+      </div>
+      <label>Authenticator code</label>
+      <input id="l_code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code"/>
+      <label class="trg" style="display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:400;font-size:13px"><input type="checkbox" id="l_trust" checked/> Trust this device for 30 days (don't ask for a code here again)</label>
+    </div>
     <div id="loginErr" class="err"></div>
     <button class="btn btn-gold" style="width:100%;margin-top:14px" id="loginBtn">Sign in</button>
   </form>
@@ -1924,6 +1933,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616BZ"></script>
+<script src="/app.js?v=20260616CA"></script>
 </body>
 </html>

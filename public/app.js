@@ -26,11 +26,20 @@ $('loginForm').addEventListener('submit', async e => {
   e.preventDefault(); $('loginErr').textContent='';
   try {
     if (mfaTicket) {
-      const { user } = await api('/login/mfa', { method:'POST', body: JSON.stringify({ ticket: mfaTicket, code: $('l_code').value }) });
+      const trust = $('l_trust') ? $('l_trust').checked : true;
+      const { user } = await api('/login/mfa', { method:'POST', body: JSON.stringify({ ticket: mfaTicket, code: $('l_code').value, trust }) });
       mfaTicket = null; ME = user; boot(); return;
     }
     const r = await api('/login', { method:'POST', body: JSON.stringify({ username:$('l_user').value, password:$('l_pass').value }) });
-    if (r.mfaRequired) { mfaTicket = r.ticket; $('mfaRow').style.display='block'; $('l_code').focus(); $('loginBtn').textContent='Verify code'; return; }
+    if (r.mfaRequired) { mfaTicket = r.ticket; $('mfaRow').style.display='block'; if($('mfaEnrollBox'))$('mfaEnrollBox').style.display='none'; $('l_code').focus(); $('loginBtn').textContent='Verify code'; return; }
+    if (r.mfaEnroll) {
+      mfaTicket = r.ticket; $('mfaRow').style.display='block';
+      if($('mfaEnrollBox')) $('mfaEnrollBox').style.display='block';
+      if($('mfaQr')) $('mfaQr').src = '/api/login/qr.svg?ticket=' + encodeURIComponent(r.ticket);
+      if($('mfaKey')) $('mfaKey').textContent = r.secret || '';
+      $('l_code').focus(); $('loginBtn').textContent='Verify & turn on';
+      return;
+    }
     ME = r.user; boot();
   } catch(err){ $('loginErr').textContent = err.message; }
 });

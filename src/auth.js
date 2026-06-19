@@ -2,11 +2,20 @@
 // HttpOnly cookie. No third-party session library needed.
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
-import { db, audit } from './db.js';
+import { db, audit, getState, setState } from './db.js';
 
 const COOKIE = 'armada_sid';
+const TD_COOKIE = 'armada_td';            // trusted-device cookie (skips MFA for a window)
+const TD_DAYS = +(process.env.MFA_TRUST_DAYS || 30);
 const SESSION_DAYS = 1;
-const mfaTickets = new Map(); // ticket -> { uid, exp } (short-lived, between password and code)
+const mfaTickets = new Map(); // ticket -> { uid, exp, enroll } (short-lived, between password and code)
+
+// MFA is required for everyone unless explicitly turned off (state or env kill-switch).
+export function mfaRequired() {
+  if (process.env.MFA_REQUIRED === 'off') return false;
+  return getState('mfa_required') !== 'off';
+}
+export function setMfaRequired(on) { setState('mfa_required', on ? 'on' : 'off'); }
 
 export function hashPassword(pw) {
   return bcrypt.hashSync(pw, 10);
@@ -53,6 +62,24 @@ export function mfaEnable(userId, code) {
 }
 export function mfaDisable(userId) { db.prepare(`UPDATE users SET mfa_enabled = 0, mfa_secret = NULL WHERE id = ?`).run(userId); }
 
+// ---- Trusted device: after MFA, this browser skips the code for TD_DAYS. The
+// signature folds in a slice of the password hash, so changing the password (or
+// disabling MFA) automatically invalidates every trusted device. ----
+function tdSecret() { let s = getState('mfa_td_secret'); if (!s) { s = crypto.randomBytes(32).toString('hex'); setState('mfa_td_secret', s); } return s; }
+function tdSign(uid, exp, pwHash) { return crypto.createHmac('sha256', tdSecret()).update(`${uid}.${exp}.${String(pwHash || '').slice(0, 24)}`).digest('hex'); }
+function issueTrustedDevice(res, user) {
+  const exp = Date.now() + TD_DAYS * 864e5;
+  const val = `${user.id}.${exp}.${tdSign(user.id, exp, user.password_hash)}`;
+  res.cookie(TD_COOKIE, val, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', expires: new Date(exp) });
+}
+function deviceTrusted(req, user) {
+  const c = req.cookies?.[TD_COOKIE]; if (!c) return false;
+  const [uid, exp, sig] = c.split('.');
+  if (+uid !== user.id || !exp || +exp < Date.now() || !sig) return false;
+  try { const good = tdSign(user.id, +exp, user.password_hash); return sig.length === good.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(good)); }
+  catch { return false; }
+}
+
 function startSession(req, res, user) {
   const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
@@ -73,19 +100,38 @@ export function login(req, res, username, password) {
   const user = db.prepare(`SELECT * FROM users WHERE username = ? AND active = 1`).get(username.toLowerCase().trim());
   if (!user || !bcrypt.compareSync(password, user.password_hash)) return null;
   if (user.mfa_enabled) {
+    if (deviceTrusted(req, user)) return startSession(req, res, user);   // remembered device → no code
     const ticket = crypto.randomBytes(24).toString('hex');
-    mfaTickets.set(ticket, { uid: user.id, exp: Date.now() + 5 * 60000 });
+    mfaTickets.set(ticket, { uid: user.id, exp: Date.now() + 5 * 60000, enroll: false });
     return { mfaRequired: true, ticket };
+  }
+  if (mfaRequired()) {
+    // Not enrolled yet, but MFA is mandatory — walk them through setup right now.
+    const { secret, otpauth } = mfaSetup(user.id, user.username);
+    const ticket = crypto.randomBytes(24).toString('hex');
+    mfaTickets.set(ticket, { uid: user.id, exp: Date.now() + 10 * 60000, enroll: true });
+    return { mfaEnroll: true, ticket, secret, otpauth };
   }
   return startSession(req, res, user);
 }
-export function completeMfa(req, res, ticket, code) {
+export function completeMfa(req, res, ticket, code, trustDevice = false) {
   const t = mfaTickets.get(ticket);
   if (!t || t.exp < Date.now()) { mfaTickets.delete(ticket); return null; }
   const user = db.prepare(`SELECT * FROM users WHERE id = ? AND active = 1`).get(t.uid);
   if (!user || !totpVerify(user.mfa_secret, code)) return null;
+  if (t.enroll) { db.prepare(`UPDATE users SET mfa_enabled = 1 WHERE id = ?`).run(user.id); audit({ user, action: 'MFA_ENABLE', ip: req.ip }); }
   mfaTickets.delete(ticket);
+  if (trustDevice) issueTrustedDevice(res, user);
   return startSession(req, res, user);
+}
+// The otpauth URI behind an enrollment ticket — lets the pre-login QR render
+// without a session (ticket-gated, short-lived, enrollment only).
+export function otpauthForTicket(ticket) {
+  const t = mfaTickets.get(ticket);
+  if (!t || t.exp < Date.now() || !t.enroll) return null;
+  const u = db.prepare(`SELECT username, mfa_secret FROM users WHERE id = ?`).get(t.uid);
+  if (!u?.mfa_secret) return null;
+  return `otpauth://totp/Armada%20Care:${encodeURIComponent(u.username)}?secret=${u.mfa_secret}&issuer=Armada%20Care&period=30&digits=6`;
 }
 
 export function logout(req, res) {

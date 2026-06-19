@@ -15,7 +15,7 @@ import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, 
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, requireStaffingManager, createUser, changePassword,
-  mfaSetup, mfaEnable, mfaDisable, hashPassword,
+  mfaSetup, mfaEnable, mfaDisable, hashPassword, otpauthForTicket, mfaRequired, setMfaRequired,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
@@ -133,17 +133,28 @@ app.post('/api/login', (req, res) => {
   const result = login(req, res, username || '', password || '');
   if (!result) { rlHit(ipKey, W10); rlHit(uKey, W10); return res.status(401).json({ error: 'Invalid username or password' }); }
   if (result.mfaRequired) return res.json({ mfaRequired: true, ticket: result.ticket });
+  if (result.mfaEnroll) return res.json({ mfaEnroll: true, ticket: result.ticket, secret: result.secret });   // first-time setup at login
   res.json({ user: result });
+});
+// Pre-login QR for the enrollment-at-login flow (ticket-gated; no session yet).
+app.get('/api/login/qr.svg', async (req, res) => {
+  const otpauth = otpauthForTicket(String(req.query.ticket || ''));
+  if (!otpauth) return res.status(404).send('expired');
+  try { const svg = await QRCode.toString(otpauth, { type: 'svg', margin: 1, width: 220 }); res.set('Cache-Control', 'no-store').type('image/svg+xml').send(svg); }
+  catch (e) { res.status(500).send('QR error'); }
 });
 app.post('/api/login/mfa', (req, res) => {
   // The 6-digit code is brute-forceable; cap FAILED attempts per ticket and per IP.
   const tKey = 'mfa:' + (req.body?.ticket || req.ip), ipKey = 'mfa:ip:' + req.ip;
   if (rlOver(tKey, 10, W10) || rlOver(ipKey, 30, W10))
     return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
-  const user = completeMfa(req, res, req.body?.ticket || '', req.body?.code || '');
+  const user = completeMfa(req, res, req.body?.ticket || '', req.body?.code || '', !!req.body?.trust);
   if (!user) { rlHit(tKey, W10); rlHit(ipKey, W10); return res.status(401).json({ error: 'Invalid or expired code' }); }
   res.json({ user });
 });
+// Admin: turn required-MFA on/off (kill switch lives in env too).
+app.get('/api/mfa/policy', requireAuth, requireAdmin, (req, res) => res.json({ required: mfaRequired() }));
+app.post('/api/mfa/policy', requireAuth, requireAdmin, (req, res) => { setMfaRequired(!!req.body?.on); audit({ user: req.user, action: 'MFA_POLICY', detail: req.body?.on ? 'required' : 'optional', ip: req.ip }); res.json({ ok: true, required: mfaRequired() }); });
 app.get('/api/mfa/setup', requireAuth, (req, res) => res.json(mfaSetup(req.user.id, req.user.username)));
 // Scannable QR of the user's own otpauth URI — point Microsoft Authenticator at it
 // instead of hand-typing the key. Authed: only the signed-in user gets their own.

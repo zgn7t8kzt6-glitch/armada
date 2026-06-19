@@ -211,6 +211,13 @@ const VIEW_ROLES = {
   // Concierge requests — front desk + hands-on care
   concierge:   ['Front Desk','BHT / Tech','Nurse','Clinical Director'],
 };
+// Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
+// tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
+const ROLE_MENU = {
+  'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedboard','clients','dignity','mytasks','messages','team','training','library'],
+  'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
+};
+function flatMenu(){ return (ME && ROLE_MENU[ME.job_role]) ? ROLE_MENU[ME.job_role].filter(canSeeView) : null; }
 function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role==='Director of Operations')); }
 function canSeeView(v){
   if(!ME) return true;
@@ -235,15 +242,29 @@ function firstAllowedView(grp){
   return v || grp.first;
 }
 function renderGroups(){
+  document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'stay'; });
+  const flat = flatMenu();
+  if(flat){
+    // Flat task menu: hide the group tabs, reorder the sidebar to the task flow.
+    if($('groupbar')) $('groupbar').style.display='none';
+    const nav=$('nav'); if(nav) flat.forEach(v=>{ const b=nav.querySelector(`button[data-view="${v}"]`); if(b) nav.appendChild(b); });
+    return;
+  }
+  if($('groupbar')) $('groupbar').style.display='';
   const isAdmin = ME && ME.role==='admin';
   const mk = x=>`<button data-g="${x.g}"${x.admin?' class="side-admingroup"':''}>${x.label}</button>`;
   const everyday = GROUPS.filter(x=>!x.admin && groupVisible(x.g)).map(mk).join('');
   const leadership = isAdmin ? GROUPS.filter(x=>x.admin).map(mk).join('') : '';
   $('groupbar').innerHTML = everyday + (leadership ? '<div class="side-divider"></div>'+leadership : '');
-  document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'stay'; });
   document.querySelectorAll('#groupbar button').forEach(b=>b.onclick=()=>{ const grp=GROUPS.find(x=>x.g===b.dataset.g); show(firstAllowedView(grp)); });
 }
 function selectGroup(g){
+  const flat = flatMenu();
+  if(flat){
+    [...document.querySelectorAll('#nav button')].forEach(b=>{ b.style.display = (flat.includes(b.dataset.view) && canSeeView(b.dataset.view)) ? '' : 'none'; });
+    const navEl=$('nav'); if(navEl) navEl.style.display='';
+    return;
+  }
   document.querySelectorAll('#groupbar button').forEach(b=>b.classList.toggle('active', b.dataset.g===g));
   const navBtns=[...document.querySelectorAll('#nav button')];
   navBtns.forEach(b=>{

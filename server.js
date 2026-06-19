@@ -3118,6 +3118,17 @@ function lineupRecognition() {
       <ul style="margin:0;padding-left:20px">${lines}</ul>
     </div>`;
 }
+// The most recent recognition-raffle winner, celebrated on the lineup for a week.
+function raffleWinnerLine() {
+  let w; try { w = JSON.parse(getState('raffle_winner') || ''); } catch { return ''; }
+  if (!w || !w.name) return '';
+  if (w.at && (Date.now() - new Date(w.at).getTime()) > 8 * 864e5) return '';   // older than ~a week → drop
+  const prize = w.reward ? ` — they've won <b>${htmlEsc(w.reward)}</b>` : '';
+  return `<div style="margin:16px 0;padding:12px 16px;background:#fbf3da;border-left:3px solid #c8a44d;border-radius:4px">
+      <div style="font-weight:bold;color:#8a6d1f">🎉 Recognition raffle winner: ${htmlEsc(w.name)}</div>
+      <div style="margin-top:2px">Congratulations, ${htmlEsc(String(w.name).split(/\s+/)[0])}${prize}! Drawn from everyone who recognized a teammate — keep lifting each other up.</div>
+    </div>`;
+}
 function buildLineupEmail() {
   const focus = effectiveFocus();
   const census = censusNow();
@@ -3130,6 +3141,7 @@ function buildLineupEmail() {
   const people = census === 1 ? 'person' : 'people';
   const chances = census === 1 ? 'chance' : 'chances';
   const recog = lineupRecognition();   // yesterday's shout-outs + extra-mile, by name
+  const winnerLine = raffleWinnerLine();   // this week's recognition-raffle winner
   const rewardLine = reward ? ` 🎁 Every teammate you recognize is an entry to win ${htmlEsc(reward)}.` : '';
   // One clear ask. While rolling out, the team REPLIES; once live, they log it in-app.
   const ask = live
@@ -3151,6 +3163,7 @@ function buildLineupEmail() {
     <p style="font-style:italic;color:#555;margin:0 0 8px">${htmlEsc(focus.g)}</p>
     ${horstOn ? `<p style="margin:8px 0"><b>What would Horst do?</b> ${pep.horst}</p>` : ''}
     <p style="background:#faf6ee;border-left:3px solid #c8a44d;padding:12px 16px;margin:12px 0"><b>Your one move today:</b> ${pep.move}</p>
+    ${winnerLine}
     ${recog}
     <p style="margin:14px 0"><b>✨ Today's challenge:</b> ${ask}</p>
     <p style="margin:14px 0 0">You're the difference between a facility and a <i>home</i>. Let's have a great day. 💙</p>
@@ -3342,7 +3355,15 @@ app.post('/api/lineup/raffle/draw', requireAuth, (req, res) => {
   if (!pool.length) return res.json({ ok: true, winner: null, entries: 0, participants: 0 });
   const winner = pool[Math.floor(Math.random() * pool.length)];
   const participants = new Set(pool.map((p) => p.toLowerCase())).size;
-  res.json({ ok: true, winner, entries: pool.length, participants });
+  // Persist so the winner can be celebrated on the 8am lineup (auto-clears after a week).
+  setState('raffle_winner', JSON.stringify({ name: winner, reward: (getState('lineup_reward') || '').trim(), at: new Date().toISOString(), entries: pool.length, participants }));
+  res.json({ ok: true, winner, entries: pool.length, participants, featured: true });
+});
+// Clear the featured raffle winner (e.g., a re-draw or after the prize is given).
+app.post('/api/lineup/raffle/clear-winner', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  setState('raffle_winner', '');
+  res.json({ ok: true });
 });
 app.post('/api/principle/story', requireAuth, (req, res) => {
   const action = (req.body?.action || '').trim();

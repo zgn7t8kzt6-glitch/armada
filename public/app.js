@@ -2954,8 +2954,11 @@ async function drawRaffle(){
   try{
     const r=await api('/lineup/raffle/draw',{method:'POST'});
     if(!r.entries){ if(m) m.textContent='No entries yet — add some above first.'; return; }
-    if(m) m.innerHTML='🎉 Winner: <strong>'+esc(r.winner)+'</strong> — drawn from '+r.entries+' entr'+(r.entries===1?'y':'ies')+' across '+r.participants+' name'+(r.participants===1?'':'s')+'.';
+    if(m) m.innerHTML='🎉 Winner: <strong>'+esc(r.winner)+'</strong> — drawn from '+r.entries+' entr'+(r.entries===1?'y':'ies')+' across '+r.participants+' name'+(r.participants===1?'':'s')+'. <span style="color:#2f6b44">Now featured on the lineup email.</span> <button class="btn btn-ghost btn-sm sans" onclick="clearRaffleWinner()">Remove from email</button>';
   }catch(e){ if(m) m.textContent=e.message; }
+}
+async function clearRaffleWinner(){
+  try{ await api('/lineup/raffle/clear-winner',{method:'POST'}); const m=$('raffleMsg'); if(m) m.textContent='Cleared — the winner will no longer show on the lineup email.'; }catch(e){ alert(e.message); }
 }
 async function sharePrinciple(){
   const action=$('pr_action')?$('pr_action').value.trim():'';

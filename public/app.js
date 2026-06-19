@@ -2935,6 +2935,7 @@ async function setPrinciple(title){ try{ await api('/principle/set',{method:'POS
 async function setValue(value){ try{ await api('/lineup/value/set',{method:'POST',body:JSON.stringify({value})}); if($('lineValue'))$('lineValue').textContent=value; }catch(e){ alert(e.message); } }
 async function loadRaffle(){
   const box=$('raffleList'); if(!box) return;
+  loadRaffleFeatured();
   let d; try{ d=await api('/lineup/raffle'); }catch(e){ return; }
   const rows=[
     ...(d.manual||[]).map(r=>`<div class="pc-note" style="display:flex;justify-content:space-between;align-items:center"><span>🎟️ <strong>${esc(r.name)}</strong> × ${r.count}${r.note?' <span class="hint">· '+esc(r.note)+'</span>':''} <span class="hint">· added by ${esc(r.by_name||'')}</span></span><button class="btn btn-ghost btn-sm sans" onclick="delRaffleEntry(${r.id})">Remove</button></div>`),
@@ -2958,7 +2959,16 @@ async function drawRaffle(){
   }catch(e){ if(m) m.textContent=e.message; }
 }
 async function clearRaffleWinner(){
-  try{ await api('/lineup/raffle/clear-winner',{method:'POST'}); const m=$('raffleMsg'); if(m) m.textContent='Cleared — the winner will no longer show on the lineup email.'; }catch(e){ alert(e.message); }
+  try{ await api('/lineup/raffle/clear-winner',{method:'POST'}); const m=$('raffleMsg'); if(m) m.textContent='Cleared — the winner will no longer show on the lineup email.'; loadRaffleFeatured(); }catch(e){ alert(e.message); }
+}
+async function setRaffleWinner(){
+  const name=$('raffle_set_name')?$('raffle_set_name').value.trim():'';
+  if(!name){ const m=$('raffleMsg'); if(m) m.textContent='Type a name to feature.'; return; }
+  try{ await api('/lineup/raffle/set-winner',{method:'POST',body:JSON.stringify({name})}); if($('raffle_set_name'))$('raffle_set_name').value=''; const m=$('raffleMsg'); if(m) m.innerHTML='🎉 <strong>'+esc(name)+'</strong> is now featured on the lineup email.'; loadRaffleFeatured(); }catch(e){ const m=$('raffleMsg'); if(m) m.textContent=e.message; }
+}
+async function loadRaffleFeatured(){
+  const el=$('raffleFeatured'); if(!el) return;
+  try{ const {winner}=await api('/lineup/raffle/winner'); el.innerHTML = winner ? `Currently on the email: <strong>${esc(winner.name)}</strong>${winner.reward?' — '+esc(winner.reward):''} · <a href="#" onclick="clearRaffleWinner();return false">remove</a>` : 'No winner featured on the email right now.'; }catch(e){}
 }
 async function sharePrinciple(){
   const action=$('pr_action')?$('pr_action').value.trim():'';

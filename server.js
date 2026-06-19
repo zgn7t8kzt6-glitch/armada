@@ -3359,11 +3359,24 @@ app.post('/api/lineup/raffle/draw', requireAuth, (req, res) => {
   setState('raffle_winner', JSON.stringify({ name: winner, reward: (getState('lineup_reward') || '').trim(), at: new Date().toISOString(), entries: pool.length, participants }));
   res.json({ ok: true, winner, entries: pool.length, participants, featured: true });
 });
+// Set the featured winner by name (manual override of the random draw).
+app.post('/api/lineup/raffle/set-winner', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Who won?' });
+  setState('raffle_winner', JSON.stringify({ name: name.slice(0, 80), reward: (getState('lineup_reward') || '').trim(), at: new Date().toISOString(), manual: true }));
+  res.json({ ok: true, name });
+});
 // Clear the featured raffle winner (e.g., a re-draw or after the prize is given).
 app.post('/api/lineup/raffle/clear-winner', requireAuth, (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
   setState('raffle_winner', '');
   res.json({ ok: true });
+});
+// What's currently featured (so the raffle UI can show/edit it).
+app.get('/api/lineup/raffle/winner', requireAuth, (req, res) => {
+  let w = null; try { w = JSON.parse(getState('raffle_winner') || ''); } catch { w = null; }
+  res.json({ winner: w && w.name ? w : null });
 });
 app.post('/api/principle/story', requireAuth, (req, res) => {
   const action = (req.body?.action || '').trim();

@@ -1329,6 +1329,12 @@ if (getState('lineup_extra_mile_2026_06_18') !== 'done') {
   for (const [person, story] of mile) insE.run(person, story, person);
   setState('lineup_extra_mile_2026_06_18', 'done');
 }
+// One-time: feature Jasmine as the current recognition-raffle winner on the
+// lineup (per leadership). Auto-clears after a week; editable from the raffle UI.
+if (getState('raffle_winner_seed_v1') !== 'done') {
+  setState('raffle_winner', JSON.stringify({ name: 'Jasmine Hodous', reward: (getState('lineup_reward') || '').trim(), at: new Date().toISOString(), manual: true }));
+  setState('raffle_winner_seed_v1', 'done');
+}
 // Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
 db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
   id INTEGER PRIMARY KEY,

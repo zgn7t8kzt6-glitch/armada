@@ -5653,6 +5653,28 @@ setInterval(() => {
     if (ever && k + m === 0) createAlert(null, 'recognition_gap', 'Elevated', `No teammate recognition was captured yesterday. Paste the daily-lineup replies into Best Place to Work (or add a quick shout-out) so the team gets celebrated by name on the 8am lineup.`);
   } catch (e) { console.error('[recognition watch]', e.message); }
 }, 6 * 60 * 60 * 1000).unref?.();
+// Weekly: celebrate the fastest concierge responder on the Extra Mile wall (so
+// speed-to-care gets recognized automatically, and flows onto the lineup). Posts
+// once per week, once a teammate has handled enough requests to be meaningful.
+setInterval(() => {
+  try {
+    const t = appToday();
+    const dow = new Date(t + 'T12:00:00Z').getUTCDay();      // 0 Sun … 6 Sat
+    const weekKey = addDays(t, dow === 0 ? -6 : 1 - dow);    // this week's Monday
+    if (getState('top_responder_week') === weekKey) return;  // already celebrated this week
+    const respMin = `(julianday(acknowledged_at) - julianday(created_at)) * 1440`;
+    const top = db.prepare(`SELECT acknowledged_by name, COUNT(*) n, AVG(${respMin}) avg
+      FROM requests WHERE acknowledged_at IS NOT NULL AND acknowledged_by IS NOT NULL AND acknowledged_by != ''
+        AND created_at >= datetime('now','-7 day')
+      GROUP BY acknowledged_by HAVING n >= 3 ORDER BY avg ASC LIMIT 1`).get();
+    if (!top) return;   // nobody's handled enough yet — keep checking, don't set the flag
+    const avg = Math.round(top.avg);
+    const dur = avg < 60 ? `${avg} min` : `${Math.floor(avg / 60)}h ${avg % 60}m`;
+    db.prepare(`INSERT INTO extra_mile (person, story, value_text, by_name, source) VALUES (?,?,?, 'Concierge stats', 'auto')`)
+      .run(top.name, `Fastest concierge response this week — answered ${top.n} client requests, averaging ${dur} to get back to them. Speed is care. ⚡`, effectiveValue() || null);
+    setState('top_responder_week', weekKey);
+  } catch (e) { console.error('[top responder]', e.message); }
+}, 6 * 60 * 60 * 1000).unref?.();
 // Best Place to Work dashboard (leadership).
 // Lightweight badge poll — count of Best Place to Work items needing leadership:
 // open Staff Voice + any active morale/recognition nudge. 0 for non-leadership.

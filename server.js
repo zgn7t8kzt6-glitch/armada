@@ -1672,7 +1672,7 @@ function rolesForAlert(kind, message = '') {
   // Operational lane — the Director of Operations oversees these.
   if (k === 'coverage' || k.startsWith('understaffed_')) return wrap([OPS]);
   if (k === 'unscheduled') return wrap(['Front Desk', OPS]);
-  if (k === 'request') { const d = byDept(); return d ? wrap([...d, OPS]) : wrap(['Front Desk', OPS]); }
+  if (k === 'request' || k.startsWith('request_')) { const d = byDept(); return d ? wrap([...d, OPS]) : wrap(['Front Desk', OPS]); }
   if (k.startsWith('meal_')) return wrap(['Kitchen', OPS]);
   if (k.startsWith('maint')) return wrap([OPS]);   // no dedicated Maintenance role
   if (k.startsWith('supply_out_') || k.startsWith('inv_check_')) return wrap([...(byDept() || []), OPS]);
@@ -3588,29 +3588,33 @@ app.get('/api/requests/stats', requireAuth, (req, res) => {
   });
 });
 function conciergeEmailTo() { return (getState('concierge_email') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '').trim(); }
-app.post('/api/requests', requireAuth, async (req, res) => {
+// Every request (staff- or kiosk-logged) raises its own alert + emails concierge.
+// Unique kind per request id so repeats are never deduped away. `by` is who logged it.
+function announceRequest(id, { client_id, department, text, priority, by }) {
+  const hi = priority === 'High' || priority === 'Urgent';
+  const c = client_id ? db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(client_id) : null;
+  const who = c ? `${c.pref || (c.name || '').split(/\s+/)[0] || 'a client'}${c.room ? ' · Room ' + c.room : ''}` : 'House';
+  createAlert(client_id || null, 'request_' + id, hi ? 'High' : 'Elevated', `${hi ? 'Priority request' : 'Concierge request'} — ${department}: ${String(text).slice(0, 90)} (${who})`);
+  const to = conciergeEmailTo();
+  if (to && emailConfigured()) {
+    const subject = `${hi ? '🔴 Priority' : 'New'} concierge request — ${department}`;
+    const html = `<div style="font-family:Georgia,serif"><h3>${hi ? '🔴 Priority ' : ''}Concierge request</h3>
+      <p><b>${htmlEsc(department)}</b>${hi ? ' · <b style="color:#b00">Priority</b>' : ''}</p>
+      <p style="font-size:15px">${htmlEsc(String(text))}</p>
+      <p style="color:#555">For: ${htmlEsc(who)}${by ? ' · ' + htmlEsc(by) : ''}</p>
+      <p style="color:#888;font-size:12px">Open Armada → Concierge to assign it and start the clock.</p></div>`;
+    sendEmail({ to, subject, html, suppressCc: true }).catch((e) => console.error('[concierge email]', e.message));
+  }
+}
+app.post('/api/requests', requireAuth, (req, res) => {
   const { client_id, department, text, priority } = req.body || {};
   if (!department || !text?.trim()) return res.status(400).json({ error: 'Missing department or text' });
   const hi = priority === 'High';
   const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?)`)
     .run(client_id || null, department, text.trim(), hi ? 'High' : 'Normal', req.user.id, req.user.name);
-  // Every request is an alert now (not just High) so it can be picked up right away.
-  const c = client_id ? db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(client_id) : null;
-  const who = c ? `${c.pref || (c.name || '').split(/\s+/)[0] || 'a client'}${c.room ? ' · Room ' + c.room : ''}` : 'House';
-  createAlert(client_id || null, 'request', hi ? 'High' : 'Elevated', `${hi ? 'High-priority request' : 'Concierge request'} — ${department}: ${text.trim().slice(0, 90)} (${who})`);
+  announceRequest(info.lastInsertRowid, { client_id, department, text: text.trim(), priority: hi ? 'High' : 'Normal', by: 'logged by ' + req.user.name });
   audit({ user: req.user, action: 'REQUEST', entity: 'client', entity_id: client_id ? +client_id : null, detail: department, ip: req.ip });
   res.json({ ok: true, id: info.lastInsertRowid });
-  // Email leadership/concierge so nothing waits for someone to open the app.
-  const to = conciergeEmailTo();
-  if (to && emailConfigured()) {
-    const subject = `${hi ? '🔴 High-priority' : 'New'} concierge request — ${department}`;
-    const html = `<div style="font-family:Georgia,serif"><h3>${hi ? '🔴 High-priority ' : ''}Concierge request</h3>
-      <p><b>${htmlEsc(department)}</b>${hi ? ' · <b style="color:#b00">High priority</b>' : ''}</p>
-      <p style="font-size:15px">${htmlEsc(text.trim())}</p>
-      <p style="color:#555">For: ${htmlEsc(who)} · logged by ${htmlEsc(req.user.name)}</p>
-      <p style="color:#888;font-size:12px">Open Armada → Concierge to assign it and start the clock.</p></div>`;
-    sendEmail({ to, subject, html, suppressCc: true }).catch((e) => console.error('[concierge email]', e.message));
-  }
 });
 app.post('/api/requests/:id/assign', requireAuth, (req, res) => {
   const u = req.body?.user_id ? db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(+req.body.user_id) : null;
@@ -3631,6 +3635,7 @@ app.post('/api/requests/:id/status', requireAuth, (req, res) => {
       done_by = CASE WHEN ? = 'Done' THEN ? ELSE done_by END,
       done_at = CASE WHEN ? = 'Done' THEN datetime('now') ELSE done_at END WHERE id = ?`)
     .run(st, st, st, req.user.name, st, req.user.id, st, req.params.id);
+  if (st === 'Done') db.prepare(`UPDATE alerts SET status = 'Resolved' WHERE kind = ? AND status = 'New'`).run('request_' + req.params.id);
   res.json({ ok: true });
 });
 
@@ -6167,8 +6172,11 @@ app.post('/api/kiosk/request', requireKiosk, (req, res) => {
   // is a safety + Save moment — flag it loudly so a human goes to them now.
   const distress = /\b(leave|leaving|go home|sign out|ama|can'?t do this|done with this|want out|give up|hurt myself|kill myself|suicid|hopeless|panic|can'?t breathe|withdraw|sick)\b/i.test(text);
   const priority = distress ? 'Urgent' : 'Normal';
-  db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, ?, ?)`)
-    .run(b.client_id || null, b.department || 'Front Desk / Concierge', text, priority, 'Client (kiosk)');
+  const dept = b.department || 'Front Desk / Concierge';
+  const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, ?, ?)`)
+    .run(b.client_id || null, dept, text, priority, 'Client (kiosk)');
+  // Alert + email concierge for EVERY kiosk request (the client is waiting).
+  announceRequest(info.lastInsertRowid, { client_id: b.client_id, department: dept, text, priority, by: 'from the client kiosk' });
   if (distress) {
     const c = b.client_id ? db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(b.client_id) : null;
     const who = c ? (c.pref || c.name) : 'A client';
@@ -6216,8 +6224,9 @@ app.post('/api/kiosk/meal', requireKiosk, (req, res) => {
 app.post('/api/kiosk/suggestion', requireKiosk, (req, res) => {
   const text = (req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Tell us your idea' });
-  db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, 'Normal', 'Client (kiosk)')`)
+  const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, 'Normal', 'Client (kiosk)')`)
     .run(req.body?.client_id || null, 'Suggestion box', text.slice(0, 1000));
+  announceRequest(info.lastInsertRowid, { client_id: req.body?.client_id, department: 'Suggestion box', text: text.slice(0, 1000), priority: 'Normal', by: 'idea from the client kiosk' });
   res.json({ ok: true });
 });
 

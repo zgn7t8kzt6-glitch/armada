@@ -4291,6 +4291,27 @@ async function addGrowth(){
   if(!staff_id){ alert('Pick a teammate.'); return; }
   try{ await api('/growth',{method:'POST',body:JSON.stringify({staff_id,staff_name:sel.options[sel.selectedIndex].text,goal,note})}); $('wp_growth_goal').value='';$('wp_growth_note').value=''; loadGrowth(); }catch(e){ alert(e.message); }
 }
+async function extractKudos(){
+  const text=$('kx_text')?$('kx_text').value.trim():''; const msg=$('kx_msg');
+  if(!text){ if(msg)msg.textContent='Paste the replies first.'; return; }
+  if(msg)msg.textContent='Reading…';
+  let d; try{ d=await api('/kudos/extract',{method:'POST',body:JSON.stringify({text})}); }catch(e){ if(msg)msg.textContent=e.message; return; }
+  const items=d.items||[];
+  if(msg)msg.textContent = items.length?`Found ${items.length} — review, edit, then create:`:'No shout-outs found in that text.';
+  $('kx_preview').innerHTML = items.map((it,i)=>`<div class="pc-note kx-row" data-i="${i}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <input class="kx-on" type="checkbox" checked title="Include"/>
+    <input class="kx-to sans" style="width:120px" value="${esc(it.to||'')}" placeholder="to"/>
+    <input class="kx-from sans" style="width:120px" value="${esc(it.from||'')}" placeholder="from"/>
+    <input class="kx-reason sans" style="flex:1;min-width:180px" value="${esc(it.reason||'')}" placeholder="what they did"/>
+  </div>`).join('') + (items.length?`<div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="saveExtractedKudos()">Create kudos</button></div>`:'');
+}
+async function saveExtractedKudos(){
+  const rows=[...document.querySelectorAll('#kx_preview .kx-row')].filter(r=>r.querySelector('.kx-on').checked)
+    .map(r=>({to:r.querySelector('.kx-to').value.trim(),from:r.querySelector('.kx-from').value.trim(),reason:r.querySelector('.kx-reason').value.trim()})).filter(x=>x.to);
+  if(!rows.length){ if($('kx_msg'))$('kx_msg').textContent='Tick at least one (with a name).'; return; }
+  try{ const r=await api('/kudos/bulk',{method:'POST',body:JSON.stringify({items:rows})}); if($('kx_msg'))$('kx_msg').textContent=`✓ Created ${r.saved} kudos.`; $('kx_text').value=''; $('kx_preview').innerHTML=''; loadWorkplace(); }
+  catch(e){ if($('kx_msg'))$('kx_msg').textContent=e.message; }
+}
 
 /* ---- team ---- */
 async function loadTeam(){

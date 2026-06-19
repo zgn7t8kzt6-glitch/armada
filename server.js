@@ -18,7 +18,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable, hashPassword,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, anthropicKey, resetAiClient } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -5530,6 +5530,31 @@ app.post('/api/kudos', requireAuth, (req, res) => {
   db.prepare(`INSERT INTO kudos (to_user_id, to_name, from_id, from_name, text) VALUES (?, ?, ?, ?, ?)`)
     .run(b.to_user_id || null, to?.name || null, req.user.id, req.user.name, b.text.trim());
   res.json({ ok: true });
+});
+// Paste daily-lineup email replies → AI pulls out each shout-out for review.
+app.post('/api/kudos/extract', requireAuth, requireAdmin, async (req, res) => {
+  const text = (req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Paste the lineup replies first.' });
+  if (!claudeConfigured()) return res.status(400).json({ error: 'AI is not configured, so auto-extract is unavailable.' });
+  try { const r = await extractKudos(text); res.json(r); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Save reviewed recognitions as kudos (links to a teammate by name when it matches).
+app.post('/api/kudos/bulk', requireAuth, requireAdmin, (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: 'No recognitions to save.' });
+  const findUser = db.prepare(`SELECT id, name FROM users WHERE active = 1 AND (lower(name) = lower(?) OR lower(name) LIKE lower(?)) LIMIT 1`);
+  const insK = db.prepare(`INSERT INTO kudos (to_user_id, to_name, from_id, from_name, text) VALUES (?,?,?,?,?)`);
+  let saved = 0;
+  for (const it of items) {
+    const to = String(it.to || '').trim(); if (!to) continue;
+    const reason = String(it.reason || '').trim();
+    const from = String(it.from || '').trim();
+    const u = findUser.get(to, to + ' %');                    // exact, or "First …" full name
+    insK.run(u?.id || null, u?.name || to.slice(0, 80), null, from.slice(0, 80) || req.user.name, ('🙌 ' + (reason || 'Recognized on the daily lineup')).slice(0, 500));
+    saved++;
+  }
+  res.json({ ok: true, saved });
 });
 app.post('/api/training-ack', requireAuth, (req, res) => {
   const today = appToday();

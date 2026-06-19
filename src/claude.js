@@ -613,6 +613,57 @@ export async function generateIssueDigest(lines, label) {
   return r;
 }
 
+// ---- Extract peer recognition from daily-lineup email replies ----
+const KUDOS_SYSTEM = `Staff reply to a daily "lineup" email with shout-outs for
+teammates and notes about their own shift. Pull out every RECOGNITION of a NAMED
+teammate and return one item per shout-out.
+Rules:
+- "to" = the teammate being recognized (a person's name). "from" = the email
+  author giving the recognition, if identifiable from the text/signature, else "".
+- "reason" = one warm, concise sentence describing what they did well.
+- If one author praises several people, output several items.
+- Keep CLIENT/patient identifying details out of "reason" — describe the action,
+  not the resident (e.g. "helped a resident in crisis stay safe", never a name).
+- Only include genuine recognition of a named teammate. Skip pure self-reports
+  that don't name another teammate, and skip generic sign-offs.`;
+const KUDOS_SCHEMA = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Teammate being recognized.' },
+          from: { type: 'string', description: 'Person giving the recognition, or "" if unknown.' },
+          reason: { type: 'string', description: 'One concise sentence — what they did, no client-identifying details.' },
+        },
+        required: ['to', 'from', 'reason'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['items'],
+  additionalProperties: false,
+};
+export async function extractKudos(text) {
+  if (!text || !text.trim()) return { items: [] };
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    system: G + KUDOS_SYSTEM,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: KUDOS_SCHEMA } },
+    messages: [{ role: 'user', content: `Daily-lineup email replies:\n\n${text.slice(0, 12000)}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) return { items: [] };
+  const r = JSON.parse(t.text);
+  r.items = (r.items || []).filter((i) => i && i.to && i.to.trim()).map((i) => ({ to: String(i.to).trim(), from: String(i.from || '').trim(), reason: String(i.reason || '').trim() }));
+  return r;
+}
+
 // ---- AI Shift Briefing: the daily lineup for the whole house ----
 const SHIFT_BRIEF_SYSTEM = `You are the care coordinator giving the shift-huddle
 briefing for a residential recovery center, in the Ritz-Carlton spirit. Given the

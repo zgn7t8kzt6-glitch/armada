@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616CF" />
+<link rel="stylesheet" href="/styles.css?v=20260616CG" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -228,10 +228,12 @@
       <!-- Period summary: KPIs open, the discharge detail collapsed -->
       <div class="card" id="periodCard">
         <div class="cmd-hero-row">
-          <div><h3>Period summary</h3><p class="sub sans">Scheduled, admitted, discharged and AMA since a start date. Click an AMA to read why.</p></div>
-          <div class="toolbar" style="justify-content:flex-end">
-            <label class="hint" style="align-self:center">Since</label>
+          <div><h3>Period summary</h3><p class="sub sans">Scheduled, admitted, discharged and AMA over a date range. Leave the end date blank for "to today." Click an AMA to read why.</p></div>
+          <div class="toolbar" style="justify-content:flex-end;gap:6px;flex-wrap:wrap">
+            <label class="hint" style="align-self:center">From</label>
             <input type="date" id="periodSince" value="2026-06-01" onchange="loadCommandPeriod()"/>
+            <label class="hint" style="align-self:center">to</label>
+            <input type="date" id="periodEnd" onchange="loadCommandPeriod()"/>
           </div>
         </div>
         <div id="periodKpis" class="ret-cards"></div>
@@ -1937,6 +1939,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616CF"></script>
+<script src="/app.js?v=20260616CG"></script>
 </body>
 </html>

@@ -2169,13 +2169,15 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
 // discharge breakdown and an AMA drill-down list (reason + link to notes).
 app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday().slice(0, 8) + '01';
-  const scheduled = db.prepare(`SELECT status, COUNT(*) n FROM expected_arrivals WHERE scheduled_date >= ? GROUP BY status`).all(since);
+  const endQ = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : null;
+  const end = endQ || '9999-12-31';   // open-ended when no end date is chosen
+  const scheduled = db.prepare(`SELECT status, COUNT(*) n FROM expected_arrivals WHERE scheduled_date >= ? AND scheduled_date <= ? GROUP BY status`).all(since, end);
   const schedMap = Object.fromEntries(scheduled.map((r) => [r.status, r.n]));
   const schedTotal = scheduled.reduce((s, r) => s + r.n, 0);
 
-  const admitted = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(admit,1,10) >= ?`).get(since).n;
+  const admitted = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`).get(since, end).n;
   const dischRows = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist
-    FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? ORDER BY discharge_date DESC`).all(since);
+    FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ? ORDER BY discharge_date DESC`).all(since, end);
   const byStatus = {};
   for (const d of dischRows) { const s = d.discharge_status || 'Discharged'; byStatus[s] = (byStatus[s] || 0) + 1; }
   const losOf = (a, d) => { if (!a || !d) return null; const n = Math.round((Date.parse(d) - Date.parse(a)) / 864e5); return n >= 0 ? n : null; };
@@ -2197,7 +2199,7 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   }));
 
   res.json({
-    since,
+    since, end: endQ,
     scheduled: { total: schedTotal, arrived: schedMap.arrived || 0, noShow: schedMap.no_show || 0, expected: schedMap.expected || 0 },
     admitted,
     discharged: { total: dischRows.length, byStatus, avgLos, amaRate: dischRows.length ? Math.round(amaCount / dischRows.length * 100) : 0, list: dischList },

@@ -2259,7 +2259,8 @@ async function loadOwnerAccountability(){
 /* ---- Leadership Command Center ---- */
 async function loadCommandPeriod(){
   const since=($('periodSince')&&$('periodSince').value)||'2026-06-01';
-  let p; try{ p = await api('/command/since?date='+encodeURIComponent(since)); }catch(e){ return; }
+  const end=($('periodEnd')&&$('periodEnd').value)||'';
+  let p; try{ p = await api('/command/since?date='+encodeURIComponent(since)+(end?'&end='+encodeURIComponent(end):'')); }catch(e){ return; }
   const dc=p.discharged||{}, sc=p.scheduled||{};
   $('periodKpis').innerHTML=
     `<div class="ret-card"><div class="n">${sc.total||0}</div><div class="l">Scheduled</div></div>`+

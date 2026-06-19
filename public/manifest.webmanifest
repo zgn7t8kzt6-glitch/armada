@@ -3,10 +3,12 @@
   "short_name": "Armada",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#235056",
+  "background_color": "#ffffff",
   "theme_color": "#235056",
   "description": "The Gold Standard of Client Care",
   "icons": [
-    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/icon-192.png?v=2", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png?v=2", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png?v=2", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

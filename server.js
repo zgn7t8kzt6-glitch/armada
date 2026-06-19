@@ -32,6 +32,43 @@ try { const n = ensureShiftTemplates(); if (n) console.log(`[staffing] seeded ${
 try { const a = ensureArrivalItems(); if (a) console.log(`[arrival] added ${a} checklist item(s)`); } catch (e) { console.error('[arrival] ensureItems:', e.message); }
 try { ensureOpsRoutines(); } catch (e) { console.error('[ops] ensureRoutines:', e.message); }
 try { const nn = ensureNourishment(); if (nn) console.log(`[inventory] added ${nn} nourishment item(s)`); } catch (e) { console.error('[inventory] ensureNourishment:', e.message); }
+// One-time: provision the detox staff roster (per leadership). Usernames are
+// first-initial + last name; titles map to the app's roles. Skips any username
+// that already exists; everyone gets a temp password to change on first login.
+try {
+  if (getState('detox_staff_seed_v1') !== 'done') {
+    const TEMP_PW = process.env.STAFF_SEED_PASSWORD || 'Armada#2026';
+    const roleMap = {
+      'APRN': 'Nurse', 'RN': 'Nurse', 'LPN': 'Nurse', 'RN Intake Therapist': 'Nurse',
+      'Resident Tech': 'BHT / Tech', 'Case Manager': 'Case Manager', 'Therapist': 'Therapist',
+      'CDCA': 'Therapist', 'Housekeeper': 'Housekeeping', 'Front Desk Admin Asst': 'Front Desk',
+    };
+    const roster = [
+      ['Natasha', 'Ashcraft', 'APRN'], ['Nadia', 'Baker', 'Resident Tech'], ['Paul', 'Biscardi', 'Case Manager'],
+      ['Shai', 'Briggs', 'RN'], ['Jason', 'Cole', 'Resident Tech'], ['Amanda', 'Demshar', 'Case Manager'],
+      ['James', 'Elmerick', 'Case Manager'], ['Shyanne', 'Ferrebee', 'Resident Tech'], ['Tracy', 'Foss', 'LPN'],
+      ['Jasmine', 'Hodous', 'Resident Tech'], ['Wendy', 'Hovey', 'LPN'], ['Shabrina', 'Jackson', 'LPN'],
+      ['Jennifer', 'Jinks', 'RN'], ['Tamica', 'Johnson', 'Resident Tech'], ['Herbert', 'Luckey', 'CDCA'],
+      ['Lori', 'Martin', 'Resident Tech'], ['Desiree', 'Mastache', 'LPN'], ['Kiera', 'Mastache', 'RN'],
+      ['David', 'McGrady', 'LPN'], ['Lynsey', 'Miller', 'LPN'], ['Zakiya', 'Moore', 'Resident Tech'],
+      ['Shantel', 'Morgan', 'Resident Tech'], ['Almond', 'Moss', 'LPN'], ['Terrence', 'Murphy', 'RN'],
+      ['Suzanne', 'Parsons', 'Therapist'], ['Stevie', 'Reeves', 'Resident Tech'], ['Natasha', 'Roberson', 'Resident Tech'],
+      ['Alexis', 'Robertson', 'RN Intake Therapist'], ['Benjamin', 'Robinson', 'Resident Tech'], ['Nathaniel', 'Rodgers', 'Resident Tech'],
+      ['Kayla', 'Schultz', 'RN'], ['Macayla', 'Strasser', 'Housekeeper'], ['Sarah', 'Taylor', 'Resident Tech'],
+      ['Shiann', 'Trego', 'Front Desk Admin Asst'],
+    ];
+    const exists = db.prepare(`SELECT 1 FROM users WHERE username = ?`);
+    let created = 0;
+    for (const [first, last, title] of roster) {
+      const username = (first[0] + last).toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (exists.get(username)) continue;
+      try { createUser({ name: `${first} ${last}`, username, password: TEMP_PW, role: 'staff', job_role: roleMap[title] || 'BHT / Tech' }); created++; }
+      catch (e) { console.error('[staff seed]', username, e.message); }
+    }
+    setState('detox_staff_seed_v1', 'done');
+    if (created) console.log(`[staff seed] provisioned ${created} detox staff (temp password set)`);
+  }
+} catch (e) { console.error('[staff seed]', e.message); }
 // Default census recipient so a test send reaches the right person out of the box.
 if (!getState('census_email_to')) setState('census_email_to', process.env.CENSUS_EMAIL_TO || 'shlomo@armadarecovery.com');
 // One-time cleanup on boot: clear stale auto-generated risk/concern alerts (e.g.

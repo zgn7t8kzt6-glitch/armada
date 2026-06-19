@@ -2207,6 +2207,94 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+// ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────
+// The curriculum lives here; plan_progress records what's done. Each task carries
+// the day it becomes active so the dashboard can tell leadership what to do today.
+const BELONGING_PLAN = [
+  // PHASE 1 — Foundation (Days 1–30): safety & respect first.
+  { id: 'p1-reset', day: 1, phase: 1, week: 'Week 1 — Stabilize & name reality', owner: 'CEO', title: 'Leadership reset message, in person on the floor', detail: 'CEO + site lead name the post-restructuring reality honestly, explain the "why," and state what stability looks like. Include a weekend shift. Move people from "am I next?" to "I know where I stand."' },
+  { id: 'p1-owner', day: 1, phase: 1, week: 'Week 1 — Stabilize & name reality', owner: 'CEO', title: 'Name the Belonging & Service owner', detail: 'Your Clinical Director or DON (not corporate). They own how the team feels, reviewed alongside census + compliance.' },
+  { id: 'p1-anchor11s', day: 3, phase: 1, week: 'Week 1 — Stabilize & name reality', owner: 'Clinical Director', title: 'Anchor 1:1s with shift leaders & retention-critical staff', detail: 'Sit with the informal shift leaders and your anchors (the Tracy Foss / Wendy Hovey tier). Listen first — they set the emotional weather on their shift.' },
+  { id: 'p1-lineup', day: 8, phase: 1, week: 'Week 2 — Install the Daily Lineup', owner: 'Clinical Director', view: 'lineup', title: 'Launch the 10-minute Daily Lineup on every shift, 7 days', detail: 'Weekends are non-negotiable — that\'s where the problem lives. Value of the day → one wow story → one operational note → recognize one person. The app sends the 8am lineup; run the huddle live too.' },
+  { id: 'p1-rotate', day: 10, phase: 1, week: 'Week 2 — Install the Daily Lineup', owner: 'Clinical Director', title: 'Rotate who runs the lineup', detail: 'So the ritual survives any one person\'s absence.' },
+  { id: 'p1-credo', day: 15, phase: 1, week: 'Week 3 — Define the Akron Gold Standards', owner: 'Clinical Director', view: 'lineup', title: 'Draft & post the Akron credo + motto', detail: 'Why this detox exists, and your "Ladies and Gentlemen serving Ladies and Gentlemen" line.' },
+  { id: 'p1-3steps', day: 17, phase: 1, week: 'Week 3 — Define the Akron Gold Standards', owner: 'Clinical Director', title: 'Define Three Steps of Service (for patients AND staff)', detail: '(1) warm welcome using the patient\'s name; (2) anticipate & meet needs before being asked; (3) a caring, recovery-oriented farewell. Apply the same three steps to how leaders treat staff.' },
+  { id: 'p1-pulse', day: 22, phase: 1, week: 'Week 4 — Baseline & first proof point', owner: 'Clinical Director', view: 'workplace', title: 'Baseline the 3-question belonging pulse (anonymous)', detail: '"I feel part of something here / My input is heard / I\'m treated with respect." This is your leading indicator for the next 90 days.' },
+  { id: 'p1-ama', day: 23, phase: 1, week: 'Week 4 — Baseline & first proof point', owner: 'Clinical Director', view: 'command', title: 'Baseline AMA split: weekend vs weekday', detail: 'Pull the weekend-vs-weekday AMA rate (shown on this page) and by ASAM level. This is the core revenue leak.' },
+  { id: 'p1-census', day: 24, phase: 1, week: 'Week 4 — Baseline & first proof point', owner: 'Clinical Director', title: 'Record baseline census + regrettable turnover', detail: 'Average census (~24 today) and regrettable turnover — each loss resets a team\'s cohesion.' },
+  { id: 'p1-wknddiag', day: 25, phase: 1, week: 'Week 4 — Baseline & first proof point', owner: 'Weekend Lead', title: 'Weekend coverage diagnostic', detail: 'Who is actually present Sat/Sun, and how supported do they feel?' },
+  { id: 'p1-youchanged', day: 27, phase: 1, week: 'Week 4 — Baseline & first proof point', owner: 'Clinical Director', view: 'workplace', title: 'Ship ONE visible "you said, we changed" fix', detail: 'Act fast on one thing staff raised in Staff Voice. Voice without follow-through erodes trust faster than never asking.' },
+  // PHASE 2 — Activation (Days 31–60): push authority & recognition down, win the weekend.
+  { id: 'p2-empower', day: 31, phase: 2, week: 'Week 5 — Push authority & recognition down', owner: 'Compliance (Lauren Shaull)', title: 'Define detox-bounded empowerment', detail: 'Frontline discretion to solve experience problems on the spot — comfort-med conversation, food/beverage outside set times, an extra blanket, a family phone call, a 1:1 walk. Set clear clinical/compliance guardrails so it never collides with safety.' },
+  { id: 'p2-recognition', day: 33, phase: 2, week: 'Week 5 — Push authority & recognition down', owner: 'Clinical Director', view: 'workplace', title: 'Formalize recognition — broad, specific, equitable', detail: 'Peer-to-peer recognition + a monthly award tied to a service value. Keep it broad: over a month, everyone contributing should get seen. Avoid creating an in-crowd.' },
+  { id: 'p2-wkndlead', day: 38, phase: 2, week: 'Week 6 — Win the weekend (the heart of the plan)', owner: 'CEO', title: 'Stand up a named Weekend Lead with real authority', detail: 'Visible, empowered. Leaders should be seen on weekends.' },
+  { id: 'p2-wkndlineup', day: 38, phase: 2, week: 'Week 6 — Win the weekend (the heart of the plan)', owner: 'Weekend Lead', title: 'Run the weekend lineup with weekday energy', detail: 'Same ritual, same energy. Weekend staff stop feeling like a B-team.' },
+  { id: 'p2-wkndidentity', day: 40, phase: 2, week: 'Week 6 — Win the weekend (the heart of the plan)', owner: 'Weekend Lead', title: 'Build a weekend identity + concrete support', detail: '"The team that holds the line when it\'s hardest." Clearer weekend clinical backup, recognition aimed at weekend staff, and — if the model supports it — a weekend differential.' },
+  { id: 'p2-recalibrate', day: 45, phase: 2, week: 'Week 7 — Mid-point recalibration', owner: 'Clinical Director', view: 'workplace', title: 'Second belonging pulse + skip-level conversations', detail: 'Compare to baseline. Adjust. Use skip-levels and floor presence, not only formal HR channels.' },
+  { id: 'p2-purpose', day: 52, phase: 2, week: 'Week 8 — Purpose made visible', owner: 'Clinical Director', title: 'Systematize wow-story capture; bring an alumnus to a lineup', detail: 'Share patient outcomes back to staff. Connect the 2am tech to the six-months-sober result — that\'s the purpose leg, and it costs nothing.' },
+  // PHASE 3 — Embed (Days 61–90): institutionalize it so it survives without heroics.
+  { id: 'p3-day1', day: 61, phase: 3, week: 'Week 9 — Sacred onboarding', owner: 'HR (Rose Copeland)', title: 'Redesign Day 1 = credo + the "why"', detail: 'Immersion in who we are and how we treat people — not a paperwork day. First impression on the employee mirrors the patient\'s first impression of us.' },
+  { id: 'p3-day21', day: 64, phase: 3, week: 'Week 9 — Sacred onboarding', owner: 'HR (Rose Copeland)', title: 'Build the Day 21 reorientation check-in', detail: 'How\'s it going, do you feel part of this, what\'s unclear. Every future hire enters through this.' },
+  { id: 'p3-ladders', day: 68, phase: 3, week: 'Week 10 — Path (so people see a future)', owner: 'HR (Rose Copeland)', title: 'Publish concrete career ladders', detail: 'Tech → counselor, LPN → charge/leadership, an RT development pipeline. 94% of employees say they\'d stay if invested in — answer it visibly.' },
+  { id: 'p3-scorecard', day: 75, phase: 3, week: 'Week 11 — Make leaders accountable', owner: 'CEO', view: 'workplace', title: 'Put belonging on the site-leader scorecard', detail: 'Belonging pulse + regrettable turnover + weekend AMA, reviewed monthly. One plan, not a parallel track.' },
+  { id: 'p3-anchors', day: 82, phase: 3, week: 'Week 12 — Protect the anchors', owner: 'Clinical Director', view: 'workplace', title: 'Formal retention/growth plans for the anchors', detail: 'Tracy, Wendy & key weekend staff. Log growth check-ins so they see a future here.' },
+  { id: 'p3-review', day: 88, phase: 3, week: 'Week 13 — 90-Day review & scale', owner: 'CEO', title: '90-day review: baseline → now', detail: 'Compare belonging pulse, weekend vs weekday AMA, average census, regrettable turnover, and the revenue line.' },
+  { id: 'p3-scale', day: 90, phase: 3, week: 'Week 13 — 90-Day review & scale', owner: 'CEO', title: 'Decide what transfers to Dayton, Spark Indy, Wheatfield', detail: 'Lock in what worked; protect the anchors; scale the rhythm.' },
+];
+const PHASE_LABEL = { 1: 'Phase 1 — Foundation', 2: 'Phase 2 — Activation', 3: 'Phase 3 — Embed', 4: 'Sustaining' };
+function weekendAmaSplit() {
+  const rows = db.prepare(`SELECT CASE WHEN CAST(strftime('%w', discharge_date) AS INTEGER) IN (0,6) THEN 'weekend' ELSE 'weekday' END bucket,
+      SUM(CASE WHEN discharge_status = 'AMA' THEN 1 ELSE 0 END) ama, COUNT(*) total
+    FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-90 day') GROUP BY bucket`).all();
+  const get = (b) => rows.find((r) => r.bucket === b) || { ama: 0, total: 0 };
+  const wk = get('weekend'), wd = get('weekday');
+  const rate = (x) => x.total ? Math.round(x.ama / x.total * 100) : null;
+  return { weekendAma: wk.ama, weekendDisch: wk.total, weekendRate: rate(wk), weekdayAma: wd.ama, weekdayDisch: wd.total, weekdayRate: rate(wd) };
+}
+app.get('/api/plan', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  let start = getState('belonging_plan_start');
+  if (!start) { start = appToday(); setState('belonging_plan_start', start); }
+  const day = Math.max(1, Math.floor((Date.parse(appToday()) - Date.parse(start)) / 864e5) + 1);
+  const phase = day <= 30 ? 1 : day <= 60 ? 2 : day <= 90 ? 3 : 4;
+  const curWeek = Math.ceil(day / 7);
+  const prog = {}; db.prepare(`SELECT task_id, done, substr(done_at,1,10) done_at, done_by FROM plan_progress`).all().forEach((r) => { prog[r.task_id] = r; });
+  const tasks = BELONGING_PLAN.map((t) => {
+    const p = prog[t.id];
+    const taskWeek = Math.ceil(t.day / 7);
+    let status;
+    if (p && p.done) status = 'done';
+    else if (day < t.day) status = 'upcoming';
+    else status = curWeek > taskWeek ? 'overdue' : 'due';
+    return { ...t, done: !!(p && p.done), done_at: p?.done_at || null, done_by: p?.done_by || null, status };
+  });
+  const active = tasks.filter((t) => t.status === 'overdue' || t.status === 'due');
+  const focus = [...active].sort((a, b) => (a.status === 'overdue' ? 0 : 1) - (b.status === 'overdue' ? 0 : 1) || a.day - b.day)[0]
+    || tasks.find((t) => t.status === 'upcoming') || null;
+  const thisWeek = active[0]?.week || (tasks.find((t) => t.status === 'upcoming')?.week) || 'Plan complete';
+  res.json({
+    start, day, phase, phaseLabel: PHASE_LABEL[phase], thisWeek,
+    counts: { done: tasks.filter((t) => t.done).length, total: tasks.length, openNow: active.length },
+    focus, tasks,
+    metrics: { ...weekendAmaSplit(), census: censusNow(), recognitions7d: db.prepare(`SELECT COUNT(*) n FROM kudos WHERE created_at >= datetime('now','-7 day')`).get().n },
+  });
+});
+app.post('/api/plan/task', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const id = String(req.body?.id || ''); if (!BELONGING_PLAN.some((t) => t.id === id)) return res.status(400).json({ error: 'Unknown task' });
+  const done = req.body?.done ? 1 : 0;
+  db.prepare(`INSERT INTO plan_progress (task_id, done, done_at, done_by) VALUES (?,?,?,?)
+    ON CONFLICT(task_id) DO UPDATE SET done=excluded.done, done_at=excluded.done_at, done_by=excluded.done_by`)
+    .run(id, done, done ? new Date().toISOString() : null, done ? req.user.name : null);
+  res.json({ ok: true });
+});
+app.post('/api/plan/start', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.date || '') ? req.body.date : appToday();
+  setState('belonging_plan_start', d);
+  res.json({ ok: true, start: d });
+});
+
 // Diagnostic: show exactly what is being counted as "discharges today" —
 // the flow-events for today and the clients whose discharge_date is today,
 // with source/active/kipu_id so we can see what they actually are.

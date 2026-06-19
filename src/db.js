@@ -255,6 +255,15 @@ CREATE TABLE IF NOT EXISTS extra_mile (
   source TEXT DEFAULT 'lineup',             -- lineup | manual
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- 90-Day Belonging & Service Excellence plan: per-task completion tracking. The
+-- task list itself lives in code (the curriculum); this just records what's done.
+CREATE TABLE IF NOT EXISTS plan_progress (
+  task_id TEXT PRIMARY KEY,
+  done INTEGER NOT NULL DEFAULT 0,
+  done_at TEXT,
+  done_by TEXT,
+  note TEXT
+);
 
 -- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
 CREATE TABLE IF NOT EXISTS staff_pulses (

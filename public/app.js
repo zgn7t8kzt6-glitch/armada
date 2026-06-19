@@ -164,7 +164,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',plan:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -192,6 +192,7 @@ const VIEW_ROLES = {
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
+  plan:        ['Executive Director','Director of Operations','Clinical Director'],
   dignity:     ['BHT / Tech','Nurse','Clinical Director'],
   engagement:  ['BHT / Tech','Therapist','Clinical Director'],
   program:     ['BHT / Tech','Therapist','Clinical Director'],
@@ -300,6 +301,7 @@ function show(v){
   if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
+  if(v==='plan') loadPlan();
   if(v==='leadership') loadLeadership();
   if(v==='compliance') loadCompliance();
   if(v==='askai') loadAskAI();
@@ -2390,10 +2392,59 @@ async function loadLeadership(){
     </div></div>`;
   $('leadBody').innerHTML = opsCard + clinCard + `<p class="hint">Executive Director: ${holders(d.execHolders)}. More seats show their scorecard + routine here as they're built.</p>`;
 }
+/* ---- 90-Day Belonging Plan ---- */
+let PLAN_DATA=null;
+function planTaskRow(t){
+  const badge = t.status==='done'?'<span class="risk risk-low">done</span>'
+    : t.status==='overdue'?'<span class="risk risk-high">overdue</span>'
+    : t.status==='due'?'<span class="risk risk-warn">do now</span>'
+    : '<span class="hint">upcoming · day '+t.day+'</span>';
+  const link = t.view?` <a href="#" onclick="show('${t.view}');return false" class="hint">open ↗</a>`:'';
+  return `<div class="pc-note" style="display:flex;gap:8px;align-items:flex-start;${t.status==='done'?'opacity:.6':''}">
+    <input type="checkbox" ${t.done?'checked':''} onchange="togglePlanTask('${t.id}',this.checked)" style="margin-top:3px"/>
+    <div style="flex:1"><div><strong>${esc(t.title)}</strong> ${badge}</div>
+      <div class="hint" style="margin-top:2px">${esc(t.detail)}</div>
+      <div class="hint" style="margin-top:2px">👤 ${esc(t.owner)}${link}${t.done_by?' · ✓ '+esc(t.done_by):''}</div></div></div>`;
+}
+async function loadPlan(){
+  let d; try{ d=await api('/plan'); }catch(e){ if($('planTasks'))$('planTasks').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  PLAN_DATA=d;
+  if($('planStart')&&d.start) $('planStart').value=d.start;
+  const m=d.metrics||{};
+  $('planHeader').innerHTML=`<div style="font-size:15px"><strong>Day ${d.day} of 90 · ${esc(d.phaseLabel)}</strong> — ${esc(d.thisWeek)}</div>
+    <div class="hint" style="margin-top:2px">${d.counts.done}/${d.counts.total} steps done · ${d.counts.openNow} open now</div>`;
+  $('planMetrics').innerHTML=`
+    <div class="ret-card ${m.weekendRate!=null&&m.weekdayRate!=null&&m.weekendRate>m.weekdayRate?'rc-high':''}"><div class="n">${m.weekendRate==null?'—':m.weekendRate+'%'}</div><div class="l">Weekend AMA rate (90d)</div></div>
+    <div class="ret-card"><div class="n">${m.weekdayRate==null?'—':m.weekdayRate+'%'}</div><div class="l">Weekday AMA rate</div></div>
+    <div class="ret-card"><div class="n">${m.census}</div><div class="l">Census (toward 30)</div></div>
+    <div class="ret-card"><div class="n">${m.recognitions7d}</div><div class="l">Recognitions · 7d</div></div>`;
+  // group tasks by week, in order
+  const weeks=[]; const seen={};
+  d.tasks.forEach(t=>{ if(!seen[t.week]){ seen[t.week]=[]; weeks.push(t.week); } seen[t.week].push(t); });
+  $('planTasks').innerHTML = weeks.map(w=>`<div class="card"><h3 style="font-size:15px">${esc(w)}</h3>${seen[w].map(planTaskRow).join('')}</div>`).join('');
+}
+async function loadPlanMorning(){
+  const box=$('planMorning'); if(!box) return;
+  let d; try{ d=await api('/plan'); }catch(e){ box.style.display='none'; return; }
+  const open=d.tasks.filter(t=>t.status==='overdue'||t.status==='due');
+  box.style.display='';
+  box.innerHTML=`<div class="cmd-hero-row"><div><h3 style="margin:0">📋 Today on the 90-Day Plan — Day ${d.day} · ${esc(d.phaseLabel)}</h3>
+      <p class="sub sans" style="margin:2px 0 0">${esc(d.thisWeek)}</p></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="show('plan')">Full plan ↗</button></div>
+    ${d.focus?`<div style="margin:10px 0;padding:10px 14px;background:#faf6ee;border-left:3px solid #c8a44d;border-radius:4px"><div class="hint" style="text-transform:uppercase;letter-spacing:.5px;font-size:10px">Focus today</div><strong>${esc(d.focus.title)}</strong><div class="hint" style="margin-top:2px">${esc(d.focus.detail)}</div></div>`:''}
+    ${open.length?open.map(planTaskRow).join(''):'<div class="hint">✓ Nothing open right now — you\'re on track.</div>'}`;
+}
+async function togglePlanTask(id,done){
+  try{ await api('/plan/task',{method:'POST',body:JSON.stringify({id,done})}); if($('plan')&&$('plan').classList.contains('active'))loadPlan(); loadPlanMorning(); }catch(e){ alert(e.message); }
+}
+async function setPlanStart(){
+  const date=$('planStart')?$('planStart').value:''; if(!date) return;
+  try{ await api('/plan/start',{method:'POST',body:JSON.stringify({date})}); loadPlan(); loadPlanMorning(); }catch(e){ alert(e.message); }
+}
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
-  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys();
+  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});

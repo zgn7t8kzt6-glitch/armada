@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616CI" />
+<link rel="stylesheet" href="/styles.css?v=20260616CJ" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -55,6 +55,7 @@
     <button data-view="dashboard">My Shift</button>
     <button data-view="today">Today</button>
     <button data-view="command" data-admin>Command Center</button>
+    <button data-view="plan" data-admin data-subview>90-Day Plan</button>
     <button data-view="leadership" data-admin>Leadership</button>
     <button data-view="compliance" data-admin>Documentation</button>
     <button data-view="report" class="active">Shift Playbook</button>
@@ -223,6 +224,7 @@
           <div id="cmdAssessMsg" class="hint" style="width:100%;margin-top:8px"></div>
         </div>
       </div>
+      <div class="card" id="planMorning" style="display:none;border-left:4px solid #c8a44d"></div>
       <div id="cmdFlow" class="ret-cards"></div>
       <div id="cmdFlowDetail" class="card" style="display:none"></div>
       <!-- Period summary: KPIs open, the discharge detail collapsed -->
@@ -327,6 +329,19 @@
           <div><h4 style="margin:0 0 4px">Staffing — today</h4><p class="sub sans" style="margin:0 0 8px">Coverage against need, plus call-offs to backfill.</p><div id="cmdStaffing"></div></div>
         </div>
       </details>
+    </section>
+
+    <!-- 90-DAY BELONGING PLAN -->
+    <section id="plan" class="view">
+      <div class="card cmd-hero">
+        <div class="cmd-hero-row">
+          <div><h3>📋 90-Day Belonging &amp; Service Plan</h3><p class="sub sans">Horst Schulze model — bend the weekend-AMA curve by getting the staff side right. Check off each step; the dashboard tells you what to do today.</p></div>
+          <div class="cmd-hero-actions"><span id="planStartWrap" class="hint">Start date <input type="date" id="planStart" onchange="setPlanStart()" style="margin-left:4px"/></span></div>
+        </div>
+        <div id="planHeader" style="margin-top:8px"></div>
+      </div>
+      <div id="planMetrics" class="ret-cards"></div>
+      <div id="planTasks"></div>
     </section>
 
     <!-- ENGAGEMENT & REWARDS -->
@@ -1939,6 +1954,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616CI"></script>
+<script src="/app.js?v=20260616CJ"></script>
 </body>
 </html>

@@ -1285,6 +1285,26 @@ if (getState('kitchen_cat_merge_v1') !== 'done') {
   ].forEach((n) => deact.run(n));
   setState('kitchen_cat_merge_v1', 'done');
 }
+// One-time: capture the peer recognition from the June 18 daily-lineup email
+// replies into Kudos so it reaches the most-recognized board (the team replied
+// before the paste-to-Kudos tool existed). Idempotent — guarded by a flag, and
+// links to a teammate by name when one matches. No client-identifying details.
+if (getState('lineup_kudos_2026_06_18') !== 'done') {
+  const findU = db.prepare(`SELECT id, name FROM users WHERE active = 1 AND (lower(name) = lower(?) OR lower(name) LIKE lower(?)) LIMIT 1`);
+  const insK = db.prepare(`INSERT INTO kudos (to_user_id, to_name, from_id, from_name, text) VALUES (?,?,?,?,?)`);
+  const seed = [
+    ['Maci', 'Shyanne Ferrebee', 'Comes in every day and keeps the facility clean and organized — does an amazing job and always has a smile, even on the hard days.'],
+    ['Maci', 'Suzanne Parsons', 'While cleaning the upstairs floor, a resident asked where the snacks were and she walked him down to the dining room.'],
+    ['Lynsey', 'Tracy Foss', 'Split her time between upstairs nurse and intake, taking on two admissions while a teammate was away — always jumps in and never complains.'],
+    ['Sarah Lindsey', 'Jasmine Hodous', 'Recognized on the daily lineup for going above and beyond.'],
+    ['Bre', 'Jasmine Hodous', 'Recognized on the daily lineup for going above and beyond.'],
+  ];
+  for (const [to, from, reason] of seed) {
+    const u = findU.get(to, to + ' %');
+    insK.run(u?.id || null, u?.name || to, null, from, '🙌 ' + reason);
+  }
+  setState('lineup_kudos_2026_06_18', 'done');
+}
 // Multiple photos per work order (before/after, several angles). Client-resized JPEGs.
 db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
   id INTEGER PRIMARY KEY,

@@ -2413,7 +2413,9 @@ async function loadPlan(){
   const m=d.metrics||{};
   $('planHeader').innerHTML=`<div style="font-size:15px"><strong>Day ${d.day} of 90 · ${esc(d.phaseLabel)}</strong> — ${esc(d.thisWeek)}</div>
     <div class="hint" style="margin-top:2px">${d.counts.done}/${d.counts.total} steps done · ${d.counts.openNow} open now</div>`;
+  const bl=m.belonging||{};
   $('planMetrics').innerHTML=`
+    <div class="ret-card ${bl.avg!=null&&bl.avg<3.5?'rc-high':''}"><div class="n">${bl.avg==null?'—':bl.avg+'/5'}</div><div class="l">Belonging pulse${bl.n?' ('+bl.n+')':''}</div></div>
     <div class="ret-card ${m.weekendRate!=null&&m.weekdayRate!=null&&m.weekendRate>m.weekdayRate?'rc-high':''}"><div class="n">${m.weekendRate==null?'—':m.weekendRate+'%'}</div><div class="l">Weekend AMA rate (90d)</div></div>
     <div class="ret-card"><div class="n">${m.weekdayRate==null?'—':m.weekdayRate+'%'}</div><div class="l">Weekday AMA rate</div></div>
     <div class="ret-card"><div class="n">${m.census}</div><div class="l">Census (toward 30)</div></div>
@@ -2424,15 +2426,15 @@ async function loadPlan(){
   $('planTasks').innerHTML = weeks.map(w=>`<div class="card"><h3 style="font-size:15px">${esc(w)}</h3>${seen[w].map(planTaskRow).join('')}</div>`).join('');
 }
 async function loadPlanMorning(){
-  const box=$('planMorning'); if(!box) return;
-  let d; try{ d=await api('/plan'); }catch(e){ box.style.display='none'; return; }
+  const boxes=['planMorning','planMorningOps'].map(id=>$(id)).filter(Boolean); if(!boxes.length) return;
+  let d; try{ d=await api('/plan'); }catch(e){ boxes.forEach(b=>b.style.display='none'); return; }
   const open=d.tasks.filter(t=>t.status==='overdue'||t.status==='due');
-  box.style.display='';
-  box.innerHTML=`<div class="cmd-hero-row"><div><h3 style="margin:0">📋 Today on the 90-Day Plan — Day ${d.day} · ${esc(d.phaseLabel)}</h3>
+  const html=`<div class="cmd-hero-row"><div><h3 style="margin:0">📋 Today on the 90-Day Plan — Day ${d.day} · ${esc(d.phaseLabel)}</h3>
       <p class="sub sans" style="margin:2px 0 0">${esc(d.thisWeek)}</p></div>
       <button class="btn btn-ghost btn-sm sans" onclick="show('plan')">Full plan ↗</button></div>
     ${d.focus?`<div style="margin:10px 0;padding:10px 14px;background:#faf6ee;border-left:3px solid #c8a44d;border-radius:4px"><div class="hint" style="text-transform:uppercase;letter-spacing:.5px;font-size:10px">Focus today</div><strong>${esc(d.focus.title)}</strong><div class="hint" style="margin-top:2px">${esc(d.focus.detail)}</div></div>`:''}
     ${open.length?open.map(planTaskRow).join(''):'<div class="hint">✓ Nothing open right now — you\'re on track.</div>'}`;
+  boxes.forEach(b=>{ b.style.display=''; b.innerHTML=html; });
 }
 async function togglePlanTask(id,done){
   try{ await api('/plan/task',{method:'POST',body:JSON.stringify({id,done})}); if($('plan')&&$('plan').classList.contains('active'))loadPlan(); loadPlanMorning(); }catch(e){ alert(e.message); }
@@ -3792,6 +3794,7 @@ let OPS=null;
 const ENV_AREAS=[['beds','Beds made'],['rooms','Rooms clean'],['common','Common areas'],['kitchen','Kitchen reset']];
 const HO_AREAS=[['stock','Stock at par'],['beds','Beds made'],['kitchen','Kitchen reset'],['smokes','Smokes prepped']];
 async function loadOps(){
+  loadPlanMorning();
   let d; try{ d=await api('/ops'); }catch(e){ $('opsKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   OPS=d; const x=d.extras;
   // Today's recurring tasks — the operational workflow
@@ -4417,7 +4420,10 @@ async function loadWorkplace(){
   try{ const {staff}=await api('/staff'); const opts='<option value="">— teammate —</option>'+staff.filter(s=>s.active!==0).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join(''); if($('wp_rec_to'))$('wp_rec_to').innerHTML=opts; if($('wp_growth_to'))$('wp_growth_to').innerHTML=opts; }catch(e){}
   let d; try{ d=await api('/workplace'); }catch(e){ $('wpKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   const moraleLabel = d.morale==null?'—':(d.morale>=80?'Strong':d.morale>=60?'Okay':d.morale>=40?'Stretched':'At risk');
+  const bl=d.belonging||{};
+  const blArrow = (bl.avg!=null&&bl.prevAvg!=null) ? (bl.avg>bl.prevAvg?' ↑':bl.avg<bl.prevAvg?' ↓':'') : '';
   $('wpKpis').innerHTML=`
+    <div class="ret-card ${bl.avg!=null&&bl.avg<3.5?'rc-high':''}"><div class="n">${bl.avg==null?'—':bl.avg+'/5'}${blArrow}</div><div class="l">Belonging${bl.n?' ('+bl.n+')':''}</div></div>
     <div class="ret-card ${d.morale!=null&&d.morale<60?'rc-high':''}"><div class="n">${d.morale==null?'—':d.morale}</div><div class="l">Morale ${d.morale!=null?'('+moraleLabel+')':''}</div></div>
     <div class="ret-card"><div class="n">${d.recognitionsWeek}</div><div class="l">Recognitions this week</div></div>
     <div class="ret-card ${d.callOffsWeek?'rc-warn':''}"><div class="n">${d.callOffsWeek}</div><div class="l">Call-offs this week</div></div>
@@ -4493,11 +4499,32 @@ async function addExtraMile(){
   catch(e){ if($('em_msg'))$('em_msg').textContent=e.message; }
 }
 
+/* ---- belonging pulse (anonymous, the plan's leading indicator) ---- */
+const BELONG_Q = ['I feel part of something here', 'My input is heard', "I'm treated with respect"];
+let BELONG = {};
+function renderBelonging(){
+  const card=$('belongCard'); const box=$('belongQs'); if(!card||!box) return;
+  if(localStorage.getItem('belong_date')===today()){ card.innerHTML='<h3>💜 Belonging check-in</h3><p class="sub sans" style="margin:0">✓ Thanks — your check-in is in (anonymously). Come back tomorrow.</p>'; return; }
+  BELONG={};
+  box.innerHTML = BELONG_Q.map((q,i)=>{ const qi='q'+(i+1);
+    return `<div style="margin:8px 0"><div class="sans" style="font-size:13px;margin-bottom:4px">${esc(q)}</div>
+      <div data-q="${qi}" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${[1,2,3,4,5].map(n=>`<button type="button" class="btn btn-ghost btn-sm sans bl-b" onclick="pickBelong('${qi}',${n},this)">${n}</button>`).join('')}<span class="hint" style="margin-left:6px">1 = strongly disagree · 5 = strongly agree</span></div></div>`;
+  }).join('');
+}
+function pickBelong(q,n,btn){ BELONG[q]=n; [...btn.parentElement.querySelectorAll('.bl-b')].forEach(b=>b.classList.remove('btn-gold')); btn.classList.add('btn-gold'); }
+async function submitBelonging(){
+  if(BELONG.q1==null||BELONG.q2==null||BELONG.q3==null){ if($('belong_msg'))$('belong_msg').textContent='Please answer all three.'; return; }
+  try{ await api('/belonging-pulse',{method:'POST',body:JSON.stringify({q1:BELONG.q1,q2:BELONG.q2,q3:BELONG.q3,note:($('belong_note')||{}).value||''})});
+    localStorage.setItem('belong_date',today()); renderBelonging();
+  }catch(e){ if($('belong_msg'))$('belong_msg').textContent=e.message; }
+}
+
 /* ---- team ---- */
 async function loadTeam(){
   if($('workplaceLink')) $('workplaceLink').style.display = isLeadershipUser() ? '' : 'none';
   loadStaffVoice();
   loadExtraMile();
+  renderBelonging();
   const [{value}, t, {staff}] = await Promise.all([api('/lineup'), api('/team'), api('/staff')]);
   $('teamValue').textContent = value;
   $('trainBtn').disabled = t.trainedToday; $('trainMsg').textContent = t.trainedToday ? `✓ reviewed · ${t.trainingCount} on the team today` : `${t.trainingCount} teammates reviewed today`;

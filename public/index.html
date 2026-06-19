@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616CJ" />
+<link rel="stylesheet" href="/styles.css?v=20260616CK" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -557,6 +557,7 @@
         </div>
         <div id="opsKpis" class="ret-cards"></div>
       </div>
+      <div class="card" id="planMorningOps" style="display:none;border-left:4px solid #c8a44d"></div>
       <div class="card" style="border-left:4px solid var(--gold)">
         <div class="cmd-hero-row"><div><h3 style="margin:0">✅ Today — do these</h3><p class="sub sans">Your operational tasks for today. Check each off — this is the job, not the alerts.</p></div><span id="opsTaskCount" class="badge"></span></div>
         <div id="opsTasks"></div>
@@ -1376,6 +1377,13 @@
         <span class="hint" id="em_msg"></span>
         <div id="extraMileFeed" style="margin-top:10px"></div>
       </div>
+      <div class="card" id="belongCard" style="border-left:4px solid #7a5cc0">
+        <h3>💜 Belonging check-in <span class="hint" style="font-weight:400">· anonymous</span></h3>
+        <p class="sub sans" style="margin:0 0 8px">Three quick questions — no name attached. Just an honest read so leadership knows how we're really doing.</p>
+        <div id="belongQs"></div>
+        <textarea id="belong_note" rows="2" placeholder="Anything you want to add (optional, still anonymous)"></textarea>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold sans" onclick="submitBelonging()">Submit</button><span class="hint" id="belong_msg"></span></div>
+      </div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
         <div class="card" style="flex:2;min-width:300px">
           <h3>Kudos — recognize a teammate</h3>
@@ -1954,6 +1962,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616CJ"></script>
+<script src="/app.js?v=20260616CK"></script>
 </body>
 </html>

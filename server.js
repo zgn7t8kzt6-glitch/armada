@@ -2242,6 +2242,24 @@ const BELONGING_PLAN = [
   { id: 'p3-scale', day: 90, phase: 3, week: 'Week 13 — 90-Day review & scale', owner: 'CEO', title: 'Decide what transfers to Dayton, Spark Indy, Wheatfield', detail: 'Lock in what worked; protect the anchors; scale the rhythm.' },
 ];
 const PHASE_LABEL = { 1: 'Phase 1 — Foundation', 2: 'Phase 2 — Activation', 3: 'Phase 3 — Embed', 4: 'Sustaining' };
+// Belonging pulse: average of the three 1-5 ratings over a window (the leading
+// indicator). Returns overall avg + per-question + count, plus the prior window
+// for a trend arrow.
+function belongingStats(days = 30) {
+  const win = (from, to) => {
+    const r = db.prepare(`SELECT COUNT(*) n, AVG(q1) a1, AVG(q2) a2, AVG(q3) a3, AVG((q1+q2+q3)/3.0) avg
+      FROM belonging_pulses WHERE created_at >= datetime('now', ?) ${to ? `AND created_at < datetime('now', ?)` : ''}`).get(...(to ? [from, to] : [from]));
+    return r;
+  };
+  const cur = win(`-${days} day`);
+  const prev = win(`-${days * 2} day`, `-${days} day`);
+  const r1 = (x) => x == null ? null : Math.round(x * 10) / 10;
+  return {
+    n: cur.n || 0,
+    avg: r1(cur.avg), q1: r1(cur.a1), q2: r1(cur.a2), q3: r1(cur.a3),
+    prevAvg: prev.n ? r1(prev.avg) : null,
+  };
+}
 function weekendAmaSplit() {
   const rows = db.prepare(`SELECT CASE WHEN CAST(strftime('%w', discharge_date) AS INTEGER) IN (0,6) THEN 'weekend' ELSE 'weekday' END bucket,
       SUM(CASE WHEN discharge_status = 'AMA' THEN 1 ELSE 0 END) ama, COUNT(*) total
@@ -2276,8 +2294,23 @@ app.get('/api/plan', requireAuth, (req, res) => {
     start, day, phase, phaseLabel: PHASE_LABEL[phase], thisWeek,
     counts: { done: tasks.filter((t) => t.done).length, total: tasks.length, openNow: active.length },
     focus, tasks,
-    metrics: { ...weekendAmaSplit(), census: censusNow(), recognitions7d: db.prepare(`SELECT COUNT(*) n FROM kudos WHERE created_at >= datetime('now','-7 day')`).get().n },
+    metrics: { ...weekendAmaSplit(), belonging: belongingStats(30), census: censusNow(), recognitions7d: db.prepare(`SELECT COUNT(*) n FROM kudos WHERE created_at >= datetime('now','-7 day')`).get().n },
   });
+});
+// Anonymous 3-question belonging pulse — no user stored, by design.
+app.post('/api/belonging-pulse', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const v = (x) => { const n = parseInt(x, 10); return n >= 1 && n <= 5 ? n : null; };
+  const q1 = v(b.q1), q2 = v(b.q2), q3 = v(b.q3);
+  if (q1 == null || q2 == null || q3 == null) return res.status(400).json({ error: 'Please answer all three.' });
+  const weekend = [0, 6].includes(new Date().getDay()) ? 1 : 0;
+  db.prepare(`INSERT INTO belonging_pulses (q1, q2, q3, note, weekend) VALUES (?,?,?,?,?)`)
+    .run(q1, q2, q3, (b.note || '').trim().slice(0, 500) || null, weekend);
+  res.json({ ok: true });
+});
+app.get('/api/belonging-pulse/stats', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  res.json(belongingStats(+req.query.days || 30));
 });
 app.post('/api/plan/task', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
@@ -5797,7 +5830,7 @@ app.get('/api/workplace', requireAuth, (req, res) => {
   db.prepare(`SELECT to_name FROM kudos WHERE to_name IS NOT NULL AND to_name != '' AND created_at >= ${since7}`).all().forEach((r) => { const k = r.to_name.trim(); tally[k] = (tally[k] || 0) + 1; });
   db.prepare(`SELECT recognize FROM wows WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= ${since7}`).all().forEach((r) => { const k = r.recognize.trim(); tally[k] = (tally[k] || 0) + 1; });
   const mostRecognized = Object.entries(tally).map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n).slice(0, 8);
-  res.json({ morale, pulse, kudosWeek, wowRecWeek, recognitionsWeek: kudosWeek + wowRecWeek, callOffsWeek, openVoice, voiceClosedWeek, mostRecognized });
+  res.json({ morale, pulse, belonging: belongingStats(30), kudosWeek, wowRecWeek, recognitionsWeek: kudosWeek + wowRecWeek, callOffsWeek, openVoice, voiceClosedWeek, mostRecognized });
 });
 // Growth check-ins (leadership logs goals + 1:1 notes per teammate).
 app.get('/api/growth', requireAuth, (req, res) => {

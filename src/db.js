@@ -264,6 +264,15 @@ CREATE TABLE IF NOT EXISTS plan_progress (
   done_by TEXT,
   note TEXT
 );
+-- Belonging pulse (the plan's leading indicator): 3 anonymous 1-5 ratings —
+-- "I feel part of something here / My input is heard / I'm treated with respect."
+CREATE TABLE IF NOT EXISTS belonging_pulses (
+  id INTEGER PRIMARY KEY,
+  q1 INTEGER, q2 INTEGER, q3 INTEGER,        -- 1-5 each
+  note TEXT,
+  weekend INTEGER NOT NULL DEFAULT 0,        -- submitted on a weekend (weekend-staff signal)
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
 CREATE TABLE IF NOT EXISTS staff_pulses (

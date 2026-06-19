@@ -1620,7 +1620,7 @@ function rolesForAlert(kind, message = '') {
   if (k.startsWith('maint')) return wrap([OPS]);   // no dedicated Maintenance role
   if (k.startsWith('supply_out_') || k.startsWith('inv_check_')) return wrap([...(byDept() || []), OPS]);
   if (k.startsWith('bed_overdue')) return wrap([OPS]);                       // bed turnover not done in time
-  if (k.startsWith('staff_voice') || k === 'morale_dip') return wrap([OPS, CLIN]);   // team morale — leadership
+  if (k.startsWith('staff_voice') || k === 'morale_dip' || k === 'recognition_gap') return wrap([OPS, CLIN]);   // team morale — leadership
   return null;   // unknown kind → everyone (a safety net; all current kinds are mapped above)
 }
 // Re-tag every New alert on startup so any change to the mapping above takes
@@ -5489,6 +5489,19 @@ setInterval(() => {
     let sum = 0, cnt = 0; for (const p of pulse) { if (score[p.load] != null) { sum += score[p.load] * p.n; cnt += p.n; } }
     if (cnt >= 3) { const morale = Math.round(sum / cnt); if (morale < 50) createAlert(null, 'morale_dip', 'Elevated', `Team morale is running low (${morale}/100 over the last week). Check Best Place to Work, recognize someone, and answer open Staff Voice.`); }
   } catch (e) { console.error('[morale watch]', e.message); }
+}, 6 * 60 * 60 * 1000).unref?.();
+// Recognition habit: gently nudge leadership if a full day passed with no
+// recognition captured (no Kudos, no Extra Mile) — so the 8am lineup always has
+// someone to celebrate by name. Once/day, and only after the program is running.
+setInterval(() => {
+  try {
+    const y = dayBoundsUtc(addDays(appToday(), -1));   // yesterday, local day in UTC
+    const k = db.prepare(`SELECT COUNT(*) n FROM kudos WHERE created_at >= ? AND created_at < ?`).get(y.start, y.end).n;
+    const m = db.prepare(`SELECT COUNT(*) n FROM extra_mile WHERE created_at >= ? AND created_at < ?`).get(y.start, y.end).n;
+    // Only nudge once there's a recognition habit to keep (the app has seen some).
+    const ever = db.prepare(`SELECT 1 FROM kudos LIMIT 1`).get() || db.prepare(`SELECT 1 FROM extra_mile LIMIT 1`).get();
+    if (ever && k + m === 0) createAlert(null, 'recognition_gap', 'Elevated', `No teammate recognition was captured yesterday. Paste the daily-lineup replies into Best Place to Work (or add a quick shout-out) so the team gets celebrated by name on the 8am lineup.`);
+  } catch (e) { console.error('[recognition watch]', e.message); }
 }, 6 * 60 * 60 * 1000).unref?.();
 // Best Place to Work dashboard (leadership).
 app.get('/api/workplace', requireAuth, (req, res) => {

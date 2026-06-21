@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>Hilltop Recovery Home — Staff Training</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  :root{
+    --teal:#235056;--teal2:#2d6168;--aqua:#5fb0c2;--sage:#a7ba86;--gold:#d29a5e;--gold2:#e5a05e;--gold-soft:#ecd9b6;
+    --ink:#16242a;--paper:#fff;--muted:#7d8b88;--line:#e7e2d7;
+    --serif:"Fraunces","Iowan Old Style",Georgia,serif;
+    --sans:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:var(--sans);color:#eaf1f0;overflow:hidden;
+    background:radial-gradient(1200px 800px at 80% -10%,#2d6168,transparent 60%),radial-gradient(1000px 700px at 8% 115%,#173a40,transparent 55%),linear-gradient(140deg,#143036,#214b51 55%,#2d6168);
+    -webkit-font-smoothing:antialiased}
+  .wrap{height:100%;display:flex;flex-direction:column;max-width:1280px;margin:0 auto;padding:22px clamp(16px,4vw,52px) 16px}
+  /* top bar */
+  .top{display:flex;align-items:center;gap:14px;flex:0 0 auto}
+  .brand{font-family:var(--serif);font-weight:600;font-size:20px;letter-spacing:-.01em;color:#fff;display:flex;align-items:center;gap:9px}
+  .brand .mk{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--gold2),var(--sage));display:grid;place-items:center;font-size:15px}
+  .chips{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px;color:#bcd6d3}
+  .chap{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--gold-soft);font-weight:700}
+  /* stage */
+  .stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0}
+  .scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+    opacity:0;transform:translateY(14px) scale(.99);transition:opacity .5s ease,transform .6s ease;pointer-events:none;padding:8px}
+  .scene.on{opacity:1;transform:none;pointer-events:auto}
+  .icon{font-size:clamp(40px,7vw,76px);filter:drop-shadow(0 8px 24px rgba(0,0,0,.3));animation:float 6s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+  h1{font-family:var(--serif);font-weight:600;font-size:clamp(26px,4.6vw,52px);line-height:1.08;letter-spacing:-.02em;margin:0;text-align:center;max-width:18ch;color:#fff}
+  .lines{max-width:760px;text-align:center}
+  .line{font-size:clamp(15px,2vw,21px);line-height:1.5;color:#d7e6e3;margin:8px 0;opacity:0;transform:translateY(8px);animation:rise .6s ease forwards}
+  @keyframes rise{to{opacity:1;transform:none}}
+  .hint{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);
+    backdrop-filter:blur(6px);border-radius:999px;padding:9px 18px;font-size:14px;font-weight:600;color:#fff}
+  .hint b{color:var(--gold-soft);font-weight:700}
+  /* faux UI mock */
+  .mock{width:min(680px,92vw);background:rgba(255,255,255,.97);color:var(--ink);border-radius:18px;
+    box-shadow:0 30px 80px rgba(0,0,0,.4);padding:18px 20px;border:1px solid rgba(255,255,255,.5)}
+  .mock .bar{height:4px;border-radius:4px 4px 0 0;background:linear-gradient(120deg,var(--gold2),var(--sage) 45%,var(--aqua));margin:-18px -20px 14px}
+  .kpis{display:flex;gap:12px;flex-wrap:wrap}
+  .kpi{flex:1;min-width:90px;background:linear-gradient(180deg,#fff,#fbf8f2);border:1px solid var(--line);border-radius:14px;padding:14px 10px;text-align:center;position:relative;overflow:hidden}
+  .kpi::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:linear-gradient(120deg,var(--gold2),var(--aqua))}
+  .kpi .n{font-family:var(--serif);font-size:30px;font-weight:600;color:var(--teal);line-height:1}
+  .kpi .l{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700;margin-top:6px}
+  .kpi.warn .n{color:#b3382f}
+  .frow{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);margin:8px 0;font-size:15px}
+  .frow.flag{border-left:3px solid var(--gold);background:linear-gradient(90deg,rgba(210,154,94,.08),transparent 60%)}
+  .frow .tag{margin-left:auto;font-size:11px;font-weight:700;background:#eef2f7;color:var(--teal);border-radius:20px;padding:3px 9px}
+  .frow .tag.bad{background:#fbe9e7;color:#b3382f}
+  .chk{display:flex;align-items:center;gap:11px;padding:9px 2px;font-size:15px;border-bottom:1px dashed var(--line)}
+  .chk:last-child{border-bottom:none}
+  .box{width:20px;height:20px;border-radius:5px;border:2px solid var(--teal);display:grid;place-items:center;font-size:13px;color:#2f7a4f;font-weight:800;flex:0 0 auto}
+  .box.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .chk.done span{color:var(--muted);text-decoration:line-through}
+  .quote{font-family:var(--serif);font-style:italic;font-size:22px;line-height:1.45;color:var(--teal);text-align:left}
+  .qhead{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:8px}
+  .tbar{margin:11px 0}
+  .tbar .lab{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+  .tbar .lab b{color:var(--teal)}
+  .track{height:9px;border-radius:6px;background:#eee5d6;overflow:hidden}
+  .track>span{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--sage),var(--aqua))}
+  /* controls */
+  .ctrls{flex:0 0 auto;display:flex;flex-direction:column;gap:10px;padding-top:10px}
+  .prog{height:6px;border-radius:6px;background:rgba(255,255,255,.16);overflow:hidden}
+  .prog>span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--gold2),var(--sage));transition:width .25s linear}
+  .dots{display:flex;gap:5px;flex-wrap:wrap;justify-content:center}
+  .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.25);cursor:pointer;transition:.2s}
+  .dot.on{background:var(--gold);transform:scale(1.25);box-shadow:0 0 0 3px rgba(210,154,94,.25)}
+  .dot.seen{background:rgba(255,255,255,.5)}
+  .btns{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
+  button{font-family:var(--sans);cursor:pointer;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.12);color:#fff;
+    border-radius:12px;padding:10px 16px;font-size:14px;font-weight:600;transition:.15s;backdrop-filter:blur(6px)}
+  button:hover{background:rgba(255,255,255,.22)}
+  button.play{background:var(--gold);border-color:var(--gold);color:#1d2a44;min-width:130px;font-size:15px}
+  button.play:hover{filter:brightness(1.05)}
+  .small{font-size:12px;color:#bcd6d3;text-align:center}
+  /* opening overlay */
+  .opener{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;
+    background:radial-gradient(900px 600px at 50% 30%,rgba(95,176,194,.18),transparent 60%);z-index:10;text-align:center;padding:24px}
+  .opener h2{font-family:var(--serif);font-weight:600;font-size:clamp(30px,6vw,60px);margin:0;color:#fff;letter-spacing:-.02em}
+  .opener p{color:#cfe1de;font-size:17px;max-width:60ch;margin:0}
+  .hide{display:none!important}
+  @media(max-width:640px){.chips .meta{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand"><span class="mk">⛰</span> Hilltop Recovery Home</div>
+    <div class="chips"><span class="chap" id="chap"></span><span class="meta" id="counter"></span></div>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="opener" id="opener">
+      <div class="icon">⛰</div>
+      <h2>Staff Training</h2>
+      <p>A guided walk-through of the whole Hilltop operating system — how to run a best-in-class recovery home, one screen at a time. About 8 minutes. It plays on its own.</p>
+      <div class="btns">
+        <button class="play" id="startBtn">▶ Start training</button>
+        <button id="muteStart">🔊 Voice: on</button>
+      </div>
+      <div class="small">Tip: press <b>F</b> for full screen, then screen-record this tab to make a shareable video.</div>
+    </div>
+  </div>
+
+  <div class="ctrls">
+    <div class="prog"><span id="progBar"></span></div>
+    <div class="dots" id="dots"></div>
+    <div class="btns">
+      <button id="prev">⏮ Back</button>
+      <button class="play" id="playBtn">⏸ Pause</button>
+      <button id="next">Next ⏭</button>
+      <button id="mute">🔊 Voice</button>
+      <button id="full">⛶ Full screen</button>
+      <button id="restart">↻ Restart</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const SCENES = [
+  {chap:"Welcome", icon:"⛰", title:"Welcome to the Hilltop operating system",
+   lines:["This is the all-in-one system for running Hilltop Recovery Home — a best-in-class sober living.",
+          "It runs on a simple belief: great resident care comes from a great team, held to world-class standards.",
+          "In a few minutes you'll know every part you use day to day."],
+   hint:"Let's begin", mock:{type:"quote", head:"Our credo", text:"We create a safe, dignified home where people rebuild their lives. Our care is the difference between a bed and a turning point."}},
+
+  {chap:"Philosophy", icon:"🤝", title:"Two companies, one standard of excellence",
+   lines:["Hilltop is walled off from the clinical detox side — separate data, a separate kiosk, its own world.",
+          "We model the Ritz-Carlton approach: anticipate needs, own every problem, and treat each other like ladies and gentlemen.",
+          "Everything points at two outcomes — residents who stay, and residents who thrive."],
+   hint:"Hilltop is its own world"},
+
+  {chap:"Getting around", icon:"🧭", title:"Finding your way",
+   lines:["Sign in, then open the Hilltop section in the left sidebar.",
+          "Your menu is tailored to your role — you see what you need, and nothing you don't.",
+          "Start at the top: Hilltop HQ and Staff Hub."],
+   hint:"Left sidebar → <b>Hilltop</b>"},
+
+  {chap:"Hilltop HQ", icon:"📊", title:"Hilltop HQ — the whole house on one screen",
+   lines:["HQ shows your live census: beds filled, open beds, recovery capital, screens due, and compliance.",
+          "One glance tells you how the homes are doing right now."],
+   hint:"Hilltop → <b>Hilltop HQ</b>",
+   mock:{type:"kpis", items:[["78/105","Beds filled"],["27","Open beds"],["74","Recovery capital"],["88%","Compliance"]]}},
+
+  {chap:"Staff Hub", icon:"⛰", title:"Staff Hub — your shift, the Hilltop way",
+   lines:["Staff Hub is where every shift begins.",
+          "Five tabs: My Shift, Line-up, Shift Tasks, First Day, and Recognition."],
+   hint:"Hilltop → <b>Staff Hub</b>"},
+
+  {chap:"Staff Hub", icon:"🎯", title:"My Shift — what to focus on first",
+   lines:["The focus board surfaces what needs you now: new arrivals, who's eligible to come off restriction, who hasn't checked in, today's activities, and operations to clear.",
+          "If it's flagged, it needs action. Work the board top to bottom."],
+   hint:"Staff Hub → <b>My Shift</b>",
+   mock:{type:"focus", items:[["👋 New arrival — run the first-day playbook","3/20","flag"],["✅ Eligible to come off restriction","review","flag"],["⏳ 4 residents haven't checked in","todo","flag"],["🎉 7:00 Evening meeting","today",""]]}},
+
+  {chap:"Staff Hub", icon:"📣", title:"The daily line-up",
+   lines:["Every day starts with a ten-minute line-up.",
+          "Read the Standard of the Day, share a win, and set the day's focus — then log it so the ritual stays alive.",
+          "Twelve standards rotate through the year, and leadership can make them yours."],
+   hint:"Staff Hub → <b>Line-up</b>",
+   mock:{type:"quote", head:"Standard of the day · #2 of 12", text:"We anticipate needs and act before a resident has to ask."}},
+
+  {chap:"Staff Hub", icon:"🗒️", title:"Shift tasks — the non-negotiables",
+   lines:["Pick your shift — Day, Evening, or Overnight — and your house.",
+          "Check off each task as you go: headcount, meds, check-ins, curfew, bed checks, and the shift report.",
+          "Leadership sees what's done, in real time."],
+   hint:"Staff Hub → <b>Shift Tasks</b>",
+   mock:{type:"check", items:[["Morning headcount & wellness check",1],["Observe AM medication / MAT",1],["Confirm everyone did their check-in",0],["Coordinate transport & attendance",0]]}},
+
+  {chap:"Staff Hub", icon:"🧳", title:"The first-day playbook",
+   lines:["A resident's first day decides whether they stay. This is your script.",
+          "Twenty steps across the first hour, first 24 hours, and first week — from a warm welcome by name to the 72-hour check-in.",
+          "Aim for one hundred percent before three days are up."],
+   hint:"Staff Hub → <b>First Day</b>",
+   mock:{type:"check", items:[["Warm welcome by name; introduce the house",1],["Assign bed; provide linens & welcome kit",1],["Review & sign the resident agreement",0],["Assign a peer buddy / introduce a sponsor",0]]}},
+
+  {chap:"Staff Hub", icon:"⭐", title:"Recognition — catch people doing it right",
+   lines:["When a teammate lives a standard, give them a shout-out.",
+          "Tag the standard, add kudos, and watch the thirty-day leaderboard.",
+          "Recognition is how culture compounds."],
+   hint:"Staff Hub → <b>Recognition</b>",
+   mock:{type:"quote", head:"★ Recognition", text:"“Maria drove a resident to a 6am interview on her day off — he got the job.” — from James"}},
+
+  {chap:"Staff Growth", icon:"🌱", title:"Staff Growth — invest in the team",
+   lines:["Great care starts with a great team.",
+          "Run each new hire's sacred orientation — Day 1, Week 1, and Day 21 — sign off competencies, and capture their dreams and growth goals.",
+          "People who feel invested in, invest in residents."],
+   hint:"Hilltop → <b>Staff Growth</b>",
+   mock:{type:"check", items:[["Personal welcome from the leader — vision first",1],["Shadow each shift (Day / Evening / Overnight)",0],["Competency sign-offs",0],["Capture their goals & dreams",0]]}},
+
+  {chap:"Residents", icon:"🧑‍🤝‍🧑", title:"Residents & the Resident 360",
+   lines:["Residents lists everyone, grouped by their first 30, 60, and 90 days.",
+          "Open anyone for the Resident 360 — recovery capital, phase, screens, ledger, and supports, all in one place."],
+   hint:"Hilltop → <b>Residents</b>"},
+
+  {chap:"Residents", icon:"💛", title:"The “Know me” card",
+   lines:["Every resident profile has a Know-me card: what motivates them, their triggers, and what a great day looks like.",
+          "Fill it in. Anticipation — knowing someone before they ask — is the heart of great service."],
+   hint:"Resident 360 → <b>Know me</b>",
+   mock:{type:"focus", items:[["What motivates me — my daughter","",""],["My triggers — payday, idle weekends","",""],["A great day — gym, a meeting, work","",""]]}},
+
+  {chap:"Intake", icon:"📋", title:"Intake & forms",
+   lines:["Every resident gets an intake packet — agreements, consents, and compliance forms.",
+          "Fill and sign right on screen. The packet bar shows what's left."],
+   hint:"Hilltop → <b>Intake & Forms</b>"},
+
+  {chap:"Drug screening", icon:"🧪", title:"Drug screening",
+   lines:["Schedule and record screens, run randoms, and log results — observed or not.",
+          "Results stay inside Hilltop, walled off from the clinical side."],
+   hint:"Hilltop → <b>Drug Screening</b>"},
+
+  {chap:"House life", icon:"🏠", title:"House life",
+   lines:["Track curfew and bed checks, daily chores, and house meetings — the rhythms that keep a home healthy."],
+   hint:"Hilltop → <b>House Life</b>"},
+
+  {chap:"Resident voice", icon:"🛎️", title:"Resident Voice & the kiosk",
+   lines:["Residents check in daily on their own kiosk — mood, cravings, sleep, and needs. Low mood or high cravings get flagged.",
+          "When a resident makes a request, claim it — that starts the response clock and makes you the owner until it's done.",
+          "Hear a problem? Log a service-recovery item and do whatever it takes to make it right."],
+   hint:"Hilltop → <b>Resident Voice & Kiosk</b>",
+   mock:{type:"focus", items:[["🔴 Transportation request — unclaimed","waiting 2h","bad"],["🤝 Service recovery — own it","open","flag"],["🌅 Morning check-in · mood 8/10","","" ]]}},
+
+  {chap:"Activities", icon:"🎉", title:"Activities & engagement",
+   lines:["A full week of activities is scheduled automatically — exercise, meetings, life skills, fun nights, and outings.",
+          "Mark them complete and record who attended.",
+          "Success is simple: never drop below your weekly minimum. Boredom and isolation drive early exits — this is the antidote."],
+   hint:"Hilltop → <b>Activities & Engagement</b>",
+   mock:{type:"kpis", items:[["7/7","Weekly minimum"],["12","Completed"],["86%","Attendance"]]}},
+
+  {chap:"Maintenance", icon:"🔧", title:"Maintenance & supplies",
+   lines:["Staff log work orders; the system tracks inventory and suggests reorders before you run out.",
+          "Urgent work orders alert leadership instantly."],
+   hint:"Hilltop → <b>Maintenance & Supplies</b>"},
+
+  {chap:"Incidents", icon:"⚠️", title:"Incident reports",
+   lines:["Document incidents with type, severity, and follow-up.",
+          "Serious events notify leadership in real time and flow into the daily report."],
+   hint:"Hilltop → <b>Incident Reports</b>"},
+
+  {chap:"Farewell", icon:"👋", title:"The fond farewell",
+   lines:["Every exit is planned for success — continuing care, next housing, documents, and a celebration.",
+          "Then keep the door open: log alumni check-ins, and ask the one question that measures loyalty — would you recommend Hilltop?"],
+   hint:"Hilltop → <b>Farewell & Alumni</b>",
+   mock:{type:"kpis", items:[["63","Alumni"],["+72","Net promoter"],["88%","Reporting sober"]]}},
+
+  {chap:"Daily movement", icon:"📨", title:"The daily movement report",
+   lines:["Each day, an automated report goes to clinical and leadership: intakes, discharges, census, incidents, and the week's activities.",
+          "No one has to ask how the houses are doing — it lands in their inbox."],
+   hint:"Hilltop → <b>Daily Movement</b>"},
+
+  {chap:"Outcomes", icon:"🎯", title:"Outcomes & best-in-class targets",
+   lines:["Outcomes shows retention, recovery-capital growth, employment, and loyalty.",
+          "Set best-in-class targets and measure the distance — because we aim to be the best, not just good."],
+   hint:"Hilltop → <b>Housing Outcomes</b>",
+   mock:{type:"targets", items:[["90-day retention","74%",78],["Employed / in school","61%",80],["Would-recommend (NPS)","72",90]]}},
+
+  {chap:"You're ready", icon:"🌟", title:"That's Hilltop",
+   lines:["Work the board, run the line-up, own every problem, and celebrate every win.",
+          "A warm welcome, a fond farewell, and genuine care in between.",
+          "Now go make Hilltop the best recovery home there is."],
+   hint:"Welcome to the team",
+   mock:{type:"quote", head:"The three steps of service", text:"A warm welcome, using their name · Anticipate and meet needs; own every concern · A fond farewell with genuine encouragement."}},
+];
+
+const stage = document.getElementById('stage');
+const dotsEl = document.getElementById('dots');
+const progBar = document.getElementById('progBar');
+const chapEl = document.getElementById('chap');
+const counterEl = document.getElementById('counter');
+const opener = document.getElementById('opener');
+
+let i = 0, playing = false, voice = true, timer = null, rafId = null, sceneStart = 0, sceneDur = 0, started = false;
+
+// build scene nodes
+const nodes = SCENES.map((s, idx) => {
+  const el = document.createElement('div');
+  el.className = 'scene';
+  el.innerHTML = renderScene(s);
+  stage.appendChild(el);
+  const dot = document.createElement('span'); dot.className = 'dot'; dot.title = s.chap;
+  dot.onclick = () => { goto(idx); }; dotsEl.appendChild(dot);
+  return el;
+});
+
+function esc(t){ return String(t).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+function renderMock(m){
+  if(!m) return '';
+  if(m.type==='kpis') return `<div class="mock"><div class="bar"></div><div class="kpis">${m.items.map((k,n)=>`<div class="kpi ${n>2?'':''}"><div class="n">${esc(k[0])}</div><div class="l">${esc(k[1])}</div></div>`).join('')}</div></div>`;
+  if(m.type==='focus') return `<div class="mock"><div class="bar"></div>${m.items.map(r=>`<div class="frow ${r[2]||''}"><span>${r[0]}</span>${r[1]?`<span class="tag ${r[2]==='bad'?'bad':''}">${esc(r[1])}</span>`:''}</div>`).join('')}</div>`;
+  if(m.type==='check') return `<div class="mock"><div class="bar"></div>${m.items.map(c=>`<div class="chk ${c[1]?'done':''}"><span class="box ${c[1]?'on':''}">${c[1]?'✓':''}</span><span>${esc(c[0])}</span></div>`).join('')}</div>`;
+  if(m.type==='quote') return `<div class="mock"><div class="bar"></div><div class="qhead">${esc(m.head||'')}</div><div class="quote">${esc(m.text)}</div></div>`;
+  if(m.type==='targets') return `<div class="mock"><div class="bar"></div>${m.items.map(t=>{const a=parseFloat(t[1]);const pct=Math.max(8,Math.min(100,Math.round(a/t[2]*100)));return `<div class="tbar"><div class="lab"><span>${esc(t[0])}</span><b>${esc(t[1])} <span style="color:#7d8b88;font-weight:400">/ ${t[2]}</span></b></div><div class="track"><span style="width:${pct}%"></span></div></div>`;}).join('')}</div>`;
+  return '';
+}
+function renderScene(s){
+  return `<div class="icon">${s.icon}</div><h1>${esc(s.title)}</h1>`+
+    `<div class="lines">${s.lines.map((l,n)=>`<div class="line" style="animation-delay:${.15+n*.25}s">${esc(l)}</div>`).join('')}</div>`+
+    (s.mock?renderMock(s.mock):'')+
+    `<div class="hint">📍 ${s.hint}</div>`;
+}
+function speak(s){
+  if(!voice || !('speechSynthesis' in window)) return null;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(s.title + '. ' + s.lines.join(' '));
+  u.rate = 1.0; u.pitch = 1.0; u.volume = 1;
+  const vs = window.speechSynthesis.getVoices();
+  const pick = vs.find(v=>/en-US/i.test(v.lang) && /female|samantha|google us|aria|jenny/i.test(v.name)) || vs.find(v=>/en/i.test(v.lang));
+  if(pick) u.voice = pick;
+  return u;
+}
+function durFor(s){ return Math.max(5600, 2800 + s.lines.join(' ').length * 42); }
+
+function show(idx){
+  i = (idx + SCENES.length) % SCENES.length;
+  nodes.forEach((n,k)=>n.classList.toggle('on', k===i));
+  // re-trigger line animations
+  const cur = nodes[i];
+  cur.querySelectorAll('.line').forEach((l,n)=>{ l.style.animation='none'; void l.offsetWidth; l.style.animation=''; l.style.animationDelay=(.15+n*.25)+'s'; });
+  document.querySelectorAll('.dot').forEach((d,k)=>{ d.classList.toggle('on',k===i); d.classList.toggle('seen',k<i); });
+  chapEl.textContent = SCENES[i].chap;
+  counterEl.textContent = (i+1) + ' / ' + SCENES.length;
+}
+function clearTimers(){ if(timer){clearTimeout(timer);timer=null;} if(rafId){cancelAnimationFrame(rafId);rafId=null;} if('speechSynthesis' in window) window.speechSynthesis.cancel(); }
+function tickProgress(){
+  const el = nodes[i];
+  const update = () => {
+    const p = Math.min(1, (performance.now()-sceneStart)/sceneDur);
+    progBar.style.width = (p*100)+'%';
+    if(p<1 && playing) rafId = requestAnimationFrame(update);
+  };
+  rafId = requestAnimationFrame(update);
+}
+function playScene(){
+  clearTimers();
+  show(i);
+  sceneStart = performance.now();
+  sceneDur = durFor(SCENES[i]);
+  progBar.style.width = '0%';
+  if(playing) tickProgress();
+  const advance = () => { if(i >= SCENES.length-1){ stop(true); } else if(playing){ i++; playScene(); } };
+  if(voice && ('speechSynthesis' in window)){
+    const u = speak(SCENES[i]);
+    if(u){
+      let done=false;
+      u.onend = () => { if(done)return; done=true; if(playing) timer = setTimeout(advance, 900); };
+      // safety: if speech stalls, fall back to timed duration + buffer
+      timer = setTimeout(()=>{ if(done)return; done=true; if(playing) advance(); }, sceneDur+9000);
+      window.speechSynthesis.speak(u);
+      return;
+    }
+  }
+  timer = setTimeout(advance, sceneDur);
+}
+function start(){
+  started = true; opener.classList.add('hide');
+  playing = true; setPlayLabel();
+  // warm up voices (some browsers populate async)
+  if('speechSynthesis' in window) window.speechSynthesis.getVoices();
+  playScene();
+}
+function stop(atEnd){ playing=false; clearTimers(); setPlayLabel(); if(atEnd){ progBar.style.width='100%'; } }
+function toggle(){ if(!started){ start(); return; } playing = !playing; if(playing){ playScene(); } else { stop(false); } setPlayLabel(); }
+function goto(idx){ i=idx; if(!started){ started=true; opener.classList.add('hide'); } if(playing){ playScene(); } else { show(i); clearTimers(); progBar.style.width='0%'; } }
+function setPlayLabel(){ const b=document.getElementById('playBtn'); b.textContent = playing ? '⏸ Pause' : '▶ Play'; }
+function setVoice(on){ voice=on; const t='🔊 Voice: '+(on?'on':'off'); document.getElementById('mute').textContent = on?'🔊 Voice':'🔇 Voice';
+  const ms=document.getElementById('muteStart'); if(ms) ms.textContent=t; if(!on && 'speechSynthesis' in window) window.speechSynthesis.cancel(); if(on && playing){ playScene(); } }
+
+document.getElementById('startBtn').onclick = start;
+document.getElementById('muteStart').onclick = ()=>setVoice(!voice);
+document.getElementById('playBtn').onclick = toggle;
+document.getElementById('next').onclick = ()=>{ goto(Math.min(SCENES.length-1,i+1)); };
+document.getElementById('prev').onclick = ()=>{ goto(Math.max(0,i-1)); };
+document.getElementById('mute').onclick = ()=>setVoice(!voice);
+document.getElementById('restart').onclick = ()=>{ i=0; start(); };
+document.getElementById('full').onclick = ()=>{ if(!document.fullscreenElement) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); };
+document.addEventListener('keydown', e=>{
+  if(e.code==='Space'){ e.preventDefault(); toggle(); }
+  else if(e.code==='ArrowRight'){ goto(Math.min(SCENES.length-1,i+1)); }
+  else if(e.code==='ArrowLeft'){ goto(Math.max(0,i-1)); }
+  else if(e.key==='f'||e.key==='F'){ document.getElementById('full').click(); }
+});
+show(0);
+if('speechSynthesis' in window){ window.speechSynthesis.onvoiceschanged = ()=>window.speechSynthesis.getVoices(); }
+</script>
+</body>
+</html>

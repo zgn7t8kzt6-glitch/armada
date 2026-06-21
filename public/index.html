@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260622N" />
+<link rel="stylesheet" href="/styles.css?v=20260622O" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -115,6 +115,7 @@
     <!-- Hilltop Recovery Home (sober-living suite) -->
     <button data-view="housing">Hilltop HQ</button>
     <button data-view="staffhub">Staff Hub</button>
+    <button data-view="hstaffdev">Staff Growth</button>
     <button data-view="houses">Houses &amp; Beds</button>
     <button data-view="residents">Residents</button>
     <button data-view="resident" data-subview>Resident 360</button>
@@ -127,6 +128,7 @@
     <button data-view="voice">Resident Voice &amp; Kiosk</button>
     <button data-view="hmaint">Maintenance &amp; Supplies</button>
     <button data-view="activities">Activities &amp; Engagement</button>
+    <button data-view="hfarewell">Farewell &amp; Alumni</button>
     <button data-view="movement">Daily Movement</button>
     <button data-view="coordination">Clinical Coordination</button>
     <button data-view="employment">Employment</button>
@@ -2207,6 +2209,7 @@
         <div class="card" style="flex:1;min-width:280px"><h3>Recovery capital growth</h3><div id="hoReccap"></div></div>
         <div class="card" style="flex:1;min-width:280px"><h3>Discharge dispositions</h3><div id="hoDispo"></div></div>
       </div>
+      <div class="card"><div class="cmd-hero-row"><div><h3>🎯 Best-in-class targets</h3><p class="sub sans" style="margin:0">Be the best, not just good. How we measure against where a top recovery home should be.</p></div><button class="btn btn-ghost btn-sm sans" onclick="editTargets()">Edit targets</button></div><div id="hoTargets" style="margin-top:12px"></div></div>
     </section>
 
     <!-- Intake & Forms -->
@@ -2316,6 +2319,7 @@
           <div><h3>⛰ Staff Hub — your shift, the Hilltop way</h3><p class="sub sans" style="margin:0">What to focus on first, the daily standard we live by, the first-day playbook for new residents, and recognition for the team. This is how we run a best-in-class recovery home.</p></div>
           <span class="seg" id="hubSeg">
             <button class="on" data-t="focus" onclick="setHubTab('focus')">My Shift</button>
+            <button data-t="lineup" onclick="setHubTab('lineup')">Line-up</button>
             <button data-t="tasks" onclick="setHubTab('tasks')">Shift Tasks</button>
             <button data-t="firstday" onclick="setHubTab('firstday')">First Day</button>
             <button data-t="recog" onclick="setHubTab('recog')">Recognition</button>
@@ -2323,6 +2327,20 @@
         </div>
       </div>
       <div id="hubBody"></div>
+    </section>
+
+    <section id="hstaffdev" class="view">
+      <div class="card hq-hero">
+        <div><h3>🌱 Staff Growth — select, orient, empower, develop</h3><p class="sub sans" style="margin:0">Ladies and gentlemen serving ladies and gentlemen. A sacred Day-1 orientation, competency sign-offs, and each person’s dreams &amp; growth path — because great resident care starts with a great team.</p></div>
+      </div>
+      <div id="sdevBody"></div>
+    </section>
+
+    <section id="hfarewell" class="view">
+      <div class="card hq-hero">
+        <div><h3>👋 Farewell &amp; Alumni — the fond goodbye</h3><p class="sub sans" style="margin:0">A planned, dignified exit and a door that’s always open. Run the farewell playbook, track alumni, and measure loyalty — would they recommend Hilltop?</p></div>
+      </div>
+      <div id="fwBody"></div>
     </section>
 
     <section id="activities" class="view">
@@ -2368,7 +2386,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260622N"></script>
-<script src="/housing.js?v=20260622N"></script>
+<script src="/app.js?v=20260622O"></script>
+<script src="/housing.js?v=20260622O"></script>
 </body>
 </html>

@@ -398,6 +398,38 @@ export function housingSchema() {
     from_user TEXT, to_name TEXT, to_user_id INTEGER, standard TEXT,
     message TEXT, kudos INTEGER DEFAULT 0, created TEXT DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS housing_lineup (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT, standard_index INTEGER, led_by TEXT, attendees INTEGER,
+    wow_story TEXT, focus_note TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_staff_profile (
+    user_id INTEGER PRIMARY KEY, name TEXT, role TEXT, start_date TEXT,
+    strengths TEXT, dream TEXT, growth_goal TEXT, pulse INTEGER, notes TEXT,
+    updated_by TEXT, updated TEXT
+  );
+  CREATE TABLE IF NOT EXISTS housing_staff_onboard (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER, item_key TEXT, done INTEGER DEFAULT 0, done_by TEXT, done_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS housing_competency (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER, comp_key TEXT, level INTEGER DEFAULT 0, signed_by TEXT, signed_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS housing_service_recovery (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, owner TEXT, issue TEXT, action TEXT, cost REAL,
+    status TEXT DEFAULT 'open', created TEXT DEFAULT (datetime('now')), resolved_at TEXT, by TEXT
+  );
+  CREATE TABLE IF NOT EXISTS housing_farewell (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, item_key TEXT, done INTEGER DEFAULT 0, done_by TEXT, done_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS housing_alumni_checkins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, date TEXT, sober INTEGER, employed INTEGER, housed INTEGER,
+    would_recommend INTEGER, note TEXT, by TEXT, created TEXT DEFAULT (datetime('now'))
+  );
   `);
   // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
   try { db.exec(`ALTER TABLE housing_houses ADD COLUMN program TEXT`); } catch { /* already exists */ }
@@ -407,6 +439,14 @@ export function housingSchema() {
   }
   // Migration: photo consent attestation (who/when).
   try { db.exec(`ALTER TABLE housing_residents ADD COLUMN photo_consent TEXT`); } catch { /* already exists */ }
+  // Migration: "Know me" preference card + alumni would-recommend (loyalty).
+  for (const col of ['pref_motivate TEXT', 'pref_trigger TEXT', 'pref_bestday TEXT', 'would_recommend INTEGER']) {
+    try { db.exec(`ALTER TABLE housing_residents ADD COLUMN ${col}`); } catch { /* already exists */ }
+  }
+  // Migration: request ownership + first-response time (timeliness / "own it").
+  for (const col of ['owner TEXT', 'first_response_at TEXT']) {
+    try { db.exec(`ALTER TABLE housing_requests ADD COLUMN ${col}`); } catch { /* already exists */ }
+  }
 }
 
 /* ───────────────────────── Seed (sample so it looks alive) ───────────────────────── */
@@ -951,12 +991,87 @@ const HILLTOP_THREE_STEPS = [
   'Anticipate and meet needs; own every concern.',
   'A fond farewell with genuine encouragement.',
 ];
+// Leadership can edit the standards so they are truly *yours* (stored in state).
+function getStandards() {
+  const saved = P(getState('hilltop_standards'), null);
+  return (Array.isArray(saved) && saved.length) ? saved : HILLTOP_STANDARDS;
+}
 function standardOfDay(date) {
+  const list = getStandards();
   const d = new Date((date || todayStr()) + 'T00:00:00');
   const start = new Date(d.getFullYear(), 0, 0);
   const doy = Math.floor((d - start) / 86400000);
-  const i = ((doy % HILLTOP_STANDARDS.length) + HILLTOP_STANDARDS.length) % HILLTOP_STANDARDS.length;
-  return { index: i + 1, total: HILLTOP_STANDARDS.length, text: HILLTOP_STANDARDS[i] };
+  const i = ((doy % list.length) + list.length) % list.length;
+  return { index: i + 1, total: list.length, text: list[i] };
+}
+
+// ── Staff selection, sacred orientation & development (Schulze's #1) ──
+const STAFF_ONBOARD = [
+  ['Day 1 — welcome & vision', 'welcome', 'Personal welcome from the leader — vision first, not paperwork'],
+  ['Day 1 — welcome & vision', 'purpose', 'Walk through Hilltop’s purpose, credo & the three steps of service'],
+  ['Day 1 — welcome & vision', 'standards', 'Review the service standards we live by'],
+  ['Day 1 — welcome & vision', 'tour', 'Tour the houses; introduced to the whole team'],
+  ['Day 1 — welcome & vision', 'mentor', 'Assigned a mentor for the first weeks'],
+  ['Day 1 — welcome & vision', 'safety', 'Naloxone, emergency & safety procedures'],
+  ['Day 1 — welcome & vision', 'systems', 'Logins & the app — Staff Hub, check-ins, shift tasks'],
+  ['First week — learn the work', 'shadow', 'Shadow each shift (Day / Evening / Overnight)'],
+  ['First week — learn the work', 'run_shift', 'Run a shift checklist alongside the mentor'],
+  ['First week — learn the work', 'firstday_obs', 'Observe a resident first-day playbook end to end'],
+  ['First week — learn the work', 'screens', 'Trained on drug-screen collection & chain of custody'],
+  ['First week — learn the work', 'meds', 'Trained on medication observation / MAT support'],
+  ['First week — learn the work', 'boundaries', 'Ethics, boundaries & confidentiality'],
+  ['First week — learn the work', 'deescalation', 'De-escalation & crisis response'],
+  ['Day 21 — re-align & invest', 'checkin21', '21-day check-in with the leader — how is it really going?'],
+  ['Day 21 — re-align & invest', 'recommit', 'Recommit to the standards; every question answered'],
+  ['Day 21 — re-align & invest', 'competency21', 'First competency review'],
+  ['Day 21 — re-align & invest', 'dream', 'Capture their goals & dreams; map a growth path'],
+];
+const STAFF_COMPETENCIES = [
+  ['welcome_service', 'Three steps of service & resident dignity'],
+  ['safety', 'Safety, naloxone & emergency response'],
+  ['screens', 'Drug-screen collection & chain of custody'],
+  ['meds', 'Medication observation / MAT support'],
+  ['deescalation', 'De-escalation & crisis response'],
+  ['documentation', 'Shift reports, incidents & documentation'],
+  ['boundaries', 'Ethics, boundaries & confidentiality'],
+];
+const COMP_LEVELS = ['Not started', 'In training', 'Competent', 'Can mentor others'];
+
+// ── The fond farewell: a planned, dignified exit + alumni loyalty ──
+const FAREWELL = [
+  ['Planned for success', 'notice', 'Exit/transition planned *with* the resident — never a surprise'],
+  ['Planned for success', 'continuing_care', 'Continuing-care plan — clinical, meetings, sponsor'],
+  ['Planned for success', 'housing_next', 'Next safe housing confirmed'],
+  ['Planned for success', 'documents', 'ID, benefits & documents in hand'],
+  ['Planned for success', 'relapse_plan', 'Updated recovery & relapse-prevention plan'],
+  ['Planned for success', 'balance', 'Ledger settled / financial wrap-up'],
+  ['The fond farewell', 'celebrate', 'Celebrate the milestone with the house'],
+  ['The fond farewell', 'belongings', 'Belongings & medications returned'],
+  ['The fond farewell', 'contacts', 'Exchange contacts — “the door is always open”'],
+  ['The fond farewell', 'alumni_enroll', 'Enrolled in alumni & first check-in scheduled'],
+  ['The fond farewell', 'survey', 'Exit survey — “Would you recommend Hilltop?” (loyalty)'],
+  ['Follow-up', 'checkin_7', '7-day alumni check-in'],
+  ['Follow-up', 'checkin_30', '30-day alumni check-in'],
+  ['Follow-up', 'checkin_90', '90-day alumni check-in'],
+];
+
+// ── Best-in-class targets (be the best, not good). Editable in state. ──
+const DEFAULT_TARGETS = [
+  { key: 'd90', label: '90-day retention', target: 70, unit: '%', dir: 'up' },
+  { key: 'employed', label: 'Employed / in school', target: 65, unit: '%', dir: 'up' },
+  { key: 'reccap', label: 'Recovery-capital growth', target: 2, unit: 'pts', dir: 'up' },
+  { key: 'returns', label: 'Returns to use / month', target: 2, unit: '', dir: 'down' },
+  { key: 'nps', label: 'Would-recommend (alumni)', target: 80, unit: '%', dir: 'up' },
+  { key: 'activities', label: 'Activities / week per house', target: 7, unit: '', dir: 'up' },
+];
+function getTargets() {
+  const saved = P(getState('hilltop_targets'), null);
+  if (!Array.isArray(saved) || !saved.length) return DEFAULT_TARGETS;
+  // merge saved target values over the canonical label/dir set
+  return DEFAULT_TARGETS.map(t => { const s = saved.find(x => x.key === t.key); return s ? { ...t, target: num(s.target, t.target) } : t; });
+}
+function canManageHousing(req) {
+  const u = req.user; return !!(u && (u.role === 'admin' || u.job_role === 'Executive Director' || u.job_role === 'Housing Director'));
 }
 
 // Per-shift task checklists. Keyed by shift; each item is [key, label].
@@ -1451,7 +1566,7 @@ export function mountHousing(app) {
     const cur = db.prepare(`SELECT * FROM housing_residents WHERE id=?`).get(req.params.id);
     if (!cur) return res.status(404).json({ error: 'Not found' });
     const b = req.body || {};
-    const cols = ['name', 'dob', 'phone', 'email', 'loc', 'phase', 'status', 'move_in', 'sober_date', 'recovery_coach', 'payer', 'insurance', 'employment', 'education', 'mat', 'sponsor', 'home_group', 'emergency_name', 'emergency_phone', 'goals', 'notes'];
+    const cols = ['name', 'dob', 'phone', 'email', 'loc', 'phase', 'status', 'move_in', 'sober_date', 'recovery_coach', 'payer', 'insurance', 'employment', 'education', 'mat', 'sponsor', 'home_group', 'emergency_name', 'emergency_phone', 'goals', 'notes', 'pref_motivate', 'pref_trigger', 'pref_bestday'];
     const sets = []; const vals = [];
     for (const c of cols) if (b[c] !== undefined) { sets.push(`${c}=?`); vals.push(b[c]); }
     if (sets.length) { vals.push(req.params.id); db.prepare(`UPDATE housing_residents SET ${sets.join(',')} WHERE id=?`).run(...vals); }
@@ -2181,12 +2296,14 @@ export function mountHousing(app) {
     const doneToday = {}; db.prepare(`SELECT house_id,shift FROM housing_shift_reports WHERE date=?`).all(date).forEach(r => { doneToday[r.house_id + '|' + r.shift] = 1; });
     let reportsMissing = 0; houses.forEach(h => HOUSING_SHIFTS.forEach(s => { if (!doneToday[h.id + '|' + s]) reportsMissing++; }));
     const recognition = db.prepare(`SELECT * FROM housing_recognition ORDER BY id DESC LIMIT 6`).all();
+    const serviceOpen = db.prepare(`SELECT COUNT(*) c FROM housing_service_recovery WHERE status='open'`).get().c;
+    const lineupToday = !!db.prepare(`SELECT id FROM housing_lineup WHERE date=? LIMIT 1`).get(date);
     res.json({
       date, standard: standardOfDay(date), credo: HILLTOP_CREDO, threeSteps: HILLTOP_THREE_STEPS,
       focus: {
         arrivals, offRestriction,
         missingCheckin: { count: missing.length, total: active.length, sample: missing.slice(0, 10).map(r => r.name) },
-        activities, openReq, urgentReq, openWO, urgentWO, lowStock, reportsMissing,
+        activities, openReq, urgentReq, openWO, urgentWO, lowStock, reportsMissing, serviceOpen, lineupToday,
       },
       recognition,
     });
@@ -2264,6 +2381,163 @@ export function mountHousing(app) {
   });
   app.post('/api/housing/recognition/:id/kudos', requireAuth, (req, res) => {
     db.prepare(`UPDATE housing_recognition SET kudos=kudos+1 WHERE id=?`).run(num(req.params.id));
+    res.json({ ok: true });
+  });
+
+  // ════════════ Staff selection, sacred orientation & development ════════════
+  app.get('/api/housing/staff-dev', requireAuth, (req, res) => {
+    const staff = db.prepare(`SELECT id,name,job_role FROM users WHERE active=1 AND (role='admin' OR job_role IN ('Housing Director','House Manager','Recovery Coach')) ORDER BY name`).all().map(s => {
+      const profile = db.prepare(`SELECT * FROM housing_staff_profile WHERE user_id=?`).get(s.id) || null;
+      const onboardDone = db.prepare(`SELECT COUNT(*) c FROM housing_staff_onboard WHERE user_id=? AND done=1`).get(s.id).c;
+      const compDone = db.prepare(`SELECT COUNT(*) c FROM housing_competency WHERE user_id=? AND level>=2`).get(s.id).c;
+      return { ...s, profile, onboardDone, onboardTotal: STAFF_ONBOARD.length, compDone, compTotal: STAFF_COMPETENCIES.length };
+    });
+    res.json({ staff });
+  });
+  app.get('/api/housing/staff-dev/:id', requireAuth, (req, res) => {
+    const uid = num(req.params.id);
+    const user = db.prepare(`SELECT id,name,job_role FROM users WHERE id=?`).get(uid);
+    if (!user) return res.status(404).json({ error: 'Not found' });
+    const profile = db.prepare(`SELECT * FROM housing_staff_profile WHERE user_id=?`).get(uid) || {};
+    const omap = {}; db.prepare(`SELECT item_key,done,done_by FROM housing_staff_onboard WHERE user_id=?`).all(uid).forEach(r => { omap[r.item_key] = r; });
+    const phases = [];
+    for (const [phase, key, label] of STAFF_ONBOARD) { let p = phases.find(x => x.phase === phase); if (!p) { p = { phase, items: [] }; phases.push(p); } p.items.push({ key, label, done: omap[key]?.done ? 1 : 0, done_by: omap[key]?.done_by || null }); }
+    const cmap = {}; db.prepare(`SELECT comp_key,level,signed_by,signed_at FROM housing_competency WHERE user_id=?`).all(uid).forEach(r => { cmap[r.comp_key] = r; });
+    const competencies = STAFF_COMPETENCIES.map(([key, label]) => ({ key, label, level: cmap[key]?.level || 0, signed_by: cmap[key]?.signed_by || null, signed_at: cmap[key]?.signed_at || null }));
+    const onbDone = phases.reduce((a, p) => a + p.items.filter(i => i.done).length, 0);
+    res.json({ user, profile, phases, competencies, compLevels: COMP_LEVELS, onbDone, onbTotal: STAFF_ONBOARD.length });
+  });
+  app.post('/api/housing/staff-dev/:id/profile', requireAuth, (req, res) => {
+    const uid = num(req.params.id); const b = req.body || {};
+    const u = db.prepare(`SELECT name,job_role FROM users WHERE id=?`).get(uid);
+    if (!u) return res.status(404).json({ error: 'Not found' });
+    const ex = db.prepare(`SELECT user_id FROM housing_staff_profile WHERE user_id=?`).get(uid);
+    if (ex) db.prepare(`UPDATE housing_staff_profile SET name=?,role=?,start_date=?,strengths=?,dream=?,growth_goal=?,pulse=?,notes=?,updated_by=?,updated=datetime('now') WHERE user_id=?`)
+      .run(u.name, u.job_role || null, b.start_date || null, b.strengths || null, b.dream || null, b.growth_goal || null, b.pulse != null && b.pulse !== '' ? num(b.pulse) : null, b.notes || null, req.user.name, uid);
+    else db.prepare(`INSERT INTO housing_staff_profile (user_id,name,role,start_date,strengths,dream,growth_goal,pulse,notes,updated_by,updated) VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
+      .run(uid, u.name, u.job_role || null, b.start_date || null, b.strengths || null, b.dream || null, b.growth_goal || null, b.pulse != null && b.pulse !== '' ? num(b.pulse) : null, b.notes || null, req.user.name);
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/staff-dev/:id/onboard', requireAuth, (req, res) => {
+    const uid = num(req.params.id); const b = req.body || {}; const key = String(b.item_key || ''); const done = b.done ? 1 : 0;
+    const stamp = done ? new Date().toISOString() : null; const who = done ? req.user.name : null;
+    const ex = db.prepare(`SELECT id FROM housing_staff_onboard WHERE user_id=? AND item_key=?`).get(uid, key);
+    if (ex) db.prepare(`UPDATE housing_staff_onboard SET done=?,done_by=?,done_at=? WHERE id=?`).run(done, who, stamp, ex.id);
+    else db.prepare(`INSERT INTO housing_staff_onboard (user_id,item_key,done,done_by,done_at) VALUES (?,?,?,?,?)`).run(uid, key, done, who, stamp);
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/staff-dev/:id/competency', requireAuth, (req, res) => {
+    const uid = num(req.params.id); const b = req.body || {}; const key = String(b.comp_key || ''); const level = num(b.level, 0);
+    const sign = level >= 2 ? req.user.name : null; const at = level >= 2 ? new Date().toISOString() : null;
+    const ex = db.prepare(`SELECT id FROM housing_competency WHERE user_id=? AND comp_key=?`).get(uid, key);
+    if (ex) db.prepare(`UPDATE housing_competency SET level=?,signed_by=?,signed_at=? WHERE id=?`).run(level, sign, at, ex.id);
+    else db.prepare(`INSERT INTO housing_competency (user_id,comp_key,level,signed_by,signed_at) VALUES (?,?,?,?,?)`).run(uid, key, level, sign, at);
+    res.json({ ok: true });
+  });
+
+  // ════════════ Daily line-up ritual ════════════
+  app.get('/api/housing/lineup', requireAuth, (req, res) => {
+    const date = req.query.date || todayStr();
+    const today = db.prepare(`SELECT * FROM housing_lineup WHERE date=? ORDER BY id DESC LIMIT 1`).get(date) || null;
+    const recent = db.prepare(`SELECT * FROM housing_lineup ORDER BY date DESC, id DESC LIMIT 10`).all();
+    const wow = db.prepare(`SELECT * FROM housing_recognition ORDER BY id DESC LIMIT 1`).get() || null;
+    res.json({ date, standard: standardOfDay(date), credo: HILLTOP_CREDO, threeSteps: HILLTOP_THREE_STEPS, standards: getStandards(), canEdit: canManageHousing(req), today, recent, wow });
+  });
+  app.post('/api/housing/lineup', requireAuth, (req, res) => {
+    const b = req.body || {}; const date = b.date || todayStr();
+    db.prepare(`INSERT INTO housing_lineup (date,standard_index,led_by,attendees,wow_story,focus_note) VALUES (?,?,?,?,?,?)`)
+      .run(date, standardOfDay(date).index, req.user.name, b.attendees != null && b.attendees !== '' ? num(b.attendees) : null, b.wow_story || null, b.focus_note || null);
+    audit({ user: req.user, action: 'HOUSING_LINEUP', detail: `line-up ${date}`, ip: req.ip });
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/standards', requireAuth, (req, res) => {
+    if (!canManageHousing(req)) return res.status(403).json({ error: 'Leadership only.' });
+    const arr = (req.body?.standards || []).map(s => String(s).trim()).filter(Boolean);
+    if (!arr.length) return res.status(400).json({ error: 'Add at least one standard.' });
+    setState('hilltop_standards', J(arr)); res.json({ ok: true, count: arr.length });
+  });
+
+  // ════════════ Service recovery — own it, do whatever it takes ════════════
+  app.get('/api/housing/service-recovery', requireAuth, (req, res) => {
+    const nm = (rid) => rid ? (db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(rid)?.name || null) : null;
+    const rows = db.prepare(`SELECT * FROM housing_service_recovery ORDER BY (status='open') DESC, id DESC LIMIT 60`).all().map(r => ({ ...r, name: nm(r.resident_id) }));
+    const cost30 = db.prepare(`SELECT IFNULL(SUM(cost),0) s FROM housing_service_recovery WHERE created>=date('now','-30 days')`).get().s;
+    res.json({ rows, openCount: rows.filter(r => r.status === 'open').length, cost30 });
+  });
+  app.post('/api/housing/service-recovery', requireAuth, (req, res) => {
+    const b = req.body || {};
+    if (!String(b.issue || '').trim()) return res.status(400).json({ error: 'Describe what happened.' });
+    db.prepare(`INSERT INTO housing_service_recovery (resident_id,owner,issue,action,cost,status,by) VALUES (?,?,?,?,?,?,?)`)
+      .run(b.resident_id ? num(b.resident_id) : null, b.owner || req.user.name, String(b.issue).trim(), b.action || null, b.cost != null && b.cost !== '' ? num(b.cost) : null, 'open', req.user.name);
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/service-recovery/:id', requireAuth, (req, res) => {
+    const b = req.body || {}; const id = num(req.params.id);
+    const cur = db.prepare(`SELECT * FROM housing_service_recovery WHERE id=?`).get(id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    const resolved = b.status === 'resolved';
+    db.prepare(`UPDATE housing_service_recovery SET action=COALESCE(?,action), cost=COALESCE(?,cost), owner=COALESCE(?,owner), status=?, resolved_at=? WHERE id=?`)
+      .run(b.action ?? null, b.cost != null && b.cost !== '' ? num(b.cost) : null, b.owner ?? null, b.status || cur.status, resolved ? new Date().toISOString() : cur.resolved_at, id);
+    res.json({ ok: true });
+  });
+  // Claim a resident request — ownership + first-response clock (timeliness).
+  app.post('/api/housing/voice/request/:id/claim', requireAuth, (req, res) => {
+    const cur = db.prepare(`SELECT * FROM housing_requests WHERE id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    db.prepare(`UPDATE housing_requests SET owner=?, first_response_at=COALESCE(first_response_at, datetime('now')) WHERE id=?`).run(req.user.name, req.params.id);
+    res.json({ ok: true });
+  });
+
+  // ════════════ Fond farewell + alumni loyalty ════════════
+  app.get('/api/housing/farewell', requireAuth, (req, res) => {
+    const departing = db.prepare(`SELECT r.id,r.name,r.move_in,h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active' ORDER BY r.move_in LIMIT 80`).all().map(r => {
+      const done = db.prepare(`SELECT COUNT(*) c FROM housing_farewell WHERE resident_id=? AND done=1`).get(r.id).c;
+      return { ...r, done, total: FAREWELL.length };
+    });
+    const alumni = db.prepare(`SELECT id,name,discharge_date,discharge_type,would_recommend FROM housing_residents WHERE status!='active' AND status!='waitlist' ORDER BY discharge_date DESC LIMIT 120`).all().map(a => {
+      const last = db.prepare(`SELECT date,sober,employed,housed FROM housing_alumni_checkins WHERE resident_id=? ORDER BY date DESC LIMIT 1`).get(a.id) || null;
+      const fwDone = db.prepare(`SELECT COUNT(*) c FROM housing_farewell WHERE resident_id=? AND done=1`).get(a.id).c;
+      return { ...a, last, fwDone, fwTotal: FAREWELL.length };
+    });
+    const recs = db.prepare(`SELECT would_recommend v FROM housing_alumni_checkins WHERE would_recommend IS NOT NULL`).all().map(r => r.v);
+    const nps = recs.length ? Math.round((recs.filter(v => v >= 9).length - recs.filter(v => v <= 6).length) / recs.length * 100) : null;
+    const soberRows = db.prepare(`SELECT resident_id, MAX(sober) s FROM housing_alumni_checkins GROUP BY resident_id`).all();
+    const soberRate = soberRows.length ? Math.round(soberRows.filter(r => r.s).length / soberRows.length * 100) : null;
+    res.json({ departing, alumni, nps, soberRate, alumniCount: alumni.length, surveyed: recs.length });
+  });
+  app.get('/api/housing/farewell/:id', requireAuth, (req, res) => {
+    const rid = num(req.params.id);
+    const resident = db.prepare(`SELECT r.id,r.name,r.move_in,r.discharge_date,r.discharge_type,r.status,h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.id=?`).get(rid);
+    if (!resident) return res.status(404).json({ error: 'Not found' });
+    const map = {}; db.prepare(`SELECT item_key,done,done_by FROM housing_farewell WHERE resident_id=?`).all(rid).forEach(r => { map[r.item_key] = r; });
+    const phases = [];
+    for (const [phase, key, label] of FAREWELL) { let p = phases.find(x => x.phase === phase); if (!p) { p = { phase, items: [] }; phases.push(p); } p.items.push({ key, label, done: map[key]?.done ? 1 : 0, done_by: map[key]?.done_by || null }); }
+    const done = Object.values(map).filter(m => m.done).length;
+    const checkins = db.prepare(`SELECT * FROM housing_alumni_checkins WHERE resident_id=? ORDER BY date DESC`).all(rid);
+    res.json({ resident, phases, done, total: FAREWELL.length, checkins });
+  });
+  app.post('/api/housing/farewell/:id', requireAuth, (req, res) => {
+    const rid = num(req.params.id); const b = req.body || {}; const key = String(b.item_key || ''); const done = b.done ? 1 : 0;
+    const stamp = done ? new Date().toISOString() : null; const who = done ? req.user.name : null;
+    const ex = db.prepare(`SELECT id FROM housing_farewell WHERE resident_id=? AND item_key=?`).get(rid, key);
+    if (ex) db.prepare(`UPDATE housing_farewell SET done=?,done_by=?,done_at=? WHERE id=?`).run(done, who, stamp, ex.id);
+    else db.prepare(`INSERT INTO housing_farewell (resident_id,item_key,done,done_by,done_at) VALUES (?,?,?,?,?)`).run(rid, key, done, who, stamp);
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/alumni/:id/checkin', requireAuth, (req, res) => {
+    const rid = num(req.params.id); const b = req.body || {};
+    const wr = (b.would_recommend != null && b.would_recommend !== '') ? num(b.would_recommend) : null;
+    db.prepare(`INSERT INTO housing_alumni_checkins (resident_id,date,sober,employed,housed,would_recommend,note,by) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(rid, b.date || todayStr(), b.sober ? 1 : 0, b.employed ? 1 : 0, b.housed ? 1 : 0, wr, b.note || null, req.user.name);
+    if (wr != null) db.prepare(`UPDATE housing_residents SET would_recommend=? WHERE id=?`).run(wr, rid);
+    res.json({ ok: true });
+  });
+
+  // ════════════ Best-in-class targets ════════════
+  app.get('/api/housing/targets', requireAuth, (req, res) => res.json({ targets: getTargets(), canEdit: canManageHousing(req) }));
+  app.post('/api/housing/targets', requireAuth, (req, res) => {
+    if (!canManageHousing(req)) return res.status(403).json({ error: 'Leadership only.' });
+    setState('hilltop_targets', J((req.body?.targets || []).map(t => ({ key: t.key, target: num(t.target) }))));
     res.json({ ok: true });
   });
 

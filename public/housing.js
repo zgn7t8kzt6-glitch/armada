@@ -433,6 +433,14 @@ async function openResident(id){
         <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="openResidentEdit(${r.id})">Edit plan</button></div>
       </div>
 
+      <div class="card" style="border-left:3px solid var(--gold)">
+        <h3>💛 Know me <button class="btn btn-ghost btn-sm sans no-print" style="float:right" onclick="openKnowMe(${r.id})">Edit</button></h3>
+        <p class="sub sans" style="margin:0 0 8px">The little things every staffer should know to make ${esc((r.name||'').split(' ')[0]||'them')} feel seen.</p>
+        <div class="kv"><span class="k">What motivates me</span><span class="v" style="max-width:62%">${esc(r.pref_motivate||'—')}</span></div>
+        <div class="kv"><span class="k">My triggers</span><span class="v" style="max-width:62%">${esc(r.pref_trigger||'—')}</span></div>
+        <div class="kv"><span class="k">A great day looks like</span><span class="v" style="max-width:62%">${esc(r.pref_bestday||'—')}</span></div>
+      </div>
+
       <div class="card">
         <h3>Clinical coordination</h3>
         ${r.clinTarget?`<div style="display:flex;gap:14px;align-items:center;margin-bottom:8px">
@@ -732,6 +740,7 @@ async function loadHousingOutcomes(){
   $('hoReccap').innerHTML = d.reccap.first!=null?`<div style="display:flex;gap:16px;align-items:center">${hRing(Math.round((d.reccap.last||0)*10), d.reccap.last, 'now')}<div><div class="hint">Intake average</div><div style="font-size:20px;font-family:var(--serif);color:var(--navy)">${d.reccap.first} → ${d.reccap.last}</div><div class="hint">${d.reccap.delta>=0?'Growing':'Declining'} by ${Math.abs(d.reccap.delta)} on average</div></div></div>`:'<div class="hint">Not enough assessments yet.</div>';
   const dispo=Object.entries(d.dispo);
   $('hoDispo').innerHTML = dispo.length?dispo.map(([k,v])=>`<div class="cmd-row"><div class="cmd-row-main">${esc(k)}</div><b>${v}</b></div>`).join(''):'<div class="hint">No discharges yet — every warm farewell is a future admission.</div>';
+  loadTargets({d90:ret.d90, employed:d.emplRate, reccap:d.reccap.delta, returns:d.returns});
 }
 
 /* ============================ INTAKE & FORMS ============================ */
@@ -1001,10 +1010,15 @@ async function loadVoice(){
     <div class="ret-card ${k.openRequests?'rc-warn':''}"><div class="n">${k.openRequests}</div><div class="l">Open requests</div></div>
     <div class="ret-card"><div class="n">${k.checkinsToday}</div><div class="l">Check-ins today</div></div>
     <div class="ret-card ${k.flagged?'rc-high':''}"><div class="n">${k.flagged}</div><div class="l">Flagged today (low mood / high craving)</div></div>`;
-  const reqRow=r=>`<div class="cmd-row ${r.priority==='Urgent'&&r.status==='open'?'cmd-row-flag':''}"><div class="cmd-row-main">
-    ${r.priority==='Urgent'?'🔴 ':'🛎 '}<b>${esc(r.name||'A resident')}</b> <span class="hint">· ${esc(r.category||'request')} · ${esc((r.created||'').slice(0,16).replace('T',' '))}</span><br>${esc(r.text)}
+  const waitH=r=>{ if(!r.created) return null; const base=r.first_response_at||(r.status!=='open'?r.handled_at:null)||new Date().toISOString(); const h=Math.round((new Date(base.replace(' ','T'))-new Date(r.created.replace(' ','T')))/3600000); return isFinite(h)?h:null; };
+  const reqRow=r=>{ const w=waitH(r); const slaBad=r.status==='open'&&!r.first_response_at&&w!=null&&w>=(r.priority==='Urgent'?1:8);
+    return `<div class="cmd-row ${(r.priority==='Urgent'&&r.status==='open')||slaBad?'cmd-row-flag':''}"><div class="cmd-row-main">
+    ${r.priority==='Urgent'?'🔴 ':'🛎 '}<b>${esc(r.name||'A resident')}</b> <span class="hint">· ${esc(r.category||'request')} · ${esc((r.created||'').slice(0,16).replace('T',' '))}</span>
+    ${r.owner?`<span class="chip" style="margin-left:6px">owned · ${esc(r.owner)}</span>`:r.status==='open'?'<span class="chip chip-warn" style="margin-left:6px">unclaimed</span>':''}
+    ${r.status==='open'&&w!=null?`<span class="hint" style="margin-left:6px">${r.first_response_at?'responded in':'waiting'} ${w}h</span>`:''}
+    <br>${esc(r.text)}
     ${r.status!=='open'?`<span class="chip" style="margin-left:6px">done · ${esc(r.handled_by||'')}</span>`:''}</div>
-    ${r.status==='open'?`<div class="toolbar" style="margin:0;gap:6px"><button class="btn btn-ghost btn-sm sans" onclick="voiceToWorkOrder(${r.id})">→ Work order</button><button class="btn btn-ghost btn-sm sans" onclick="voiceRequestDone(${r.id})">Mark done</button></div>`:''}</div>`;
+    ${r.status==='open'?`<div class="toolbar" style="margin:0;gap:6px">${r.owner?'':`<button class="btn btn-ghost btn-sm sans" onclick="claimRequest(${r.id})">Claim</button>`}<button class="btn btn-ghost btn-sm sans" onclick="voiceToWorkOrder(${r.id})">→ Work order</button><button class="btn btn-ghost btn-sm sans" onclick="voiceRequestDone(${r.id})">Mark done</button></div>`:''}</div>`; };
   const ci=c=>{ const flag=(c.cravings!=null&&c.cravings>=6)||(c.mood!=null&&c.mood<=3);
     return `<div class="cmd-row ${flag?'cmd-row-flag':''}"><div class="cmd-row-main">
       ${flag?'⚠️ ':'🌅 '}<b>${esc(c.name||'A resident')}</b> <span class="hint">· ${esc(c.date)}</span><br>
@@ -1381,6 +1395,7 @@ function setHubTab(t){ HOUSING.hubTab=t; loadStaffHub(); }
 async function loadStaffHub(){
   const tab=HOUSING.hubTab||'focus';
   document.querySelectorAll('#hubSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+  if(tab==='lineup') return hubLineup();
   if(tab==='tasks') return hubTasks();
   if(tab==='firstday') return hubFirstDay();
   if(tab==='recog') return hubRecognition();
@@ -1407,10 +1422,11 @@ async function hubFocus(){
   const offR = f.offRestriction.length? f.offRestriction.map(r=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">✅ <b>${esc(r.name)}</b> <span class="hint">· ${esc(r.type||'restriction')} — criteria met, review to lift</span></div></div>`).join('') : '<div class="hint">No one is currently eligible to come off restriction.</div>';
   const acts = f.activities.length? f.activities.map(a=>`<div class="cmd-row"><div class="cmd-row-main">${a.status==='completed'?'✅':'🎉'} ${a.time?'<b>'+esc(a.time)+'</b> · ':''}${esc(a.title)}</div></div>`).join('') : '<div class="hint">Nothing scheduled today — add something in Activities.</div>';
   const missing = f.missingCheckin.count? `<div class="cmd-row ${f.missingCheckin.count?'cmd-row-flag':''}"><div class="cmd-row-main">⏳ <b>${f.missingCheckin.count}</b> of ${f.missingCheckin.total} residents haven't checked in <span class="hint">· ${f.missingCheckin.sample.map(esc).join(', ')}${f.missingCheckin.count>10?'…':''}</span></div></div>` : '<div class="hint">✅ Everyone has checked in today.</div>';
-  const ops=`${f.lowStock?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">📦 <b>${f.lowStock}</b> supply item(s) at/below par — reorder in Maintenance &amp; Supplies</div></div>`:''}
+  const ops=`${!f.lineupToday?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">📣 Daily line-up not logged yet — <a onclick="setHubTab('lineup')" style="cursor:pointer;color:var(--gold);font-weight:600">run it</a></div></div>`:'<div class="cmd-row"><div class="cmd-row-main">✅ Line-up done today</div></div>'}
+    ${f.serviceOpen?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">🤝 <b>${f.serviceOpen}</b> open service-recovery item(s) to own</div></div>`:''}
+    ${f.lowStock?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">📦 <b>${f.lowStock}</b> supply item(s) at/below par — reorder in Maintenance &amp; Supplies</div></div>`:''}
     ${f.urgentWO?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">🔧 <b>${f.urgentWO}</b> urgent work order(s) open</div></div>`:''}
-    ${f.reportsMissing?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">📝 <b>${f.reportsMissing}</b> shift report(s) not yet filed today</div></div>`:''}
-    ${(!f.lowStock&&!f.urgentWO&&!f.reportsMissing)?'<div class="hint">✅ Operations are clean — nothing urgent.</div>':''}`;
+    ${f.reportsMissing?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">📝 <b>${f.reportsMissing}</b> shift report(s) not yet filed today</div></div>`:''}`;
   const recog = d.recognition.length? d.recognition.slice(0,3).map(r=>`<div class="wow">“${esc(r.message)}”<div class="wow-meta">★ ${esc(r.to_name)} — from ${esc(r.from_user)}${r.standard?' · '+esc(r.standard):''}</div></div>`).join('') : '<div class="hint">No shout-outs yet — be the first in the Recognition tab.</div>';
   $('hubBody').innerHTML=`${kpis}${standard}
     <div class="cmd-grid">
@@ -1419,8 +1435,10 @@ async function hubFocus(){
       <div class="card"><h3>⏳ Daily check-ins</h3><div style="margin-top:8px">${missing}</div></div>
       <div class="card"><h3>🎉 Today's activities</h3><div style="margin-top:8px">${acts}</div></div>
       <div class="card"><h3>🛠 Operations to clear</h3><div style="margin-top:8px">${ops}</div></div>
+      <div class="card"><h3>🤝 Service recovery <button class="btn btn-gold btn-sm sans" style="float:right" onclick="openServiceRecovery()">+ Own a problem</button></h3><div id="hubSR" style="margin-top:8px"><div class="hint">Loading…</div></div></div>
       <div class="card"><h3>⭐ Recent recognition <button class="btn btn-ghost btn-sm sans" style="float:right" onclick="setHubTab('recog')">Give one →</button></h3><div style="margin-top:8px">${recog}</div></div>
     </div>`;
+  loadServiceRecovery();
 }
 async function hubTasks(){
   if(!HOUSING.hubShift) HOUSING.hubShift=(new Date().getHours()<14?'Day':new Date().getHours()<22?'Evening':'Overnight');
@@ -1491,4 +1509,197 @@ async function giveRecognition(){
 }
 async function kudosRecognition(id){ try{ await api('/housing/recognition/'+id+'/kudos',{method:'POST',body:'{}'}); hubRecognition(); }catch(e){ alert(e.message); } }
 
-Object.assign(window,{loadStaffHub,setHubTab,hubFocus,hubTasks,toggleShiftTask,hubFirstDay,openFirstDay,toggleOnboard,hubRecognition,giveRecognition,kudosRecognition,loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+/* ---- Daily line-up ritual ---- */
+async function hubLineup(){
+  let d; try{ d=await api('/housing/lineup'); }catch(e){ $('hubBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  HOUSING.lineup=d;
+  const st=d.standard;
+  const doneToday=d.today;
+  const recent=d.recent.length? d.recent.map(r=>`<div class="cmd-row"><div class="cmd-row-main">📣 <b>${esc(r.date)}</b> · standard #${r.standard_index} <span class="hint">· led by ${esc(r.led_by||'')}${r.attendees!=null?' · '+r.attendees+' present':''}</span>${r.wow_story?`<br>⭐ ${esc(r.wow_story)}`:''}${r.focus_note?`<br><span class="hint">Focus: ${esc(r.focus_note)}</span>`:''}</div></div>`).join('') : '<div class="hint">No line-ups logged yet.</div>';
+  $('hubBody').innerHTML=`
+    <div class="card anchor-card">
+      <div class="anchor-head">Today's standard · #${st.index} of ${st.total} ${d.canEdit?`<button class="btn btn-ghost btn-sm sans no-print" style="float:right" onclick="editStandards()">Edit standards</button>`:''}</div>
+      <div class="anchor-words">${esc(st.text)}</div>
+      <div class="anchor-foot">${esc(d.credo)}</div>
+      <div class="anchor-foot" style="margin-top:8px">Three steps of service: ${d.threeSteps.map(esc).join(' &nbsp;·&nbsp; ')}</div>
+    </div>
+    <div class="cmd-grid">
+      <div class="card"><h3>Run today's line-up</h3>
+        <p class="sub sans">Gather the team for 10 minutes: read the standard, share a win, set the day's focus. Then log it so the ritual stays alive.</p>
+        ${doneToday?`<div class="cmd-row"><div class="cmd-row-main">✅ Logged today by ${esc(doneToday.led_by||'')}${doneToday.attendees!=null?` · ${doneToday.attendees} present`:''}</div></div>`:''}
+        <label>How many were present?</label><input id="lu_att" type="number" min="0" placeholder="e.g. 6"/>
+        <label>A win / wow story to share (optional)</label><textarea id="lu_wow" rows="2" placeholder="Catch someone living the standard…"></textarea>
+        <label>Today's focus (optional)</label><input id="lu_focus" placeholder="e.g. two new arrivals — make them feel at home"/>
+        <div class="toolbar" style="margin-top:10px"><button class="btn btn-gold sans" onclick="logLineup()">${doneToday?'Log another':'Log line-up'}</button></div></div>
+      <div class="card"><h3>Recent line-ups</h3><div style="margin-top:8px">${recent}</div></div>
+    </div>`;
+}
+async function logLineup(){
+  try{ await api('/housing/lineup',{method:'POST',body:JSON.stringify({attendees:$('lu_att').value,wow_story:$('lu_wow').value,focus_note:$('lu_focus').value})}); hubLineup(); }catch(e){ alert(e.message); }
+}
+function editStandards(){
+  const list=(HOUSING.lineup&&HOUSING.lineup.standards)||[];
+  const save=hmodal(`<h3>Edit service standards</h3><p class="sub sans">One per line. The app reads one each day at line-up, in order, then starts over.</p>
+    <textarea id="std_box" rows="14">${esc(list.join('\n'))}</textarea>`);
+  save.onclick=async()=>{ const arr=$('std_box').value.split('\n').map(s=>s.trim()).filter(Boolean); if(!arr.length){ alert('Add at least one standard.'); return; }
+    try{ await api('/housing/standards',{method:'POST',body:JSON.stringify({standards:arr})}); closeHModal(); hubLineup(); }catch(e){ alert(e.message); } };
+}
+/* ---- Service recovery — own it, do whatever it takes ---- */
+async function loadServiceRecovery(){
+  const el=$('hubSR'); if(!el) return;
+  let d; try{ d=await api('/housing/service-recovery'); }catch(e){ el.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  const open=d.rows.filter(r=>r.status==='open');
+  el.innerHTML=`${d.cost30?`<div class="hint" style="margin-bottom:6px">“Whatever it takes” spend · 30d: <b>${money(d.cost30)}</b></div>`:''}
+    ${open.length? open.map(r=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">🤝 <b>${esc(r.owner||'unowned')}</b> ${r.name?'· for '+esc(r.name):''}<br>${esc(r.issue)}${r.action?`<br><span class="hint">Action: ${esc(r.action)}${r.cost?' · '+money(r.cost):''}</span>`:''}</div><button class="btn btn-primary btn-sm sans" onclick="resolveServiceRecovery(${r.id})">Resolve</button></div>`).join('') : '<div class="hint">✅ Nothing open. Log a problem the moment you hear it — you own it until it’s fixed.</div>'}`;
+}
+async function openServiceRecovery(){
+  const residents=await api('/housing/residents?status=active').catch(()=>[]);
+  const opts=residents.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
+  const save=hmodal(`<h3>Own a problem (service recovery)</h3>
+    <p class="sub sans">Whoever hears it, owns it. Capture what happened and what you’re doing about it — leadership sees the pattern, not to blame, but to fix root causes.</p>
+    <label>Resident (optional)</label><select id="sr_res"><option value="">— general / house —</option>${opts}</select>
+    <label>What happened</label><textarea id="sr_issue" rows="2" placeholder="The concern, in their words if possible"></textarea>
+    <label>What you did / will do</label><textarea id="sr_action" rows="2" placeholder="The recovery — a ride, a meal, a fix, an apology…"></textarea>
+    <label>Cost, if any ($)</label><input id="sr_cost" type="number" min="0" step="0.01" placeholder="0"/>`);
+  save.onclick=async()=>{ if(!$('sr_issue').value.trim()){ alert('Describe what happened.'); return; }
+    try{ await api('/housing/service-recovery',{method:'POST',body:JSON.stringify({resident_id:$('sr_res').value||null,issue:$('sr_issue').value,action:$('sr_action').value,cost:$('sr_cost').value})}); closeHModal(); loadServiceRecovery(); }catch(e){ alert(e.message); } };
+}
+async function resolveServiceRecovery(id){
+  const save=hmodal(`<h3>Resolve service-recovery item</h3><label>How was it resolved?</label><textarea id="srr_action" rows="2"></textarea><label>Final cost ($, optional)</label><input id="srr_cost" type="number" min="0" step="0.01"/>`);
+  save.onclick=async()=>{ try{ await api('/housing/service-recovery/'+id,{method:'POST',body:JSON.stringify({status:'resolved',action:$('srr_action').value||null,cost:$('srr_cost').value||null})}); closeHModal(); loadServiceRecovery(); }catch(e){ alert(e.message); } };
+}
+async function claimRequest(id){ try{ await api('/housing/voice/request/'+id+'/claim',{method:'POST',body:'{}'}); loadVoice(); }catch(e){ alert(e.message); } }
+
+/* ============================ STAFF GROWTH — select, orient, develop ============================ */
+async function loadStaffDev(){
+  if(HOUSING.sdevId){ return openStaffDev(HOUSING.sdevId); }
+  let d; try{ d=await api('/housing/staff-dev'); }catch(e){ $('sdevBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const fullyOriented=d.staff.filter(s=>s.onboardDone>=s.onboardTotal).length;
+  const kpis=`<div class="ret-cards" style="margin:16px 0">
+    <div class="ret-card"><div class="n">${d.staff.length}</div><div class="l">Team members</div></div>
+    <div class="ret-card ${fullyOriented<d.staff.length?'rc-warn':''}"><div class="n">${fullyOriented}/${d.staff.length}</div><div class="l">Fully oriented</div></div>
+    <div class="ret-card"><div class="n">${d.staff.filter(s=>s.profile&&s.profile.dream).length}</div><div class="l">Dreams captured</div></div></div>`;
+  const rows=d.staff.length? d.staff.map(s=>{ const op=s.onboardTotal?Math.round(s.onboardDone/s.onboardTotal*100):0;
+    return `<div class="cmd-row" style="cursor:pointer" onclick="HOUSING.sdevId=${s.id};loadStaffDev()"><div class="cmd-row-main"><b>${esc(s.name)}</b> <span class="hint">· ${esc(s.job_role||'')}</span>
+      <div class="occbar" style="margin-top:6px;max-width:240px"><span style="width:${op}%"></span></div>
+      <span class="hint">Orientation ${s.onboardDone}/${s.onboardTotal} · competencies ${s.compDone}/${s.compTotal}${s.profile&&s.profile.dream?' · dream on file':''}</span></div>
+      <span class="chip ${op>=100?'':'chip-warn'}">${op}%</span></div>`; }).join('') : '<div class="empty">No housing staff yet — add them under Users.</div>';
+  $('sdevBody').innerHTML=`${kpis}<div class="card"><h3>The team</h3><p class="sub sans">Pick a person to run their sacred orientation, sign off competencies, and invest in their growth.</p><div style="margin-top:8px">${rows}</div></div>`;
+}
+async function openStaffDev(id){
+  let d; try{ d=await api('/housing/staff-dev/'+id); }catch(e){ $('sdevBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const u=d.user, p=d.profile||{};
+  const pct=d.onbTotal?Math.round(d.onbDone/d.onbTotal*100):0;
+  const phases=d.phases.map(ph=>`<div style="margin-bottom:14px"><div style="font-weight:700;color:var(--navy);border-bottom:2px solid var(--gold-soft,#eadfbf);padding-bottom:4px;margin-bottom:6px">${esc(ph.phase)}</div>
+    ${ph.items.map(it=>`<div class="todo ${it.done?'done':''}"><div class="box" onclick="toggleStaffOnboard(${id},'${it.key}',${it.done?0:1})">${it.done?'✓':''}</div><div class="txt">${esc(it.label)}${it.done&&it.done_by?`<span class="hint"> · ${esc(it.done_by)}</span>`:''}</div></div>`).join('')}</div>`).join('');
+  const comps=d.competencies.map(c=>`<div class="cmd-row"><div class="cmd-row-main">${esc(c.label)}${c.signed_by?`<span class="hint"> · signed ${esc(c.signed_by)}</span>`:''}</div>
+    <select style="width:auto" onchange="setCompetency(${id},'${c.key}',this.value)">${d.compLevels.map((l,i)=>`<option value="${i}" ${c.level===i?'selected':''}>${esc(l)}</option>`).join('')}</select></div>`).join('');
+  $('sdevBody').innerHTML=`<div class="card">
+    <div class="cmd-hero-row" style="align-items:center"><div><h3>🌱 ${esc(u.name)} <span class="hint" style="font-weight:400">· ${esc(u.job_role||'')}</span></h3>${p.start_date?`<p class="sub sans" style="margin:0">Started ${esc(p.start_date)}</p>`:''}</div>
+      <button class="btn btn-ghost sans" onclick="HOUSING.sdevId=null;loadStaffDev()">← All staff</button></div>
+    <div class="ret-cards" style="margin:14px 0"><div class="ret-card ${pct===100?'':'rc-warn'}"><div class="n">${d.onbDone}/${d.onbTotal}</div><div class="l">${pct}% oriented</div></div></div>
+  </div>
+  <div class="cmd-grid">
+    <div class="card"><h3>🧭 Sacred orientation (Day 1 · Week 1 · Day 21)</h3><div style="margin-top:8px">${phases}</div></div>
+    <div>
+      <div class="card"><h3>🎓 Competencies</h3><p class="sub sans">Sign off when they’re competent. “Can mentor others” is mastery.</p><div style="margin-top:8px">${comps}</div></div>
+      <div class="card"><h3>💫 Their dreams & growth <button class="btn btn-ghost btn-sm sans" style="float:right" onclick="editStaffProfile(${id})">Edit</button></h3>
+        <div class="kv"><span class="k">Strengths</span><span class="v" style="max-width:60%">${esc(p.strengths||'—')}</span></div>
+        <div class="kv"><span class="k">Their dream</span><span class="v" style="max-width:60%">${esc(p.dream||'—')}</span></div>
+        <div class="kv"><span class="k">Growth goal</span><span class="v" style="max-width:60%">${esc(p.growth_goal||'—')}</span></div>
+        <div class="kv"><span class="k">Morale (1–10)</span><span class="v">${p.pulse!=null?p.pulse:'—'}</span></div>
+        ${p.notes?`<div class="pc-note" style="margin-top:6px">${esc(p.notes)}</div>`:''}</div>
+    </div>
+  </div>`;
+}
+async function toggleStaffOnboard(id,key,done){ try{ await api('/housing/staff-dev/'+id+'/onboard',{method:'POST',body:JSON.stringify({item_key:key,done})}); openStaffDev(id); }catch(e){ alert(e.message); } }
+async function setCompetency(id,key,level){ try{ await api('/housing/staff-dev/'+id+'/competency',{method:'POST',body:JSON.stringify({comp_key:key,level:+level})}); openStaffDev(id); }catch(e){ alert(e.message); } }
+async function editStaffProfile(id){
+  let d; try{ d=await api('/housing/staff-dev/'+id); }catch(e){ alert(e.message); return; } const p=d.profile||{};
+  const save=hmodal(`<h3>Invest in ${esc(d.user.name)}</h3>
+    <label>Start date</label><input id="sp_start" type="date" value="${esc(p.start_date||'')}"/>
+    <label>Strengths</label><input id="sp_str" value="${esc(p.strengths||'')}" placeholder="What they're great at"/>
+    <label>Their dream (where do they want to go?)</label><textarea id="sp_dream" rows="2">${esc(p.dream||'')}</textarea>
+    <label>Growth goal (next 90 days)</label><textarea id="sp_growth" rows="2">${esc(p.growth_goal||'')}</textarea>
+    <label>Morale / engagement (1–10)</label><input id="sp_pulse" type="number" min="1" max="10" value="${p.pulse!=null?p.pulse:''}"/>
+    <label>Notes</label><textarea id="sp_notes" rows="2">${esc(p.notes||'')}</textarea>`);
+  save.onclick=async()=>{ try{ await api('/housing/staff-dev/'+id+'/profile',{method:'POST',body:JSON.stringify({start_date:$('sp_start').value,strengths:$('sp_str').value,dream:$('sp_dream').value,growth_goal:$('sp_growth').value,pulse:$('sp_pulse').value,notes:$('sp_notes').value})}); closeHModal(); openStaffDev(id); }catch(e){ alert(e.message); } };
+}
+
+/* ============================ FAREWELL & ALUMNI ============================ */
+async function loadFarewell(){
+  if(HOUSING.fwId){ return openFarewell(HOUSING.fwId); }
+  let d; try{ d=await api('/housing/farewell'); }catch(e){ $('fwBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const kpis=`<div class="ret-cards" style="margin:16px 0">
+    <div class="ret-card"><div class="n">${d.alumniCount}</div><div class="l">Alumni</div></div>
+    <div class="ret-card ${d.nps!=null&&d.nps<50?'rc-warn':''}"><div class="n">${d.nps!=null?d.nps:'—'}</div><div class="l">Net promoter (would recommend)</div></div>
+    <div class="ret-card"><div class="n">${d.soberRate!=null?d.soberRate+'%':'—'}</div><div class="l">Alumni reporting sober</div></div>
+    <div class="ret-card"><div class="n">${d.surveyed}</div><div class="l">Loyalty responses</div></div></div>`;
+  const dep=d.departing.length? d.departing.slice(0,40).map(r=>{ const pct=r.total?Math.round(r.done/r.total*100):0;
+    return `<div class="cmd-row" style="cursor:pointer" onclick="HOUSING.fwId=${r.id};loadFarewell()"><div class="cmd-row-main"><b>${esc(r.name)}</b> <span class="hint">· ${esc(r.house||'')}</span><div class="occbar" style="margin-top:6px;max-width:200px"><span style="width:${pct}%"></span></div></div><span class="chip ${r.done?'':''}">${r.done}/${r.total}</span></div>`; }).join('') : '<div class="hint">No active residents.</div>';
+  const alum=d.alumni.length? d.alumni.slice(0,40).map(a=>`<div class="cmd-row" style="cursor:pointer" onclick="HOUSING.fwId=${a.id};loadFarewell()"><div class="cmd-row-main"><b>${esc(a.name)}</b> <span class="hint">· ${esc(a.discharge_type||'discharged')}${a.discharge_date?' · '+esc(a.discharge_date):''}</span>${a.last?`<br><span class="hint">Last check-in ${esc(a.last.date)} · ${a.last.sober?'sober ✅':'sober ?'}${a.last.employed?' · employed':''}${a.last.housed?' · housed':''}</span>`:'<br><span class="hint">No alumni check-in yet</span>'}</div>${a.would_recommend!=null?`<span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">${a.would_recommend}/10</span>`:''}</div>`).join('') : '<div class="hint">No alumni yet — every warm farewell becomes one.</div>';
+  $('fwBody').innerHTML=`${kpis}<div class="cmd-grid">
+    <div class="card"><h3>🧳 Run a farewell playbook</h3><p class="sub sans">Plan the exit for success — a dignified goodbye is a future admission and a referral.</p><div style="margin-top:8px">${dep}</div></div>
+    <div class="card"><h3>🎓 Alumni — keep the door open</h3><p class="sub sans">Stay in touch. Click anyone to log a check-in.</p><div style="margin-top:8px">${alum}</div></div>
+  </div>`;
+}
+async function openFarewell(id){
+  let d; try{ d=await api('/housing/farewell/'+id); }catch(e){ $('fwBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const r=d.resident; const pct=d.total?Math.round(d.done/d.total*100):0;
+  const phases=d.phases.map(p=>`<div style="margin-bottom:14px"><div style="font-weight:700;color:var(--navy);border-bottom:2px solid var(--gold-soft,#eadfbf);padding-bottom:4px;margin-bottom:6px">${esc(p.phase)}</div>
+    ${p.items.map(it=>`<div class="todo ${it.done?'done':''}"><div class="box" onclick="toggleFarewell(${id},'${it.key}',${it.done?0:1})">${it.done?'✓':''}</div><div class="txt">${esc(it.label)}${it.done&&it.done_by?`<span class="hint"> · ${esc(it.done_by)}</span>`:''}</div></div>`).join('')}</div>`).join('');
+  const ci=d.checkins.length? d.checkins.map(c=>`<div class="cmd-row"><div class="cmd-row-main">📞 <b>${esc(c.date)}</b> · ${c.sober?'sober ✅':'sober ?'}${c.employed?' · employed':''}${c.housed?' · housed':''}${c.would_recommend!=null?' · would recommend '+c.would_recommend+'/10':''}${c.note?`<br><span class="hint">${esc(c.note)}</span>`:''}</div></div>`).join('') : '<div class="hint">No alumni check-ins yet.</div>';
+  $('fwBody').innerHTML=`<div class="card">
+    <div class="cmd-hero-row" style="align-items:center"><div><h3>👋 ${esc(r.name)} <span class="hint" style="font-weight:400">· ${esc(r.house||'')}${r.status!=='active'?' · '+esc(r.status):''}</span></h3></div>
+      <button class="btn btn-ghost sans" onclick="HOUSING.fwId=null;loadFarewell()">← Back</button></div>
+    <div class="ret-cards" style="margin:14px 0"><div class="ret-card ${pct===100?'':'rc-warn'}"><div class="n">${d.done}/${d.total}</div><div class="l">${pct}% farewell complete</div></div></div>
+  </div>
+  <div class="cmd-grid">
+    <div class="card"><h3>🧳 Farewell playbook</h3><div style="margin-top:8px">${phases}</div></div>
+    <div class="card"><h3>📞 Alumni check-ins <button class="btn btn-gold btn-sm sans" style="float:right" onclick="openAlumniCheckin(${id})">+ Log check-in</button></h3><div style="margin-top:8px">${ci}</div></div>
+  </div>`;
+}
+async function toggleFarewell(id,key,done){ try{ await api('/housing/farewell/'+id,{method:'POST',body:JSON.stringify({item_key:key,done})}); openFarewell(id); }catch(e){ alert(e.message); } }
+function openAlumniCheckin(id){
+  const save=hmodal(`<h3>Alumni check-in</h3>
+    <label>Date</label><input id="ac_date" type="date" value="${today()}"/>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px">
+      <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-weight:500"><input type="checkbox" id="ac_sober" checked style="width:auto"/> Sober</label>
+      <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-weight:500"><input type="checkbox" id="ac_emp" style="width:auto"/> Employed / in school</label>
+      <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-weight:500"><input type="checkbox" id="ac_housed" checked style="width:auto"/> Stably housed</label>
+    </div>
+    <label>Would they recommend Hilltop? (0–10)</label><input id="ac_rec" type="number" min="0" max="10" placeholder="0–10"/>
+    <label>Note</label><textarea id="ac_note" rows="2"></textarea>`);
+  save.onclick=async()=>{ try{ await api('/housing/alumni/'+id+'/checkin',{method:'POST',body:JSON.stringify({date:$('ac_date').value,sober:$('ac_sober').checked?1:0,employed:$('ac_emp').checked?1:0,housed:$('ac_housed').checked?1:0,would_recommend:$('ac_rec').value,note:$('ac_note').value})}); closeHModal(); openFarewell(id); }catch(e){ alert(e.message); } };
+}
+
+/* ---- Best-in-class targets (Housing Outcomes) ---- */
+async function loadTargets(actual){
+  const el=$('hoTargets'); if(!el) return;
+  let d; try{ d=await api('/housing/targets'); }catch(e){ el.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  HOUSING.targets=d.targets;
+  el.innerHTML=d.targets.map(t=>{ const a=actual[t.key]; const has=a!=null;
+    const ok = has ? (t.dir==='down'? a<=t.target : a>=t.target) : false;
+    const pct = has ? Math.max(0,Math.min(100, t.dir==='down' ? (t.target? Math.round(Math.min(100,(t.target/Math.max(a,0.0001))*100)):0) : (t.target? Math.round(a/t.target*100):0))) : 0;
+    return `<div style="margin:10px 0"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span>${esc(t.label)}</span><b>${has?a+(t.unit||''):'—'} <span class="hint" style="font-weight:400">/ ${t.target}${t.unit||''} ${ok?'✅':''}</span></b></div><div class="dose ${has&&!ok?'low':''}"><span style="width:${pct}%"></span></div></div>`;
+  }).join('');
+}
+function editTargets(){
+  const list=HOUSING.targets||[];
+  const save=hmodal(`<h3>Best-in-class targets</h3><p class="sub sans">Set the bar where a top recovery home should be.</p>
+    ${list.map(t=>`<label>${esc(t.label)} (${t.unit||'#'}${t.dir==='down'?', lower is better':''})</label><input id="tg_${t.key}" type="number" step="0.1" value="${t.target}"/>`).join('')}`);
+  save.onclick=async()=>{ const targets=list.map(t=>({key:t.key,target:$('tg_'+t.key).value})); try{ await api('/housing/targets',{method:'POST',body:JSON.stringify({targets})}); closeHModal(); loadHousingOutcomes(); }catch(e){ alert(e.message); } };
+}
+
+/* ---- "Know me" resident preference card ---- */
+function openKnowMe(id){
+  const r=HOUSING.current||{};
+  const save=hmodal(`<h3>Know me — ${esc(r.name||'resident')}</h3>
+    <p class="sub sans">The little things every staffer should know to make this person feel seen. Anticipation is the heart of great service.</p>
+    <label>What motivates me</label><textarea id="km_mot" rows="2">${esc(r.pref_motivate||'')}</textarea>
+    <label>My triggers / what to watch for</label><textarea id="km_trig" rows="2">${esc(r.pref_trigger||'')}</textarea>
+    <label>What a great day looks like for me</label><textarea id="km_day" rows="2">${esc(r.pref_bestday||'')}</textarea>`);
+  save.onclick=async()=>{ try{ await api('/housing/residents/'+id,{method:'POST',body:JSON.stringify({pref_motivate:$('km_mot').value,pref_trigger:$('km_trig').value,pref_bestday:$('km_day').value})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
+}
+
+Object.assign(window,{hubLineup,logLineup,editStandards,loadServiceRecovery,openServiceRecovery,resolveServiceRecovery,claimRequest,loadStaffDev,openStaffDev,toggleStaffOnboard,setCompetency,editStaffProfile,loadFarewell,openFarewell,toggleFarewell,openAlumniCheckin,loadTargets,editTargets,openKnowMe,loadStaffHub,setHubTab,hubFocus,hubTasks,toggleShiftTask,hubFirstDay,openFirstDay,toggleOnboard,hubRecognition,giveRecognition,kudosRecognition,loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

@@ -24,6 +24,45 @@ spans every department and weaves Claude through all of it.
   client-facing kiosk, team (kudos/training/wellbeing), incident reports, the full
   Ritz service model, outcomes, and a weekly report.
 
+## 🏡 Recovery Housing (sober-living suite — PHP · IOP · OP · ORH L2/L3)
+
+A full recovery-residence platform for Ohio, built into the same app so a person
+is **one record across the whole continuum** — detox → residential → housing —
+and the recovery houses run hand-in-glove with Armada's clinical outpatient. It
+is grounded in the same *Excellence Wins* (Horst Schulze) playbook: warm arrival,
+anticipated stay, the fond farewell, lateral ownership, a complaint is a gift,
+measure everything, belonging. Find it under the **Housing** group in the nav.
+
+- **Housing HQ** — every residence on one screen: occupancy, open beds, average
+  recovery capital, clinical under-dose, screens due, outstanding balances,
+  returns to use, ORH compliance %, and a live "needs attention" feed.
+- **Houses & live bed board** — NARR / Ohio Recovery Housing **Level 2
+  (monitored)** and **Level 3 (supervised)** homes with ORH cert #, capacity,
+  gender, MAT-supportive flag and house manager. Tap any bed to assign, move,
+  hold, or flag maintenance.
+- **Residents** — intake (the warm welcome), level of care (PHP / IOP / OP /
+  housing-only), phase 1–4, length of stay, days sober, recovery capital, balance.
+- **Resident 360** — recovery plan, **recovery-capital assessment** (8 REC-CAP-style
+  domains scored 0–10 with growth tracking), phase tracker, sober supports
+  (sponsor, home group, meetings vs goal), employment/education, MAT, drug-screen
+  history, ledger, clinical coordination, and the fond-farewell discharge.
+- **Drug screening** — random selection, observed/panel, positivity & refusal
+  rates, "due now" list; a positive auto-logs a return-to-use to recover instantly.
+- **House life** — daily chores, curfew / bed-check, and meeting attendance.
+- **Clinical coordination** — weekly clinical-hour dose vs target (PHP ≥20h, IOP
+  ≥9h), coordination-of-care notes with clinical, and ROI tracking.
+- **Rent & funding** — bed-fee ledger (self-pay, SOR/STAR scholarship, Medicaid,
+  private), balances, aging, payer mix and collection rate.
+- **ORH / NARR compliance** — the full certification standards matrix by domain
+  (Administrative, Recovery Support, Physical Environment, Good Neighbor) per
+  house and level, plus inspections and a grievance log.
+- **Housing outcomes** — 30/90/180-day retention, recovery-capital growth,
+  employment rate, returns to use, average length of stay, and discharge
+  dispositions — the proof the model works.
+
+Code: `src/housing.js` (schema + `/api/housing/*` routes, mounted from
+`server.js`) and `public/housing.js` (front-end), styled in `public/styles.css`.
+
 ## ► Deploy it live (one click)
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/zgn7t8kzt6-glitch/armada)

@@ -144,6 +144,7 @@ const GROUPS=[
   {g:'arrival',label:'Arrival',first:'arrivals'},
   {g:'stay',label:'Stay',first:'clients'},
   {g:'handoff',label:'Handoff',first:'dischargepage'},
+  {g:'housing',label:'Housing',first:'housing'},
   {g:'team',label:'Team',first:'mytasks'},
   {g:'facility',label:'Facility',first:'inventory'},
   {g:'command',label:'Command',first:'command',admin:true},
@@ -159,6 +160,8 @@ const GROUP_OF={
   casemgmt:'stay',retention:'stay',surveys:'stay',incidents:'stay',compliance:'stay',
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
+  // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
+  housing:'housing',houses:'housing',residents:'housing',resident:'housing',screens:'housing',houselife:'housing',coordination:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
   mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
@@ -298,7 +301,7 @@ function show(v){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',housing:'Recovery Housing HQ',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
@@ -360,6 +363,16 @@ function show(v){
   if(v==='audit') loadAudit();
   if(v==='report-view') loadReport();
   if(v==='assign') loadAssign();
+  // Recovery Housing suite (functions live in housing.js)
+  if(v==='housing' && window.loadHousingHQ) loadHousingHQ();
+  if(v==='houses' && window.loadHouses) loadHouses();
+  if(v==='residents' && window.loadResidents) loadResidents();
+  if(v==='screens' && window.loadScreens) loadScreens();
+  if(v==='houselife' && window.loadHouseLife) loadHouseLife();
+  if(v==='coordination' && window.loadCoordination) loadCoordination();
+  if(v==='ledger' && window.loadLedger) loadLedger();
+  if(v==='orh' && window.loadOrh) loadOrh();
+  if(v==='housingoutcomes' && window.loadHousingOutcomes) loadHousingOutcomes();
 }
 
 /* ---- clients ---- */

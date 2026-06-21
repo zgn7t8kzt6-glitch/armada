@@ -1,0 +1,535 @@
+/* Armada Recovery Housing — front-end for the sober-living suite.
+   Loaded after app.js, so it shares its globals (api, $, esc, today, initials, ME, show). */
+const HOUSING = { meta:null, residents:[], resStatus:'active', houses:[] };
+
+async function hMeta(){ if(!HOUSING.meta){ try{ HOUSING.meta = await api('/housing/meta'); }catch(e){ HOUSING.meta={reccapDomains:[],phases:[],loc:{},orhStandards:[]}; } } return HOUSING.meta; }
+
+/* ---- shared helpers ---- */
+const money = n => '$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0});
+function hLvl(l){ return l==='L3' ? '<span class="lvl lvl-l3">★ Level 3 · Supervised</span>' : '<span class="lvl lvl-l2">Level 2 · Monitored</span>'; }
+function hLocPill(loc){ const m=(HOUSING.meta&&HOUSING.meta.loc)||{}; const c=(m[loc]&&m[loc].color)||'#6f7a75'; return `<span class="loc-pill" style="background:${c}">${esc(loc||'—')}</span>`; }
+function hRing(pct, value, label, color){
+  color = color || (pct>=70?'#5fb0c2':pct>=40?'#d29a5e':'#c06a52');
+  return `<div class="rc-ring" style="--p:${Math.max(0,Math.min(100,pct))};--c:${color}"><div class="rcv"><b>${value}</b><span>${esc(label||'')}</span></div></div>`;
+}
+function hmodal(html){ const m=$('hModal'); $('hModalBody').innerHTML = html + `<div class="toolbar" style="margin-top:18px"><button class="btn btn-ghost sans" onclick="closeHModal()">Cancel</button><button class="btn btn-primary sans" id="hModalSave">Save</button></div>`; m.style.display='flex'; m.onclick=e=>{ if(e.target===m) closeHModal(); }; return $('hModalSave'); }
+function hmodalPlain(html){ const m=$('hModal'); $('hModalBody').innerHTML = html; m.style.display='flex'; m.onclick=e=>{ if(e.target===m) closeHModal(); }; }
+function closeHModal(){ $('hModal').style.display='none'; $('hModalBody').innerHTML=''; }
+const isAdmin = () => ME && ME.role==='admin';
+
+/* ============================ HOUSING HQ ============================ */
+async function loadHousingHQ(){
+  await hMeta();
+  let d; try{ d=await api('/housing/overview'); }catch(e){ $('hqKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const k=d.kpis;
+  $('hqKpis').innerHTML = `
+    <div class="ret-card"><div class="n">${k.occupied}/${k.capacity}</div><div class="l">Beds filled · ${k.occPct}%</div></div>
+    <div class="ret-card ${k.open?'':''}"><div class="n">${k.open}</div><div class="l">Open beds</div></div>
+    <div class="ret-card"><div class="n">${k.reccapAvg??'—'}</div><div class="l">Avg recovery capital</div></div>
+    <div class="ret-card ${k.underDose?'rc-warn':''}"><div class="n">${k.underDose}</div><div class="l">Clinical under-dose</div></div>
+    <div class="ret-card ${k.screensDue?'rc-warn':''}"><div class="n">${k.screensDue}</div><div class="l">Screens due</div></div>
+    <div class="ret-card ${k.balanceOut>0?'rc-warn':''}"><div class="n">${money(k.balanceOut)}</div><div class="l">Balance outstanding</div></div>
+    <div class="ret-card ${k.returnsToUse?'rc-high':''}"><div class="n">${k.returnsToUse}</div><div class="l">Returns to use · mo</div></div>
+    <div class="ret-card ${k.orhPct>=90?'':'rc-warn'}"><div class="n">${k.orhPct}%</div><div class="l">ORH compliance</div></div>`;
+  // by level of care
+  const total = Object.values(d.byLoc).reduce((a,b)=>a+b,0)||1;
+  $('hqLoc').innerHTML = Object.keys(d.byLoc).map(loc=>{
+    const n=d.byLoc[loc]; const pct=Math.round(n/total*100);
+    const m=(HOUSING.meta.loc[loc])||{};
+    return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span>${hLocPill(loc)} <span class="hint">${esc(m.label||'')}</span></span><b>${n}</b></div>
+      <div class="dose"><span style="width:${pct}%;background:${m.color||'#5fb0c2'}"></span></div></div>`;
+  }).join('');
+  // houses
+  $('hqHouses').innerHTML = d.houses.map(h=>houseMiniCard(h)).join('') || '<div class="empty">No houses yet.</div>';
+  // attention
+  const a=[];
+  if(k.underDose) a.push(`🩺 <b>${k.underDose}</b> resident(s) below their clinical dose this week — <a onclick="show('coordination')" style="cursor:pointer;color:var(--navy)">coordinate care →</a>`);
+  if(k.screensDue) a.push(`🧪 <b>${k.screensDue}</b> resident(s) due for a screen — <a onclick="show('screens')" style="cursor:pointer;color:var(--navy)">screen now →</a>`);
+  if(k.returnsToUse) a.push(`⚠️ <b>${k.returnsToUse}</b> return(s) to use this month — recover instantly, keep the door open.`);
+  if(k.balanceOut>0) a.push(`💵 <b>${money(k.balanceOut)}</b> in outstanding balances — <a onclick="show('ledger')" style="cursor:pointer;color:var(--navy)">review ledger →</a>`);
+  if(k.grievOpen) a.push(`📣 <b>${k.grievOpen}</b> open grievance(s) — a complaint is a gift; <a onclick="show('orh')" style="cursor:pointer;color:var(--navy)">resolve →</a>`);
+  if(k.orhPct<90) a.push(`🏛️ ORH compliance at <b>${k.orhPct}%</b> — excellence is non-negotiable; <a onclick="show('orh')" style="cursor:pointer;color:var(--navy)">close the gaps →</a>`);
+  $('hqAttention').innerHTML = a.length ? a.map(x=>`<div class="cmd-row"><div class="cmd-row-main">${x}</div></div>`).join('') : '<div class="hint">All clear across housing. 🎉</div>';
+}
+function houseMiniCard(h){
+  const filled=h.occ.occupied||0, cap=h.capacity||0, pct=cap?Math.round(filled/cap*100):0;
+  return `<div class="house-card" onclick="show('houses')" style="cursor:pointer">
+    <div class="house-top" style="background:linear-gradient(120deg,${esc(h.color||'#235056')},#2d6168)">
+      <h4>${esc(h.name)}</h4>
+      <div class="meta">${esc(h.city||'')} · ${esc(h.gender||'Any')} ${h.mat_friendly?'· MAT-friendly':''}</div>
+      <div style="margin-top:8px">${hLvl(h.level)}</div>
+    </div>
+    <div class="house-body">
+      <div style="display:flex;justify-content:space-between;font-size:12px"><span class="hint">Occupancy</span><b>${filled}/${cap}</b></div>
+      <div class="occbar ${pct>=100?'full':''}"><span style="width:${pct}%"></span></div>
+      <div class="hint">${h.occ.open||0} open · House mgr: ${esc(h.manager||'—')}</div>
+    </div></div>`;
+}
+
+/* ============================ HOUSES & BEDS ============================ */
+async function loadHouses(){
+  await hMeta();
+  let houses; try{ houses=await api('/housing/houses'); }catch(e){ $('housesBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  HOUSING.houses = houses;
+  $('housesBoard').innerHTML = houses.map(h=>{
+    const filled=h.occ.occupied||0, cap=h.capacity||h.beds.length, pct=cap?Math.round(filled/cap*100):0;
+    const beds = h.beds.map(b=>`
+      <button class="bed bed-${b.status}" onclick="bedClick(${b.id})" title="${esc(b.status)}">
+        <div class="blab">${esc(b.label||b.room)}</div>
+        <div class="bname">${b.resident_name?esc(b.resident_name):'<span style="color:var(--muted)">—</span>'}</div>
+        <div class="bstat">${b.status==='occupied'&&b.resident_loc?esc(b.resident_loc):esc(b.status)}</div>
+      </button>`).join('');
+    return `<div class="card">
+      <div class="cmd-hero-row">
+        <div><h3 style="font-size:18px">${esc(h.name)} ${hLvl(h.level)} ${h.mat_friendly?'<span class="mat-pill">MAT</span>':''} ${h.active?'':'<span class="chip">inactive</span>'}</h3>
+          <p class="sub sans" style="margin:2px 0 0">${esc(h.address||'')}${h.city?', '+esc(h.city):''} · ${esc(h.gender||'Any')} · House mgr: ${esc(h.manager||'—')}${h.orh_cert?' · '+esc(h.orh_cert):''}</p></div>
+        <div style="text-align:right">
+          <div style="font-size:13px"><b>${filled}/${cap}</b> filled · ${h.occ.open||0} open</div>
+          <div class="occbar ${pct>=100?'full':''}" style="width:160px;margin-left:auto"><span style="width:${pct}%"></span></div>
+          <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm sans" onclick="addBed(${h.id})">+ Bed</button>
+            ${isAdmin()?`<button class="btn btn-ghost btn-sm sans" onclick="openHouseForm(${h.id})">Edit</button>`:''}
+          </div>
+        </div>
+      </div>
+      <div class="bed-grid">${beds||'<div class="hint">No beds yet — add one.</div>'}</div>
+    </div>`;
+  }).join('') || '<div class="card"><div class="empty">No houses yet. Add your first recovery residence.</div></div>';
+}
+async function bedClick(bedId){
+  // find bed
+  let bed=null,house=null;
+  for(const h of HOUSING.houses){ const b=h.beds.find(x=>x.id===bedId); if(b){ bed=b; house=h; break; } }
+  if(!bed) return;
+  const openRes = HOUSING.houses.flatMap(h=>h.beds).filter(b=>b.status==='occupied'); // not used directly
+  const residents = (await api('/housing/residents?status=all')).filter(r=>r.status!=='discharged');
+  const unbedded = residents.filter(r=>!r.bed_id || r.bed_id===bedId);
+  const opts = unbedded.map(r=>`<option value="${r.id}" ${r.bed_id===bedId?'selected':''}>${esc(r.name)} · ${esc(r.loc)}${r.house&&r.house.name?' ('+esc(r.house.name)+')':''}</option>`).join('');
+  hmodalPlain(`<h3>Bed ${esc(bed.label||bed.room)} · ${esc(house.name)}</h3>
+    <p class="sub sans">Currently: <b>${bed.resident_name?esc(bed.resident_name):esc(bed.status)}</b></p>
+    <label>Assign / move a resident here</label>
+    <select id="bedRes"><option value="">— choose resident —</option>${opts}</select>
+    <div class="toolbar" style="justify-content:flex-start;flex-wrap:wrap;margin-top:14px">
+      <button class="btn btn-primary btn-sm sans" onclick="doAssignBed(${bedId})">Assign</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="setBedStatus(${bedId},'open')">Mark open</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="setBedStatus(${bedId},'hold')">Hold</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="setBedStatus(${bedId},'maintenance')">🛠 Maintenance</button>
+      ${isAdmin()?`<button class="btn btn-danger btn-sm sans" onclick="deleteBed(${bedId})">Delete bed</button>`:''}
+      <button class="btn btn-ghost btn-sm sans" style="margin-left:auto" onclick="closeHModal()">Close</button>
+    </div>`);
+}
+async function doAssignBed(bedId){ const rid=$('bedRes').value; if(!rid){ alert('Pick a resident.'); return; } try{ await api(`/housing/beds/${bedId}/assign`,{method:'POST',body:JSON.stringify({resident_id:+rid})}); closeHModal(); loadHouses(); }catch(e){ alert(e.message); } }
+async function setBedStatus(bedId,status){ try{ await api(`/housing/beds/${bedId}`,{method:'POST',body:JSON.stringify({status})}); closeHModal(); loadHouses(); }catch(e){ alert(e.message); } }
+async function deleteBed(bedId){ if(!confirm('Delete this bed?')) return; try{ await api(`/housing/beds/${bedId}`,{method:'DELETE'}); closeHModal(); loadHouses(); }catch(e){ alert(e.message); } }
+async function addBed(houseId){ const room=prompt('Room number (e.g. 03):'); if(room===null) return; const label=prompt('Bed label (e.g. 03A):', room+'A'); if(label===null) return; try{ await api(`/housing/houses/${houseId}/beds`,{method:'POST',body:JSON.stringify({room,label})}); loadHouses(); }catch(e){ alert(e.message); } }
+function openHouseForm(id){
+  const h = id ? HOUSING.houses.find(x=>x.id===id) : {};
+  const save = hmodal(`<h3>${id?'Edit house':'Add a recovery residence'}</h3>
+    <label>House name</label><input id="hf_name" value="${esc(h.name||'')}"/>
+    <div class="grid2">
+      <div><label>NARR / ORH level</label><select id="hf_level"><option value="L3" ${h.level==='L3'?'selected':''}>Level 3 — Supervised</option><option value="L2" ${h.level!=='L3'?'selected':''}>Level 2 — Monitored</option></select></div>
+      <div><label>ORH certificate #</label><input id="hf_cert" value="${esc(h.orh_cert||'')}"/></div>
+      <div><label>City</label><input id="hf_city" value="${esc(h.city||'')}"/></div>
+      <div><label>Capacity (beds)</label><input id="hf_cap" type="number" value="${h.capacity||0}"/></div>
+      <div><label>Gender</label><select id="hf_gender"><option ${h.gender==='Any'?'selected':''}>Any</option><option ${h.gender==='Men'?'selected':''}>Men</option><option ${h.gender==='Women'?'selected':''}>Women</option></select></div>
+      <div><label>House manager</label><input id="hf_mgr" value="${esc(h.manager||'')}"/></div>
+    </div>
+    <label>Address</label><input id="hf_addr" value="${esc(h.address||'')}"/>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500"><input type="checkbox" id="hf_mat" ${h.mat_friendly!==0?'checked':''} style="width:auto"/> MAT-supportive (no one excluded for prescribed medication)</label>`);
+  save.onclick = async () => {
+    const body = { name:$('hf_name').value, level:$('hf_level').value, orh_cert:$('hf_cert').value, city:$('hf_city').value, capacity:+$('hf_cap').value, gender:$('hf_gender').value, manager:$('hf_mgr').value, address:$('hf_addr').value, mat_friendly:$('hf_mat').checked };
+    try{ await api(id?`/housing/houses/${id}`:'/housing/houses',{method:'POST',body:JSON.stringify(body)}); closeHModal(); loadHouses(); }catch(e){ alert(e.message); }
+  };
+}
+
+/* ============================ RESIDENTS ============================ */
+function setResStatus(st){ HOUSING.resStatus=st; document.querySelectorAll('#resStatusSeg button').forEach(b=>b.classList.toggle('on',b.dataset.st===st)); loadResidents(); }
+async function loadResidents(){
+  await hMeta();
+  let rows; try{ rows=await api('/housing/residents?status='+HOUSING.resStatus); }catch(e){ $('residentsTable').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  HOUSING.residents = rows; renderResidents();
+}
+function renderResidents(){
+  const q=($('resSearch')?.value||'').toLowerCase();
+  let rows = HOUSING.residents.filter(r=>!q || (r.name||'').toLowerCase().includes(q));
+  if(!rows.length){ $('residentsTable').innerHTML='<div class="empty">No residents.</div>'; return; }
+  $('residentsTable').innerHTML = `<table class="tbl"><thead><tr>
+    <th>Resident</th><th>House · bed</th><th>LOC</th><th>Phase</th><th>Days</th><th>Sober</th><th>Recovery capital</th><th>Clinical dose</th><th>Balance</th>
+    </tr></thead><tbody>${rows.map(r=>{
+      const phase=(HOUSING.meta.phases.find(p=>p.n===r.phase)||{}).name||r.phase;
+      const dosePct=r.clinTarget?Math.round(r.clinHoursWk/r.clinTarget*100):100;
+      return `<tr style="cursor:pointer" onclick="openResident(${r.id})">
+        <td><b>${esc(r.name)}</b></td>
+        <td>${r.house?esc(r.house.name):'<span class="hint">unassigned</span>'}${r.bed?' · '+esc(r.bed.label):''}</td>
+        <td>${hLocPill(r.loc)}</td>
+        <td>${esc(phase)}</td>
+        <td>${r.los}d</td>
+        <td>${r.soberDays?r.soberDays+'d':'—'}</td>
+        <td>${r.reccap!=null?`<b style="color:var(--navy)">${r.reccap}</b>/10`:'<span class="hint">—</span>'}</td>
+        <td>${r.clinTarget?`<div class="dose ${dosePct<60?'low':''}" style="width:80px"><span style="width:${Math.min(100,dosePct)}%"></span></div><span class="hint">${r.clinHoursWk}/${r.clinTarget}h</span>`:'<span class="hint">housing only</span>'}</td>
+        <td>${r.balance>0?`<span style="color:var(--danger);font-weight:600">${money(r.balance)}</span>`:money(r.balance)}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+async function openResidentForm(){
+  await hMeta();
+  const houses = (await api('/housing/houses'));
+  const houseOpts = houses.map(h=>`<option value="${h.id}">${esc(h.name)} (${h.occ.open||0} open)</option>`).join('');
+  const locOpts = Object.keys(HOUSING.meta.loc).map(k=>`<option value="${k}">${esc(HOUSING.meta.loc[k].label)}</option>`).join('');
+  const save = hmodal(`<h3>New resident intake</h3>
+    <p class="sub sans">The warm welcome — Step 1 of Service. Lead with the person, then the paperwork.</p>
+    <label>Name</label><input id="rf_name"/>
+    <div class="grid2">
+      <div><label>House</label><select id="rf_house"><option value="">— waitlist (no house yet) —</option>${houseOpts}</select></div>
+      <div><label>Level of care</label><select id="rf_loc">${locOpts}</select></div>
+      <div><label>Move-in date</label><input id="rf_movein" type="date" value="${today()}"/></div>
+      <div><label>Sobriety date</label><input id="rf_sober" type="date"/></div>
+      <div><label>Recovery coach</label><input id="rf_coach"/></div>
+      <div><label>Payer</label><input id="rf_payer" placeholder="SOR scholarship / Medicaid / Self-pay"/></div>
+      <div><label>Phone</label><input id="rf_phone"/></div>
+      <div><label>MAT (if any)</label><input id="rf_mat" placeholder="Suboxone / Vivitrol / None"/></div>
+    </div>
+    <label>Recovery goals</label><textarea id="rf_goals" rows="2" placeholder="What does a good outcome look like for them?"></textarea>`);
+  save.onclick = async () => {
+    const body={ name:$('rf_name').value, house_id:$('rf_house').value||null, loc:$('rf_loc').value, move_in:$('rf_movein').value, sober_date:$('rf_sober').value||null, recovery_coach:$('rf_coach').value, payer:$('rf_payer').value, phone:$('rf_phone').value, mat:$('rf_mat').value, goals:$('rf_goals').value };
+    if(!body.name.trim()){ alert('Name is required.'); return; }
+    try{ const {id}=await api('/housing/residents',{method:'POST',body:JSON.stringify(body)}); closeHModal(); openResident(id); }catch(e){ alert(e.message); }
+  };
+}
+
+/* ---- Resident 360 ---- */
+async function openResident(id){
+  await hMeta();
+  let r; try{ r=await api('/housing/residents/'+id); }catch(e){ alert(e.message); return; }
+  HOUSING.current=r;
+  show('resident');
+  const phases=HOUSING.meta.phases;
+  const cap=r.capHistory&&r.capHistory.length?r.capHistory[r.capHistory.length-1]:null;
+  const capPct=cap?Math.round(cap.total*10):0;
+  const dosePct=r.clinTarget?Math.round(r.clinHoursWk/r.clinTarget*100):100;
+  const phaseTrack = phases.map(p=>`<div class="phase-step ${r.phase>p.n?'done':''} ${r.phase===p.n?'cur':''}">
+      <div class="pn">PHASE ${p.n}</div><div class="pl">${esc(p.name)}</div><div class="hint" style="margin-top:2px;font-size:10px">${esc(p.days)}d</div></div>`).join('');
+  // reccap domain bars
+  const domBars = HOUSING.meta.reccapDomains.map(d=>{
+    const v=cap&&cap.scores?(cap.scores[d[0]]??0):0;
+    return `<div class="rcdom"><div class="lab"><span title="${esc(d[2])}">${esc(d[1])}</span><b>${v}/10</b></div><div class="rcbar"><span style="width:${v*10}%"></span></div></div>`;
+  }).join('');
+  $('residentBody').innerHTML = `
+    <div class="toolbar no-print" style="justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="show('residents')">← All residents</button></div>
+    <div class="card">
+      <div class="r360-head">
+        <div class="r360-av">${esc(initials(r.name))}</div>
+        <div style="flex:1;min-width:220px">
+          <h3 style="font-size:23px;font-family:var(--serif);margin:0">${esc(r.name)}</h3>
+          <div style="margin-top:5px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            ${r.house?`<span class="chip">${esc(r.house.name)}${r.bed?' · '+esc(r.bed.label):''}</span>`:'<span class="chip">unassigned</span>'}
+            ${r.house?hLvl(r.house.level):''} ${hLocPill(r.loc)}
+            <span class="chip">${r.los} days in house</span>
+            ${r.soberDays?`<span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">${r.soberDays} days sober</span>`:''}
+          </div>
+        </div>
+        <div class="toolbar no-print" style="margin:0;flex-wrap:wrap">
+          <button class="btn btn-gold btn-sm sans" onclick="openReccapForm(${r.id})">Recovery capital</button>
+          <button class="btn btn-ghost btn-sm sans" onclick="openSupportForm(${r.id})">+ Meeting/support</button>
+          <button class="btn btn-ghost btn-sm sans" onclick="openScreenForm(${r.id})">+ Screen</button>
+          <button class="btn btn-ghost btn-sm sans" onclick="openLedgerForm(${r.id})">+ Charge/pay</button>
+          ${r.status==='active'?`<button class="btn btn-danger btn-sm sans" onclick="openDischargeForm(${r.id})">Discharge</button>`:`<span class="chip">${esc(r.status)}${r.discharge_type?' · '+esc(r.discharge_type):''}</span>`}
+        </div>
+      </div>
+      <div class="phase-track" style="margin-top:16px">${phaseTrack}</div>
+    </div>
+
+    <div class="r360-grid">
+      <div class="card">
+        <h3>Recovery capital</h3>
+        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          ${hRing(capPct, cap?cap.total:'—', 'of 10')}
+          <div style="flex:1;min-width:160px">
+            <p class="sub sans" style="margin:0 0 6px">Growth in recovery capital is the best predictor of staying in recovery. ${cap?'Last assessed '+esc(cap.date)+'.':'Not yet assessed.'}</p>
+            ${r.capHistory&&r.capHistory.length>1?`<div class="hint">First ${r.capHistory[0].total} → now ${cap.total} (${(cap.total-r.capHistory[0].total>=0?'+':'')}${(cap.total-r.capHistory[0].total).toFixed(1)})</div>`:''}
+          </div>
+        </div>
+        <div style="margin-top:12px">${domBars||'<div class="hint">No domains scored yet.</div>'}</div>
+      </div>
+
+      <div class="card">
+        <h3>Recovery plan &amp; supports</h3>
+        <div class="kv"><span class="k">Goals</span><span class="v" style="max-width:60%">${esc(r.goals||'—')}</span></div>
+        <div class="kv"><span class="k">Recovery coach</span><span class="v">${esc(r.recovery_coach||'—')}</span></div>
+        <div class="kv"><span class="k">Sponsor</span><span class="v">${esc(r.sponsor||'—')}</span></div>
+        <div class="kv"><span class="k">Home group</span><span class="v">${esc(r.home_group||'—')}</span></div>
+        <div class="kv"><span class="k">Meetings this week</span><span class="v">${r.meetingsWk} ${r.meetingsWk>=3?'✅':'<span style="color:var(--danger)">below 3</span>'}</span></div>
+        <div class="kv"><span class="k">Employment</span><span class="v">${esc(r.employment||'—')}</span></div>
+        <div class="kv"><span class="k">Education</span><span class="v">${esc(r.education||'—')}</span></div>
+        <div class="kv"><span class="k">MAT</span><span class="v">${esc(r.mat||'None')}</span></div>
+        <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="openResidentEdit(${r.id})">Edit plan</button></div>
+      </div>
+
+      <div class="card">
+        <h3>Clinical coordination</h3>
+        ${r.clinTarget?`<div style="display:flex;gap:14px;align-items:center;margin-bottom:8px">
+          ${hRing(Math.min(100,dosePct), r.clinHoursWk, 'hrs/wk')}
+          <div><div style="font-size:13px"><b>${hLocPill(r.loc)}</b> · target ${r.clinTarget}h/wk</div>
+          <div class="hint">${dosePct>=100?'On dose ✅':dosePct>=60?'Slightly under':'Under-dosed — coordinate with clinical'}</div></div>
+        </div>`:'<p class="sub sans">Recovery housing only — no clinical hours target.</p>'}
+        ${r.coordination&&r.coordination.length?`<div class="hint" style="margin-top:6px">Recent coordination notes:</div>`+r.coordination.filter(c=>c.note).slice(0,3).map(c=>`<div class="pc-note">📋 <b>${esc(c.date)}</b> · ${esc(c.note)}</div>`).join(''):''}
+        <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="openCoordForm(${r.id},'${esc(r.loc)}')">+ Log hours / note</button></div>
+      </div>
+
+      <div class="card">
+        <h3>Drug screens</h3>
+        ${r.screens&&r.screens.length?`<table class="tbl"><tbody>${r.screens.slice(0,6).map(s=>`<tr><td>${esc(s.date)}</td><td>${esc(s.panel||'')}</td><td>${screenResultBadge(s.result)}</td><td class="hint">${s.observed?'observed':''}${s.substances?' · '+esc(s.substances):''}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No screens logged.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Ledger <span class="hint" style="font-weight:400">· balance ${r.balance>0?`<b style="color:var(--danger)">${money(r.balance)}</b>`:money(r.balance)}</span></h3>
+        ${r.ledger&&r.ledger.length?`<table class="tbl"><tbody>${r.ledger.slice(0,6).map(l=>`<tr><td>${esc(l.date)}</td><td>${l.kind==='payment'?'✅ Payment':l.kind==='charge'?'Charge':'Adj'}</td><td>${l.kind==='payment'?'-':''}${money(l.amount)}</td><td class="hint">${esc(l.payer||'')}${l.memo?' · '+esc(l.memo):''}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No transactions.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Supports &amp; meetings</h3>
+        ${r.supports&&r.supports.length?r.supports.slice(0,8).map(s=>`<div class="pc-note">${s.type==='meeting'?'🙏':s.type==='employment'?'💼':'🤝'} <b>${esc(s.date)}</b> · ${esc(s.type)}${s.detail?' — '+esc(s.detail):''}</div>`).join(''):'<div class="hint">None logged yet.</div>'}
+      </div>
+    </div>`;
+}
+function screenResultBadge(r){ const m={negative:'#2f7a4f',positive:'#c06a52',refused:'#c06a52',diluted:'#9a6a1f',pending:'#6f7a75'}; return `<span class="loc-pill" style="background:${m[r]||'#6f7a75'}">${esc(r)}</span>`; }
+
+function openReccapForm(id){
+  const dom=HOUSING.meta.reccapDomains;
+  const cur=HOUSING.current&&HOUSING.current.capHistory&&HOUSING.current.capHistory.length?HOUSING.current.capHistory[HOUSING.current.capHistory.length-1].scores:{};
+  const save=hmodal(`<h3>Recovery capital assessment</h3><p class="sub sans">Score each domain 0–10 with the resident — strengths-based, in their words.</p>
+    ${dom.map(d=>{ const v=cur[d[0]]??5; return `<div class="rcdom"><div class="lab"><span title="${esc(d[2])}">${esc(d[1])}</span><b id="rcv_${d[0]}">${v}</b></div>
+      <input type="range" min="0" max="10" value="${v}" oninput="document.getElementById('rcv_${d[0]}').textContent=this.value" data-dom="${d[0]}"/></div>`; }).join('')}
+    <label>Note (optional)</label><textarea id="rc_note" rows="2"></textarea>`);
+  save.onclick=async()=>{ const scores={}; document.querySelectorAll('#hModalBody input[type=range]').forEach(i=>scores[i.dataset.dom]=+i.value); try{ await api(`/housing/residents/${id}/reccap`,{method:'POST',body:JSON.stringify({scores,note:$('rc_note').value})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
+}
+function openSupportForm(id){
+  const save=hmodal(`<h3>Log a support / meeting</h3>
+    <div class="grid2"><div><label>Type</label><select id="sp_type"><option value="meeting">12-step / recovery meeting</option><option value="sponsor">Sponsor contact</option><option value="service">Service work</option><option value="employment">Employment / education</option><option value="family">Family</option></select></div>
+    <div><label>Date</label><input id="sp_date" type="date" value="${today()}"/></div></div>
+    <label>Detail</label><input id="sp_detail" placeholder="e.g. Tuesday Big Book"/>`);
+  save.onclick=async()=>{ try{ await api(`/housing/residents/${id}/support`,{method:'POST',body:JSON.stringify({type:$('sp_type').value,date:$('sp_date').value,detail:$('sp_detail').value})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
+}
+function openCoordForm(id,loc){
+  const save=hmodal(`<h3>Clinical coordination</h3><p class="sub sans">Log clinical hours and/or a coordination-of-care note with Armada clinical.</p>
+    <div class="grid2"><div><label>Date</label><input id="co_date" type="date" value="${today()}"/></div>
+    <div><label>Hours attended</label><input id="co_hours" type="number" step="0.5" value="0"/></div>
+    <div><label>Program</label><input id="co_kind" value="${esc(loc||'')}"/></div></div>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500"><input type="checkbox" id="co_roi" style="width:auto"/> ROI on file with clinical</label>
+    <label>Coordination note</label><textarea id="co_note" rows="3" placeholder="Coordination with Armada clinical: attendance, progress, step-up/step-down recommendation…"></textarea>`);
+  save.onclick=async()=>{ try{ await api('/housing/coordination',{method:'POST',body:JSON.stringify({resident_id:id,date:$('co_date').value,hours:+$('co_hours').value,kind:$('co_kind').value,note:$('co_note').value,with_clinical:1,roi:$('co_roi').checked?1:0})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
+}
+function openDischargeForm(id){
+  const save=hmodal(`<h3>Discharge — the fond farewell</h3><p class="sub sans">Warm, no-shame, door always open. A warm goodbye is what makes someone call us again.</p>
+    <div class="grid2"><div><label>Date</label><input id="dc_date" type="date" value="${today()}"/></div>
+    <div><label>Disposition</label><select id="dc_type"><option>Completed — graduated</option><option>Transitioned to independent housing</option><option>Stepped up to higher care</option><option>Left against advice</option><option>Asked to leave (rule violation)</option><option>Return to use</option></select></div></div>
+    <label>Farewell note</label><textarea id="dc_note" rows="3" placeholder="The door is always open…"></textarea>`);
+  save.onclick=async()=>{ try{ await api(`/housing/residents/${id}/discharge`,{method:'POST',body:JSON.stringify({date:$('dc_date').value,type:$('dc_type').value,note:$('dc_note').value})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
+}
+function openResidentEdit(id){
+  const r=HOUSING.current||{};
+  const save=hmodal(`<h3>Edit recovery plan</h3>
+    <label>Goals</label><textarea id="re_goals" rows="2">${esc(r.goals||'')}</textarea>
+    <div class="grid2">
+      <div><label>Recovery coach</label><input id="re_coach" value="${esc(r.recovery_coach||'')}"/></div>
+      <div><label>Sponsor</label><input id="re_sponsor" value="${esc(r.sponsor||'')}"/></div>
+      <div><label>Home group</label><input id="re_home" value="${esc(r.home_group||'')}"/></div>
+      <div><label>Employment</label><input id="re_emp" value="${esc(r.employment||'')}"/></div>
+      <div><label>Education</label><input id="re_edu" value="${esc(r.education||'')}"/></div>
+      <div><label>MAT</label><input id="re_mat" value="${esc(r.mat||'')}"/></div>
+      <div><label>Phase (1–4)</label><input id="re_phase" type="number" min="1" max="4" value="${r.phase||1}"/></div>
+      <div><label>Payer</label><input id="re_payer" value="${esc(r.payer||'')}"/></div>
+    </div>`);
+  save.onclick=async()=>{ const body={goals:$('re_goals').value,recovery_coach:$('re_coach').value,sponsor:$('re_sponsor').value,home_group:$('re_home').value,employment:$('re_emp').value,education:$('re_edu').value,mat:$('re_mat').value,phase:+$('re_phase').value,payer:$('re_payer').value}; try{ await api(`/housing/residents/${id}`,{method:'POST',body:JSON.stringify(body)}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
+}
+
+/* ============================ DRUG SCREENING ============================ */
+async function loadScreens(){
+  let d; try{ d=await api('/housing/screens'); }catch(e){ $('screenDue').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('screenKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${d.stats.total}</div><div class="l">Screens logged</div></div>
+    <div class="ret-card ${d.stats.positivityPct>0?'rc-warn':''}"><div class="n">${d.stats.positivityPct}%</div><div class="l">Positivity rate</div></div>
+    <div class="ret-card ${d.stats.refused?'rc-high':''}"><div class="n">${d.stats.refused}</div><div class="l">Refused</div></div>
+    <div class="ret-card ${d.due.length?'rc-warn':''}"><div class="n">${d.due.length}</div><div class="l">Due now</div></div>`;
+  $('screenDue').innerHTML = d.due.length ? d.due.map(r=>`<div class="cmd-row"><div class="cmd-row-main"><b>${esc(r.name)}</b> <span class="hint">· ${esc(r.house||'')} · last ${r.last?esc(r.last):'never'}</span></div><button class="btn btn-gold btn-sm sans" onclick="openScreenForm(${r.id})">Screen</button></div>`).join('') : '<div class="hint">Everyone screened within the last week. ✅</div>';
+  $('screenRecent').innerHTML = d.recent.length ? `<table class="tbl"><thead><tr><th>Date</th><th>Resident</th><th>Panel</th><th>Result</th><th>Detail</th></tr></thead><tbody>${d.recent.map(s=>`<tr><td>${esc(s.date)}</td><td>${esc(s.resident_name)}</td><td>${esc(s.panel||'')}</td><td>${screenResultBadge(s.result)}</td><td class="hint">${s.observed?'observed ':''}${s.substances?esc(s.substances):''}${s.scheduled?' · random':''}</td></tr>`).join('')}</tbody></table>` : '<div class="hint">No results yet.</div>';
+}
+async function randomScreens(){
+  const n=+$('randN').value||3;
+  try{ const {picked}=await api('/housing/screens/random',{method:'POST',body:JSON.stringify({n})});
+    $('randPicked').innerHTML = picked.length?`<div class="card" style="margin-top:12px;border-left:3px solid var(--gold)"><h3>🎲 Randomly selected — screen these ${picked.length}</h3>${picked.map(r=>`<div class="cmd-row"><div class="cmd-row-main"><b>${esc(r.name)}</b> <span class="hint">· last ${r.last?esc(r.last):'never'}</span></div><button class="btn btn-gold btn-sm sans" onclick="openScreenForm(${r.id})">Log result</button></div>`).join('')}</div>`:'<div class="hint">No one to select.</div>';
+  }catch(e){ alert(e.message); }
+}
+async function openScreenForm(presetId){
+  const residents = await api('/housing/residents?status=active');
+  const opts = residents.map(r=>`<option value="${r.id}" ${r.id===presetId?'selected':''}>${esc(r.name)}</option>`).join('');
+  const save=hmodal(`<h3>Log a drug/alcohol screen</h3>
+    <label>Resident</label><select id="sc_res">${opts}</select>
+    <div class="grid2">
+      <div><label>Date</label><input id="sc_date" type="date" value="${today()}"/></div>
+      <div><label>Panel</label><select id="sc_panel"><option>12-panel</option><option>10-panel</option><option>5-panel</option><option>Breathalyzer</option><option>EtG</option></select></div>
+      <div><label>Result</label><select id="sc_result"><option value="negative">Negative</option><option value="positive">Positive</option><option value="refused">Refused</option><option value="diluted">Diluted</option><option value="pending">Pending (sent to lab)</option></select></div>
+      <div><label>Substances (if positive)</label><input id="sc_subs"/></div>
+    </div>
+    <div style="display:flex;gap:18px;margin-top:8px"><label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500"><input type="checkbox" id="sc_obs" style="width:auto"/> Observed</label>
+    <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500"><input type="checkbox" id="sc_rand" checked style="width:auto"/> Random/scheduled</label></div>`);
+  save.onclick=async()=>{ try{ await api('/housing/screens',{method:'POST',body:JSON.stringify({resident_id:+$('sc_res').value,date:$('sc_date').value,panel:$('sc_panel').value,result:$('sc_result').value,substances:$('sc_subs').value,observed:$('sc_obs').checked?1:0,scheduled:$('sc_rand').checked?1:0})}); closeHModal(); if($('screens').classList.contains('active'))loadScreens(); else if(HOUSING.current)openResident(HOUSING.current.id); }catch(e){ alert(e.message); } };
+}
+
+/* ============================ HOUSE LIFE ============================ */
+async function loadHouseLife(){
+  if(!HOUSING.houses.length){ try{ HOUSING.houses=await api('/housing/houses'); }catch(e){} }
+  const sel=$('hlHouse');
+  if(sel && !sel.options.length){ sel.innerHTML=HOUSING.houses.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join(''); }
+  if($('hlDate') && !$('hlDate').value) $('hlDate').value=today();
+  const houseId=sel?sel.value:(HOUSING.houses[0]&&HOUSING.houses[0].id);
+  const date=$('hlDate')?$('hlDate').value:today();
+  if(!houseId){ $('houseLifeBody').innerHTML='<div class="empty">Add a house first.</div>'; return; }
+  let d; try{ d=await api(`/housing/houselife?house_id=${houseId}&date=${date}`); }catch(e){ $('houseLifeBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  if(!d.residents.length){ $('houseLifeBody').innerHTML='<div class="empty">No active residents in this house.</div>'; return; }
+  $('houseLifeBody').innerHTML=`<table class="tbl"><thead><tr><th>Resident</th><th>Bed</th><th>Curfew / bed check</th><th>Chore</th><th>Meeting today</th></tr></thead><tbody>${d.residents.map(r=>{
+    const cs=r.curfew?r.curfew.status:null;
+    const curfewBtns=['in','late','pass','absent'].map(s=>`<button class="btn btn-sm sans ${cs===s?(s==='in'?'btn-gold':'btn-danger'):'btn-ghost'}" onclick="setCurfew(${r.id},${houseId},'${s}')" style="padding:4px 9px">${s==='in'?'✓ In':s[0].toUpperCase()+s.slice(1)}</button>`).join(' ');
+    const choreDone=r.chore&&r.chore.done;
+    return `<tr>
+      <td><b>${esc(r.name)}</b></td>
+      <td class="hint">${esc(r.bed||'—')}</td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap">${curfewBtns}</div></td>
+      <td><button class="btn btn-sm sans ${choreDone?'btn-gold':'btn-ghost'}" onclick="toggleChore(${r.id},${houseId},${choreDone?0:1})">${choreDone?'✓ Done':'Mark chore done'}</button></td>
+      <td>${r.meeting?'🙏 '+r.meeting:'<span class="hint">—</span>'} <button class="btn btn-ghost btn-sm sans" onclick="openSupportForm(${r.id})" style="padding:3px 8px">+</button></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+async function setCurfew(rid,houseId,status){ try{ await api('/housing/curfew',{method:'POST',body:JSON.stringify({resident_id:rid,house_id:houseId,status,date:$('hlDate').value})}); loadHouseLife(); }catch(e){ alert(e.message); } }
+async function toggleChore(rid,houseId,done){ try{ await api('/housing/chore',{method:'POST',body:JSON.stringify({resident_id:rid,house_id:houseId,done,date:$('hlDate').value})}); loadHouseLife(); }catch(e){ alert(e.message); } }
+
+/* ============================ CLINICAL COORDINATION ============================ */
+async function loadCoordination(){
+  await hMeta();
+  if($('coordWeek') && !$('coordWeek').value) $('coordWeek').value=today();
+  let d; try{ d=await api('/housing/coordination?week='+($('coordWeek')?$('coordWeek').value:today())); }catch(e){ $('coordBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const onDose=d.rows.filter(r=>r.pct>=100).length;
+  const under=d.rows.filter(r=>r.pct<60).length;
+  const noRoi=d.rows.filter(r=>!r.roi).length;
+  $('coordKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${d.rows.length}</div><div class="l">In clinical care</div></div>
+    <div class="ret-card"><div class="n">${onDose}</div><div class="l">On full dose</div></div>
+    <div class="ret-card ${under?'rc-high':''}"><div class="n">${under}</div><div class="l">Under-dosed</div></div>
+    <div class="ret-card ${noRoi?'rc-warn':''}"><div class="n">${noRoi}</div><div class="l">No ROI on file</div></div>`;
+  $('coordBody').innerHTML=`<table class="tbl"><thead><tr><th>Resident</th><th>House</th><th>LOC</th><th>This week</th><th>Dose</th><th>ROI</th><th>Last coordination note</th><th></th></tr></thead><tbody>${d.rows.map(r=>`
+    <tr>
+      <td><b style="cursor:pointer" onclick="openResident(${r.id})">${esc(r.name)}</b></td>
+      <td class="hint">${esc(r.house)}</td>
+      <td>${hLocPill(r.loc)}</td>
+      <td><b>${r.hours}</b>/${r.target}h</td>
+      <td><div class="dose ${r.pct<60?'low':''}" style="width:90px"><span style="width:${Math.min(100,r.pct)}%"></span></div></td>
+      <td>${r.roi?'✅':'<span style="color:var(--danger)">missing</span>'}</td>
+      <td class="hint" style="max-width:260px">${r.lastCoc?esc(r.lastCoc.date)+' — '+esc(r.lastCoc.note):'—'}</td>
+      <td><button class="btn btn-ghost btn-sm sans" onclick="openCoordForm(${r.id},'${esc(r.loc)}')">+ Log</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/* ============================ LEDGER ============================ */
+async function loadLedger(){
+  let d; try{ d=await api('/housing/ledger'); }catch(e){ $('ledgerResidents').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('ledgerKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${money(d.stats.totalCharged)}</div><div class="l">Total charged</div></div>
+    <div class="ret-card"><div class="n">${money(d.stats.totalPaid)}</div><div class="l">Total collected</div></div>
+    <div class="ret-card ${d.stats.outstanding>0?'rc-warn':''}"><div class="n">${money(d.stats.outstanding)}</div><div class="l">Outstanding</div></div>
+    <div class="ret-card"><div class="n">${d.stats.totalCharged?Math.round(d.stats.totalPaid/d.stats.totalCharged*100):0}%</div><div class="l">Collection rate</div></div>`;
+  $('ledgerResidents').innerHTML = d.residents.length?`<table class="tbl"><tbody>${d.residents.map(r=>`<tr style="cursor:pointer" onclick="openLedgerForm(${r.id})"><td><b>${esc(r.name)}</b> <span class="hint">· ${esc(r.house||'')}</span></td><td class="hint">${esc(r.payer||'')}</td><td style="text-align:right">${r.balance>0?`<b style="color:var(--danger)">${money(r.balance)}</b>`:money(r.balance)}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No residents.</div>';
+  $('ledgerPayer').innerHTML = d.byPayer.length?d.byPayer.map(p=>{ const pct=p.charged?Math.round(p.paid/p.charged*100):0; return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13px"><span>${esc(p.payer||'Unspecified')}</span><b>${money(p.paid)} / ${money(p.charged)}</b></div><div class="dose ${pct<70?'low':''}"><span style="width:${pct}%"></span></div></div>`; }).join(''):'<div class="hint">No data.</div>';
+  $('ledgerRecent').innerHTML = d.recent.length?`<table class="tbl"><thead><tr><th>Date</th><th>Resident</th><th>Type</th><th>Amount</th><th>Payer / memo</th></tr></thead><tbody>${d.recent.map(l=>`<tr><td>${esc(l.date)}</td><td>${esc(l.resident_name)}</td><td>${l.kind==='payment'?'✅ Payment':l.kind==='charge'?'Charge':'Adjustment'}</td><td>${l.kind==='payment'?'-':''}${money(l.amount)}</td><td class="hint">${esc(l.payer||'')}${l.memo?' · '+esc(l.memo):''}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No transactions.</div>';
+}
+async function openLedgerForm(presetId){
+  const residents=await api('/housing/residents?status=active');
+  const opts=residents.map(r=>`<option value="${r.id}" ${r.id===presetId?'selected':''}>${esc(r.name)}</option>`).join('');
+  const save=hmodal(`<h3>Charge or payment</h3>
+    <label>Resident</label><select id="lg_res">${opts}</select>
+    <div class="grid2">
+      <div><label>Type</label><select id="lg_kind"><option value="charge">Charge (bed fee)</option><option value="payment">Payment received</option><option value="adjustment">Adjustment / scholarship</option></select></div>
+      <div><label>Amount ($)</label><input id="lg_amt" type="number" step="1" value="175"/></div>
+      <div><label>Date</label><input id="lg_date" type="date" value="${today()}"/></div>
+      <div><label>Payer</label><input id="lg_payer" placeholder="Self-pay / SOR / Medicaid"/></div>
+    </div>
+    <label>Memo</label><input id="lg_memo" placeholder="Weekly bed fee"/>`);
+  save.onclick=async()=>{ try{ await api('/housing/ledger',{method:'POST',body:JSON.stringify({resident_id:+$('lg_res').value,kind:$('lg_kind').value,amount:+$('lg_amt').value,date:$('lg_date').value,payer:$('lg_payer').value,memo:$('lg_memo').value})}); closeHModal(); if($('ledger').classList.contains('active'))loadLedger(); else if(HOUSING.current)openResident(HOUSING.current.id); }catch(e){ alert(e.message); } };
+}
+
+/* ============================ ORH COMPLIANCE ============================ */
+async function loadOrh(){
+  let d; try{ d=await api('/housing/orh'); }catch(e){ $('orhMatrix').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  HOUSING.orh=d;
+  const avg=d.houses.length?Math.round(d.houses.reduce((a,h)=>a+(d.statusByHouse[h.id]?.pct||0),0)/d.houses.length):0;
+  const gaps=d.houses.reduce((a,h)=>{const s=d.statusByHouse[h.id]; return a+(s?s.total-s.met-s.partial:0);},0);
+  $('orhKpis').innerHTML=`
+    <div class="ret-card ${avg>=90?'':'rc-warn'}"><div class="n">${avg}%</div><div class="l">Avg compliance</div></div>
+    <div class="ret-card"><div class="n">${d.houses.length}</div><div class="l">Certified houses</div></div>
+    <div class="ret-card ${gaps?'rc-high':''}"><div class="n">${gaps}</div><div class="l">Open gaps</div></div>
+    <div class="ret-card ${d.grievances.filter(g=>g.status==='open').length?'rc-warn':''}"><div class="n">${d.grievances.filter(g=>g.status==='open').length}</div><div class="l">Open grievances</div></div>`;
+  // matrix grouped by domain
+  const domains={admin:'Administrative & Operational',recovery:'Recovery Support',physical:'Physical Environment',neighbor:'Good Neighbor'};
+  let html=`<table class="orh-matrix"><thead><tr><th style="min-width:280px">Standard</th>${d.houses.map(h=>`<th>${esc(h.name)}<br><span class="hint">${hLvl(h.level)} · ${d.statusByHouse[h.id]?.pct||0}%</span></th>`).join('')}</tr></thead><tbody>`;
+  Object.keys(domains).forEach(dom=>{
+    html+=`<tr><td colspan="${d.houses.length+1}" style="background:rgba(35,80,86,.05);font-weight:700;color:var(--navy);font-size:12px;text-transform:uppercase;letter-spacing:.5px">${domains[dom]}</td></tr>`;
+    d.standards.filter(s=>s[0]===dom).forEach(s=>{
+      html+=`<tr><td><b>${s[1]}</b> ${esc(s[2])} ${s[3]===3?'<span class="lvl lvl-l3" style="font-size:9px">L3</span>':''}</td>`;
+      d.houses.forEach(h=>{
+        const level=h.level==='L3'?3:2;
+        if(s[3]>level){ html+=`<td class="hint" style="text-align:center">n/a</td>`; return; }
+        const st=(d.statusByHouse[h.id]?.map[s[1]]?.status)||'gap';
+        html+=`<td><div class="orh-cell orh-${st}" onclick="cycleOrh(${h.id},'${s[1]}','${st}')" title="Click to change">${st}</div></td>`;
+      });
+      html+=`</tr>`;
+    });
+  });
+  html+=`</tbody></table>`;
+  $('orhMatrix').innerHTML=html;
+  $('orhInspections').innerHTML=d.inspections.length?d.inspections.map(i=>`<div class="cmd-row"><div class="cmd-row-main"><b>${esc(i.house_name)}</b> · ${esc(i.type)} <span class="hint">${esc(i.date)}</span><div class="hint">${esc(i.note||'')}</div></div><span class="loc-pill" style="background:${i.result==='Pass'?'#2f7a4f':'#c06a52'}">${esc(i.result)}</span></div>`).join(''):'<div class="hint">No inspections logged.</div>';
+  $('orhGrievances').innerHTML=d.grievances.length?d.grievances.map(g=>`<div class="cmd-row"><div class="cmd-row-main">${esc(g.summary)} <span class="hint">· ${esc(g.house_name||'')} · ${esc(g.date)}</span>${g.resolution?`<div class="hint">✅ ${esc(g.resolution)}</div>`:''}</div>${g.status==='open'?`<button class="btn btn-gold btn-sm sans" onclick="resolveGrievance(${g.id})">Resolve</button>`:'<span class="chip">resolved</span>'}</div>`).join(''):'<div class="hint">No grievances — or none logged.</div>';
+}
+async function cycleOrh(houseId,code,cur){
+  if(!isAdmin()){ alert('Only admins can update certification status.'); return; }
+  const next={gap:'partial',partial:'met',met:'gap'}[cur]||'partial';
+  try{ await api('/housing/orh/status',{method:'POST',body:JSON.stringify({house_id:houseId,code,status:next})}); loadOrh(); }catch(e){ alert(e.message); }
+}
+async function openInspectionForm(){
+  if(!HOUSING.orh){ await loadOrh(); }
+  const opts=HOUSING.orh.houses.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('');
+  const save=hmodal(`<h3>Log an inspection</h3>
+    <label>House</label><select id="in_house">${opts}</select>
+    <div class="grid2"><div><label>Type</label><select id="in_type"><option>Fire & safety</option><option>House walkthrough</option><option>Health/sanitation</option><option>ORH re-certification</option></select></div>
+    <div><label>Result</label><select id="in_result"><option>Pass</option><option>Pass with corrections</option><option>Fail</option></select></div>
+    <div><label>Date</label><input id="in_date" type="date" value="${today()}"/></div></div>
+    <label>Note</label><textarea id="in_note" rows="2"></textarea>`);
+  save.onclick=async()=>{ try{ await api('/housing/inspections',{method:'POST',body:JSON.stringify({house_id:+$('in_house').value,type:$('in_type').value,result:$('in_result').value,date:$('in_date').value,note:$('in_note').value})}); closeHModal(); loadOrh(); }catch(e){ alert(e.message); } };
+}
+async function openGrievanceForm(){
+  if(!HOUSING.orh){ await loadOrh(); }
+  const opts=HOUSING.orh.houses.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('');
+  const save=hmodal(`<h3>Log a grievance</h3><p class="sub sans">A complaint is a gift — capture it, resolve it, fix the system.</p>
+    <label>House</label><select id="gr_house">${opts}</select>
+    <label>Summary</label><textarea id="gr_sum" rows="3"></textarea>`);
+  save.onclick=async()=>{ try{ await api('/housing/grievances',{method:'POST',body:JSON.stringify({house_id:+$('gr_house').value,summary:$('gr_sum').value})}); closeHModal(); loadOrh(); }catch(e){ alert(e.message); } };
+}
+async function resolveGrievance(id){ const resolution=prompt('How was it resolved?'); if(resolution===null) return; try{ await api('/housing/grievances',{method:'POST',body:JSON.stringify({id,status:'resolved',resolution})}); loadOrh(); }catch(e){ alert(e.message); } }
+
+/* ============================ OUTCOMES ============================ */
+async function loadHousingOutcomes(){
+  let d; try{ d=await api('/housing/outcomes'); }catch(e){ $('hoKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('hoKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${d.avgLos}</div><div class="l">Avg length of stay (days)</div></div>
+    <div class="ret-card"><div class="n">${d.active}</div><div class="l">Active residents</div></div>
+    <div class="ret-card"><div class="n">${d.emplRate}%</div><div class="l">Employed / in school</div></div>
+    <div class="ret-card ${d.reccap.delta>0?'':''}"><div class="n">${d.reccap.delta!=null?(d.reccap.delta>=0?'+':'')+d.reccap.delta:'—'}</div><div class="l">Recovery capital growth</div></div>
+    <div class="ret-card ${d.returns?'rc-high':''}"><div class="n">${d.returns}</div><div class="l">Returns to use (all time)</div></div>
+    <div class="ret-card"><div class="n">${d.discharged}</div><div class="l">Alumni</div></div>`;
+  const ret=d.retention;
+  $('hoRetention').innerHTML=[['30-day',ret.d30],['90-day',ret.d90],['180-day',ret.d180]].map(([l,v])=>`<div style="margin:10px 0"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span>${l} retention</span><b>${v==null?'—':v+'%'}</b></div><div class="dose ${v!=null&&v<70?'low':''}"><span style="width:${v||0}%"></span></div></div>`).join('');
+  $('hoReccap').innerHTML = d.reccap.first!=null?`<div style="display:flex;gap:16px;align-items:center">${hRing(Math.round((d.reccap.last||0)*10), d.reccap.last, 'now')}<div><div class="hint">Intake average</div><div style="font-size:20px;font-family:var(--serif);color:var(--navy)">${d.reccap.first} → ${d.reccap.last}</div><div class="hint">${d.reccap.delta>=0?'Growing':'Declining'} by ${Math.abs(d.reccap.delta)} on average</div></div></div>`:'<div class="hint">Not enough assessments yet.</div>';
+  const dispo=Object.entries(d.dispo);
+  $('hoDispo').innerHTML = dispo.length?dispo.map(([k,v])=>`<div class="cmd-row"><div class="cmd-row-main">${esc(k)}</div><b>${v}</b></div>`).join(''):'<div class="hint">No discharges yet — every warm farewell is a future admission.</div>';
+}
+
+/* expose to window for inline handlers & app.js show() */
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge});

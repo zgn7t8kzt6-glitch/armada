@@ -112,6 +112,17 @@
     <button data-view="report-view" data-admin data-subview>Reports</button>
     <button data-view="users" data-admin>Staff</button>
     <button data-view="audit" data-admin>Audit Log</button>
+    <!-- Recovery Housing (sober-living suite) -->
+    <button data-view="housing">Housing HQ</button>
+    <button data-view="houses">Houses &amp; Beds</button>
+    <button data-view="residents">Residents</button>
+    <button data-view="resident" data-subview>Resident 360</button>
+    <button data-view="screens">Drug Screening</button>
+    <button data-view="houselife">House Life</button>
+    <button data-view="coordination">Clinical Coordination</button>
+    <button data-view="ledger">Rent &amp; Funding</button>
+    <button data-view="orh">ORH Compliance</button>
+    <button data-view="housingoutcomes">Housing Outcomes</button>
   </nav>
     <a class="side-kiosk sans" href="/kiosk.html" target="_blank" title="Open the client kiosk on this device">📱 Client Kiosk ↗</a>
     <div class="side-foot sans">
@@ -2049,7 +2060,158 @@
   </div>
 </div>
 
+    <!-- ===================== RECOVERY HOUSING ===================== -->
+
+    <!-- Housing HQ -->
+    <section id="housing" class="view">
+      <div class="card hq-hero">
+        <div class="cmd-hero-row">
+          <div><h3 style="font-size:21px">🏡 Recovery Housing HQ</h3>
+            <p class="sub">Every Armada recovery residence on one screen — NARR / Ohio Recovery Housing Level 2 &amp; 3, run hand-in-glove with clinical PHP · IOP · OP. <em>Warm arrival, anticipated stay, fond farewell — the door is always open.</em></p></div>
+          <div class="cmd-hero-actions"><button class="btn btn-ghost sans" onclick="loadHousingHQ()">↻ Refresh</button></div>
+        </div>
+        <div id="hqKpis" class="ret-cards" style="margin-top:14px"></div>
+      </div>
+      <div class="card">
+        <div class="cmd-hero-row"><div><h3>Residents by level of care</h3><p class="sub sans" style="margin:0">The clinical dose each resident is getting alongside housing.</p></div>
+          <button class="btn btn-gold btn-sm sans" onclick="show('residents')">View all residents →</button></div>
+        <div id="hqLoc" style="margin-top:10px"></div>
+      </div>
+      <div class="card"><h3>The houses</h3><div id="hqHouses" class="house-grid" style="margin-top:6px"></div></div>
+      <div class="card"><h3>⚡ Needs attention across housing</h3><div id="hqAttention"></div></div>
+    </section>
+
+    <!-- Houses & Beds -->
+    <section id="houses" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🛏️ Houses &amp; live bed board</h3><p class="sub sans" style="margin:0">Tap any bed to assign, move, hold, or flag it for maintenance. Open beds are revenue and a saved life waiting — fill them fast.</p></div>
+          <div style="display:flex;gap:8px"><button class="btn btn-ghost sans" onclick="loadHouses()">↻ Refresh</button><button class="btn btn-primary sans" data-admin onclick="openHouseForm()">+ Add house</button></div>
+        </div>
+      </div>
+      <div id="housesBoard"></div>
+    </section>
+
+    <!-- Residents -->
+    <section id="residents" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🧑‍🤝‍🧑 Residents</h3><p class="sub sans" style="margin:0">Everyone living in an Armada recovery residence — their level of care, phase, recovery capital and balance at a glance.</p></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <span class="seg" id="resStatusSeg">
+              <button class="on" data-st="active" onclick="setResStatus('active')">Active</button>
+              <button data-st="waitlist" onclick="setResStatus('waitlist')">Waitlist</button>
+              <button data-st="discharged" onclick="setResStatus('discharged')">Alumni</button>
+              <button data-st="all" onclick="setResStatus('all')">All</button>
+            </span>
+            <input id="resSearch" placeholder="Search…" style="width:160px" oninput="renderResidents()"/>
+            <button class="btn btn-primary sans" onclick="openResidentForm()">+ Intake</button>
+          </div>
+        </div>
+        <div id="residentsTable" style="margin-top:10px;overflow:auto"></div>
+      </div>
+    </section>
+
+    <!-- Resident 360 (subview) -->
+    <section id="resident" class="view"><div id="residentBody"></div></section>
+
+    <!-- Drug Screening -->
+    <section id="screens" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🧪 Drug &amp; alcohol screening</h3><p class="sub sans" style="margin:0">Random, observed, consistent — applied the same to everyone (ORH R4). A positive isn’t a failure to punish; it’s a signal to recover instantly and keep the door open.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadScreens()">↻ Refresh</button>
+        </div>
+        <div id="screenKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div class="toolbar no-print" style="justify-content:flex-start;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <input id="randN" type="number" value="3" min="1" style="width:70px"/>
+          <button class="btn btn-gold btn-sm sans" onclick="randomScreens()">🎲 Random select</button>
+          <button class="btn btn-primary btn-sm sans" onclick="openScreenForm()">+ Log a screen</button>
+        </div>
+        <div id="randPicked"></div>
+      </div>
+      <div class="card"><h3>Due for a screen <span class="hint" style="font-weight:400">(no screen in 7+ days)</span></h3><div id="screenDue"></div></div>
+      <div class="card"><h3>Recent results</h3><div id="screenRecent" style="overflow:auto"></div></div>
+    </section>
+
+    <!-- House Life -->
+    <section id="houselife" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🧹 House life — chores · curfew · meetings</h3><p class="sub sans" style="margin:0">The daily rhythm that makes a house a home. Structure with dignity — not policing.</p></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="hlHouse" style="width:auto" onchange="loadHouseLife()"></select>
+            <input id="hlDate" type="date" style="width:auto" onchange="loadHouseLife()"/>
+            <button class="btn btn-ghost sans" onclick="loadHouseLife()">↻</button>
+          </div>
+        </div>
+        <div id="houseLifeBody" style="margin-top:12px;overflow:auto"></div>
+      </div>
+    </section>
+
+    <!-- Clinical Coordination -->
+    <section id="coordination" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🩺 Clinical coordination — PHP · IOP · OP</h3><p class="sub sans" style="margin:0">Is every resident getting the clinical dose they need? Targets: PHP ≥20h/wk · IOP ≥9h/wk. Anticipate the gap before it becomes a relapse.</p></div>
+          <div style="display:flex;gap:8px;align-items:center"><input id="coordWeek" type="date" style="width:auto" onchange="loadCoordination()"/><button class="btn btn-ghost sans" onclick="loadCoordination()">↻</button></div>
+        </div>
+        <div id="coordKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div id="coordBody" style="margin-top:12px;overflow:auto"></div>
+      </div>
+    </section>
+
+    <!-- Rent & Funding -->
+    <section id="ledger" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>💵 Rent &amp; funding</h3><p class="sub sans" style="margin:0">Bed fees and payments — self-pay, SOR/STAR scholarship, Medicaid, private. Transparent ledger per resident (ORH A3).</p></div>
+          <div style="display:flex;gap:8px"><button class="btn btn-ghost sans" onclick="loadLedger()">↻</button><button class="btn btn-primary sans" onclick="openLedgerForm()">+ Charge / payment</button></div>
+        </div>
+        <div id="ledgerKpis" class="ret-cards" style="margin-top:12px"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:300px"><h3>Balances by resident</h3><div id="ledgerResidents" style="overflow:auto"></div></div>
+        <div class="card" style="flex:1;min-width:300px"><h3>By payer</h3><div id="ledgerPayer"></div></div>
+      </div>
+      <div class="card"><h3>Recent transactions</h3><div id="ledgerRecent" style="overflow:auto"></div></div>
+    </section>
+
+    <!-- ORH Compliance -->
+    <section id="orh" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🏛️ ORH / NARR certification</h3><p class="sub sans" style="margin:0">Ohio Recovery Housing &amp; NARR standards by house — Level 2 (monitored) &amp; Level 3 (supervised). Excellence is non-negotiable; tap any cell to update its status.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadOrh()">↻ Refresh</button>
+        </div>
+        <div id="orhKpis" class="ret-cards" style="margin-top:12px"></div>
+      </div>
+      <div class="card"><h3>Standards matrix</h3><div id="orhMatrix" style="overflow:auto"></div></div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:300px"><div class="cmd-hero-row"><h3>Inspections</h3><button class="btn btn-ghost btn-sm sans" onclick="openInspectionForm()">+ Log</button></div><div id="orhInspections"></div></div>
+        <div class="card" style="flex:1;min-width:300px"><div class="cmd-hero-row"><h3>Grievances</h3><button class="btn btn-ghost btn-sm sans" onclick="openGrievanceForm()">+ Log</button></div><div id="orhGrievances"></div></div>
+      </div>
+    </section>
+
+    <!-- Housing Outcomes -->
+    <section id="housingoutcomes" class="view">
+      <div class="card hq-hero">
+        <h3 style="font-size:20px">📈 Housing outcomes</h3>
+        <p class="sub">What we measure, we manage. Retention, recovery-capital growth, employment and returns to use — the proof the model works, and the alumni truth: every warm discharge is a future admission and a saved life.</p>
+        <div id="hoKpis" class="ret-cards" style="margin-top:12px"></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:280px"><h3>Retention</h3><div id="hoRetention"></div></div>
+        <div class="card" style="flex:1;min-width:280px"><h3>Recovery capital growth</h3><div id="hoReccap"></div></div>
+        <div class="card" style="flex:1;min-width:280px"><h3>Discharge dispositions</h3><div id="hoDispo"></div></div>
+      </div>
+    </section>
+
+    <!-- generic housing modal -->
+    <div id="hModal" class="hmodal" style="display:none"><div class="hmodal-card"><div id="hModalBody"></div></div></div>
+
 <script src="/jsqr.js"></script>
 <script src="/app.js?v=20260616CU"></script>
+<script src="/housing.js?v=20260621"></script>
 </body>
 </html>

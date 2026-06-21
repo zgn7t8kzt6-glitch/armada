@@ -11,7 +11,7 @@ services:
                              # feel snappy in production. (starter works but is
                              # underpowered for the per-client detail/notes pulls.)
     region: oregon
-    branch: main
+    branch: claude/sober-living-software-my0gfm
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /

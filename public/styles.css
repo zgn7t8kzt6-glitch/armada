@@ -715,6 +715,11 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 .login-wrap::after{content:"";position:fixed;inset:0;pointer-events:none;
   background:radial-gradient(700px 400px at 80% 10%,rgba(95,176,194,.18),transparent 60%)}
 
+/* ── Hilltop wordmark (shown to Hilltop-only staff instead of the Armada logo) ── */
+.hilltop-word{font-family:var(--serif);font-size:27px;font-weight:600;color:var(--navy);letter-spacing:-.01em;margin-top:2px}
+.hilltop-sub{font-size:9.5px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-top:4px}
+[data-theme="dark"] .hilltop-word{color:#cfe3df}
+
 /* ── Hilltop hub tabs: consolidate related screens behind one sidebar item ── */
 .hubtabs{display:flex;gap:2px;flex-wrap:wrap;margin:-6px 0 24px;border-bottom:1px solid var(--line)}
 .hubtab{font-family:var(--sans);background:none;border:none;border-bottom:2.5px solid transparent;padding:11px 18px;

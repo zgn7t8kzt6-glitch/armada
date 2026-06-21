@@ -116,6 +116,7 @@ async function boot(){
   if($('r_role')){ const dflt=(ME.role==='admin'||ME.job_role==='Executive Director'||!META.jobRoles.includes(ME.job_role))?'All':ME.job_role; $('r_role').value=dflt; }
   fillSelect($('u_job'), META.jobRoles);
   $('r_date').value = today(); $('a_date').value = today();
+  applyCompanyBranding();
   renderGroups();
   // Role-based landing: everyone opens already where they work.
   const landing = isHousingRole() ? 'housing' : (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
@@ -123,6 +124,22 @@ async function boot(){
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
   if(isLeadershipUser()){ pollWpBadge(); setInterval(pollWpBadge, 60000); }   // Best Place to Work attention badge
   if(canSeeView('concierge')){ if($('reqBell'))$('reqBell').style.display=''; pollReqBadge(); setInterval(pollReqBadge, 45000); }   // concierge request bell
+}
+// Hilltop and the detox/clinical side are two separate companies — never mix
+// their branding or tools. Hilltop-only staff see Hilltop branding and never the
+// detox client kiosk.
+function applyCompanyBranding(){
+  const hilltopOnly = isHousingRole();
+  const brand = $('sideBrand');
+  if(brand && hilltopOnly){
+    brand.innerHTML = `<div style="text-align:center;line-height:1.05">
+      <div style="font-size:30px">⛰</div>
+      <div class="hilltop-word">Hilltop</div>
+      <div class="hilltop-sub">Recovery Home</div></div>`;
+  }
+  const ck = $('clientKioskLink');                  // detox client kiosk — hide for Hilltop staff
+  if(ck) ck.style.display = hilltopOnly ? 'none' : '';
+  if(hilltopOnly && $('whoami')) document.title = 'Hilltop Recovery Home';
 }
 function updateReqBadge(n){ const b=$('reqBadge'); if(!b) return; if(n>0){ b.textContent=n; b.style.display=''; } else { b.textContent=''; b.style.display='none'; } }
 async function pollReqBadge(){ try{ const {open}=await api('/requests/count'); updateReqBadge(open); }catch(e){} }

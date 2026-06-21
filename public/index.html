@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260622S" />
+<link rel="stylesheet" href="/styles.css?v=20260622T" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -2026,17 +2026,23 @@
         <div id="demoStaffOut"></div>
       </div>
       <div class="card">
-        <h3>Add Staff Member</h3>
-        <div class="grid3">
-          <div><label>Name</label><input id="u_name"/></div>
-          <div><label>Username</label><input id="u_user"/></div>
-          <div><label>Temp Password</label><input id="u_pass"/></div>
-        </div>
+        <h3>Invite a team member</h3>
+        <p class="sub sans">Enter their work email and we'll send them an invitation to set their own password — you never have to share login details. Email must be on an approved company domain.</p>
         <div class="grid2">
+          <div><label>Name</label><input id="u_name" placeholder="Full name"/></div>
+          <div><label>Work email</label><input id="u_email" type="email" placeholder="name@armadarecovery.com"/></div>
           <div><label>Job Role</label><select id="u_job"></select></div>
           <div><label>Access</label><select id="u_role"><option value="staff">Staff</option><option value="admin">Admin</option></select></div>
         </div>
-        <button class="btn btn-primary sans" style="margin-top:14px" onclick="addUser()">Add staff</button>
+        <p class="hint" id="u_domhint" style="margin-top:8px"></p>
+        <button class="btn btn-primary sans" style="margin-top:10px" onclick="addUser()">Send invite</button>
+        <div id="u_addmsg" class="hint" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h3>Approved sign-up domains</h3>
+        <p class="sub sans">Only emails on these domains can be invited. One per line or comma-separated.</p>
+        <textarea id="u_domains" rows="4" placeholder="armadarecovery.com"></textarea>
+        <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="saveDomains()">Save domains</button><span id="u_dommsg" class="hint" style="align-self:center"></span></div>
       </div>
       <div class="card"><h3>Staff</h3><div id="userList"></div></div>
     </section>
@@ -2400,7 +2406,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260622S"></script>
-<script src="/housing.js?v=20260622S"></script>
+<script src="/app.js?v=20260622T"></script>
+<script src="/housing.js?v=20260622T"></script>
 </body>
 </html>

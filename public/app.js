@@ -3335,24 +3335,41 @@ async function saveAssign(){
 
 /* ---- users ---- */
 async function loadUsers(){
-  const { users } = await api('/users');
+  const { users, domains } = await api('/users');
   const roles = META.jobRoles||[];
-  $('userList').innerHTML = `<table class="tbl"><tr><th>Name</th><th>Username</th><th>Job role</th><th>Access</th><th>Active</th><th></th></tr>${
+  if($('u_domains') && document.activeElement!==$('u_domains')) $('u_domains').value = (domains||[]).join('\n');
+  if($('u_domhint')) $('u_domhint').textContent = (domains&&domains.length)?('Approved domains: '+domains.join(', ')):'No approved domains set — add some below first.';
+  $('userList').innerHTML = `<table class="tbl"><tr><th>Name</th><th>Email / login</th><th>Job role</th><th>Access</th><th>Status</th><th></th></tr>${
     users.map(u=>{
       const roleOpts = roles.map(r=>`<option ${u.job_role===r?'selected':''}>${esc(r)}</option>`).join('');
       const missing = u.job_role && !roles.includes(u.job_role) ? `<option selected>${esc(u.job_role)}</option>` : (u.job_role?'':'<option selected value="">— none set —</option>');
+      const status = u.active===0 ? '<span class="risk risk-warn">inactive</span>'
+        : u.pending ? '<span class="risk risk-elev">invited · pending</span>'
+        : '<span class="risk risk-low">active</span>';
       return `<tr data-uid="${u.id}">
         <td><input class="us-name sans" value="${esc(u.name)}" style="min-width:120px"/></td>
-        <td>${esc(u.username)}</td>
+        <td>${esc(u.email||u.username)}</td>
         <td><select class="us-job sans">${missing}${roleOpts}</select></td>
         <td><select class="us-role sans"><option value="staff" ${u.role!=='admin'?'selected':''}>Staff</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></td>
-        <td style="text-align:center"><input type="checkbox" class="us-active" ${u.active!==0?'checked':''}/></td>
+        <td style="text-align:center">${status}<br><label class="hint" style="text-transform:none;letter-spacing:0"><input type="checkbox" class="us-active" ${u.active!==0?'checked':''}/> active</label></td>
         <td class="toolbar" style="gap:6px">
           <button class="btn btn-gold btn-sm sans" onclick="saveUser(${u.id})">Save</button>
-          <button class="btn btn-ghost btn-sm sans" onclick="resetUserPw(${u.id})">Reset pw</button>
+          ${u.pending?`<button class="btn btn-ghost btn-sm sans" onclick="reinvite(${u.id})">Resend invite</button>`:''}
           <button class="btn btn-ghost btn-sm sans" onclick="deleteUser(${u.id}, ${JSON.stringify(u.name).replace(/"/g,'&quot;')})" style="color:var(--danger)">Delete</button>
         </td></tr>`;
     }).join('')}</table><div id="userMsg" class="hint" style="margin-top:6px"></div>`;
+}
+async function saveDomains(){
+  const list = $('u_domains').value.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);
+  if($('u_dommsg')) $('u_dommsg').textContent='Saving…';
+  try{ const r=await api('/allowed-domains',{method:'POST',body:JSON.stringify({domains:list})}); if($('u_dommsg')) $('u_dommsg').textContent='✓ Saved'; if($('u_domhint')) $('u_domhint').textContent='Approved domains: '+r.domains.join(', '); }
+  catch(e){ if($('u_dommsg')) $('u_dommsg').textContent='Error: '+esc(e.message); }
+}
+async function reinvite(id){
+  if($('userMsg')) $('userMsg').textContent='Resending…';
+  try{ const r=await api('/users/'+id+'/reinvite',{method:'POST'});
+    if($('userMsg')) $('userMsg').innerHTML = r.emailed ? '✓ Invite re-sent.' : ('Email not sent ('+esc(r.emailErr||'')+'). Copy this link to them: <span style="word-break:break-all;color:var(--navy)">'+esc(r.link||'')+'</span>');
+  }catch(e){ if($('userMsg')) $('userMsg').textContent='Error: '+esc(e.message); }
 }
 function userRow(id){ return document.querySelector('tr[data-uid="'+id+'"]'); }
 async function saveUser(id){
@@ -3388,11 +3405,18 @@ async function makeDemoStaff(){
   }catch(e){ $('demoStaffMsg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function addUser(){
+  const msg=$('u_addmsg');
+  const name=$('u_name').value.trim(), email=$('u_email').value.trim();
+  if(!name||!email){ if(msg) msg.textContent='Enter a name and a work email.'; return; }
+  if(msg) msg.textContent='Sending invite…';
   try{
-    await api('/users',{method:'POST',body:JSON.stringify({
-      name:$('u_name').value,username:$('u_user').value,password:$('u_pass').value,role:$('u_role').value,job_role:$('u_job').value})});
-    $('u_name').value=$('u_user').value=$('u_pass').value=''; loadUsers();
-  }catch(e){ alert(e.message); }
+    const r=await api('/users',{method:'POST',body:JSON.stringify({name,email,role:$('u_role').value,job_role:$('u_job').value})});
+    $('u_name').value=$('u_email').value='';
+    if(msg) msg.innerHTML = r.emailed
+      ? ('✓ Invitation sent to '+esc(email)+'. They’ll set their own password.')
+      : ('Account created, but email isn’t connected ('+esc(r.emailErr||'')+'). Send them this sign-up link: <span style="word-break:break-all;color:var(--navy)">'+esc(r.link||'')+'</span>');
+    loadUsers();
+  }catch(e){ if(msg) msg.textContent='Error: '+esc(e.message); }
 }
 
 /* ---- concierge / requests ---- */

@@ -96,6 +96,62 @@ export function createUser({ name, username, password, role = 'staff', job_role 
   return info.lastInsertRowid;
 }
 
+// ---- Approved email domains + invite-based signup ----
+// New users must have an email on one of the approved company domains, and they
+// set their own password from an emailed invite link — we never send credentials.
+const DEFAULT_DOMAINS = ['armadarecovery.com', 'hilltoprecoveryhome.com', 'sparkrecovery.com', 'reveriesoberliving.com'];
+export function allowedDomains() {
+  try { const s = JSON.parse(getState('allowed_domains') || 'null'); if (Array.isArray(s) && s.length) return s.map(cleanDomain).filter(Boolean); } catch { /* fall through */ }
+  return DEFAULT_DOMAINS;
+}
+function cleanDomain(d) { return String(d || '').toLowerCase().replace(/^@/, '').trim(); }
+export function setAllowedDomains(list) {
+  const arr = [...new Set((list || []).map(cleanDomain).filter(Boolean))];
+  setState('allowed_domains', JSON.stringify(arr));
+  return arr;
+}
+export function emailDomainAllowed(email) {
+  const m = /@([^@\s]+)$/.exec(String(email || '').toLowerCase().trim());
+  return !!m && allowedDomains().includes(m[1]);
+}
+function hashToken(t) { return crypto.createHash('sha256').update(String(t)).digest('hex'); }
+const INVITE_DAYS = 7;
+export function createInvite({ name, email, role = 'staff', job_role = 'BHT / Tech', invitedBy = '' }) {
+  const em = String(email || '').toLowerCase().trim();
+  const token = crypto.randomBytes(32).toString('hex');
+  const placeholder = hashPassword(crypto.randomBytes(24).toString('hex')); // unusable until they accept
+  const expires = new Date(Date.now() + INVITE_DAYS * 864e5).toISOString();
+  const info = db.prepare(
+    `INSERT INTO users (name, username, email, password_hash, role, job_role, active, pending, invite_token, invite_expires, invited_at, invited_by)
+     VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, datetime('now'), ?)`
+  ).run(name, em, em, placeholder, role, job_role, hashToken(token), expires, invitedBy);
+  return { id: Number(info.lastInsertRowid), token };
+}
+export function regenInvite(userId) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + INVITE_DAYS * 864e5).toISOString();
+  db.prepare(`UPDATE users SET invite_token = ?, invite_expires = ?, invited_at = datetime('now'), pending = 1 WHERE id = ?`)
+    .run(hashToken(token), expires, userId);
+  return token;
+}
+export function inviteInfo(token) {
+  if (!token) return null;
+  const u = db.prepare(`SELECT name, email, invite_expires FROM users WHERE invite_token = ? AND active = 1`).get(hashToken(token));
+  if (!u) return null;
+  if (u.invite_expires && new Date(u.invite_expires) < new Date()) return { expired: true };
+  return { name: u.name, email: u.email };
+}
+export function acceptInvite(token, password) {
+  if (!token) return { error: 'Missing invite token.' };
+  if (!password || String(password).length < 8) return { error: 'Password must be at least 8 characters.' };
+  const u = db.prepare(`SELECT * FROM users WHERE invite_token = ? AND active = 1`).get(hashToken(token));
+  if (!u) return { error: 'This invite link is invalid or has already been used.' };
+  if (u.invite_expires && new Date(u.invite_expires) < new Date()) return { error: 'This invite has expired — ask your admin to resend it.' };
+  db.prepare(`UPDATE users SET password_hash = ?, pending = 0, invite_token = NULL, invite_expires = NULL WHERE id = ?`)
+    .run(hashPassword(String(password)), u.id);
+  return { ok: true, email: u.email, name: u.name };
+}
+
 export function login(req, res, username, password) {
   const user = db.prepare(`SELECT * FROM users WHERE username = ? AND active = 1`).get(username.toLowerCase().trim());
   if (!user || !bcrypt.compareSync(password, user.password_hash)) return null;

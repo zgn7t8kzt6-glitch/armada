@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>Set up your account — Armada Recovery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  :root{--teal:#235056;--gold:#d29a5e;--ink:#1b2825;--muted:#6f7a75;--line:#e7e2d7;--danger:#c06a52;--good:#2f7a4f;
+    --serif:"Fraunces",Georgia,serif;--sans:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;font-family:var(--sans);color:var(--ink);
+    background:radial-gradient(1100px 700px at 78% -10%,#2d6168,transparent 60%),radial-gradient(900px 600px at 10% 115%,#1c4147,transparent 55%),linear-gradient(140deg,#173a40,#235056 55%,#2d6168);-webkit-font-smoothing:antialiased}
+  .card{background:#fff;border-radius:24px;width:420px;max-width:94vw;padding:40px 36px 32px;position:relative;overflow:hidden;
+    box-shadow:0 40px 100px rgba(6,28,32,.5),0 2px 0 rgba(255,255,255,.6) inset}
+  .card::before{content:"";position:absolute;top:0;left:0;right:0;height:5px;background:linear-gradient(120deg,#e5a05e,#a7ba86 42%,#6fb6b7 72%,#54aec6)}
+  .brand{text-align:center;margin-bottom:6px}
+  .brand .rec{font-size:12px;letter-spacing:5px;text-transform:uppercase;color:var(--teal);font-weight:600}
+  h1{font-family:var(--serif);font-weight:600;font-size:26px;margin:8px 0 4px;text-align:center;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:14px;text-align:center;margin:0 0 20px;line-height:1.5}
+  label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 5px}
+  input{width:100%;font-family:var(--sans);font-size:15px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fcfbf8;color:var(--ink)}
+  input:focus{outline:none;border-color:#5fb0c2;box-shadow:0 0 0 3px rgba(95,176,194,.18);background:#fff}
+  input[readonly]{background:#f1efe9;color:var(--muted)}
+  .btn{width:100%;margin-top:20px;cursor:pointer;border:none;border-radius:12px;padding:13px;font-family:var(--sans);font-size:15px;font-weight:700;
+    background:linear-gradient(135deg,#235056,#2d6168);color:#fff;box-shadow:0 6px 16px rgba(35,80,86,.25)}
+  .btn:hover{filter:brightness(1.06)}
+  .btn:disabled{opacity:.55;cursor:default;filter:none}
+  .msg{font-size:13px;min-height:18px;margin-top:10px;text-align:center}
+  .err{color:var(--danger)}
+  .ok{color:var(--good)}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .center{text-align:center}
+  .big{font-size:46px;margin:0 0 6px}
+  a.go{display:inline-block;margin-top:16px;background:var(--gold);color:#1d2a44;text-decoration:none;font-weight:700;padding:12px 26px;border-radius:12px}
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="brand"><div class="rec">Armada Recovery</div></div>
+    <div id="content"><h1>Loading your invite…</h1><p class="sub">One moment.</p></div>
+  </div>
+<script>
+  const token = new URLSearchParams(location.search).get('token') || '';
+  const content = document.getElementById('content');
+  function render(html){ content.innerHTML = html; }
+  function fail(title, msg){
+    render(`<h1>${title}</h1><p class="sub">${msg}</p><div class="center"><a class="go" href="/">Go to sign in</a></div>`);
+  }
+  async function init(){
+    if(!token){ return fail('Invalid link', 'This invite link is missing its token. Ask your admin to resend the invitation.'); }
+    let info;
+    try{
+      const r = await fetch('/api/invite/'+encodeURIComponent(token));
+      if(r.status===410){ return fail('Invite expired', 'This invitation has expired. Ask your admin to resend it.'); }
+      if(!r.ok){ return fail('Invalid link', 'This invite is invalid or has already been used. If you already set a password, just sign in.'); }
+      info = await r.json();
+    }catch(e){ return fail('Something went wrong', 'Please try again in a moment.'); }
+    render(`
+      <h1>Welcome${info.name?', '+escapeHtml(info.name.split(' ')[0]):''}</h1>
+      <p class="sub">Set a password to finish creating your account. You'll sign in with your email.</p>
+      <label>Email</label><input value="${escapeHtml(info.email||'')}" readonly/>
+      <label>Create password</label><input id="pw" type="password" autocomplete="new-password" placeholder="At least 8 characters"/>
+      <label>Confirm password</label><input id="pw2" type="password" autocomplete="new-password" placeholder="Re-enter password"/>
+      <button class="btn" id="go">Create account</button>
+      <div class="msg" id="msg"></div>
+      <p class="hint center">After this you'll be asked to set up two-factor authentication for security.</p>`);
+    document.getElementById('go').onclick = submit;
+    document.getElementById('pw2').addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
+  }
+  async function submit(){
+    const pw = document.getElementById('pw').value, pw2 = document.getElementById('pw2').value;
+    const msg = document.getElementById('msg'); msg.className='msg';
+    if(pw.length < 8){ msg.className='msg err'; msg.textContent='Password must be at least 8 characters.'; return; }
+    if(pw !== pw2){ msg.className='msg err'; msg.textContent='Passwords don’t match.'; return; }
+    const btn = document.getElementById('go'); btn.disabled=true; msg.textContent='Creating your account…';
+    try{
+      const r = await fetch('/api/signup', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, password: pw }) });
+      const d = await r.json();
+      if(!r.ok){ msg.className='msg err'; msg.textContent = d.error || 'Could not create your account.'; btn.disabled=false; return; }
+      render(`<div class="center"><div class="big">✓</div><h1>You're all set</h1><p class="sub">Your account is ready. Sign in with your email and the password you just created.</p><a class="go" href="/">Sign in</a></div>`);
+    }catch(e){ msg.className='msg err'; msg.textContent='Something went wrong — please try again.'; btn.disabled=false; }
+  }
+  function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+  init();
+</script>
+</body>
+</html>

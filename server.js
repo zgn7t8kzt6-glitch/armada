@@ -16,6 +16,7 @@ import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './sr
 import {
   cookies, login, logout, completeMfa, currentUser, requireAuth, requireAdmin, requireStaffingManager, createUser, changePassword,
   mfaSetup, mfaEnable, mfaDisable, hashPassword, otpauthForTicket, mfaRequired, setMfaRequired,
+  allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite,
 } from './src/auth.js';
 import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
@@ -2780,19 +2781,96 @@ app.post('/api/assignments', requireAuth, requireAdmin, (req, res) => {
 
 /* ---------------- users (admin) ---------------- */
 app.get('/api/users', requireAuth, requireAdmin, (req, res) => {
-  res.json({ users: db.prepare(`SELECT id, name, username, role, job_role, active FROM users ORDER BY name`).all() });
+  res.json({
+    users: db.prepare(`SELECT id, name, username, email, role, job_role, active, pending, invited_at FROM users ORDER BY name`).all(),
+    domains: allowedDomains(),
+  });
 });
 
-app.post('/api/users', requireAuth, requireAdmin, (req, res) => {
-  const { name, username, password, role, job_role } = req.body || {};
-  if (!name || !username || !password) return res.status(400).json({ error: 'Missing fields' });
+// Base URL for building invite links (Render sits behind a proxy; trust proxy is on).
+function appBaseUrl(req) {
+  if (process.env.APP_URL) return String(process.env.APP_URL).replace(/\/$/, '');
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  return `${proto}://${host}`;
+}
+function inviteEmailHtml({ name, link, inviter }) {
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+  const first = String(name || '').split(' ')[0] || 'there';
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;color:#1b2825">
+    <div style="background:linear-gradient(135deg,#173a40,#235056 55%,#2d6168);color:#fff;border-radius:18px;padding:30px 28px;text-align:center">
+      <div style="font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#ecd9b6">Armada Recovery</div>
+      <h1 style="font-family:Georgia,serif;font-weight:600;font-size:26px;margin:10px 0 6px">You're invited to join the team</h1>
+      <p style="color:#cfe1de;margin:0;font-size:15px">Set up your account in under a minute.</p>
+    </div>
+    <div style="padding:24px 6px">
+      <p style="font-size:15px;line-height:1.6">Hi ${esc(first)},</p>
+      <p style="font-size:15px;line-height:1.6">${esc(inviter || 'Your team')} has created an account for you. Click below to set your password and sign in — there's no username to remember; you'll log in with this email address.</p>
+      <p style="text-align:center;margin:26px 0"><a href="${link}" style="background:#d29a5e;color:#1d2a44;text-decoration:none;font-weight:700;padding:13px 30px;border-radius:12px;font-size:15px;display:inline-block">Set my password →</a></p>
+      <p style="font-size:13px;color:#6f7a75;line-height:1.6">This link expires in 7 days. If the button doesn't work, copy this address into your browser:<br><span style="color:#235056;word-break:break-all">${link}</span></p>
+      <p style="font-size:13px;color:#6f7a75">If you weren't expecting this, you can ignore this email.</p>
+    </div>
+  </div>`;
+}
+async function sendInvite(req, user, token) {
+  const link = `${appBaseUrl(req)}/signup.html?token=${token}`;
+  if (!emailConfigured()) return { emailed: false, emailErr: 'Email isn’t connected yet (Settings → Email).', link };
   try {
-    const id = createUser({ name, username, password, role: role === 'admin' ? 'admin' : 'staff', job_role });
-    audit({ user: req.user, action: 'CREATE', entity: 'user', entity_id: id, detail: username, ip: req.ip });
-    res.json({ id });
-  } catch (e) {
-    res.status(400).json({ error: 'Username already exists' });
-  }
+    await sendEmail({ to: user.email, subject: 'Your invitation to Armada Recovery', html: inviteEmailHtml({ name: user.name, link, inviter: req.user.name }), suppressCc: true });
+    return { emailed: true, link };
+  } catch (e) { return { emailed: false, emailErr: e.message, link }; }
+}
+
+// Invite a new user: no password is set here — they get an email to self-sign-up.
+app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
+  const { name, email, role, job_role } = req.body || {};
+  const em = String(email || '').toLowerCase().trim();
+  if (!name || !em) return res.status(400).json({ error: 'Name and email are required.' });
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (!emailDomainAllowed(em)) return res.status(400).json({ error: `Email must be on an approved domain: ${allowedDomains().join(', ')}` });
+  if (db.prepare(`SELECT id FROM users WHERE lower(username) = ? OR lower(email) = ?`).get(em, em)) return res.status(400).json({ error: 'A user with that email already exists.' });
+  let invite;
+  try { invite = createInvite({ name: String(name).trim(), email: em, role: role === 'admin' ? 'admin' : 'staff', job_role, invitedBy: req.user.name }); }
+  catch (e) { return res.status(400).json({ error: 'Could not create the account.' }); }
+  audit({ user: req.user, action: 'INVITE', entity: 'user', entity_id: invite.id, detail: em, ip: req.ip });
+  const out = await sendInvite(req, { name, email: em }, invite.token);
+  res.json({ id: invite.id, emailed: out.emailed, emailErr: out.emailErr, link: out.emailed ? undefined : out.link });
+});
+
+// Resend (regenerate) an invite for a pending user.
+app.post('/api/users/:id/reinvite', requireAuth, requireAdmin, async (req, res) => {
+  const u = db.prepare(`SELECT id, name, email FROM users WHERE id = ?`).get(+req.params.id);
+  if (!u) return res.status(404).json({ error: 'User not found.' });
+  if (!u.email) return res.status(400).json({ error: 'No email on file — this is a legacy username account.' });
+  const token = regenInvite(u.id);
+  audit({ user: req.user, action: 'REINVITE', entity: 'user', entity_id: u.id, detail: u.email, ip: req.ip });
+  const out = await sendInvite(req, u, token);
+  res.json({ ok: true, emailed: out.emailed, emailErr: out.emailErr, link: out.emailed ? undefined : out.link });
+});
+
+// Public: look up an invite (for the signup page) and accept it.
+app.get('/api/invite/:token', (req, res) => {
+  const info = inviteInfo(req.params.token);
+  if (!info) return res.status(404).json({ error: 'invalid' });
+  if (info.expired) return res.status(410).json({ error: 'expired' });
+  res.json(info);
+});
+app.post('/api/signup', (req, res) => {
+  const { token, password } = req.body || {};
+  const out = acceptInvite(token, password);
+  if (out.error) return res.status(400).json({ error: out.error });
+  audit({ user: { id: null, name: out.email }, action: 'SIGNUP', entity: 'user', detail: out.email, ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Approved sign-up domains (admin).
+app.get('/api/allowed-domains', requireAuth, requireAdmin, (req, res) => res.json({ domains: allowedDomains() }));
+app.post('/api/allowed-domains', requireAuth, requireAdmin, (req, res) => {
+  const list = Array.isArray(req.body?.domains) ? req.body.domains
+    : String(req.body?.domains || '').split(/[\s,]+/);
+  const saved = setAllowedDomains(list);
+  audit({ user: req.user, action: 'UPDATE', entity: 'allowed_domains', detail: saved.join(', '), ip: req.ip });
+  res.json({ domains: saved });
 });
 
 // Edit a staff member — name, job role, access level, active, and (optional)

@@ -1236,6 +1236,13 @@ addColumn('followups', 'assignee_id', 'INTEGER');
 addColumn('followups', 'assignee_name', 'TEXT');
 addColumn('users', 'mfa_secret', 'TEXT');
 addColumn('users', 'mfa_enabled', 'INTEGER');
+// Invite-based signup + approved-domain accounts.
+addColumn('users', 'email', 'TEXT');
+addColumn('users', 'pending', 'INTEGER');         // 1 = invited, hasn't set a password yet
+addColumn('users', 'invite_token', 'TEXT');       // sha256 of the emailed invite token
+addColumn('users', 'invite_expires', 'TEXT');
+addColumn('users', 'invited_at', 'TEXT');
+addColumn('users', 'invited_by', 'TEXT');
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');

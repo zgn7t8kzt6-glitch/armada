@@ -3090,6 +3090,7 @@ async function sharePrinciple(){
 }
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
+  if($('lineupCaptureCard')) $('lineupCaptureCard').style.display = canSendLineup() ? '' : 'none';
   if($('raffleCard')){ $('raffleCard').style.display = canSendLineup() ? '' : 'none'; if(canSendLineup()) loadRaffle(); }
   const d = await api('/lineup');
   const { value, wows, purpose } = d;
@@ -4453,8 +4454,8 @@ async function addGrowth(){
   if(!staff_id){ alert('Pick a teammate.'); return; }
   try{ await api('/growth',{method:'POST',body:JSON.stringify({staff_id,staff_name:sel.options[sel.selectedIndex].text,goal,note})}); $('wp_growth_goal').value='';$('wp_growth_note').value=''; loadGrowth(); }catch(e){ alert(e.message); }
 }
-async function extractKudos(){
-  const text=$('kx_text')?$('kx_text').value.trim():''; const msg=$('kx_msg');
+async function extractKudos(P='kx'){
+  const text=$(P+'_text')?$(P+'_text').value.trim():''; const msg=$(P+'_msg');
   if(!text){ if(msg)msg.textContent='Paste the replies first.'; return; }
   if(msg)msg.textContent='Reading…';
   let d; try{ d=await api('/kudos/extract',{method:'POST',body:JSON.stringify({text})}); }catch(e){ if(msg)msg.textContent=e.message; return; }
@@ -4472,16 +4473,17 @@ async function extractKudos(){
     <input class="km-by sans" style="width:120px" value="${esc(m.by||'')}" placeholder="noted by"/>
     <input class="km-story sans" style="flex:1;min-width:180px" value="${esc(m.story||'')}" placeholder="what they did"/>
   </div>`).join('') : '';
-  $('kx_preview').innerHTML = kudosHtml + momHtml + ((items.length||moments.length)?`<div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="saveExtractedKudos()">Create</button></div>`:'');
+  $(P+'_preview').innerHTML = kudosHtml + momHtml + ((items.length||moments.length)?`<div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="saveExtractedKudos('${P}')">Create</button></div>`:'');
 }
-async function saveExtractedKudos(){
-  const items=[...document.querySelectorAll('#kx_preview .kx-row')].filter(r=>r.querySelector('.kx-on').checked)
+async function saveExtractedKudos(P='kx'){
+  const items=[...document.querySelectorAll('#'+P+'_preview .kx-row')].filter(r=>r.querySelector('.kx-on').checked)
     .map(r=>({to:r.querySelector('.kx-to').value.trim(),from:r.querySelector('.kx-from').value.trim(),reason:r.querySelector('.kx-reason').value.trim()})).filter(x=>x.to);
-  const moments=[...document.querySelectorAll('#kx_preview .km-row')].filter(r=>r.querySelector('.km-on').checked)
+  const moments=[...document.querySelectorAll('#'+P+'_preview .km-row')].filter(r=>r.querySelector('.km-on').checked)
     .map(r=>({person:r.querySelector('.km-person').value.trim(),by:r.querySelector('.km-by').value.trim(),story:r.querySelector('.km-story').value.trim()})).filter(x=>x.person&&x.story);
-  if(!items.length&&!moments.length){ if($('kx_msg'))$('kx_msg').textContent='Tick at least one.'; return; }
-  try{ const r=await api('/kudos/bulk',{method:'POST',body:JSON.stringify({items,moments})}); if($('kx_msg'))$('kx_msg').textContent=`✓ ${r.saved} kudos + ${r.wall} on the Extra Mile wall.`; $('kx_text').value=''; $('kx_preview').innerHTML=''; loadWorkplace(); }
-  catch(e){ if($('kx_msg'))$('kx_msg').textContent=e.message; }
+  const msg=$(P+'_msg');
+  if(!items.length&&!moments.length){ if(msg)msg.textContent='Tick at least one.'; return; }
+  try{ const r=await api('/kudos/bulk',{method:'POST',body:JSON.stringify({items,moments})}); if(msg)msg.innerHTML=`✓ ${r.saved} kudos + ${r.wall} on the wall — they'll appear in the next lineup's "Caught being great."`; if($(P+'_text'))$(P+'_text').value=''; if($(P+'_preview'))$(P+'_preview').innerHTML=''; if(P==='kx')loadWorkplace(); }
+  catch(e){ if(msg)msg.textContent=e.message; }
 }
 
 async function loadExtraMile(){

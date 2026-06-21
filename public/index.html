@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616CM" />
+<link rel="stylesheet" href="/styles.css?v=20260616CN" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1823,6 +1823,13 @@
         </div>
         <div id="lineupEmailPreview" style="display:none;margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:16px;background:#fff;max-height:440px;overflow:auto"></div>
       </div>
+      <div class="card no-print" id="lineupCaptureCard" style="display:none;border-left:4px solid #c8a44d">
+        <h3>📥 Add to "Caught being great"</h3>
+        <p class="sub sans">The team replies to the lineup by email (they're not all in the app yet). Paste those replies here — we'll pull out the shout-outs, and they'll appear in tomorrow's lineup's <strong>🌟 Caught being great</strong> section.</p>
+        <textarea id="lx_text" rows="5" placeholder="Paste the email replies here…"></textarea>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-primary btn-sm sans" onclick="extractKudos('lx')">Find shout-outs</button><span class="hint" id="lx_msg"></span></div>
+        <div id="lx_preview" style="margin-top:10px"></div>
+      </div>
       <div class="card no-print" id="raffleCard" style="display:none;border-left:4px solid #7a5cc0">
         <h3>🎁 Recognition raffle</h3>
         <p class="sub sans">Each recognition this week is one entry. Add entries by hand as the email replies come in (staff who aren't in the app yet), then draw a winner.</p>
@@ -1962,6 +1969,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616CM"></script>
+<script src="/app.js?v=20260616CN"></script>
 </body>
 </html>

@@ -5893,6 +5893,40 @@ app.post('/api/beds/:id', requireAuth, (req, res) => {
   db.prepare(`UPDATE beds SET status = ?, client_id = ? WHERE id = ?`).run(st, st === 'Occupied' ? cid : null, req.params.id);
   res.json({ ok: true });
 });
+app.delete('/api/beds/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM beds WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// Bed Board: who's in which room/bed (live from Kipu's clients.room) mapped onto
+// the bed inventory, with open beds. Total is configurable (40 detox beds).
+function bedKey(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+app.get('/api/bedboard', requireAuth, (req, res) => {
+  const total = +(getState('detox_bed_count') || 40);
+  const active = db.prepare(`SELECT id, pref, name, room, loc, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const beds = db.prepare(`SELECT id, room, label, unit FROM beds ORDER BY unit, room, label`).all();
+  // index clients by their Kipu bed string
+  const byKey = {}; active.forEach((c) => { if (c.room) (byKey[bedKey(c.room)] = byKey[bedKey(c.room)] || []).push(c); });
+  const used = new Set();
+  const rows = beds.map((b) => {
+    let occ = byKey[bedKey((b.room || '') + (b.label || ''))]?.find((c) => !used.has(c.id)) || byKey[bedKey(b.room || '')]?.find((c) => !used.has(c.id)) || null;
+    if (occ) used.add(occ.id);
+    return { id: b.id, room: b.room, label: b.label, unit: b.unit || 'Detox', client: occ ? { id: occ.id, name: occ.pref || occ.name, loc: occ.loc && occ.loc !== 'Unspecified' ? occ.loc : '', admit: (occ.admit || '').slice(0, 10) } : null };
+  });
+  const unplaced = active.filter((c) => c.room && !used.has(c.id)).map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room, loc: c.loc && c.loc !== 'Unspecified' ? c.loc : '' }));
+  const occupied = active.filter((c) => c.room && String(c.room).trim()).length;
+  res.json({ total, beds: rows, unplaced, occupied, open: Math.max(0, total - occupied), inventoryCount: beds.length, noRoom: active.filter((c) => !c.room || !String(c.room).trim()).length });
+});
+// One click: create a bed-inventory row for every distinct room/bed Kipu shows occupied.
+app.post('/api/bedboard/sync', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const rooms = db.prepare(`SELECT DISTINCT room FROM clients WHERE active = 1 AND discharge_status IS NULL AND room IS NOT NULL AND room != ''`).all().map((r) => r.room);
+  const existing = new Set(db.prepare(`SELECT room, label FROM beds`).all().map((b) => bedKey((b.room || '') + (b.label || ''))));
+  let added = 0;
+  for (const r of rooms) { if (!existing.has(bedKey(r))) { db.prepare(`INSERT INTO beds (room, unit) VALUES (?, 'Detox')`).run(r); existing.add(bedKey(r)); added++; } }
+  res.json({ ok: true, added });
+});
+app.post('/api/bedboard/total', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  setState('detox_bed_count', String(Math.max(1, Math.min(500, parseInt(req.body?.total, 10) || 40))));
+  res.json({ ok: true });
+});
 
 /* ---------------- Team: kudos + training ---------------- */
 app.get('/api/staff', requireAuth, (req, res) => {

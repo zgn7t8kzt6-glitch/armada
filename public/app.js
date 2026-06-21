@@ -155,7 +155,7 @@ const GROUP_OF={
   arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
   // Stay — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
-  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',engagement:'stay',program:'stay',meals:'stay',
+  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',bedmap:'stay',engagement:'stay',program:'stay',meals:'stay',
   casemgmt:'stay',retention:'stay',surveys:'stay',incidents:'stay',compliance:'stay',
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
@@ -191,6 +191,7 @@ const VIEW_ROLES = {
   rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
+  bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
   excellence:  ['Executive Director','Director of Operations','Clinical Director'],
@@ -218,8 +219,8 @@ const VIEW_ROLES = {
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
-  'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedboard','clients','dignity','mytasks','messages','team','training','library'],
-  'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedmap','bedboard','clients','dignity','mytasks','messages','team','training','library'],
+  'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','bedmap','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
 };
 function flatMenu(){
   // Admins + leadership always get the full nav (Command Center, etc.) — the flat
@@ -328,6 +329,7 @@ function show(v){
   if(v==='schedule') loadSchedule();
   if(v==='roster') loadRoster();
   if(v==='bedboard') loadBedBoard();
+  if(v==='bedmap') loadBedMap();
   if(v==='workplace') loadWorkplace();
   if(v==='weekgrid') loadWeekGrid();
   if(v==='staffmodel') loadStaffModel();
@@ -2985,6 +2987,34 @@ async function loadCareHealth(){
 function schShift(n){ const d=new Date($('sc_date').value||today()); d.setDate(d.getDate()+n); $('sc_date').value=d.toISOString().slice(0,10); loadSchedule(); }
 
 /* ---- Bed turnover board ---- */
+/* ---- Bed Board (occupancy from Kipu) ---- */
+async function loadBedMap(){
+  let d; try{ d=await api('/bedboard'); }catch(e){ if($('bmBoard'))$('bmBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  if($('bm_total') && document.activeElement!==$('bm_total')) $('bm_total').value=d.total;
+  $('bmKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${d.occupied}</div><div class="l">Occupied</div></div>
+    <div class="ret-card ${d.open>0?'rc-warn':''}"><div class="n">${d.open}</div><div class="l">Open beds</div></div>
+    <div class="ret-card"><div class="n">${d.total}</div><div class="l">Total beds</div></div>
+    <div class="ret-card ${d.noRoom?'rc-high':''}"><div class="n">${d.noRoom}</div><div class="l">No bed in Kipu</div></div>`;
+  // unplaced: clients whose Kipu room isn't an inventory bed yet
+  $('bmUnplaced').innerHTML = (d.unplaced&&d.unplaced.length) ? `<div class="card" style="border-left:4px solid var(--gold)"><h3>On the unit but not on the board <span class="hint" style="font-weight:400">— tap "Build from Kipu" to place them</span></h3>${d.unplaced.map(u=>`<div class="pc-note">🛏️ <strong>${esc(u.name)}</strong> — ${esc(u.room)}${u.loc?' <span class="hint">· '+esc(u.loc)+'</span>':''}</div>`).join('')}</div>` : '';
+  if(!d.beds.length){ $('bmBoard').innerHTML='<div class="card"><div class="empty">No beds on the board yet. Tap <strong>⟳ Build from Kipu</strong> to populate occupied beds, then add your open beds.</div></div>'; return; }
+  // group by unit then room
+  const byUnit={}; d.beds.forEach(b=>{ (byUnit[b.unit||'Detox']=byUnit[b.unit||'Detox']||[]).push(b); });
+  $('bmBoard').innerHTML = Object.keys(byUnit).sort().map(unit=>`<div class="card"><h3>${esc(unit)} <span class="hint">(${byUnit[unit].filter(b=>b.client).length}/${byUnit[unit].length})</span></h3>
+    <div class="bed-grid" style="display:flex;flex-wrap:wrap;gap:10px">${byUnit[unit].map(b=>{
+      const occ=!!b.client; const loc=b.client&&b.client.loc?b.client.loc:'';
+      return `<div style="flex:1 1 150px;min-width:140px;border:1px solid var(--line);border-radius:10px;padding:12px;background:${occ?'#fbf3ea':'#eef7f0'}">
+        <div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">${esc(b.room)}${b.label?' · '+esc(b.label):''}</div>
+        ${occ?`<div style="font-weight:600;margin-top:3px">${esc(b.client.name)}</div>${loc?`<div class="hint">${esc(loc)}</div>`:''}${b.client.admit?`<div class="hint">since ${esc(b.client.admit)}</div>`:''}`
+          :`<div style="font-weight:600;color:#2f6b44;margin-top:3px">Open</div><button class="btn btn-ghost btn-sm sans no-print" style="margin-top:4px" onclick="removeBed(${b.id})">remove</button>`}
+      </div>`;
+    }).join('')}</div></div>`).join('');
+}
+async function syncBeds(){ if($('bm_msg'))$('bm_msg').textContent='Building…'; try{ const r=await api('/bedboard/sync',{method:'POST'}); if($('bm_msg'))$('bm_msg').textContent='✓ Added '+r.added+' bed(s) from Kipu'; loadBedMap(); }catch(e){ if($('bm_msg'))$('bm_msg').textContent=e.message; } }
+async function bmAddBed(){ const room=($('bm_room')||{}).value||''; if(!room.trim()){ if($('bm_msg'))$('bm_msg').textContent='Room?'; return; } try{ await api('/beds',{method:'POST',body:JSON.stringify({room,label:($('bm_label')||{}).value||'',unit:'Detox'})}); $('bm_room').value='';$('bm_label').value=''; loadBedMap(); }catch(e){ if($('bm_msg'))$('bm_msg').textContent=e.message; } }
+async function removeBed(id){ try{ await api('/beds/'+id,{method:'DELETE'}); loadBedMap(); }catch(e){ alert(e.message); } }
+async function setBedTotal(){ const total=($('bm_total')||{}).value||40; try{ await api('/bedboard/total',{method:'POST',body:JSON.stringify({total})}); loadBedMap(); }catch(e){ alert(e.message); } }
 async function loadBedBoard(){
   let d; try{ d=await api('/turnovers'); }catch(e){ if($('tovDirty'))$('tovDirty').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   $('tovKpis').innerHTML=`

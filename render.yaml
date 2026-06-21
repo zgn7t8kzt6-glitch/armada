@@ -29,6 +29,12 @@ services:
         value: admin
       - key: ADMIN_PASS
         sync: false                  # Render will prompt you to enter this secret
+      # ── Sober Living kiosk ───────────────────────────────────────────────
+      # Separate resident kiosk for the sober-living company (its own code).
+      # Optional — the owner can also set/change it in-app under Housing →
+      # Resident Voice → Kiosk setup. Open /sl-kiosk.html on the resident iPad.
+      - key: SL_KIOSK_CODE
+        sync: false                  # at least 6 characters; staff enter it once per device
       # ── AI provider ──────────────────────────────────────────────────────
       # Default is the Anthropic API (needs an Anthropic BAA before real PHI).
       # To run Claude through AWS Bedrock instead — so the free AWS BAA covers

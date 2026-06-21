@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260621U" />
+<link rel="stylesheet" href="/styles.css?v=20260621V" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -123,6 +123,7 @@
     <button data-view="housingstaff">Staffing</button>
     <button data-view="shiftreports">Shift Reports</button>
     <button data-view="hincidents">Incident Reports</button>
+    <button data-view="voice">Resident Voice &amp; Kiosk</button>
     <button data-view="coordination">Clinical Coordination</button>
     <button data-view="employment">Employment</button>
     <button data-view="rentrun">Rent Run</button>
@@ -2279,6 +2280,17 @@
       </div>
     </section>
 
+    <section id="voice" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🗣️ Resident Voice &amp; Sober Living kiosk</h3><p class="sub sans" style="margin:0">Everything residents send from the Sober Living kiosk — daily check-ins, requests, ideas and surveys. This is the housing company's own channel; it never touches the clinical/detox side.</p></div>
+          <button class="btn btn-ghost sans" onclick="openSlKioskCode()">⚙ Kiosk setup</button>
+        </div>
+        <div id="voiceKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div id="voiceBody" style="margin-top:14px"></div>
+      </div>
+    </section>
+
     <!-- generic housing modal -->
     <div id="hModal" class="hmodal" style="display:none"><div class="hmodal-card"><div id="hModalBody"></div></div></div>
   </main>
@@ -2294,7 +2306,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260621U"></script>
-<script src="/housing.js?v=20260621U"></script>
+<script src="/app.js?v=20260621V"></script>
+<script src="/housing.js?v=20260621V"></script>
 </body>
 </html>

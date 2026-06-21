@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Armada Sober Living — How are you doing?</title>
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  body{background:linear-gradient(135deg,#235056,#1a3b40);min-height:100vh}
+  .kiosk{max-width:680px;margin:0 auto;padding:28px 18px}
+  .kcard{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);padding:26px;border-top:4px solid #a7ba86}
+  .kiosk h1{color:#235056;margin:6px 0}
+  .kbtn{display:block;width:100%;text-align:left;font-family:inherit;font-size:18px;padding:18px 20px;margin:10px 0;border:1px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;color:#235056}
+  .kbtn:hover{border-color:#a7ba86;background:#f4f7ef}
+  .kmark{width:auto;height:74px;max-width:240px;object-fit:contain;display:block;margin:0 auto 6px}
+  .ktag{text-align:center;color:#5fb0c2;font-family:sans-serif;font-weight:700;letter-spacing:1px;text-transform:uppercase;font-size:13px;margin-bottom:14px}
+  .ksub{color:var(--muted);font-family:sans-serif;font-size:15px}
+  textarea,select,input{font-size:17px;padding:12px}
+  .big{font-size:18px;padding:16px 22px}
+  .scale{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .sc{flex:1;min-width:34px;text-align:center;font-size:17px;padding:10px 0;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;color:#235056}
+  .sc.on{background:#235056;color:#fff;border-color:#235056}
+  .yn{display:flex;gap:10px;margin-top:6px}
+  .ynb{flex:1;font-size:18px;text-align:center;padding:14px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;color:#235056}
+  .ynb.on{background:#a7ba86;color:#16302a;border-color:#a7ba86;font-weight:700}
+  .gbtn{display:inline-block;font-family:inherit;font-size:15px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:#fff;cursor:pointer;color:#235056;margin:0 6px 6px 0}
+  .gbtn.on,.gbtn:hover{border-color:#a7ba86;background:#f4f7ef}
+  label{color:#235056;font-weight:600}
+</style>
+</head>
+<body>
+<div class="kiosk">
+  <div class="kcard">
+    <img src="/logo.png" class="kmark" alt="Armada"/>
+    <div class="ktag">Sober Living</div>
+    <div id="kview"></div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let CODE=localStorage.getItem('slKioskCode')||'', DATA=null, WHO='', VIEW='', LAST=0;
+
+async function kapi(path, opts){ const r=await fetch('/api/sl-kiosk/'+path,opts); if(!r.ok){throw new Error((await r.json().catch(()=>({}))).error||'Error');} return r.json(); }
+
+function gate(){
+  $('kview').innerHTML=`<h1>Welcome home</h1><p class="ksub">A staff member will enter the kiosk code to begin.</p>
+    <label>Kiosk code</label><input id="kcode" type="password"/><div id="kerr" class="err"></div>
+    <button class="btn big" style="margin-top:12px;width:100%;background:#235056;color:#fff" onclick="enter()">Start</button>`;
+}
+async function enter(){
+  CODE=$('kcode')?$('kcode').value:CODE;
+  try{ DATA=await kapi('data?code='+encodeURIComponent(CODE)); LAST=Date.now(); localStorage.setItem('slKioskCode',CODE); home(); }
+  catch(e){ if($('kerr'))$('kerr').textContent='That code didn\'t work.'; else gate(); }
+}
+async function refreshData(){
+  const btn=$('kRefreshBtn'); if(btn){ btn.disabled=true; btn.textContent='Updating…'; }
+  try{ DATA=await kapi('data?code='+encodeURIComponent(CODE)); LAST=Date.now(); home(); }
+  catch(e){ if(btn){ btn.disabled=false; btn.textContent='🔄  Update list'; } }
+}
+function syncLine(){ const n=(DATA&&DATA.residents)?DATA.residents.length:0; const t=LAST?new Date(LAST).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}):'—'; return 'Showing '+n+' resident'+(n===1?'':'s')+' · Updated '+t; }
+function who(){ const s=$('klist'); return s?s.value:''; }
+function residentSelect(id, sel){ return `<select id="${id}"><option value="">— choose your name —</option>${DATA.residents.map(r=>`<option value="${r.id}"${String(r.id)===String(sel||WHO)?' selected':''}>${esc(r.pref)}${r.house?' · '+esc(r.house):''}</option>`).join('')}</select>`; }
+
+function home(){
+  VIEW='home';
+  $('kview').innerHTML=`<h1>How are you doing?</h1>
+    <p class="ksub">Check in, ask for something, or tell us how it's going. Your answers go to your house team — not the clinical side.</p>
+    <label>I am</label>${residentSelect('klist')}
+    <button class="kbtn" onclick="checkinView()">🌅  Daily check-in</button>
+    <button class="kbtn" onclick="reqView()">🛎  Request something / talk to staff</button>
+    ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}
+    <button class="kbtn" onclick="ideaView()">💡  Share an idea</button>
+    <div style="margin-top:18px;text-align:center">
+      <button id="kRefreshBtn" class="btn btn-ghost" style="font-size:15px" onclick="refreshData()">🔄  Update list</button>
+      <div class="ksub" style="margin-top:8px">${syncLine()}</div>
+      <p class="ksub" style="margin-top:4px;font-size:13px">Don't see your name? Tap Update.</p>
+    </div>`;
+}
+
+/* ---- Daily check-in ---- */
+function scaleRow(k, lo, hi){ return `<div class="cq" data-k="${k}"><div class="scale">${[0,1,2,3,4,5,6,7,8,9,10].map(i=>`<button class="sc" onclick="pickScale(this,${i})">${i}</button>`).join('')}</div>
+  <div class="ksub" style="display:flex;justify-content:space-between;margin-top:3px"><span>${lo}</span><span>${hi}</span></div></div>`; }
+function ynRow(k){ return `<div class="cq" data-k="${k}"><div class="yn"><button class="ynb" onclick="pickYN(this,1)">Yes</button><button class="ynb" onclick="pickYN(this,0)">No</button></div></div>`; }
+function pickScale(b,v){ const r=b.closest('.cq'); r.dataset.val=v; r.querySelectorAll('.sc').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }
+function pickYN(b,v){ const r=b.closest('.cq'); r.dataset.val=v; r.querySelectorAll('.ynb').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }
+function checkinView(){
+  VIEW='checkin'; WHO=who();
+  $('kview').innerHTML=`<h1>Daily check-in 🌅</h1>
+    <p class="ksub">Takes a few taps. There are no wrong answers — we just want to know how you are.</p>
+    <label>Your name *</label>${residentSelect('klist')}
+    <label style="margin-top:14px;display:block">How is your mood today?</label>${scaleRow('mood','Low','Great')}
+    <label style="margin-top:14px;display:block">How strong are cravings today?</label>${scaleRow('cravings','None','Intense')}
+    <label style="margin-top:14px;display:block">Did you sleep okay?</label>${ynRow('slept_ok')}
+    <label style="margin-top:14px;display:block">Have you made it to a meeting today?</label>${ynRow('meeting')}
+    <label style="margin-top:14px;display:block">Anything you need help with? (optional)</label>
+    <input id="cneed" placeholder="e.g. a ride to my meeting, talk to my coach"/>
+    <div id="cerr" class="err" style="margin-top:6px"></div>
+    <button class="btn big" style="width:100%;margin-top:14px;background:#235056;color:#fff" onclick="submitCheckin()">Send check-in</button>
+    <button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`;
+}
+async function submitCheckin(){
+  const rid=$('klist')?$('klist').value:''; if(!rid){ $('cerr').textContent='Please choose your name.'; return; }
+  const g=k=>{const r=document.querySelector('.cq[data-k="'+k+'"]'); return r&&r.dataset.val!=null?+r.dataset.val:null;};
+  try{
+    await kapi('checkin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,resident_id:+rid,mood:g('mood'),cravings:g('cravings'),slept_ok:g('slept_ok'),meeting:g('meeting'),need:$('cneed').value})});
+    thanks('Thank you for checking in. Your house team has it.');
+  }catch(e){ $('cerr').textContent=e.message; }
+}
+
+/* ---- Request ---- */
+function reqView(){
+  VIEW='req'; WHO=who();
+  const quick=['A ride / transportation','Maintenance in my room','Talk to my recovery coach','Supplies','Medication / MAT help','I\'m struggling — please check on me'];
+  $('kview').innerHTML=`<h1>What do you need?</h1>
+    <p class="ksub">Choose your name, then tap a common one or write your own.</p>
+    <label>Your name *</label>${residentSelect('klist')}
+    <label style="margin-top:10px;display:block">Who can help?</label>
+    <select id="rcat"><option value="">Anyone</option>${DATA.categories.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
+    <div style="margin-top:10px">${quick.map(q=>`<button class="gbtn" onclick="$('rtext').value=this.textContent">${esc(q)}</button>`).join('')}</div>
+    <label style="margin-top:10px;display:block">In your words</label>
+    <textarea id="rtext" rows="3" placeholder="e.g. I need a ride to my 6pm meeting"></textarea>
+    <div id="rerr" class="err"></div>
+    <button class="btn big" style="width:100%;margin-top:10px;background:#235056;color:#fff" onclick="sendReq()">Send</button>
+    <button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`;
+}
+async function sendReq(){
+  const rid=$('klist')?$('klist').value:''; if(!rid){ $('rerr').textContent='Please choose your name.'; return; }
+  if(!$('rtext').value.trim()){ $('rerr').textContent='Tell us what you need.'; return; }
+  try{ await kapi('request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,resident_id:+rid,category:$('rcat').value||null,text:$('rtext').value})});
+    thanks('We\'re on it. Someone from your house team will help you.'); }catch(e){ $('rerr').textContent=e.message; }
+}
+
+/* ---- Survey ---- */
+function surveyView(id){
+  VIEW='survey'; WHO=who();
+  const s=DATA.surveys.find(x=>x.id===id); let cat='',html='';
+  s.questions.forEach(q=>{
+    if(q.category&&q.category!==cat){cat=q.category;html+=`<div class="sv-cat" style="color:#5fb0c2;font-family:sans-serif;font-weight:700;text-transform:uppercase;font-size:12px;letter-spacing:.5px;margin:16px 0 4px">${esc(cat)}</div>`;}
+    let inp;
+    if(q.type==='text') inp=`<textarea class="sq-text" rows="3"></textarea>`;
+    else if(q.type==='yesno') inp=`<div class="cq" data-qid="${q.id}" data-type="yesno"><div class="yn"><button class="ynb" onclick="pickYN(this,1)">Yes</button><button class="ynb" onclick="pickYN(this,0)">No</button></div></div>`;
+    else inp=`<div class="cq" data-qid="${q.id}" data-type="scale"><div class="scale">${[0,1,2,3,4,5,6,7,8,9,10].map(i=>`<button class="sc" onclick="pickScale(this,${i})">${i}</button>`).join('')}</div><div class="ksub" style="display:flex;justify-content:space-between;margin-top:3px"><span>Not at all</span><span>Absolutely</span></div></div>`;
+    html+=`<div class="sq" data-qid="${q.id}" data-type="${q.type}" style="margin:8px 0"><div style="color:#235056;font-size:17px">${esc(q.text)}</div>${inp}</div>`;
+  });
+  $('kview').innerHTML=`<h1>${esc(s.title)}</h1><p class="ksub">${esc(s.description||'')}</p>
+    <label style="display:block;margin-top:8px">Your name (optional)</label>${residentSelect('klist')}
+    ${html}
+    <button class="btn big" style="width:100%;margin-top:12px;background:#235056;color:#fff" onclick="sendSurvey(${id})">Submit</button>
+    <button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`;
+}
+async function sendSurvey(id){
+  const answers=[];
+  document.querySelectorAll('.sq').forEach(sq=>{ const qid=+sq.dataset.qid;
+    if(sq.dataset.type==='text'){ const t=sq.querySelector('.sq-text').value.trim(); if(t)answers.push({question_id:qid,text:t}); }
+    else{ const c=sq.querySelector('.cq'); if(c&&c.dataset.val!=null)answers.push({question_id:qid,num:+c.dataset.val}); }
+  });
+  if(!answers.length){ home(); return; }
+  const rid=$('klist')?$('klist').value:'';
+  try{ await kapi('survey',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,survey_id:id,resident_id:rid||null,answers})});
+    thanks('Thank you for sharing. It helps us make this a better home.'); }catch(e){ alert(e.message); }
+}
+
+/* ---- Idea ---- */
+function ideaView(){
+  VIEW='idea'; WHO=who();
+  $('kview').innerHTML=`<h1>Share an idea 💡</h1>
+    <p class="ksub">Anything that would make your house better. Your name is optional.</p>
+    <label>Your name (optional)</label>${residentSelect('klist')}
+    <label style="margin-top:10px;display:block">Your idea</label>
+    <textarea id="itext" rows="4" placeholder="I'd love it if…"></textarea>
+    <div id="ierr" class="err"></div>
+    <button class="btn big" style="width:100%;margin-top:12px;background:#235056;color:#fff" onclick="sendIdea()">Send</button>
+    <button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`;
+}
+async function sendIdea(){
+  const text=$('itext')?$('itext').value.trim():''; if(!text){ $('ierr').textContent='Tell us your idea first.'; return; }
+  const rid=$('klist')?$('klist').value:'';
+  try{ await kapi('suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,resident_id:rid||null,text})});
+    thanks('Thank you — your idea goes straight to the house leadership.'); }catch(e){ $('ierr').textContent=e.message; }
+}
+
+function thanks(msg){
+  $('kview').innerHTML=`<h1>Thank you 💚</h1><p class="ksub" style="font-size:17px">${esc(msg)}</p>
+    <button class="btn big" style="width:100%;margin-top:16px;background:#235056;color:#fff" onclick="home()">Done</button>`;
+  setTimeout(()=>{ if($('kview')) home(); }, 6000);
+}
+if(CODE) enter(); else gate();
+setInterval(async ()=>{ if(VIEW!=='home'||!CODE) return; try{ const fresh=await kapi('data?code='+encodeURIComponent(CODE)); const changed=!DATA||(fresh.residents||[]).length!==(DATA.residents||[]).length; DATA=fresh; LAST=Date.now(); if(changed&&VIEW==='home') home(); }catch(e){} }, 240000);
+</script>
+</body>
+</html>

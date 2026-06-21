@@ -11,6 +11,7 @@
 // routes, mounted from server.js. It links to the existing `clients` table by
 // id so a person can be one record across detox → residential → housing.
 
+import crypto from 'node:crypto';
 import { db, audit, getState, setState } from './db.js';
 import { requireAuth, requireAdmin } from './auth.js';
 
@@ -287,6 +288,41 @@ export function housingSchema() {
     present_count INTEGER, expected_count INTEGER, out_residents TEXT,
     meds_note TEXT, safety TEXT, summary TEXT, handoff TEXT, escalation INTEGER DEFAULT 0,
     by TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  -- Sober Living resident kiosk: a separate kiosk (own code) whose results live
+  -- entirely under Recovery Housing, walled off from the clinical/detox side.
+  CREATE TABLE IF NOT EXISTS housing_checkins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, date TEXT, mood INTEGER, cravings INTEGER,
+    meeting INTEGER, slept_ok INTEGER, need TEXT, note TEXT,
+    seen INTEGER DEFAULT 0, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, category TEXT, text TEXT, priority TEXT DEFAULT 'Normal',
+    status TEXT DEFAULT 'open', handled_by TEXT, handled_at TEXT,
+    created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, text TEXT, status TEXT DEFAULT 'open',
+    created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_surveys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT, title TEXT, description TEXT, active INTEGER DEFAULT 1, sort INTEGER DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS housing_survey_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    survey_id INTEGER, category TEXT, text TEXT, type TEXT DEFAULT 'scale', sort INTEGER DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS housing_survey_responses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    survey_id INTEGER, resident_id INTEGER, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_survey_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    response_id INTEGER, question_id INTEGER, value_num REAL, value_text TEXT
   );
   `);
   // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
@@ -582,6 +618,61 @@ function requireHousing(req, res, next) {
   return res.status(403).json({ error: 'Recovery Housing is restricted to housing staff.' });
 }
 
+/* ───────────────── Sober Living resident kiosk (its own code) ───────────────── */
+// Two separate companies: the SL kiosk is a distinct device experience with its
+// own access code; everything it collects stays inside Recovery Housing.
+const SL_REQUEST_CATEGORIES = ['House manager', 'Recovery coach', 'Maintenance / repair', 'Transportation', 'Medication / MAT', 'Supplies', 'Something else'];
+const SL_DISTRESS = /\b(leave|leaving|relapse|use|using|drink|drank|high|crav(e|ing)|want out|give up|hurt myself|kill myself|suicid|hopeless|panic|can'?t breathe|withdraw|sick|unsafe|threat)\b/i;
+
+function slKioskCode() { return getState('sl_kiosk_code') || process.env.SL_KIOSK_CODE || process.env.HOUSING_KIOSK_CODE || 'soberliving'; }
+function slKioskCodeWeak() { const c = slKioskCode(); return !c || c.toLowerCase() === 'soberliving' || c.length < 6; }
+function slSecret() { let s = getState('sl_kiosk_secret'); if (!s) { s = crypto.randomBytes(32).toString('hex'); setState('sl_kiosk_secret', s); } return s; }
+function slSign() { const exp = Date.now() + 12 * 3600e3; const sig = crypto.createHmac('sha256', slSecret()).update(String(exp)).digest('hex').slice(0, 32); return `${exp}.${sig}`; }
+function slVerify(tok) {
+  if (!tok || typeof tok !== 'string') return false;
+  const [e, sig] = tok.split('.'); const exp = +e;
+  if (!exp || exp < Date.now()) return false;
+  const want = crypto.createHmac('sha256', slSecret()).update(String(exp)).digest('hex').slice(0, 32);
+  try { return crypto.timingSafeEqual(Buffer.from(sig || ''), Buffer.from(want)); } catch { return false; }
+}
+function slCodeValid(req) {
+  const got = String(req.query.code || req.body?.code || ''), want = String(slKioskCode());
+  if (!got || got.length !== want.length) return false;
+  try { return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want)); } catch { return false; }
+}
+const _slFails = new Map();
+function requireSlKiosk(req, res, next) {
+  if (slVerify(req.cookies?.slKioskToken)) return next();
+  const k = req.ip || 'x'; const f = _slFails.get(k);
+  if (f && f.n >= 15 && Date.now() - f.t < 6e5) return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes.' });
+  if (slCodeValid(req)) {
+    _slFails.delete(k);
+    res.cookie('slKioskToken', slSign(), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', expires: new Date(Date.now() + 12 * 3600e3) });
+    return next();
+  }
+  _slFails.set(k, { n: (f && Date.now() - f.t < 6e5 ? f.n : 0) + 1, t: Date.now() });
+  return res.status(401).json({ error: 'Invalid kiosk code' });
+}
+// Kiosk-safe display name: first name + last initial (never the full legal name).
+function slPrefName(name) {
+  const p = String(name || '').trim().split(/\s+/);
+  return p.length > 1 ? `${p[0]} ${p[p.length - 1][0]}.` : (p[0] || 'Resident');
+}
+// One built-in weekly pulse, seeded once so the kiosk has a survey out of the box.
+function seedHousingSurveys() {
+  if (db.prepare(`SELECT COUNT(*) c FROM housing_surveys`).get().c) return;
+  const sid = Number(db.prepare(`INSERT INTO housing_surveys (key,title,description,sort) VALUES ('pulse','Weekly recovery check-in','A few quick questions about how this week has gone.',1)`).run().lastInsertRowid);
+  const q = db.prepare(`INSERT INTO housing_survey_questions (survey_id,category,text,type,sort) VALUES (?,?,?,?,?)`);
+  [
+    ['How you feel here', 'I feel safe and supported in my house', 'scale'],
+    ['How you feel here', 'Staff treat me with dignity and respect', 'scale'],
+    ['Recovery', 'I am connected to a recovery community (meetings, sponsor, peers)', 'scale'],
+    ['Recovery', 'I am making progress toward my goals', 'scale'],
+    ['Recovery', 'I would recommend Armada sober living to a friend in recovery', 'scale'],
+    ['Your words', 'What is going well, or what would make your stay better?', 'text'],
+  ].forEach((row, i) => q.run(sid, row[0], row[1], row[2], i));
+}
+
 export function mountHousing(app) {
   housingSchema();
   try {
@@ -596,9 +687,100 @@ export function mountHousing(app) {
       seedHousing();
     }
   } catch (e) { console.error('[housing] seed:', e.message); }
+  try { seedHousingSurveys(); } catch (e) { console.error('[housing] survey seed:', e.message); }
+
+  /* ---- Sober Living resident kiosk (separate code; NOT behind staff auth) ---- */
+  app.get('/api/sl-kiosk/data', requireSlKiosk, (req, res) => {
+    const residents = db.prepare(`SELECT r.id, r.name, h.name house FROM housing_residents r
+      LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active' ORDER BY h.name, r.name`).all()
+      .map(r => ({ id: r.id, pref: slPrefName(r.name), house: r.house || '' }));
+    const surveys = db.prepare(`SELECT id, key, title, description FROM housing_surveys WHERE active=1 ORDER BY sort, id`).all();
+    for (const s of surveys) s.questions = db.prepare(`SELECT id, category, text, type FROM housing_survey_questions WHERE survey_id=? ORDER BY sort, id`).all(s.id);
+    res.json({ residents, categories: SL_REQUEST_CATEGORIES, surveys });
+  });
+  app.post('/api/sl-kiosk/checkin', requireSlKiosk, (req, res) => {
+    const b = req.body || {};
+    if (!b.resident_id) return res.status(400).json({ error: 'Please choose your name.' });
+    const num = (v) => (v == null || v === '') ? null : Math.max(0, Math.min(10, +v || 0));
+    const yn = (v) => v === 1 || v === true || v === '1' ? 1 : (v === 0 || v === false || v === '0' ? 0 : null);
+    db.prepare(`INSERT INTO housing_checkins (resident_id,date,mood,cravings,meeting,slept_ok,need,note) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(num(b.resident_id) ? b.resident_id : null, todayStr(), num(b.mood), num(b.cravings), yn(b.meeting), yn(b.slept_ok), (b.need || '').trim().slice(0, 400) || null, (b.note || '').trim().slice(0, 600) || null);
+    res.json({ ok: true });
+  });
+  app.post('/api/sl-kiosk/request', requireSlKiosk, (req, res) => {
+    const b = req.body || {};
+    if (!b.resident_id) return res.status(400).json({ error: 'Please choose your name so we can help you.' });
+    const text = (b.text || '').trim(); if (!text) return res.status(400).json({ error: 'Tell us what you need.' });
+    const priority = SL_DISTRESS.test(text) ? 'Urgent' : 'Normal';
+    db.prepare(`INSERT INTO housing_requests (resident_id,category,text,priority) VALUES (?,?,?,?)`)
+      .run(b.resident_id, b.category || 'Something else', text.slice(0, 800), priority);
+    res.json({ ok: true });
+  });
+  app.post('/api/sl-kiosk/suggestion', requireSlKiosk, (req, res) => {
+    const text = (req.body?.text || '').trim(); if (!text) return res.status(400).json({ error: 'Tell us your idea.' });
+    db.prepare(`INSERT INTO housing_suggestions (resident_id,text) VALUES (?,?)`).run(req.body?.resident_id || null, text.slice(0, 1000));
+    res.json({ ok: true });
+  });
+  app.post('/api/sl-kiosk/survey', requireSlKiosk, (req, res) => {
+    const b = req.body || {};
+    const survey = db.prepare(`SELECT id FROM housing_surveys WHERE id=?`).get(b.survey_id);
+    if (!survey || !Array.isArray(b.answers) || !b.answers.length) return res.status(400).json({ error: 'No answers' });
+    const rid = Number(db.prepare(`INSERT INTO housing_survey_responses (survey_id,resident_id) VALUES (?,?)`).run(survey.id, b.resident_id || null).lastInsertRowid);
+    const ins = db.prepare(`INSERT INTO housing_survey_answers (response_id,question_id,value_num,value_text) VALUES (?,?,?,?)`);
+    for (const a of b.answers) { if (a.question_id == null) continue; ins.run(rid, a.question_id, (a.num === 0 || a.num) ? Number(a.num) : null, a.text?.trim() || null); }
+    res.json({ ok: true });
+  });
+
   // Gate the entire /api/housing surface to housing staff + admin/ED (defense in
   // depth — the front-end already hides it, this stops direct API access too).
   app.use('/api/housing', requireAuth, requireHousing);
+
+  // ---- Sober Living kiosk code (admin-managed; shown to staff so they can set up iPads) ----
+  app.get('/api/housing/kiosk-code', requireAuth, (req, res) => {
+    if (!(req.user.role === 'admin' || req.user.job_role === 'Executive Director')) return res.status(403).json({ error: 'Admins only' });
+    res.json({ code: slKioskCode(), weak: slKioskCodeWeak() });
+  });
+  app.post('/api/housing/kiosk-code', requireAuth, requireAdmin, (req, res) => {
+    const code = String(req.body?.code || '').trim();
+    if (code.length < 6) return res.status(400).json({ error: 'Use at least 6 characters.' });
+    setState('sl_kiosk_code', code);
+    audit({ user: req.user, action: 'HOUSING_KIOSK_CODE_SET', ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ---- Resident Voice: kiosk results, walled off under Sober Living ----
+  app.get('/api/housing/voice', requireAuth, (req, res) => {
+    const nm = (rid) => rid ? (db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(rid)?.name || null) : null;
+    const checkins = db.prepare(`SELECT * FROM housing_checkins ORDER BY id DESC LIMIT 60`).all().map(c => ({ ...c, name: nm(c.resident_id) }));
+    const requests = db.prepare(`SELECT * FROM housing_requests ORDER BY (status='open') DESC, (priority='Urgent') DESC, id DESC LIMIT 80`).all().map(r => ({ ...r, name: nm(r.resident_id) }));
+    const suggestions = db.prepare(`SELECT * FROM housing_suggestions ORDER BY id DESC LIMIT 60`).all().map(s => ({ ...s, name: nm(s.resident_id) }));
+    const surveys = db.prepare(`SELECT id, key, title FROM housing_surveys WHERE active=1 ORDER BY sort, id`).all().map(s => {
+      const responses = db.prepare(`SELECT COUNT(*) c FROM housing_survey_responses WHERE survey_id=?`).get(s.id).c;
+      const avg = db.prepare(`SELECT AVG(value_num) a FROM housing_survey_answers an JOIN housing_survey_responses r ON r.id=an.response_id WHERE r.survey_id=? AND an.value_num IS NOT NULL`).get(s.id).a;
+      return { ...s, responses, avg: avg != null ? +avg.toFixed(1) : null };
+    });
+    const recentText = db.prepare(`SELECT an.value_text text, r.created FROM housing_survey_answers an JOIN housing_survey_responses r ON r.id=an.response_id WHERE an.value_text IS NOT NULL ORDER BY r.id DESC LIMIT 25`).all();
+    res.json({
+      checkins, requests, suggestions, surveys, recentText,
+      kpis: {
+        openRequests: requests.filter(r => r.status === 'open').length,
+        urgent: requests.filter(r => r.status === 'open' && r.priority === 'Urgent').length,
+        checkinsToday: checkins.filter(c => c.date === todayStr()).length,
+        flagged: checkins.filter(c => c.date === todayStr() && ((c.cravings != null && c.cravings >= 6) || (c.mood != null && c.mood <= 3))).length,
+      },
+    });
+  });
+  app.post('/api/housing/voice/request/:id', requireAuth, (req, res) => {
+    const cur = db.prepare(`SELECT * FROM housing_requests WHERE id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    db.prepare(`UPDATE housing_requests SET status='done', handled_by=?, handled_at=datetime('now') WHERE id=?`).run(req.user.name, req.params.id);
+    audit({ user: req.user, action: 'HOUSING_REQUEST_DONE', detail: cur.text?.slice(0, 60), ip: req.ip });
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/voice/checkin/:id/seen', requireAuth, (req, res) => {
+    db.prepare(`UPDATE housing_checkins SET seen=1 WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  });
 
   // ---- Reference data ----
   app.get('/api/housing/meta', requireAuth, (req, res) => res.json({

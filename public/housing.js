@@ -135,7 +135,7 @@ async function bedClick(bedId){
     <select id="bedRes"><option value="">— choose resident —</option>${opts}</select>
     <div class="toolbar" style="justify-content:flex-start;flex-wrap:wrap;margin-top:14px">
       <button class="btn btn-primary btn-sm sans" onclick="doAssignBed(${bedId})">Assign</button>
-      <button class="btn btn-ghost btn-sm sans" onclick="setBedStatus(${bedId},'open')">Mark open</button>
+      ${bed.status==='occupied'?`<button class="btn btn-ghost btn-sm sans" onclick="setBedStatus(${bedId},'open')">↩ Unassign (free bed)</button>`:`<button class="btn btn-ghost btn-sm sans" onclick="setBedStatus(${bedId},'open')">Mark open</button>`}
       <button class="btn btn-ghost btn-sm sans" onclick="setBedStatus(${bedId},'hold')">Hold</button>
       <button class="btn btn-ghost btn-sm sans" onclick="setBedStatus(${bedId},'maintenance')">🛠 Maintenance</button>
       ${isAdmin()?`<button class="btn btn-danger btn-sm sans" onclick="deleteBed(${bedId})">Delete bed</button>`:''}
@@ -241,7 +241,7 @@ function renderResidents(){
   const dq = rows.filter(r=>!dobCheck(r.dob).ok).length;
   const dqBanner = dq ? `<div class="hint" style="margin:0 0 8px;padding:8px 10px;background:#fbe9d8;border:1px solid #f0c9a3;border-radius:8px;color:#a35a23">⚠ ${dq} resident${dq>1?'s have':' has'} a missing or implausible date of birth (common after import). Open a record and click <b>Fix</b> to correct it.</div>` : '';
   $('residentsTable').innerHTML = band + dqBanner + `<table class="tbl"><thead><tr>
-    <th>Resident</th><th>House · bed</th><th>LOC</th><th>Phase</th><th>Days</th><th>Sober</th><th>Recovery capital</th><th>Clinical dose</th><th>Balance</th>
+    <th>Resident</th><th>House · bed</th><th>LOC</th><th>Phase</th><th>Days</th><th>Sober</th><th>Recovery capital</th><th>Clinical dose</th><th>Balance</th><th></th>
     </tr></thead><tbody>${rows.map(r=>{
       const phase=(HOUSING.meta.phases.find(p=>p.n===r.phase)||{}).name||r.phase;
       const dosePct=r.clinTarget?Math.round(r.clinHoursWk/r.clinTarget*100):100;
@@ -255,6 +255,7 @@ function renderResidents(){
         <td>${r.reccap!=null?`<b style="color:var(--navy)">${r.reccap}</b>/10`:'<span class="hint">—</span>'}</td>
         <td>${r.clinTarget?`<div class="dose ${dosePct<60?'low':''}" style="width:80px"><span style="width:${Math.min(100,dosePct)}%"></span></div><span class="hint">${r.clinHoursWk}/${r.clinTarget}h</span>`:'<span class="hint">housing only</span>'}</td>
         <td>${r.balance>0?`<span style="color:var(--danger);font-weight:600">${money(r.balance)}</span>`:money(r.balance)}</td>
+        <td style="text-align:right;white-space:nowrap">${r.status==='active'?`<button class="btn btn-ghost btn-sm sans" onclick="event.stopPropagation();openDischargeForm(${r.id})">Discharge</button>`:`<span class="chip">${esc(r.status)}</span>`}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
 }
@@ -947,4 +948,48 @@ async function openIncidentForm(presetResident){
 async function closeIncident(id){ const follow_up=prompt('Resolution / follow-up note:'); if(follow_up===null) return; try{ await api('/housing/incidents/'+id,{method:'POST',body:JSON.stringify({status:'closed',follow_up})}); loadHIncidents(); }catch(e){ alert(e.message); } }
 
 /* expose to window for inline handlers & app.js show() */
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto});
+/* ============================ RESIDENT VOICE (kiosk results) ============================ */
+async function loadVoice(){
+  let d; try{ d=await api('/housing/voice'); }catch(e){ $('voiceBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const k=d.kpis;
+  $('voiceKpis').innerHTML=`
+    <div class="ret-card ${k.urgent?'rc-high':''}"><div class="n">${k.urgent}</div><div class="l">Urgent requests</div></div>
+    <div class="ret-card ${k.openRequests?'rc-warn':''}"><div class="n">${k.openRequests}</div><div class="l">Open requests</div></div>
+    <div class="ret-card"><div class="n">${k.checkinsToday}</div><div class="l">Check-ins today</div></div>
+    <div class="ret-card ${k.flagged?'rc-high':''}"><div class="n">${k.flagged}</div><div class="l">Flagged today (low mood / high craving)</div></div>`;
+  const reqRow=r=>`<div class="cmd-row ${r.priority==='Urgent'&&r.status==='open'?'cmd-row-flag':''}"><div class="cmd-row-main">
+    ${r.priority==='Urgent'?'🔴 ':'🛎 '}<b>${esc(r.name||'A resident')}</b> <span class="hint">· ${esc(r.category||'request')} · ${esc((r.created||'').slice(0,16).replace('T',' '))}</span><br>${esc(r.text)}
+    ${r.status!=='open'?`<span class="chip" style="margin-left:6px">done · ${esc(r.handled_by||'')}</span>`:''}</div>
+    ${r.status==='open'?`<button class="btn btn-ghost btn-sm sans" onclick="voiceRequestDone(${r.id})">Mark done</button>`:''}</div>`;
+  const ci=c=>{ const flag=(c.cravings!=null&&c.cravings>=6)||(c.mood!=null&&c.mood<=3);
+    return `<div class="cmd-row ${flag?'cmd-row-flag':''}"><div class="cmd-row-main">
+      ${flag?'⚠️ ':'🌅 '}<b>${esc(c.name||'A resident')}</b> <span class="hint">· ${esc(c.date)}</span><br>
+      <span class="hint">Mood ${c.mood??'—'}/10 · Cravings ${c.cravings??'—'}/10 · Meeting ${c.meeting===1?'✅':c.meeting===0?'—':'?'} · Slept ${c.slept_ok===1?'✅':c.slept_ok===0?'—':'?'}</span>
+      ${c.need?`<br>Needs: ${esc(c.need)}`:''}${c.note?`<br>${esc(c.note)}`:''}</div></div>`; };
+  $('voiceBody').innerHTML=`
+    <div class="r360-grid">
+      <div class="card"><h3>Requests</h3>${d.requests.length?d.requests.map(reqRow).join(''):'<div class="hint">No requests yet.</div>'}</div>
+      <div class="card"><h3>Daily check-ins</h3>${d.checkins.length?d.checkins.map(ci).join(''):'<div class="hint">No check-ins yet.</div>'}</div>
+    </div>
+    <div class="r360-grid" style="margin-top:16px">
+      <div class="card"><h3>Survey pulse</h3>${d.surveys.map(s=>`<div class="kv"><span class="k">${esc(s.title)}</span><span class="v">${s.avg!=null?`<b style="color:var(--navy)">${s.avg}</b>/10 · ${s.responses} resp`:`${s.responses} resp`}</span></div>`).join('')||'<div class="hint">No surveys.</div>'}
+        ${d.recentText.length?'<div style="margin-top:10px"><div class="hint" style="margin-bottom:4px">In their words</div>'+d.recentText.map(t=>`<div class="cmd-row"><div class="cmd-row-main">“${esc(t.text)}”</div></div>`).join('')+'</div>':''}</div>
+      <div class="card"><h3>Ideas 💡</h3>${d.suggestions.length?d.suggestions.map(s=>`<div class="cmd-row"><div class="cmd-row-main"><b>${esc(s.name||'Anonymous')}</b> <span class="hint">· ${esc((s.created||'').slice(0,10))}</span><br>${esc(s.text)}</div></div>`).join(''):'<div class="hint">No ideas yet.</div>'}</div>
+    </div>`;
+}
+async function voiceRequestDone(id){ try{ await api('/housing/voice/request/'+id,{method:'POST',body:'{}'}); loadVoice(); }catch(e){ alert(e.message); } }
+async function openSlKioskCode(){
+  let d; try{ d=await api('/housing/kiosk-code'); }catch(e){ alert(e.message); return; }
+  const url = location.origin+'/sl-kiosk.html';
+  const save=hmodal(`<h3>Sober Living kiosk setup</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">A <b>separate</b> kiosk for the sober-living company. Open this on the resident iPad and enter the code once:</p>
+    <div class="kv"><span class="k">Kiosk URL</span><span class="v"><a href="${esc(url)}" target="_blank">${esc(url)}</a></span></div>
+    <label style="margin-top:10px">Kiosk code ${d.weak?'<span style="color:var(--danger)">(weak — please change it)</span>':''}</label>
+    <input id="slk_code" value="${esc(d.code)}" ${isAdmin()?'':'disabled'}/>
+    ${isAdmin()?'<div class="hint" style="margin-top:4px">At least 6 characters. Residents never type this — staff enter it once per device.</div>':'<div class="hint">Only the owner/admin can change the code.</div>'}`);
+  if(!isAdmin()){ save.textContent='Close'; save.onclick=closeHModal; return; }
+  save.textContent='Save code';
+  save.onclick=async()=>{ const code=$('slk_code').value.trim(); if(code.length<6){ alert('Use at least 6 characters.'); return; } try{ await api('/housing/kiosk-code',{method:'POST',body:JSON.stringify({code})}); closeHModal(); }catch(e){ alert(e.message); } };
+}
+
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,openSlKioskCode,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto});

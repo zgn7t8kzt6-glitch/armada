@@ -18,6 +18,20 @@ function hmodalPlain(html){ const m=$('hModal'); $('hModalBody').innerHTML = htm
 function closeHModal(){ $('hModal').style.display='none'; $('hModalBody').innerHTML=''; }
 const isAdmin = () => ME && ME.role==='admin';
 
+// Data quality: flag missing / impossible dates of birth (common in the imported
+// export — typo'd years, future dates, ages outside a plausible adult range).
+function dobCheck(dob){
+  if(!dob) return { ok:false, age:null, msg:'No date of birth on file' };
+  const d=new Date(dob+'T00:00:00'); if(isNaN(d)) return { ok:false, age:null, msg:'Unreadable date of birth' };
+  const now=new Date(); let age=now.getFullYear()-d.getFullYear();
+  if(now.getMonth()<d.getMonth()||(now.getMonth()===d.getMonth()&&now.getDate()<d.getDate())) age--;
+  if(d>now) return { ok:false, age, msg:'Date of birth is in the future' };
+  if(age<18) return { ok:false, age, msg:`Age reads ${age} — under 18 (likely a typo)` };
+  if(age>100) return { ok:false, age, msg:`Age reads ${age} — over 100 (likely a typo)` };
+  return { ok:true, age, msg:'' };
+}
+function dqBadge(dob){ const c=dobCheck(dob); return c.ok?'':`<span class="chip" title="${esc(c.msg)}" style="background:#fbe9d8;color:#a35a23;border-color:#f0c9a3;cursor:help">⚠ check DOB</span>`; }
+
 /* ============================ HOUSING HQ ============================ */
 async function loadHousingHQ(){
   await hMeta();
@@ -183,13 +197,15 @@ function renderResidents(){
   const q=($('resSearch')?.value||'').toLowerCase();
   let rows = HOUSING.residents.filter(r=>!q || (r.name||'').toLowerCase().includes(q));
   if(!rows.length){ $('residentsTable').innerHTML='<div class="empty">No residents.</div>'; return; }
-  $('residentsTable').innerHTML = `<table class="tbl"><thead><tr>
+  const dq = rows.filter(r=>!dobCheck(r.dob).ok).length;
+  const dqBanner = dq ? `<div class="hint" style="margin:0 0 8px;padding:8px 10px;background:#fbe9d8;border:1px solid #f0c9a3;border-radius:8px;color:#a35a23">⚠ ${dq} resident${dq>1?'s have':' has'} a missing or implausible date of birth (common after import). Open a record and click <b>Fix</b> to correct it.</div>` : '';
+  $('residentsTable').innerHTML = dqBanner + `<table class="tbl"><thead><tr>
     <th>Resident</th><th>House · bed</th><th>LOC</th><th>Phase</th><th>Days</th><th>Sober</th><th>Recovery capital</th><th>Clinical dose</th><th>Balance</th>
     </tr></thead><tbody>${rows.map(r=>{
       const phase=(HOUSING.meta.phases.find(p=>p.n===r.phase)||{}).name||r.phase;
       const dosePct=r.clinTarget?Math.round(r.clinHoursWk/r.clinTarget*100):100;
       return `<tr style="cursor:pointer" onclick="openResident(${r.id})">
-        <td><b>${esc(r.name)}</b></td>
+        <td><b>${esc(r.name)}</b> ${dqBadge(r.dob)}</td>
         <td>${r.house?esc(r.house.name):'<span class="hint">unassigned</span>'}${r.bed?' · '+esc(r.bed.label):''}</td>
         <td>${hLocPill(r.loc)}</td>
         <td>${esc(phase)}</td>
@@ -256,7 +272,9 @@ async function openResident(id){
             ${r.house?hLvl(r.house.level):''} ${hLocPill(r.loc)}
             <span class="chip">${r.los} days in house</span>
             ${r.soberDays?`<span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">${r.soberDays} days sober</span>`:''}
+            ${(()=>{ const c=dobCheck(r.dob); return `<span class="chip"${c.ok?'':' style="background:#fbe9d8;color:#a35a23;border-color:#f0c9a3"'}>DOB ${esc(r.dob||'—')}${c.age!=null?` · ${c.age}y`:''}</span>`; })()}
           </div>
+          ${(()=>{ const c=dobCheck(r.dob); return c.ok?'':`<div class="hint" style="margin-top:6px;color:#a35a23">⚠ ${esc(c.msg)} — <button class="btn btn-ghost btn-sm sans" style="padding:1px 8px" onclick="fixDob(${r.id})">Fix</button></div>`; })()}
         </div>
         <div class="toolbar no-print" style="margin:0;flex-wrap:wrap">
           <button class="btn btn-gold btn-sm sans" onclick="openReccapForm(${r.id})">Recovery capital</button>
@@ -382,6 +400,14 @@ function openDischargeForm(id){
     <div><label>Disposition</label><select id="dc_type"><option>Completed — graduated</option><option>Transitioned to independent housing</option><option>Stepped up to higher care</option><option>Left against advice</option><option>Asked to leave (rule violation)</option><option>Return to use</option></select></div></div>
     <label>Farewell note</label><textarea id="dc_note" rows="3" placeholder="The door is always open…"></textarea>`);
   save.onclick=async()=>{ try{ await api(`/housing/residents/${id}/discharge`,{method:'POST',body:JSON.stringify({date:$('dc_date').value,type:$('dc_type').value,note:$('dc_note').value})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
+}
+// Quick fix for a flagged date of birth (from the import data-quality warning).
+function fixDob(id){
+  const r=HOUSING.current||{};
+  const save=hmodal(`<h3>Correct date of birth</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">${esc(r.name||'Resident')} — current: <b>${esc(r.dob||'none')}</b>. ${esc((dobCheck(r.dob).msg)||'')}</p>
+    <label>Date of birth</label><input id="fd_dob" type="date" value="${esc(r.dob||'')}"/>`);
+  save.onclick=async()=>{ const dob=$('fd_dob').value; if(!dob){ alert('Pick a date.'); return; } try{ await api(`/housing/residents/${id}`,{method:'POST',body:JSON.stringify({dob})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
 }
 function openResidentEdit(id){
   const r=HOUSING.current||{};
@@ -846,4 +872,4 @@ async function openIncidentForm(presetResident){
 async function closeIncident(id){ const follow_up=prompt('Resolution / follow-up note:'); if(follow_up===null) return; try{ await api('/housing/incidents/'+id,{method:'POST',body:JSON.stringify({status:'closed',follow_up})}); loadHIncidents(); }catch(e){ alert(e.message); } }
 
 /* expose to window for inline handlers & app.js show() */
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob});

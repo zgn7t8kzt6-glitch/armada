@@ -1135,6 +1135,138 @@ async function loadOrders(){
 }
 async function orderStatus(id,status){ if(status==='received'&&!confirm('Receive this order? It will add the quantities back into inventory.')) return; try{ await api('/housing/orders/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadOrders(); }catch(e){ alert(e.message); } }
 
+/* ============================ ACTIVITIES & ENGAGEMENT ============================ */
+let ACT_CAT=null;
+function setActTab(t){ HOUSING.actTab=t; document.querySelectorAll('#actSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); loadActivities(); }
+function actStars(n){ n=+n||0; return '★★★★★'.slice(0,n)+'<span style="color:#cdd5cf">'+'★★★★★'.slice(0,5-n)+'</span>'; }
+const ACT_DIMCOLOR={Physical:'#5fb0c2',Social:'#c89b3c',Emotional:'#a86b8c',Spiritual:'#7d6ba8',Intellectual:'#5f86c2',Occupational:'#5fa37a',Environmental:'#7d9b6a',Financial:'#b3784a',Recreational:'#c06a52'};
+function actDimChip(d){ const c=ACT_DIMCOLOR[d]||'#6f7a75'; return d?`<span class="loc-pill" style="background:${c}">${esc(d)}</span>`:''; }
+async function loadActivities(){
+  const tab=HOUSING.actTab||'sched';
+  if(tab==='ideas') return loadActCatalog();
+  if(tab==='eng') return loadActEngagement();
+  return loadActSchedule();
+}
+function weekStart(d){ const x=new Date((d||new Date())); x.setDate(x.getDate()-x.getDay()); return x.toISOString().slice(0,10); }
+async function loadActSchedule(){
+  if(!HOUSING.actWeek) HOUSING.actWeek=weekStart();
+  const from=HOUSING.actWeek; const toD=new Date(from); toD.setDate(toD.getDate()+6); const to=toD.toISOString().slice(0,10);
+  let d; try{ d=await api(`/housing/activities/schedule?from=${from}&to=${to}`); }catch(e){ $('actBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('actKpis').innerHTML=`<div class="ret-card"><div class="n">${d.kpis.thisWeek}</div><div class="l">Scheduled this week</div></div>
+    <div class="ret-card ${d.kpis.needsCompletion?'rc-warn':''}"><div class="n">${d.kpis.needsCompletion}</div><div class="l">Past — mark complete</div></div>`;
+  // group by day across the 7-day week
+  const days=[]; for(let i=0;i<7;i++){ const dd=new Date(from); dd.setDate(dd.getDate()+i); days.push(dd.toISOString().slice(0,10)); }
+  const today=today();
+  const fmtDay=ds=>new Date(ds+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
+  const evCard=e=>{ const past=e.date<today && e.status==='planned';
+    return `<div class="cmd-row ${past?'cmd-row-flag':''}"><div class="cmd-row-main">
+      ${e.status==='completed'?'✅ ':e.status==='cancelled'?'✖ ':'🎉 '}<b>${esc(e.title)}</b> ${actDimChip(e.dimension)}
+      <span class="hint">${e.time?'· '+esc(e.time)+' ':''}${e.house?'· '+esc(e.house)+' ':''}${e.lead_staff?'· lead '+esc(e.lead_staff):''}</span>
+      ${e.status==='completed'?`<span class="hint"> · ${e.attendance??'?'} attended${e.avgEnjoyed!=null?` · enjoyed ${e.avgEnjoyed}/10`:''}</span>`:''}
+      ${e.status==='cancelled'?'<span class="hint"> · cancelled</span>':''}</div>
+      <div class="toolbar" style="margin:0;gap:6px">${e.status==='planned'?`<button class="btn btn-primary btn-sm sans" onclick="completeActivity(${e.id})">Mark done</button><button class="btn btn-ghost btn-sm sans" onclick="cancelActivity(${e.id})">Cancel</button>`:e.status==='completed'?`<button class="btn btn-ghost btn-sm sans" onclick="openActFeedback(${e.id})">+ Feedback</button>`:''}</div></div>`; };
+  const body=days.map(ds=>{ const evs=d.events.filter(e=>e.date===ds);
+    return `<div style="margin-bottom:14px"><div style="font-weight:700;color:var(--navy);border-bottom:2px solid var(--gold-soft,#eadfbf);padding-bottom:4px;margin-bottom:6px">${fmtDay(ds)}${ds===today?' <span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">today</span>':''}</div>
+      ${evs.length?evs.map(evCard).join(''):'<div class="hint" style="padding:2px 0 6px">No activities planned.</div>'}</div>`; }).join('');
+  $('actBody').innerHTML=`<div class="toolbar" style="justify-content:space-between;align-items:center">
+      <div class="toolbar" style="margin:0;gap:6px;align-items:center">
+        <button class="btn btn-ghost btn-sm sans" onclick="actWeekShift(-7)">← Prev</button>
+        <b>${fmtDay(from)} – ${fmtDay(to)}</b>
+        <button class="btn btn-ghost btn-sm sans" onclick="actWeekShift(7)">Next →</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="HOUSING.actWeek=weekStart();loadActSchedule()">This week</button>
+      </div>
+      <button class="btn btn-primary sans" onclick="openActPlan()">+ Plan activity</button></div>
+    <div style="margin-top:12px">${body}</div>`;
+}
+function actWeekShift(n){ const d=new Date(HOUSING.actWeek); d.setDate(d.getDate()+n); HOUSING.actWeek=d.toISOString().slice(0,10); loadActSchedule(); }
+async function actCatalog(){ if(!ACT_CAT){ try{ ACT_CAT=await api('/housing/activities/catalog'); }catch(e){ ACT_CAT={catalog:[],dimensions:[]}; } } return ACT_CAT; }
+async function openActPlan(catalogId){
+  await actCatalog(); await hMeta();
+  const houses=await api('/housing/houses').catch(()=>[]);
+  const catOpts=ACT_CAT.catalog.map(c=>`<option value="${c.id}" ${String(catalogId)===String(c.id)?'selected':''}>${esc(c.name)} — ${esc(c.dimension)} (${'★'.repeat(c.effectiveness)})</option>`).join('');
+  const houseOpts=houses.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('');
+  const save=hmodal(`<h3>Plan an activity</h3>
+    <label>From the idea library</label><select id="ap_cat"><option value="">— custom (type your own) —</option>${catOpts}</select>
+    <label style="margin-top:8px">Title (optional override)</label><input id="ap_title" placeholder="Leave blank to use the activity name"/>
+    <div class="grid2">
+      <div><label>Date</label><input id="ap_date" type="date" value="${HOUSING.actWeek||today()}"/></div>
+      <div><label>Time</label><input id="ap_time" type="time"/></div>
+      <div><label>House (optional)</label><select id="ap_house"><option value="">All / multiple</option>${houseOpts}</select></div>
+      <div><label>Lead staff</label><input id="ap_lead" value="${esc((ME&&ME.name)||'')}"/></div>
+      <div><label>Location</label><input id="ap_loc"/></div>
+      <div><label>Repeat weekly ×</label><input id="ap_weeks" type="number" min="1" max="12" value="1"/></div>
+    </div>`);
+  save.onclick=async()=>{ const weeks=+$('ap_weeks').value||1; const body={catalog_id:$('ap_cat').value||null,title:$('ap_title').value,date:$('ap_date').value,time:$('ap_time').value,house_id:$('ap_house').value||null,lead_staff:$('ap_lead').value,location:$('ap_loc').value,recurring:weeks>1?'weekly':'none',weeks};
+    if(!body.catalog_id && !body.title.trim()){ alert('Pick an activity or enter a title.'); return; }
+    if(!body.date){ alert('Pick a date.'); return; }
+    try{ await api('/housing/activities/schedule',{method:'POST',body:JSON.stringify(body)}); closeHModal(); HOUSING.actWeek=weekStart(body.date); loadActSchedule(); }catch(e){ alert(e.message); } };
+}
+async function completeActivity(id){
+  const residents=(await api('/housing/residents?status=active').catch(()=>[]));
+  const checks=residents.map(r=>`<label style="display:inline-flex;align-items:center;gap:5px;margin:2px 8px 2px 0;font-size:13px"><input type="checkbox" class="ac_att" value="${r.id}"/> ${esc(r.name)}</label>`).join('');
+  const save=hmodal(`<h3>Mark activity complete</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">Check who took part (this powers engagement tracking), then add a quick rating.</p>
+    <label>Who attended</label><div style="max-height:160px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:4px">${checks||'<span class="hint">No active residents.</span>'}</div>
+    <div class="grid2" style="margin-top:10px">
+      <div><label>Expected (optional)</label><input id="ac_exp" type="number" min="0"/></div>
+      <div><label>Overall enjoyment (0–10)</label><input id="ac_enj" type="number" min="0" max="10"/></div>
+      <div><label>Engagement (0–10)</label><input id="ac_eng" type="number" min="0" max="10"/></div>
+      <div><label style="display:flex;gap:6px;align-items:center;margin-top:22px"><input id="ac_rep" type="checkbox"/> Worth repeating</label></div>
+    </div>
+    <label>Notes</label><textarea id="ac_note" rows="2" placeholder="How did it go?"></textarea>`);
+  save.onclick=async()=>{ const attendees=[...document.querySelectorAll('.ac_att:checked')].map(c=>+c.value);
+    try{
+      await api('/housing/activities/schedule/'+id,{method:'POST',body:JSON.stringify({status:'completed',attendees,expected:$('ac_exp').value||null,note:$('ac_note').value})});
+      if($('ac_enj').value||$('ac_eng').value) await api('/housing/activities/schedule/'+id+'/feedback',{method:'POST',body:JSON.stringify({enjoyed:$('ac_enj').value||null,engaged:$('ac_eng').value||null,repeat:$('ac_rep').checked?1:0})});
+      closeHModal(); loadActSchedule();
+    }catch(e){ alert(e.message); } };
+}
+async function cancelActivity(id){ if(!confirm('Cancel this activity?')) return; try{ await api('/housing/activities/schedule/'+id,{method:'POST',body:JSON.stringify({status:'cancelled'})}); loadActSchedule(); }catch(e){ alert(e.message); } }
+function openActFeedback(id){
+  const save=hmodal(`<h3>Activity feedback</h3>
+    <div class="grid2"><div><label>Enjoyment (0–10)</label><input id="af_enj" type="number" min="0" max="10"/></div>
+    <div><label>Engagement (0–10)</label><input id="af_eng" type="number" min="0" max="10"/></div></div>
+    <label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input id="af_rep" type="checkbox"/> Worth repeating</label>
+    <label>Comment</label><textarea id="af_c" rows="2"></textarea>`);
+  save.onclick=async()=>{ try{ await api('/housing/activities/schedule/'+id+'/feedback',{method:'POST',body:JSON.stringify({enjoyed:$('af_enj').value||null,engaged:$('af_eng').value||null,repeat:$('af_rep').checked?1:0,comment:$('af_c').value})}); closeHModal(); loadActSchedule(); }catch(e){ alert(e.message); } };
+}
+async function loadActCatalog(){
+  const d=await actCatalog();
+  $('actKpis').innerHTML=`<div class="ret-card"><div class="n">${d.catalog.length}</div><div class="l">Activity ideas</div></div>
+    <div class="ret-card"><div class="n">${d.catalog.filter(c=>c.effectiveness>=5).length}</div><div class="l">Top-rated (★5)</div></div>`;
+  const byDim={}; d.catalog.forEach(c=>{ (byDim[c.dimension]=byDim[c.dimension]||[]).push(c); });
+  const body=Object.keys(byDim).map(dim=>`<div style="margin-bottom:16px"><div style="margin-bottom:6px">${actDimChip(dim)}</div>
+    <div class="r360-grid">${byDim[dim].map(c=>`<div class="card" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(c.name)}</b><span style="color:var(--gold,#c89b3c);font-size:12px">${actStars(c.effectiveness)}</span></div>
+      <p class="sub sans" style="margin:4px 0">${esc(c.description||'')}</p>
+      <div class="hint">Builds <b>${esc(c.recovery_domain||'')}</b> · ${esc(c.cost)} · ${esc(c.setting)} · ${c.duration_min}min</div>
+      ${c.evidence?`<div class="hint" style="margin-top:4px;font-style:italic">📊 ${esc(c.evidence)}</div>`:''}
+      <div class="toolbar" style="margin-top:8px"><button class="btn btn-primary btn-sm sans" onclick="openActPlan(${c.id})">Schedule this</button></div>
+    </div>`).join('')}</div></div>`).join('');
+  $('actBody').innerHTML=`<p class="hint" style="margin-bottom:10px">Research-based ideas across SAMHSA's 8 dimensions of wellness. ★ = how strongly the evidence supports it for recovery. Tap <b>Schedule this</b> to add it to the program.</p>${body}`;
+}
+async function loadActEngagement(){
+  let d; try{ d=await api('/housing/activities/engagement?days=30'); }catch(e){ $('actBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const k=d.kpis;
+  $('actKpis').innerHTML=`<div class="ret-card"><div class="n">${k.held}</div><div class="l">Activities held (30d)</div></div>
+    <div class="ret-card"><div class="n">${k.avgAttendance}</div><div class="l">Avg attendance</div></div>
+    <div class="ret-card"><div class="n">${k.avgEnjoyed??'—'}</div><div class="l">Avg enjoyment /10</div></div>
+    <div class="ret-card"><div class="n">${k.avgEngaged??'—'}</div><div class="l">Avg engagement /10</div></div>
+    <div class="ret-card ${k.lowEngaged?'rc-high':''}"><div class="n">${k.lowEngaged}</div><div class="l">Isolating residents</div></div>`;
+  const top=d.topActivities.map((t,i)=>`<tr><td>${i+1}. <b>${esc(t.name)}</b> ${actDimChip(t.dimension)}</td><td style="text-align:right">${t.held}</td><td style="text-align:right">${t.avgAttendance}</td><td style="text-align:right">${t.enjoyed??'—'}</td><td style="text-align:right">${t.engaged??'—'}</td></tr>`).join('');
+  const low=d.lowEngaged.map(r=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">⚠️ <b>${esc(r.name)}</b> <span class="hint">· ${r.count} activit${r.count===1?'y':'ies'} in 30d · ${r.los}d in house</span></div><button class="btn btn-ghost btn-sm sans" onclick="openResident(${r.id})">Open</button></div>`).join('');
+  $('actBody').innerHTML=`
+    <div class="r360-grid">
+      <div class="card"><h3>Most effective activities</h3>
+        <table class="tbl"><thead><tr><th>Activity</th><th style="text-align:right">Held</th><th style="text-align:right">Avg att.</th><th style="text-align:right">Enjoy</th><th style="text-align:right">Engage</th></tr></thead>
+        <tbody>${top||'<tr><td colspan=5 class="hint">No completed activities yet — run some and mark them done.</td></tr>'}</tbody></table>
+        <div class="hint" style="margin-top:6px">Completion rate ${k.completionRate}% · ${k.totalAttendance} total attendances · repeat-worthy ${k.repeatRate}%</div></div>
+      <div class="card"><h3>Isolation watch — retention risk</h3>
+        <p class="sub sans" style="margin:.2em 0 .8em">Residents here a week+ who've joined ≤1 activity in 30 days. Boredom and isolation are top early-exit drivers — reach out and pull them in.</p>
+        ${low||'<div class="hint">No one flagged — everyone is participating. 🎉</div>'}</div>
+    </div>`;
+}
+
 /* ============================ DAILY MOVEMENT ============================ */
 let MOVE=null;
 async function loadDailyMovement(){
@@ -1179,4 +1311,4 @@ async function openMovementSettings(){
   save.onclick=async()=>{ try{ await api('/housing/daily-movement/settings',{method:'POST',body:JSON.stringify({clinical:$('mv_clin').value,leadership:$('mv_lead').value,auto:$('mv_auto').checked,hour:+$('mv_hour').value,alerts:$('mv_alerts').checked})}); closeHModal(); loadDailyMovement(); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

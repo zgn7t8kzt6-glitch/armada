@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260622D" />
+<link rel="stylesheet" href="/styles.css?v=20260622E" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -125,6 +125,7 @@
     <button data-view="hincidents">Incident Reports</button>
     <button data-view="voice">Resident Voice &amp; Kiosk</button>
     <button data-view="hmaint">Maintenance &amp; Supplies</button>
+    <button data-view="activities">Activities &amp; Engagement</button>
     <button data-view="movement">Daily Movement</button>
     <button data-view="coordination">Clinical Coordination</button>
     <button data-view="employment">Employment</button>
@@ -2308,6 +2309,21 @@
       </div>
     </section>
 
+    <section id="activities" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🎉 Activities &amp; Engagement</h3><p class="sub sans" style="margin:0">The weekly program that keeps residents engaged — the best antidote to boredom and isolation, which drive early exits. Plan it, run it, and measure what works.</p></div>
+          <span class="seg" id="actSeg">
+            <button class="on" data-t="sched" onclick="setActTab('sched')">Schedule</button>
+            <button data-t="ideas" onclick="setActTab('ideas')">Activity ideas</button>
+            <button data-t="eng" onclick="setActTab('eng')">Engagement</button>
+          </span>
+        </div>
+        <div id="actKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div id="actBody" style="margin-top:14px"></div>
+      </div>
+    </section>
+
     <section id="movement" class="view">
       <div class="card">
         <div class="cmd-hero-row">
@@ -2336,7 +2352,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260622D"></script>
-<script src="/housing.js?v=20260622D"></script>
+<script src="/app.js?v=20260622E"></script>
+<script src="/housing.js?v=20260622E"></script>
 </body>
 </html>

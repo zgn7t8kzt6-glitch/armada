@@ -69,6 +69,7 @@ function home(){
     <label>I am</label>${residentSelect('klist')}
     <button class="kbtn" onclick="checkinView()">🌅  Daily check-in</button>
     <button class="kbtn" onclick="reqView()">🛎  Request something / talk to staff</button>
+    <button class="kbtn" onclick="rateActView()">🎉  Rate an activity</button>
     ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}
     <button class="kbtn" onclick="ideaView()">💡  Share an idea</button>
     <div style="margin-top:18px;text-align:center">
@@ -159,6 +160,34 @@ async function sendSurvey(id){
   const rid=$('klist')?$('klist').value:'';
   try{ await kapi('survey',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,survey_id:id,resident_id:rid||null,answers})});
     thanks('Thank you for sharing. It helps us make this a better home.'); }catch(e){ alert(e.message); }
+}
+
+/* ---- Rate an activity ---- */
+let ACT_EVENTS=[];
+async function rateActView(){
+  VIEW='rateact'; WHO=who();
+  let ev=[]; try{ ev=(await kapi('activities?code='+encodeURIComponent(CODE))).events||[]; }catch(e){}
+  ACT_EVENTS=ev;
+  if(!ev.length){ $('kview').innerHTML=`<h1>Rate an activity 🎉</h1><p class="ksub">No recent activities to rate yet. Check back after the next one!</p><button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`; return; }
+  $('kview').innerHTML=`<h1>How was it? 🎉</h1>
+    <p class="ksub">Tell us about a recent activity so we can do more of what you love.</p>
+    <label>Your name (optional)</label>${residentSelect('klist')}
+    <label style="margin-top:10px;display:block">Which activity?</label>
+    <select id="ra_ev">${ev.map(e=>`<option value="${e.id}">${esc(e.title)} · ${esc(e.date)}</option>`).join('')}</select>
+    <label style="margin-top:14px;display:block">Did you enjoy it?</label>${scaleRow('enjoyed','Not really','Loved it')}
+    <label style="margin-top:14px;display:block">Did you feel engaged / part of it?</label>${scaleRow('engaged','Not at all','Totally')}
+    <label style="margin-top:14px;display:block">Want to do it again?</label>${ynRow('repeat')}
+    <label style="margin-top:14px;display:block">Anything else? (optional)</label><input id="ra_c" placeholder="e.g. loved it, do it more often"/>
+    <div id="raerr" class="err" style="margin-top:6px"></div>
+    <button class="btn big" style="width:100%;margin-top:14px;background:#235056;color:#fff" onclick="submitRateAct()">Send</button>
+    <button class="kbtn" style="text-align:center;margin-top:10px" onclick="home()">← Back</button>`;
+}
+async function submitRateAct(){
+  const g=k=>{const r=document.querySelector('.cq[data-k="'+k+'"]'); return r&&r.dataset.val!=null?+r.dataset.val:null;};
+  const rid=$('klist')?$('klist').value:'';
+  const body={code:CODE,event_id:+$('ra_ev').value,resident_id:rid||null,enjoyed:g('enjoyed'),engaged:g('engaged'),repeat:g('repeat'),comment:$('ra_c').value};
+  if(body.enjoyed==null&&body.engaged==null){ $('raerr').textContent='Tap at least one answer.'; return; }
+  try{ await kapi('activity-feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); thanks('Thank you! Your feedback shapes what we do next.'); }catch(e){ $('raerr').textContent=e.message; }
 }
 
 /* ---- Idea ---- */

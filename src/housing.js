@@ -362,6 +362,27 @@ export function housingSchema() {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER, item_id INTEGER, name TEXT, qty REAL, unit_cost REAL DEFAULT 0
   );
+  -- Activities & engagement: a curated catalog, a schedule staff complete, and
+  -- post-activity feedback — the "best sober living" / anti-boredom program.
+  CREATE TABLE IF NOT EXISTS housing_activity_catalog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT, dimension TEXT, recovery_domain TEXT, description TEXT,
+    effectiveness INTEGER DEFAULT 3, cost TEXT DEFAULT 'free', setting TEXT DEFAULT 'either',
+    duration_min INTEGER DEFAULT 60, evidence TEXT, active INTEGER DEFAULT 1,
+    created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_activity_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    catalog_id INTEGER, title TEXT, dimension TEXT, house_id INTEGER,
+    date TEXT, time TEXT, location TEXT, lead_staff TEXT, recurring TEXT DEFAULT 'none',
+    status TEXT DEFAULT 'planned', attendance INTEGER, expected INTEGER, attendees TEXT,
+    completed_by TEXT, completed_at TEXT, note TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_activity_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER, resident_id INTEGER, enjoyed INTEGER, engaged INTEGER,
+    repeat INTEGER, comment TEXT, source TEXT DEFAULT 'staff', created TEXT DEFAULT (datetime('now'))
+  );
   `);
   // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
   try { db.exec(`ALTER TABLE housing_houses ADD COLUMN program TEXT`); } catch { /* already exists */ }
@@ -762,6 +783,53 @@ function seedHousingSupplies() {
 // Low = at or below par. Used for the reorder suggestion.
 const isLow = (it) => (it.qty ?? 0) <= (it.par ?? 0);
 
+// Activities & engagement — organized by SAMHSA's 8 Dimensions of Wellness, with
+// research-informed effectiveness (1–5) and the recovery-capital domain each
+// builds. Grounded in social-model recovery evidence: exercise lowers cravings,
+// peer connection is the top protective factor, service/"helper therapy" boosts
+// self-worth, mutual-aid attendance tracks with abstinence, and sober fun
+// rebuilds the reward system.
+const ACTIVITY_DIMENSIONS = ['Physical', 'Social', 'Emotional', 'Spiritual', 'Intellectual', 'Occupational', 'Environmental', 'Financial', 'Recreational'];
+function seedHousingActivities() {
+  if (db.prepare(`SELECT COUNT(*) c FROM housing_activity_catalog`).get().c) return;
+  const ins = db.prepare(`INSERT INTO housing_activity_catalog (name,dimension,recovery_domain,description,effectiveness,cost,setting,duration_min,evidence) VALUES (?,?,?,?,?,?,?,?,?)`);
+  // [name, dimension, recovery_domain, eff, cost, setting, dur, evidence, description]
+  const A = [
+    ['Morning walk / run club', 'Physical', 'health', 5, 'free', 'outdoor', 45, 'Aerobic exercise measurably reduces cravings and improves mood & sleep.', 'Start the day with a group walk or run.'],
+    ['Pickup basketball', 'Physical', 'support', 5, 'free', 'outdoor', 60, 'Weekly team sport builds fitness and friendships at once.', 'Recurring house game — residents consistently love it.'],
+    ['Yoga / stretch', 'Physical', 'coping', 4, 'low', 'indoor', 45, 'Yoga lowers stress reactivity and craving intensity.', 'Guided yoga or stretching for stress relief.'],
+    ['Gym / strength training', 'Physical', 'health', 4, '$$', 'indoor', 60, 'Structured exercise builds routine, confidence and health.', 'Group trip to the gym.'],
+    ['Hiking trip', 'Physical', 'purpose', 5, 'low', 'outdoor', 180, 'Nature + exercise produces strong mood and stress benefits.', 'Half-day hike at a local trail or park.'],
+    ['Bowling night', 'Recreational', 'support', 4, '$$', 'indoor', 90, 'Friendly competition is an easy, high-turnout sober outing.', 'A house favorite — lighthearted and social.'],
+    ['Volleyball / soccer', 'Physical', 'support', 4, 'free', 'outdoor', 75, 'Team play fosters teamwork and healthy competition.', 'Pickup match or mini-tournament.'],
+    ['Game night', 'Social', 'support', 4, 'free', 'indoor', 90, 'Low-cost connection that directly combats isolation.', 'Board games, cards, tournaments.'],
+    ['Movie night', 'Social', 'support', 3, 'free', 'indoor', 120, 'Easy shared downtime that builds belonging.', 'Group film with snacks; residents vote.'],
+    ['House BBQ / cookout', 'Social', 'community', 4, 'low', 'outdoor', 120, 'Shared meals are a powerful house-bonding ritual.', 'Cookout where the whole house connects.'],
+    ['Bonfire & storytelling', 'Social', 'support', 4, 'low', 'outdoor', 90, 'Warm, inclusive setting for honest connection.', 'Fire, music, and sharing.'],
+    ['Karaoke / talent night', 'Emotional', 'support', 3, 'low', 'indoor', 90, 'Playful self-expression and laughter reduce stress.', 'Low-stakes fun that draws people out.'],
+    ['Community dinner (cook together)', 'Occupational', 'community', 4, 'low', 'indoor', 120, 'Cooking nutritious meals builds skills and fellowship.', 'Plan, cook and eat together.'],
+    ['Mindfulness meditation', 'Emotional', 'coping', 4, 'free', 'indoor', 30, 'Mindfulness-based relapse prevention reduces relapse risk.', 'Guided meditation / breathing.'],
+    ['Gratitude circle / check-in', 'Emotional', 'commitment', 4, 'free', 'indoor', 30, 'Daily check-ins build emotional awareness and connection.', 'Round-robin gratitude and how-are-you.'],
+    ['Mutual-aid meeting (AA/NA/SMART)', 'Spiritual', 'commitment', 5, 'free', 'either', 60, 'Mutual-aid attendance is strongly associated with abstinence.', 'On-site or transport to a meeting.'],
+    ['Journaling workshop', 'Emotional', 'coping', 3, 'free', 'indoor', 45, 'Expressive writing supports emotion regulation.', 'Prompt-based reflective writing.'],
+    ['Art / painting / pottery', 'Emotional', 'purpose', 4, 'low', 'indoor', 90, 'Creative expression aids emotion regulation and identity.', 'Hands-on creative session.'],
+    ['Music jam / open mic', 'Emotional', 'purpose', 3, 'low', 'indoor', 90, 'Creative play and performance build confidence.', 'Instruments, singing, open mic.'],
+    ['Life-skills class', 'Occupational', 'community', 4, 'free', 'indoor', 60, 'Independent-living skills raise recovery capital.', 'Cooking, time management, household skills.'],
+    ['Job-readiness / resume workshop', 'Occupational', 'purpose', 4, 'free', 'indoor', 60, 'Employment is one of the strongest recovery-capital drivers.', 'Resumes, mock interviews, job search.'],
+    ['Financial literacy / budgeting', 'Financial', 'community', 4, 'free', 'indoor', 60, 'Money skills reduce a major relapse stressor.', 'Budgeting, banking, saving basics.'],
+    ['Recovery-literature book club', 'Intellectual', 'commitment', 3, 'free', 'indoor', 60, 'Shared reading reinforces recovery identity.', 'Read and discuss recovery literature.'],
+    ['Guest speaker / education night', 'Intellectual', 'purpose', 3, 'free', 'indoor', 60, 'New knowledge and role models expand horizons.', 'Invite alumni or community speakers.'],
+    ['Community service / volunteer day', 'Occupational', 'community', 5, 'free', 'outdoor', 180, '"Helper therapy" — giving back boosts self-worth and sobriety.', 'Volunteer at a local nonprofit.'],
+    ['Park / neighborhood cleanup', 'Environmental', 'community', 4, 'free', 'outdoor', 120, 'Service + environment care builds pride and purpose.', 'Litter pickup or beautification.'],
+    ['House beautification / garden', 'Environmental', 'housing', 4, 'low', 'outdoor', 90, 'Caring for the home builds pride of place.', 'Plant, paint, organize the house.'],
+    ['Fishing trip', 'Recreational', 'coping', 4, 'low', 'outdoor', 180, 'Calming nature activity residents reliably enjoy.', 'Relaxed day fishing.'],
+    ['Beach / lake day', 'Recreational', 'support', 4, 'low', 'outdoor', 240, 'Shared recreation rebuilds the capacity for sober fun.', 'Group outing to water.'],
+    ['Rock climbing / paddleboarding', 'Recreational', 'coping', 4, '$$', 'outdoor', 150, 'Novel adventure activities boost mood and confidence.', 'Guided adventure outing.'],
+  ];
+  // columns: name,dimension,recovery_domain,description,effectiveness,cost,setting,duration_min,evidence
+  for (const a of A) ins.run(a[0], a[1], a[2], a[8], a[3], a[4], a[5], a[6], a[7]);
+}
+
 /* ───────────── Branded email shell (mobile-first, email-client-safe) ───────────── */
 const SL_BRAND = 'Hilltop Recovery Home';
 const EM = { ink: '#1f2d2b', teal: '#235056', teal2: '#2d6b6b', sage: '#7d9b6a', sageBg: '#eef3e8', line: '#e2e8df', soft: '#6b7b78', paper: '#ffffff', wash: '#f4f7f3', red: '#b3382f', redBg: '#fbeceb', gold: '#bf8f3a' };
@@ -896,6 +964,7 @@ export function mountHousing(app) {
   } catch (e) { console.error('[housing] seed:', e.message); }
   try { seedHousingSurveys(); } catch (e) { console.error('[housing] survey seed:', e.message); }
   try { seedHousingSupplies(); } catch (e) { console.error('[housing] supply seed:', e.message); }
+  try { seedHousingActivities(); } catch (e) { console.error('[housing] activity seed:', e.message); }
 
   /* ---- Sober Living resident kiosk (separate code; NOT behind staff auth) ---- */
   app.get('/api/sl-kiosk/data', requireSlKiosk, (req, res) => {
@@ -940,6 +1009,18 @@ export function mountHousing(app) {
     const rid = Number(db.prepare(`INSERT INTO housing_survey_responses (survey_id,resident_id) VALUES (?,?)`).run(survey.id, b.resident_id || null).lastInsertRowid);
     const ins = db.prepare(`INSERT INTO housing_survey_answers (response_id,question_id,value_num,value_text) VALUES (?,?,?,?)`);
     for (const a of b.answers) { if (a.question_id == null) continue; ins.run(rid, a.question_id, (a.num === 0 || a.num) ? Number(a.num) : null, a.text?.trim() || null); }
+    res.json({ ok: true });
+  });
+  // Residents rate recent activities from the kiosk (closes the engagement loop).
+  app.get('/api/sl-kiosk/activities', requireSlKiosk, (req, res) => {
+    const since = (() => { const d = new Date(); d.setDate(d.getDate() - 3); return d.toISOString().slice(0, 10); })();
+    res.json({ events: db.prepare(`SELECT id, title, date FROM housing_activity_events WHERE date>=? AND date<=? AND status!='cancelled' ORDER BY date DESC, id DESC LIMIT 12`).all(since, todayStr()) });
+  });
+  app.post('/api/sl-kiosk/activity-feedback', requireSlKiosk, (req, res) => {
+    const b = req.body || {};
+    if (!b.event_id) return res.status(400).json({ error: 'Pick an activity.' });
+    db.prepare(`INSERT INTO housing_activity_feedback (event_id,resident_id,enjoyed,engaged,repeat,comment,source) VALUES (?,?,?,?,?,?, 'kiosk')`)
+      .run(num(b.event_id), b.resident_id ? num(b.resident_id) : null, b.enjoyed != null ? num(b.enjoyed) : null, b.engaged != null ? num(b.engaged) : null, b.repeat != null ? num(b.repeat) : null, (b.comment || '').trim() || null);
     res.json({ ok: true });
   });
 
@@ -1465,6 +1546,135 @@ export function mountHousing(app) {
     }, 60 * 1000);
     app._housingMovementTimer.unref?.();
   }
+
+  // ---- Activities & engagement (catalog, schedule, completion, feedback, analytics) ----
+  app.get('/api/housing/activities/catalog', requireAuth, (req, res) => {
+    const rows = db.prepare(`SELECT * FROM housing_activity_catalog WHERE active=1 ORDER BY effectiveness DESC, dimension, name`).all();
+    res.json({ catalog: rows, dimensions: ACTIVITY_DIMENSIONS });
+  });
+  app.post('/api/housing/activities/catalog', requireAuth, (req, res) => {
+    const b = req.body || {};
+    if (b.id) {
+      const sets = []; const vals = [];
+      for (const c of ['name', 'dimension', 'recovery_domain', 'description', 'effectiveness', 'cost', 'setting', 'duration_min', 'evidence', 'active']) if (b[c] !== undefined) { sets.push(`${c}=?`); vals.push(b[c]); }
+      if (sets.length) { vals.push(b.id); db.prepare(`UPDATE housing_activity_catalog SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+    } else {
+      if (!(b.name || '').trim()) return res.status(400).json({ error: 'Activity name?' });
+      db.prepare(`INSERT INTO housing_activity_catalog (name,dimension,recovery_domain,description,effectiveness,cost,setting,duration_min,evidence) VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(b.name.trim(), b.dimension || 'Recreational', b.recovery_domain || 'support', b.description || null, num(b.effectiveness, 3), b.cost || 'free', b.setting || 'either', num(b.duration_min, 60), b.evidence || null);
+    }
+    res.json({ ok: true });
+  });
+
+  // Schedule (calendar of events). from/to are YYYY-MM-DD; defaults to this week+.
+  app.get('/api/housing/activities/schedule', requireAuth, (req, res) => {
+    const from = req.query.from || todayStr();
+    const to = req.query.to || (() => { const d = new Date(from); d.setDate(d.getDate() + 28); return d.toISOString().slice(0, 10); })();
+    const rows = db.prepare(`SELECT e.*, h.name house, c.dimension cat_dimension FROM housing_activity_events e
+      LEFT JOIN housing_houses h ON h.id=e.house_id LEFT JOIN housing_activity_catalog c ON c.id=e.catalog_id
+      WHERE e.date>=? AND e.date<=? ORDER BY e.date, e.time`).all(from, to).map(e => {
+        const fb = db.prepare(`SELECT COUNT(*) n, AVG(enjoyed) e, AVG(engaged) g FROM housing_activity_feedback WHERE event_id=?`).get(e.id);
+        return { ...e, feedbackN: fb.n, avgEnjoyed: fb.e != null ? +fb.e.toFixed(1) : null, avgEngaged: fb.g != null ? +fb.g.toFixed(1) : null };
+      });
+    const today = todayStr();
+    res.json({
+      from, to, events: rows,
+      kpis: {
+        upcoming: rows.filter(e => e.status === 'planned' && e.date >= today).length,
+        thisWeek: rows.filter(e => e.date >= today && e.date <= (() => { const d = new Date(today); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })()).length,
+        needsCompletion: rows.filter(e => e.status === 'planned' && e.date < today).length,
+      },
+    });
+  });
+  app.post('/api/housing/activities/schedule', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const cat = b.catalog_id ? db.prepare(`SELECT * FROM housing_activity_catalog WHERE id=?`).get(num(b.catalog_id)) : null;
+    const title = (b.title || cat?.name || '').trim();
+    if (!title) return res.status(400).json({ error: 'Pick an activity or enter a title.' });
+    if (!b.date) return res.status(400).json({ error: 'Pick a date.' });
+    const dim = b.dimension || cat?.dimension || null;
+    const dates = [b.date];
+    // simple recurrence: weekly for N weeks
+    if (b.recurring === 'weekly' && num(b.weeks) > 1) { for (let i = 1; i < Math.min(26, num(b.weeks)); i++) { const d = new Date(b.date); d.setDate(d.getDate() + 7 * i); dates.push(d.toISOString().slice(0, 10)); } }
+    const ins = db.prepare(`INSERT INTO housing_activity_events (catalog_id,title,dimension,house_id,date,time,location,lead_staff,recurring) VALUES (?,?,?,?,?,?,?,?,?)`);
+    for (const d of dates) ins.run(cat?.id || null, title, dim, b.house_id ? num(b.house_id) : null, d, b.time || null, b.location || null, b.lead_staff || null, b.recurring || 'none');
+    audit({ user: req.user, action: 'HOUSING_ACTIVITY_PLAN', detail: `${title} ×${dates.length}`, ip: req.ip });
+    res.json({ ok: true, created: dates.length });
+  });
+  app.post('/api/housing/activities/schedule/:id', requireAuth, (req, res) => {
+    const cur = db.prepare(`SELECT * FROM housing_activity_events WHERE id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    if (b.status === 'completed') {
+      const attendees = Array.isArray(b.attendees) ? b.attendees.map(Number).filter(Boolean) : null;
+      db.prepare(`UPDATE housing_activity_events SET status='completed', attendance=?, expected=?, attendees=?, note=?, completed_by=?, completed_at=datetime('now') WHERE id=?`)
+        .run(attendees ? attendees.length : (b.attendance != null ? num(b.attendance) : null), b.expected != null ? num(b.expected) : null, attendees ? J(attendees) : null, (b.note || '').trim() || null, req.user.name, req.params.id);
+      audit({ user: req.user, action: 'HOUSING_ACTIVITY_DONE', detail: cur.title, ip: req.ip });
+    } else if (b.status === 'cancelled') {
+      db.prepare(`UPDATE housing_activity_events SET status='cancelled', note=? WHERE id=?`).run((b.note || '').trim() || null, req.params.id);
+    } else {
+      const sets = []; const vals = [];
+      for (const c of ['title', 'date', 'time', 'location', 'lead_staff', 'house_id', 'dimension']) if (b[c] !== undefined) { sets.push(`${c}=?`); vals.push(b[c] === '' ? null : b[c]); }
+      if (sets.length) { vals.push(req.params.id); db.prepare(`UPDATE housing_activity_events SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+    }
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/activities/schedule/:id/feedback', requireAuth, (req, res) => {
+    const ev = db.prepare(`SELECT id FROM housing_activity_events WHERE id=?`).get(req.params.id);
+    if (!ev) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    db.prepare(`INSERT INTO housing_activity_feedback (event_id,resident_id,enjoyed,engaged,repeat,comment,source) VALUES (?,?,?,?,?,?,?)`)
+      .run(ev.id, b.resident_id ? num(b.resident_id) : null, b.enjoyed != null ? num(b.enjoyed) : null, b.engaged != null ? num(b.engaged) : null, b.repeat != null ? num(b.repeat) : null, (b.comment || '').trim() || null, b.source || 'staff');
+    res.json({ ok: true });
+  });
+
+  // Engagement analytics — what works, attendance, and who's isolating (retention).
+  app.get('/api/housing/activities/engagement', requireAuth, (req, res) => {
+    const days = Math.min(180, Math.max(7, num(req.query.days, 30)));
+    const since = (() => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().slice(0, 10); })();
+    const done = db.prepare(`SELECT * FROM housing_activity_events WHERE status='completed' AND date>=?`).all(since);
+    const planned = db.prepare(`SELECT COUNT(*) c FROM housing_activity_events WHERE date>=? AND date<=?`).get(since, todayStr()).c;
+    const fb = db.prepare(`SELECT f.* FROM housing_activity_feedback f JOIN housing_activity_events e ON e.id=f.event_id WHERE e.date>=?`).all(since);
+    const avg = (arr, k) => { const v = arr.map(x => x[k]).filter(x => x != null); return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : null; };
+    const totalAtt = done.reduce((a, e) => a + (e.attendance || 0), 0);
+    // most effective: by feedback score (enjoyed+engaged) weighted by responses, joined to catalog
+    const byActivity = {};
+    for (const e of done) {
+      const key = e.catalog_id || ('t:' + e.title);
+      const o = byActivity[key] = byActivity[key] || { name: e.title, dimension: e.dimension, held: 0, attendance: 0, enjoyed: [], engaged: [] };
+      o.held++; o.attendance += (e.attendance || 0);
+    }
+    for (const f of fb) {
+      const e = done.find(x => x.id === f.event_id); if (!e) continue;
+      const key = e.catalog_id || ('t:' + e.title); const o = byActivity[key]; if (!o) continue;
+      if (f.enjoyed != null) o.enjoyed.push(f.enjoyed); if (f.engaged != null) o.engaged.push(f.engaged);
+    }
+    const top = Object.values(byActivity).map(o => ({
+      name: o.name, dimension: o.dimension, held: o.held, attendance: o.attendance,
+      avgAttendance: o.held ? +(o.attendance / o.held).toFixed(1) : 0,
+      enjoyed: o.enjoyed.length ? +(o.enjoyed.reduce((a, b) => a + b, 0) / o.enjoyed.length).toFixed(1) : null,
+      engaged: o.engaged.length ? +(o.engaged.reduce((a, b) => a + b, 0) / o.engaged.length).toFixed(1) : null,
+      responses: o.enjoyed.length + o.engaged.length,
+    })).sort((a, b) => (b.enjoyed || 0) + (b.engaged || 0) + b.avgAttendance / 5 - ((a.enjoyed || 0) + (a.engaged || 0) + a.avgAttendance / 5));
+    // per-resident participation from attendee rosters → isolation flag (retention)
+    const part = {};
+    for (const e of done) { const ids = P(e.attendees, []); for (const id of (ids || [])) part[id] = (part[id] || 0) + 1; }
+    const active = db.prepare(`SELECT id, name, move_in FROM housing_residents WHERE status='active' ORDER BY name`).all();
+    const residents = active.map(r => ({ id: r.id, name: r.name, count: part[r.id] || 0, los: losDays(r.move_in) }))
+      .sort((a, b) => a.count - b.count);
+    const lowEngaged = residents.filter(r => r.count <= 1 && r.los >= 7); // isolating despite a week+ in house
+    res.json({
+      days,
+      kpis: {
+        held: done.length, planned, completionRate: planned ? Math.round(done.length / planned * 100) : 0,
+        totalAttendance: totalAtt, avgAttendance: done.length ? +(totalAtt / done.length).toFixed(1) : 0,
+        avgEnjoyed: avg(fb, 'enjoyed'), avgEngaged: avg(fb, 'engaged'),
+        repeatRate: fb.length ? Math.round(fb.filter(f => f.repeat === 1).length / fb.filter(f => f.repeat != null).length * 100) || 0 : 0,
+        lowEngaged: lowEngaged.length,
+      },
+      topActivities: top.slice(0, 12), residents, lowEngaged,
+    });
+  });
 
   // ---- Recovery capital ----
   app.post('/api/housing/residents/:id/reccap', requireAuth, (req, res) => {

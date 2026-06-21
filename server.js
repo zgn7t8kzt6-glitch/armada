@@ -121,6 +121,99 @@ setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
 const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach'];
+
+/* ───────── Selection over hiring (Horst Schulze): role profiles + structured interview ───────── */
+const HIRING_STAGES = ['Applied', 'Phone screen', 'Interview', 'References', 'Offer', 'Hired', 'Passed'];
+const HOUSING_ROLE_SET = ['Housing Director', 'House Manager', 'Recovery Coach'];
+const sideOfRole = (role) => (HOUSING_ROLE_SET.includes(role) ? 'hilltop' : 'detox');
+const rolesForSide = (side) => JOB_ROLES.filter((r) => (side === 'hilltop' ? HOUSING_ROLE_SET.includes(r) : !HOUSING_ROLE_SET.includes(r)));
+const jparse = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
+// The defining talents every Armada / Hilltop hire must have, whatever the role.
+const BASE_QUALITIES = [
+  { name: 'Empathy & warmth', desc: 'Genuinely cares; reads how people feel and responds with kindness.' },
+  { name: 'Service ethic', desc: 'Finds real meaning in serving others — not just doing a job.' },
+  { name: 'Conscientiousness', desc: 'Reliable and organized; follows through without being chased.' },
+  { name: 'Integrity', desc: 'Honest, and does the right thing when no one is watching.' },
+  { name: 'Resilience & positivity', desc: 'Stays steady and hopeful under stress; recovers quickly.' },
+  { name: 'Team spirit', desc: 'Makes the people around them better; humble and collaborative.' },
+];
+const BASE_INTERVIEW = [
+  { q: 'Tell me about a time you went out of your way for someone who could never repay you.', look: 'Service ethic, generosity' },
+  { q: 'Describe a moment you noticed someone struggling before they said a word. What did you do?', look: 'Empathy, awareness' },
+  { q: 'Tell me about a hard commitment you kept anyway.', look: 'Conscientiousness, integrity' },
+  { q: 'Walk me through a high-pressure situation and how you stayed composed.', look: 'Resilience' },
+  { q: 'When did you make a teammate better?', look: 'Team spirit' },
+  { q: 'Why this work — what draws you to serving people in recovery?', look: 'Purpose & fit' },
+];
+const ROLE_SPECIFICS = {
+  'BHT / Tech': { purpose: 'Be the steady, caring presence on the unit — keep clients safe, seen, and supported every shift.',
+    qualities: [{ name: 'Calm under crisis', desc: 'De-escalates and stays grounded when things get intense.' }, { name: 'Observant', desc: 'Notices changes in mood, behavior, and safety risks early.' }],
+    responsibilities: ['Rounds, safety checks & documentation', 'De-escalation and milieu management', 'Anticipate and meet client needs', 'Accurate shift handoffs'],
+    interview: [{ q: 'A client becomes agitated and raises their voice at you — walk me through what you do.', look: 'De-escalation, calm' }, { q: 'How do you preserve dignity during tasks like searches or vitals?', look: 'Respect, warmth' }] },
+  'Nurse': { purpose: 'Deliver safe, compassionate clinical care and protect every client through the medical side of detox.',
+    qualities: [{ name: 'Clinical rigor', desc: 'Precise with meds, vitals, and protocols.' }, { name: 'Composure', desc: 'Steady in medical urgency.' }],
+    responsibilities: ['Medication administration & observation', 'Assessment, vitals & withdrawal monitoring', 'Coordinate with providers', 'Accurate documentation'],
+    interview: [{ q: 'Tell me about a time you caught a clinical risk others missed.', look: 'Vigilance' }, { q: 'How do you balance efficiency with making a patient feel truly cared for?', look: 'Caring + rigor' }] },
+  'Therapist': { purpose: 'Help clients find the why behind recovery and build the inner tools to sustain it.',
+    qualities: [{ name: 'Deep listening', desc: 'Creates safety so clients open up.' }, { name: 'Clinical insight', desc: 'Sees patterns and reframes them.' }],
+    responsibilities: ['Individual & group therapy', 'Treatment planning', 'Crisis support', 'Care coordination'],
+    interview: [{ q: 'Describe a breakthrough you helped a client reach.', look: 'Insight, impact' }, { q: 'How do you hold firm boundaries with compassion?', look: 'Boundaries' }] },
+  'Case Manager': { purpose: 'Own each client’s path from admission through a safe, dignified discharge and beyond.',
+    qualities: [{ name: 'Orchestration', desc: 'Juggles many moving parts without dropping anyone.' }, { name: 'Advocacy', desc: 'Fights for the client’s needs.' }],
+    responsibilities: ['Coordinate benefits, housing & aftercare', 'Discharge planning', 'Family & external coordination', 'Documentation'],
+    interview: [{ q: 'Tell me about a complex discharge you coordinated end to end.', look: 'Orchestration' }, { q: 'How do you keep a client from falling through the cracks?', look: 'Ownership' }] },
+  'Front Desk': { purpose: 'Be the warm first and last impression — the warm welcome and the fond farewell.',
+    qualities: [{ name: 'Welcoming presence', desc: 'Greets everyone by name with genuine warmth.' }, { name: 'Poise', desc: 'Calm and gracious in a busy lobby.' }],
+    responsibilities: ['Greet & direct everyone warmly', 'Phones, scheduling, intake support', 'Anticipate needs at the door', 'Protect confidentiality'],
+    interview: [{ q: 'Show me how you’d greet an anxious family arriving for the first time.', look: 'Warmth, the welcome' }, { q: 'Two people need you at once and the phone rings — what do you do?', look: 'Poise' }] },
+  'Clinical Director': { purpose: 'Set and guard the clinical standard; develop the care team to excellence.',
+    qualities: [{ name: 'Clinical leadership', desc: 'Raises the standard and coaches to it.' }, { name: 'Sound judgment', desc: 'Good decisions under ambiguity.' }],
+    responsibilities: ['Clinical oversight & quality', 'Supervise and develop staff', 'Compliance', 'Guidance on complex cases'] },
+  'Director of Operations': { purpose: 'Make the operation run flawlessly so the care team can focus on people.',
+    qualities: [{ name: 'Systems thinking', desc: 'Builds processes that hold.' }, { name: 'Drive', desc: 'Owns outcomes and closes gaps.' }],
+    responsibilities: ['Staffing & scheduling', 'Facility, supply & vendor operations', 'QA & compliance', 'Throughput & census'] },
+  'Executive Director': { purpose: 'Cast the vision, protect the culture, and lead both companies to be the best.',
+    qualities: [{ name: 'Vision & culture', desc: 'Defines excellence and lives it.' }, { name: 'People development', desc: 'Grows leaders.' }],
+    responsibilities: ['Vision, standards & culture', 'Develop leaders', 'Outcomes & growth', 'Steward the mission'] },
+  'Kitchen': { purpose: 'Nourish recovery with safe, comforting, dignified meals.',
+    qualities: [{ name: 'Care through food', desc: 'Treats meals as hospitality, not output.' }, { name: 'Food-safety discipline', desc: 'Clean, safe, consistent.' }],
+    responsibilities: ['Plan & prepare meals', 'Food safety & sanitation', 'Accommodate dietary needs', 'Keep the kitchen stocked & clean'] },
+  'Housekeeping': { purpose: 'Make the environment clean, safe, and welcoming — order signals dignity.',
+    qualities: [{ name: 'Pride in detail', desc: 'Notices and fixes the little things.' }, { name: 'Discretion', desc: 'Respectful around clients and privacy.' }],
+    responsibilities: ['Clean & sanitize to standard', 'Room turnovers', 'Restock supplies', 'Report maintenance needs'] },
+  'Housing Director': { purpose: 'Run Hilltop to a best-in-class standard — full houses, thriving residents, a great team.',
+    qualities: [{ name: 'Ownership', desc: 'Treats the homes like their own.' }, { name: 'People leadership', desc: 'Builds and develops a strong house team.' }],
+    responsibilities: ['Census, occupancy & outcomes', 'Lead house managers & coaches', 'NARR / ORH compliance', 'Culture & standards'],
+    interview: [{ q: 'How would you fill empty beds without lowering the bar?', look: 'Ownership, judgment' }, { q: 'Tell me about a team you built and developed.', look: 'People leadership' }] },
+  'House Manager': { purpose: 'Keep the house safe, clean, structured, and recovery-focused every single day.',
+    qualities: [{ name: 'Structure & consistency', desc: 'Holds the routines and rules fairly.' }, { name: 'Role-models recovery', desc: 'Lives what they ask of residents.' }],
+    responsibilities: ['Curfew, chores & drug screens', 'Resident support & accountability', 'Shift reports & incidents', 'House upkeep'],
+    interview: [{ q: 'A resident breaks curfew — how do you handle it?', look: 'Fair structure' }, { q: 'How do you build trust with a brand-new resident?', look: 'Warmth + boundaries' }] },
+  'Recovery Coach': { purpose: 'Walk alongside residents as a guide and example — connection is the work.',
+    qualities: [{ name: 'Authentic credibility', desc: 'Relates genuinely and earns trust.' }, { name: 'Encouragement', desc: 'Believes in people and shows it.' }],
+    responsibilities: ['1:1 support & goal-setting', 'Connect residents to meetings/sponsors', 'Lead activities & engagement', 'Spot and respond to struggles early'],
+    interview: [{ q: 'How do you support someone who has lost all motivation?', look: 'Encouragement' }, { q: 'Where’s the line between being a friend and being a coach?', look: 'Boundaries' }] },
+};
+function defaultProfileFor(role) {
+  const s = ROLE_SPECIFICS[role] || {};
+  return {
+    role, side: sideOfRole(role),
+    purpose: s.purpose || `Deliver excellent, caring service as ${role}, and uphold our standards every day.`,
+    qualities: [...BASE_QUALITIES, ...(s.qualities || [])],
+    responsibilities: s.responsibilities || ['Carry out the role’s duties to a high standard', 'Anticipate and meet needs', 'Document accurately', 'Support the team'],
+    interview: [...BASE_INTERVIEW, ...(s.interview || [])],
+  };
+}
+function getRoleProfile(role) {
+  const row = db.prepare(`SELECT * FROM role_profiles WHERE role=?`).get(role);
+  if (!row) return defaultProfileFor(role);
+  return { role, side: row.side || sideOfRole(role), purpose: row.purpose || '', qualities: jparse(row.qualities, []), responsibilities: jparse(row.responsibilities, []), interview: jparse(row.interview, []) };
+}
+function canHire(req, side) {
+  if (req.user?.role === 'admin' || req.user?.job_role === 'Executive Director') return true;
+  if (side === 'hilltop') return req.user?.job_role === 'Housing Director';
+  return ['Director of Operations', 'Clinical Director'].includes(req.user?.job_role);
+}
 const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nurse / Medical (comfort, not feeling well)', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 
@@ -2872,6 +2965,83 @@ app.post('/api/allowed-domains', requireAuth, requireAdmin, (req, res) => {
   const saved = setAllowedDomains(list);
   audit({ user: req.user, action: 'UPDATE', entity: 'allowed_domains', detail: saved.join(', '), ip: req.ip });
   res.json({ domains: saved });
+});
+
+/* ───────── Role profiles & hiring (selection over hiring) ───────── */
+app.get('/api/hiring/roles', requireAuth, (req, res) => {
+  const side = req.query.side === 'hilltop' ? 'hilltop' : 'detox';
+  const roles = rolesForSide(side).map((role) => {
+    const open = db.prepare(`SELECT COUNT(*) c FROM candidates WHERE role=? AND stage NOT IN ('Hired','Passed')`).get(role).c;
+    const hired = db.prepare(`SELECT COUNT(*) c FROM candidates WHERE role=? AND stage='Hired'`).get(role).c;
+    const p = getRoleProfile(role);
+    return { role, purpose: p.purpose, qualities: p.qualities.length, openCandidates: open, hired };
+  });
+  res.json({ side, roles, stages: HIRING_STAGES, canEdit: canHire(req, side) });
+});
+app.get('/api/hiring/profile/:role', requireAuth, (req, res) => res.json({ ...getRoleProfile(req.params.role), canEdit: canHire(req, sideOfRole(req.params.role)) }));
+app.post('/api/hiring/profile/:role', requireAuth, (req, res) => {
+  const role = req.params.role; const side = sideOfRole(role);
+  if (!canHire(req, side)) return res.status(403).json({ error: 'Leadership only.' });
+  const b = req.body || {};
+  const ex = db.prepare(`SELECT role FROM role_profiles WHERE role=?`).get(role);
+  if (ex) db.prepare(`UPDATE role_profiles SET side=?,purpose=?,qualities=?,responsibilities=?,interview=?,updated_by=?,updated=datetime('now') WHERE role=?`)
+    .run(side, b.purpose || '', JSON.stringify(b.qualities || []), JSON.stringify(b.responsibilities || []), JSON.stringify(b.interview || []), req.user.name, role);
+  else db.prepare(`INSERT INTO role_profiles (role,side,purpose,qualities,responsibilities,interview,updated_by,updated) VALUES (?,?,?,?,?,?,?,datetime('now'))`)
+    .run(role, side, b.purpose || '', JSON.stringify(b.qualities || []), JSON.stringify(b.responsibilities || []), JSON.stringify(b.interview || []), req.user.name);
+  res.json({ ok: true });
+});
+app.get('/api/hiring/candidates', requireAuth, (req, res) => {
+  let rows;
+  if (req.query.role) rows = db.prepare(`SELECT * FROM candidates WHERE role=? ORDER BY updated_at DESC`).all(req.query.role);
+  else if (req.query.side) rows = db.prepare(`SELECT * FROM candidates WHERE side=? ORDER BY updated_at DESC`).all(req.query.side === 'hilltop' ? 'hilltop' : 'detox');
+  else rows = db.prepare(`SELECT * FROM candidates ORDER BY updated_at DESC LIMIT 200`).all();
+  res.json({ candidates: rows.map((r) => ({ ...r, scores: jparse(r.scores, {}) })), stages: HIRING_STAGES });
+});
+app.post('/api/hiring/candidates', requireAuth, (req, res) => {
+  const b = req.body || {}; const role = b.role;
+  if (!b.name || !role) return res.status(400).json({ error: 'Name and role are required.' });
+  const side = sideOfRole(role);
+  if (!canHire(req, side)) return res.status(403).json({ error: 'Leadership only.' });
+  const info = db.prepare(`INSERT INTO candidates (name,email,phone,role,side,stage,source,by) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(String(b.name).trim(), b.email || null, b.phone || null, role, side, 'Applied', b.source || null, req.user.name);
+  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+});
+app.post('/api/hiring/candidates/:id', requireAuth, (req, res) => {
+  const c = db.prepare(`SELECT * FROM candidates WHERE id=?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  if (!canHire(req, c.side)) return res.status(403).json({ error: 'Leadership only.' });
+  const b = req.body || {};
+  const stage = HIRING_STAGES.includes(b.stage) ? b.stage : c.stage;
+  const rating = b.rating != null ? Math.max(0, Math.min(5, +b.rating)) : c.rating;
+  const scores = b.scores != null ? JSON.stringify(b.scores) : c.scores;
+  db.prepare(`UPDATE candidates SET stage=?,rating=?,scores=?,notes=?,email=?,phone=?,updated_at=datetime('now') WHERE id=?`)
+    .run(stage, rating, scores, b.notes != null ? b.notes : c.notes, b.email != null ? b.email : c.email, b.phone != null ? b.phone : c.phone, c.id);
+  res.json({ ok: true });
+});
+app.delete('/api/hiring/candidates/:id', requireAuth, (req, res) => {
+  const c = db.prepare(`SELECT side FROM candidates WHERE id=?`).get(req.params.id);
+  if (c && !canHire(req, c.side)) return res.status(403).json({ error: 'Leadership only.' });
+  db.prepare(`DELETE FROM candidates WHERE id=?`).run(req.params.id); res.json({ ok: true });
+});
+// Hire: mark hired and (optionally) send them a self-signup invite for the role.
+app.post('/api/hiring/candidates/:id/hire', requireAuth, async (req, res) => {
+  const c = db.prepare(`SELECT * FROM candidates WHERE id=?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  if (!canHire(req, c.side)) return res.status(403).json({ error: 'Leadership only.' });
+  db.prepare(`UPDATE candidates SET stage='Hired',updated_at=datetime('now') WHERE id=?`).run(c.id);
+  audit({ user: req.user, action: 'HIRE', entity: 'candidate', entity_id: c.id, detail: `${c.name} — ${c.role}`, ip: req.ip });
+  let invited = false, link = null, emailErr = null;
+  if (req.body?.invite && c.email) {
+    const em = String(c.email).toLowerCase().trim();
+    if (!emailDomainAllowed(em)) emailErr = `Email not on an approved domain (${allowedDomains().join(', ')}).`;
+    else if (db.prepare(`SELECT id FROM users WHERE lower(username)=? OR lower(email)=?`).get(em, em)) emailErr = 'A user with that email already exists.';
+    else {
+      const inv = createInvite({ name: c.name, email: em, role: 'staff', job_role: c.role, invitedBy: req.user.name });
+      const out = await sendInvite(req, { name: c.name, email: em }, inv.token);
+      invited = out.emailed; link = out.emailed ? null : out.link; emailErr = out.emailErr || null;
+    }
+  }
+  res.json({ ok: true, invited, link, emailErr });
 });
 
 // Edit a staff member — name, job role, access level, active, and (optional)

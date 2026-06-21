@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260622Y" />
+<link rel="stylesheet" href="/styles.css?v=20260622Z" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -93,6 +93,7 @@
     <button data-view="alumni">Alumni</button>
     <button data-view="accountability" data-admin data-subview>Accountability</button>
     <button data-view="team">Team</button>
+    <button data-view="hiring">Hiring</button>
     <button data-view="workplace" data-admin data-subview>Best Place to Work <span id="wpBadge" class="badge-danger" style="display:none"></span></button>
     <button data-view="inventory">Supplies</button>
     <button data-view="maintenance">Maintenance</button>
@@ -2040,6 +2041,15 @@
       </div>
     </section>
 
+    <!-- HIRING / ROLE PROFILES -->
+    <section id="hiring" class="view">
+      <div class="card">
+        <h3>🧭 Role profiles &amp; hiring</h3>
+        <p class="sub sans">Select for talent, don't just hire (Horst Schulze). Each role has a defining profile — the qualities a great person must have — and a structured interview to select against. Pick a role to view its profile and run its pipeline.</p>
+      </div>
+      <div id="hiringBody"></div>
+    </section>
+
     <!-- USERS -->
     <section id="users" class="view">
       <div class="card">
@@ -2367,7 +2377,13 @@
 
     <section id="hstaffdev" class="view">
       <div class="card hq-hero">
-        <div><h3>🌱 Staff Growth — select, orient, empower, develop</h3><p class="sub sans" style="margin:0">Ladies and gentlemen serving ladies and gentlemen. A sacred Day-1 orientation, competency sign-offs, and each person’s dreams &amp; growth path — because great resident care starts with a great team.</p></div>
+        <div class="cmd-hero-row">
+          <div><h3>🌱 Staff Growth — select, orient, empower, develop</h3><p class="sub sans" style="margin:0">Ladies and gentlemen serving ladies and gentlemen. Define each role, select for talent, then orient &amp; grow the team — great resident care starts here.</p></div>
+          <span class="seg" id="sdevSeg">
+            <button class="on" data-t="team" onclick="setSdevTab('team')">Develop the team</button>
+            <button data-t="hiring" onclick="setSdevTab('hiring')">Role profiles &amp; hiring</button>
+          </span>
+        </div>
       </div>
       <div id="sdevBody"></div>
     </section>
@@ -2429,7 +2445,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260622Y"></script>
-<script src="/housing.js?v=20260622Y"></script>
+<script src="/app.js?v=20260622Z"></script>
+<script src="/housing.js?v=20260622Z"></script>
 </body>
 </html>

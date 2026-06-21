@@ -1244,6 +1244,18 @@ addColumn('users', 'invite_expires', 'TEXT');
 addColumn('users', 'invited_at', 'TEXT');
 addColumn('users', 'invited_by', 'TEXT');
 addColumn('beds', 'gender', 'TEXT');   // detox bed designation: Male | Female | Any
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS role_profiles (
+  role TEXT PRIMARY KEY, side TEXT, purpose TEXT, qualities TEXT, responsibilities TEXT, interview TEXT,
+  updated_by TEXT, updated TEXT
+);
+CREATE TABLE IF NOT EXISTS candidates (
+  id INTEGER PRIMARY KEY, name TEXT, email TEXT, phone TEXT, role TEXT, side TEXT,
+  stage TEXT DEFAULT 'Applied', source TEXT, rating INTEGER, scores TEXT, notes TEXT,
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), by TEXT
+);
+`);
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');

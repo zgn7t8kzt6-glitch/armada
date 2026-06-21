@@ -1575,7 +1575,11 @@ async function resolveServiceRecovery(id){
 async function claimRequest(id){ try{ await api('/housing/voice/request/'+id+'/claim',{method:'POST',body:'{}'}); loadVoice(); }catch(e){ alert(e.message); } }
 
 /* ============================ STAFF GROWTH — select, orient, develop ============================ */
+function setSdevTab(t){ HOUSING.sdevTab=t; HOUSING.sdevId=null; loadStaffDev(); }
 async function loadStaffDev(){
+  const tab=HOUSING.sdevTab||'team';
+  document.querySelectorAll('#sdevSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+  if(tab==='hiring'){ HOUSING.sdevId=null; return loadHiring('hilltop','sdevBody'); }
   if(HOUSING.sdevId){ return openStaffDev(HOUSING.sdevId); }
   let d; try{ d=await api('/housing/staff-dev'); }catch(e){ $('sdevBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
   const fullyOriented=d.staff.filter(s=>s.onboardDone>=s.onboardTotal).length;

@@ -189,7 +189,7 @@ const GROUP_OF={
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
-  mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
+  mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
@@ -222,6 +222,7 @@ const VIEW_ROLES = {
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
   bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
+  hiring:      ['Executive Director','Director of Operations','Clinical Director'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
   excellence:  ['Executive Director','Director of Operations','Clinical Director'],
   onboarding:  ['Executive Director','Director of Operations','Clinical Director'],
@@ -437,6 +438,7 @@ function show(v){
   if(v==='team') loadTeam();
   if(v==='report') loadPlaybook();
   if(v==='users') loadUsers();
+  if(v==='hiring') loadHiring('detox','hiringBody');
   if(v==='audit') loadAudit();
   if(v==='report-view') loadReport();
   if(v==='assign') loadAssign();
@@ -3488,6 +3490,90 @@ async function addUser(){
     loadUsers();
   }catch(e){ if(msg) msg.textContent='Error: '+esc(e.message); }
 }
+
+/* ---- Role profiles & hiring (selection over hiring) — shared by detox + Hilltop ---- */
+let HIRE = { side:'detox', mount:'hiringBody', role:null, stages:[], canEdit:false, profile:null, cands:[] };
+async function loadHiring(side, mount){
+  HIRE.side = side==='hilltop'?'hilltop':'detox'; HIRE.mount = mount || 'hiringBody'; HIRE.role=null;
+  const el=$(HIRE.mount); if(!el) return;
+  let d; try{ d=await api('/hiring/roles?side='+HIRE.side); }catch(e){ el.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  HIRE.stages=d.stages; HIRE.canEdit=d.canEdit;
+  el.innerHTML = `<div class="clientlist">${d.roles.map(r=>`
+    <div class="ctile" onclick="openHireRole('${encodeURIComponent(r.role)}')">
+      <h4>${esc(r.role)}</h4>
+      <div class="meta">${r.qualities} defining qualities</div>
+      <div style="font-size:13px;margin-top:8px;color:var(--muted)">${esc(r.purpose||'')}</div>
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">${r.openCandidates?`<span class="chip chip-warn">${r.openCandidates} in pipeline</span>`:'<span class="chip">no open candidates</span>'}${r.hired?`<span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">${r.hired} hired</span>`:''}</div>
+    </div>`).join('')}</div>`;
+}
+async function openHireRole(roleEnc){
+  const role=decodeURIComponent(roleEnc); HIRE.role=role;
+  const el=$(HIRE.mount); if(!el) return;
+  let p, cd;
+  try{ p=await api('/hiring/profile/'+encodeURIComponent(role)); cd=await api('/hiring/candidates?role='+encodeURIComponent(role)); }
+  catch(e){ el.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  HIRE.profile=p; HIRE.cands=cd.candidates||[];
+  const qual=p.qualities.map(q=>`<div class="kv"><span class="k" style="min-width:150px">${esc(q.name)}</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted);max-width:60%">${esc(q.desc||'')}</span></div>`).join('');
+  const resp=p.responsibilities.map(r=>`<li>${esc(r)}</li>`).join('');
+  const intv=p.interview.map(i=>`<div class="cmd-row"><div class="cmd-row-main">❓ ${esc(i.q)}${i.look?`<br><span class="hint">Listen for: ${esc(i.look)}</span>`:''}</div></div>`).join('');
+  const byStage={}; HIRE.stages.forEach(s=>byStage[s]=[]); HIRE.cands.forEach(c=>{ (byStage[c.stage]=byStage[c.stage]||[]).push(c); });
+  const pipe=HIRE.stages.map(s=>{ const list=byStage[s]||[]; if(!list.length && s==='Passed') return '';
+    return `<div style="margin-bottom:10px"><div style="font-weight:700;color:var(--navy);font-size:12.5px;border-bottom:1px solid var(--line);padding-bottom:3px;margin-bottom:5px">${esc(s)} <span class="hint">(${list.length})</span></div>
+    ${list.map(c=>`<div class="cmd-row" style="cursor:pointer" onclick="openCandidate(${c.id})"><div class="cmd-row-main"><b>${esc(c.name)}</b>${c.rating?` <span class="hint">· ${'★'.repeat(c.rating)}</span>`:''}${c.email?`<span class="hint"> · ${esc(c.email)}</span>`:''}</div></div>`).join('')||'<div class="hint" style="font-size:12px">—</div>'}</div>`;
+  }).join('');
+  el.innerHTML=`
+    <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="loadHiring('${HIRE.side}','${HIRE.mount}')">← All roles</button></div>
+    <div class="cmd-grid">
+      <div class="card"><div class="cmd-hero-row"><div><h3>${esc(role)}</h3><p class="sub sans" style="margin:0">${esc(p.purpose||'')}</p></div>${p.canEdit?`<button class="btn btn-ghost btn-sm sans" onclick="editRoleProfile()">Edit profile</button>`:''}</div>
+        <h3 style="margin-top:14px;font-size:13px">Defining qualities — select for these</h3>${qual}
+        <h3 style="margin-top:14px;font-size:13px">Key responsibilities</h3><ul style="margin:6px 0;padding-left:18px;font-size:14px">${resp}</ul>
+      </div>
+      <div class="card"><div class="cmd-hero-row"><div><h3>Hiring pipeline</h3></div>${p.canEdit?`<button class="btn btn-gold btn-sm sans" onclick="addCandidate()">+ Candidate</button>`:''}</div>
+        <div style="margin-top:10px">${pipe}</div></div>
+    </div>
+    <div class="card"><h3>Structured interview guide</h3><p class="sub sans">Ask these and score the candidate against the defining qualities — select for talent, don't settle.</p>${intv}</div>`;
+}
+function editRoleProfile(){
+  const p=HIRE.profile; if(!p) return;
+  const qText=p.qualities.map(q=>`${q.name} — ${q.desc||''}`).join('\n');
+  const iText=p.interview.map(i=>`${i.q} || ${i.look||''}`).join('\n');
+  const save=hmodal(`<h3>Edit ${esc(p.role)} profile</h3>
+    <label>Purpose</label><textarea id="rp_purpose" rows="2">${esc(p.purpose||'')}</textarea>
+    <label>Defining qualities — one per line: "Name — description"</label><textarea id="rp_qual" rows="7">${esc(qText)}</textarea>
+    <label>Key responsibilities — one per line</label><textarea id="rp_resp" rows="5">${esc(p.responsibilities.join('\n'))}</textarea>
+    <label>Interview questions — one per line: "Question || what to listen for"</label><textarea id="rp_intv" rows="7">${esc(iText)}</textarea>`);
+  save.onclick=async()=>{
+    const qualities=$('rp_qual').value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{ const m=l.split(/\s+[—-]\s+/); return {name:(m[0]||'').trim(), desc:(m.slice(1).join(' - ')).trim()}; });
+    const interview=$('rp_intv').value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{ const m=l.split('||'); return {q:(m[0]||'').trim(), look:(m[1]||'').trim()}; });
+    const responsibilities=$('rp_resp').value.split('\n').map(l=>l.trim()).filter(Boolean);
+    try{ await api('/hiring/profile/'+encodeURIComponent(p.role),{method:'POST',body:JSON.stringify({purpose:$('rp_purpose').value,qualities,responsibilities,interview})}); closeHModal(); openHireRole(encodeURIComponent(p.role)); }catch(e){ alert(e.message); }
+  };
+}
+function addCandidate(){
+  const save=hmodal(`<h3>Add candidate — ${esc(HIRE.role)}</h3>
+    <label>Name</label><input id="cd_name"/>
+    <div class="grid2"><div><label>Email</label><input id="cd_email" type="email"/></div><div><label>Phone</label><input id="cd_phone"/></div></div>
+    <label>Source (optional)</label><input id="cd_source" placeholder="Referral, Indeed, walk-in…"/>`);
+  save.onclick=async()=>{ if(!$('cd_name').value.trim()){ alert('Name?'); return; } try{ await api('/hiring/candidates',{method:'POST',body:JSON.stringify({name:$('cd_name').value,email:$('cd_email').value,phone:$('cd_phone').value,source:$('cd_source').value,role:HIRE.role})}); closeHModal(); openHireRole(encodeURIComponent(HIRE.role)); }catch(e){ alert(e.message); } };
+}
+function openCandidate(id){
+  const c=(HIRE.cands||[]).find(x=>x.id===id); if(!c) return; const p=HIRE.profile; const scores=c.scores||{};
+  const qRows=p.qualities.map(q=>`<div class="cmd-row"><div class="cmd-row-main">${esc(q.name)}</div>
+    <select class="cand-score" data-q="${esc(q.name)}" style="width:auto"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${String(scores[q.name])===String(n)?'selected':''}>${n}</option>`).join('')}</select></div>`).join('');
+  const save=hmodal(`<h3>${esc(c.name)} <span class="hint" style="font-weight:400">· ${esc(c.role)}</span></h3>
+    ${c.email?`<div class="hint">${esc(c.email)}${c.phone?' · '+esc(c.phone):''}${c.source?' · via '+esc(c.source):''}</div>`:''}
+    <label style="margin-top:8px">Stage</label><select id="cd_stage">${HIRE.stages.map(s=>`<option ${c.stage===s?'selected':''}>${s}</option>`).join('')}</select>
+    <h3 style="margin-top:12px;font-size:13px">Score against the defining qualities (1–5)</h3>${qRows}
+    <label style="margin-top:10px">Interview notes</label><textarea id="cd_notes" rows="3">${esc(c.notes||'')}</textarea>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:10px"><input type="checkbox" id="cd_invite" style="width:auto"/> On hire, email them a sign-up invite</label>
+    <div class="toolbar" style="margin-top:6px;gap:6px"><button class="btn btn-danger btn-sm sans" onclick="delCandidate(${c.id})">Delete</button><button class="btn btn-primary btn-sm sans" onclick="hireCandidate(${c.id})">✓ Hire</button></div>`);
+  save.onclick=async()=>{ const scores={}; let sum=0,n=0; document.querySelectorAll('.cand-score').forEach(s=>{ if(s.value){ scores[s.dataset.q]=+s.value; sum+=+s.value; n++; } }); const rating=n?Math.round(sum/n):0;
+    try{ await api('/hiring/candidates/'+c.id,{method:'POST',body:JSON.stringify({stage:$('cd_stage').value,scores,rating,notes:$('cd_notes').value})}); closeHModal(); openHireRole(encodeURIComponent(HIRE.role)); }catch(e){ alert(e.message); } };
+}
+async function delCandidate(id){ if(!confirm('Remove this candidate?'))return; try{ await api('/hiring/candidates/'+id,{method:'DELETE'}); closeHModal(); openHireRole(encodeURIComponent(HIRE.role)); }catch(e){ alert(e.message); } }
+async function hireCandidate(id){ const invite=$('cd_invite')&&$('cd_invite').checked; try{ const r=await api('/hiring/candidates/'+id+'/hire',{method:'POST',body:JSON.stringify({invite})}); closeHModal();
+  if(invite) alert(r.invited?'Hired 🎉 — sign-up invite emailed.':('Hired 🎉 '+(r.emailErr||'')+(r.link?'\n\nSend them this link: '+r.link:''))); else alert('Hired 🎉');
+  openHireRole(encodeURIComponent(HIRE.role)); }catch(e){ alert(e.message); } }
 
 /* ---- concierge / requests ---- */
 function fillClientSelect(el, withBlank){

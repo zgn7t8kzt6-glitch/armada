@@ -3566,6 +3566,25 @@ app.get('/api/lineup/raffle/winner', requireAuth, (req, res) => {
   let w = null; try { w = JSON.parse(getState('raffle_winner') || ''); } catch { w = null; }
   res.json({ winner: w && w.name ? w : null });
 });
+// Curate exactly what's in the next lineup's "Caught being great" — list + remove.
+app.get('/api/lineup/recognition', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const since = dayBoundsUtc(addDays(appToday(), -1)).start;
+  const all = getState('lineup_all_recognition') === 'on';
+  const kF = all ? '' : 'AND from_id IS NULL', eF = all ? '' : `AND source = 'lineup'`;
+  const kudos = db.prepare(`SELECT id, to_name, from_name, text FROM kudos WHERE created_at >= ? AND to_name IS NOT NULL AND to_name != '' ${kF} ORDER BY id DESC LIMIT 30`).all(since);
+  const moments = db.prepare(`SELECT id, person, story, by_name FROM extra_mile WHERE created_at >= ? ${eF} ORDER BY id DESC LIMIT 20`).all(since);
+  res.json({ items: [
+    ...kudos.map((k) => ({ type: 'kudos', id: k.id, name: k.to_name, what: String(k.text || '').replace(/^🙌\s*/, ''), by: k.from_name })),
+    ...moments.map((m) => ({ type: 'moment', id: m.id, name: m.person, what: m.story, by: m.by_name })),
+  ] });
+});
+app.delete('/api/lineup/recognition/:type/:id', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  if (req.params.type === 'kudos') db.prepare(`DELETE FROM kudos WHERE id = ?`).run(req.params.id);
+  else if (req.params.type === 'moment') db.prepare(`DELETE FROM extra_mile WHERE id = ?`).run(req.params.id);
+  res.json({ ok: true });
+});
 app.post('/api/principle/story', requireAuth, (req, res) => {
   const action = (req.body?.action || '').trim();
   if (!action) return res.status(400).json({ error: 'Tell us what you did.' });

@@ -3088,9 +3088,20 @@ async function sharePrinciple(){
   try{ await api('/principle/story',{method:'POST',body:JSON.stringify({action,client_response:cr})}); $('pr_action').value=''; if($('pr_response'))$('pr_response').value=''; if($('pr_msg')) $('pr_msg').textContent='✓ Shared — thank you!'; setTimeout(()=>{if($('pr_msg'))$('pr_msg').textContent='';},2500); loadPrinciple(); }
   catch(e){ if($('pr_msg')) $('pr_msg').textContent=e.message; }
 }
+async function loadLineupRecog(){
+  const box=$('lineupRecogList'); if(!box) return;
+  let d; try{ d=await api('/lineup/recognition'); }catch(e){ box.innerHTML=''; return; }
+  box.innerHTML = d.items.length ? d.items.map(it=>`<div class="pc-note" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between">
+      <span>🌟 <strong>${esc(it.name)}</strong> — ${esc(it.what)}${it.by?' <span class="hint">— '+esc(it.by)+'</span>':''}</span>
+      <button class="btn btn-ghost btn-sm sans" title="Remove from the lineup" onclick="removeLineupRecog('${it.type}',${it.id})">✕</button>
+    </div>`).join('') : '<div class="hint">Nothing captured yet for tomorrow\'s lineup.</div>';
+}
+async function removeLineupRecog(type,id){
+  try{ await api('/lineup/recognition/'+type+'/'+id,{method:'DELETE'}); loadLineupRecog(); }catch(e){ alert(e.message); }
+}
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
-  if($('lineupCaptureCard')) $('lineupCaptureCard').style.display = canSendLineup() ? '' : 'none';
+  if($('lineupCaptureCard')){ $('lineupCaptureCard').style.display = canSendLineup() ? '' : 'none'; if(canSendLineup()) loadLineupRecog(); }
   if($('raffleCard')){ $('raffleCard').style.display = canSendLineup() ? '' : 'none'; if(canSendLineup()) loadRaffle(); }
   const d = await api('/lineup');
   const { value, wows, purpose } = d;
@@ -4482,7 +4493,7 @@ async function saveExtractedKudos(P='kx'){
     .map(r=>({person:r.querySelector('.km-person').value.trim(),by:r.querySelector('.km-by').value.trim(),story:r.querySelector('.km-story').value.trim()})).filter(x=>x.person&&x.story);
   const msg=$(P+'_msg');
   if(!items.length&&!moments.length){ if(msg)msg.textContent='Tick at least one.'; return; }
-  try{ const r=await api('/kudos/bulk',{method:'POST',body:JSON.stringify({items,moments})}); if(msg)msg.innerHTML=`✓ ${r.saved} kudos + ${r.wall} on the wall — they'll appear in the next lineup's "Caught being great."`; if($(P+'_text'))$(P+'_text').value=''; if($(P+'_preview'))$(P+'_preview').innerHTML=''; if(P==='kx')loadWorkplace(); }
+  try{ const r=await api('/kudos/bulk',{method:'POST',body:JSON.stringify({items,moments})}); if(msg)msg.innerHTML=`✓ ${r.saved} kudos + ${r.wall} on the wall — they'll appear in the next lineup's "Caught being great."`; if($(P+'_text'))$(P+'_text').value=''; if($(P+'_preview'))$(P+'_preview').innerHTML=''; if(P==='kx')loadWorkplace(); if(P==='lx'&&typeof loadLineupRecog==='function')loadLineupRecog(); }
   catch(e){ if(msg)msg.textContent=e.message; }
 }
 

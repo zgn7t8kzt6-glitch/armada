@@ -423,9 +423,20 @@ function houseFromRoom(room, facility) {
 
 const programToLoc = (p) => (p === 'PHP' ? 'PHP' : (p === 'Graduate' ? 'MON' : 'IOP'));
 
+// If raw HTML-table markup is pasted (copying from the data shown as a web
+// page), flatten <tr>/<td> into tab-separated rows before parsing.
+function htmlTableToText(html) {
+  const dec = (s) => s.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ').trim();
+  const trs = html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+  return trs.map(tr => (tr.match(/<t[dh][\s\S]*?<\/t[dh]>/gi) || []).map(dec).join('\t')).join('\n');
+}
+
 // Parse + load. opts.includeAlumni also brings Past residents in as discharged.
 export function importAkronCsv(csvText, opts = {}, user = { name: 'system' }) {
   const includeAlumni = !!opts.includeAlumni;
+  if (/<tr[\s>]/i.test(String(csvText))) csvText = htmlTableToText(String(csvText));
   const rows = parseCsv(csvText);
   if (rows.length < 2) return { error: 'That file looks empty.' };
   const hdr = rows[0].map(h => h.trim().toLowerCase());

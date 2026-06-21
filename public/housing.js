@@ -181,6 +181,23 @@ function openImportForm(){
       <input id="imp_alumni" type="checkbox"/> Also import past residents as alumni (discharged, no bed)
     </label>
     <div id="imp_status" class="hint" style="margin-top:10px"></div>`);
+  // When the data opens as a web page, a copy carries the table's HTML. Capture
+  // that on paste and flatten it to tab-separated rows the importer understands.
+  const ta = $('imp_text');
+  if(ta) ta.addEventListener('paste', (ev)=>{
+    const html = ev.clipboardData && ev.clipboardData.getData('text/html');
+    if(html && /<t[dr][\s>]/i.test(html)){
+      ev.preventDefault();
+      try{
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const rows = [...doc.querySelectorAll('tr')].map(tr =>
+          [...tr.querySelectorAll('th,td')].map(td => (td.textContent||'').replace(/\s+/g,' ').trim()).join('\t')
+        ).filter(r=>r.replace(/\t/g,'').length);
+        ta.value = rows.join('\n');
+        const s=$('imp_status'); if(s) s.textContent = `Pasted ${rows.length-1} rows from the web page — click Import.`;
+      }catch(e){ /* fall back to the browser's default plain-text paste */ }
+    }
+  });
   save.textContent = 'Import';
   save.onclick = async () => {
     const st=$('imp_status');

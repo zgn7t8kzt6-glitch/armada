@@ -2435,9 +2435,14 @@ async function loadPlanMorning(){
   const boxes=['planMorning','planMorningOps'].map(id=>$(id)).filter(Boolean); if(!boxes.length) return;
   let d; try{ d=await api('/plan'); }catch(e){ boxes.forEach(b=>b.style.display='none'); return; }
   const open=d.tasks.filter(t=>t.status==='overdue'||t.status==='due');
+  let pbLine='';
+  try{ const pb=await api('/playbook'); const all=pb.parts.flatMap(p=>p.items); const op=all.filter(i=>i.status==='on'||i.status==='set').length; const watch=all.filter(i=>i.status==='watch').length;
+    pbLine=`<div class="hint" style="margin:6px 0;cursor:pointer" onclick="show('playbook')">📋 Playbook health: <strong>${op}/${all.length} operational</strong>${watch?' · <span style="color:#a60">'+watch+' need attention</span>':''} <span style="color:var(--muted)">— open scorecard ›</span></div>`;
+  }catch(e){}
   const html=`<div class="cmd-hero-row"><div><h3 style="margin:0">📋 Today on the 90-Day Plan — Day ${d.day} · ${esc(d.phaseLabel)}</h3>
       <p class="sub sans" style="margin:2px 0 0">${esc(d.thisWeek)}</p></div>
       <button class="btn btn-ghost btn-sm sans" onclick="show('plan')">Full plan ↗</button></div>
+    ${pbLine}
     ${d.focus?`<div style="margin:10px 0;padding:10px 14px;background:#faf6ee;border-left:3px solid #c8a44d;border-radius:4px"><div class="hint" style="text-transform:uppercase;letter-spacing:.5px;font-size:10px">Focus today</div><strong>${esc(d.focus.title)}</strong><div class="hint" style="margin-top:2px">${esc(d.focus.detail)}</div></div>`:''}
     ${open.length?open.map(planTaskRow).join(''):'<div class="hint">✓ Nothing open right now — you\'re on track.</div>'}`;
   boxes.forEach(b=>{ b.style.display=''; b.innerHTML=html; });

@@ -3287,8 +3287,9 @@ function lineupRecognition() {
   // Until the app is live for everyone, only feature what leadership CAPTURED from
   // the emailed replies — not in-app recognition (kudos from logged-in staff /
   // auto top-responder). Captured kudos have no from_id; captured moments are
-  // source 'lineup'. Once app_live is on, include everything.
-  const live = appLive();
+  // source 'lineup'. Defaults to captured-only; set 'lineup_all_recognition'='on'
+  // to include everything once the whole team is in the app.
+  const live = getState('lineup_all_recognition') === 'on';
   const kFilter = live ? '' : 'AND from_id IS NULL';
   const eFilter = live ? '' : `AND source = 'lineup'`;
   const kudos = db.prepare(`SELECT to_name, from_name, text FROM kudos WHERE created_at >= ? AND to_name IS NOT NULL AND to_name != '' ${kFilter} ORDER BY id DESC LIMIT 12`).all(since);

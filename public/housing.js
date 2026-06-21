@@ -285,12 +285,23 @@ async function openResidentForm(){
 }
 
 // Profile photo — resized client-side, stored on the resident, served as bytes.
-async function uploadResidentPhoto(id, file){
+// A face photo is PHI, so the first upload requires a consent attestation.
+function pickResidentPhoto(id, file){
+  if(!file) return;
+  const r=HOUSING.current||{};
+  if(r.photo_consent){ uploadResidentPhoto(id, file, false); return; } // consent already on file
+  const save=hmodal(`<h3>Photo consent</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">A photo on file helps staff recognize and warmly welcome each resident. Please confirm the resident has given permission to store their picture in Armada Recovery Housing.</p>
+    <label style="display:flex;gap:8px;align-items:flex-start;font-weight:500"><input id="pc_ok" type="checkbox"/><span>The resident consented to having their photo kept on file.</span></label>`);
+  save.textContent='Save photo';
+  save.onclick=async()=>{ if(!$('pc_ok').checked){ alert('Please confirm consent, or cancel.'); return; } closeHModal(); await uploadResidentPhoto(id, file, true); };
+}
+async function uploadResidentPhoto(id, file, consent){
   if(!file) return;
   try{
     const dataUrl = await resizeImage(file, 480, 0.82);
-    await api(`/housing/residents/${id}/photo`, { method:'POST', body: JSON.stringify({ photo:dataUrl }) });
-    if(HOUSING.current && HOUSING.current.id===id) HOUSING.current.hasPhoto=true;
+    await api(`/housing/residents/${id}/photo`, { method:'POST', body: JSON.stringify({ photo:dataUrl, consent: !!consent }) });
+    if(HOUSING.current && HOUSING.current.id===id){ HOUSING.current.hasPhoto=true; if(consent) HOUSING.current.photo_consent='Consent on file'; }
     openResident(id);
   }catch(e){ alert('Could not save photo: '+(e.message||'error')); }
 }
@@ -323,11 +334,11 @@ async function openResident(id){
       <div class="r360-head">
         <div class="r360-av-wrap no-print" title="Click to add or change photo">
           <div onclick="document.getElementById('r360photo').click()" style="cursor:pointer;border-radius:50%">
-            ${r.hasPhoto ? `<img class="r360-av-img" src="/api/housing/residents/${r.id}/photo?t=${Date.now()}" alt=""/>` : `<div class="r360-av">${esc(initials(r.name))}</div>`}
+            ${r.hasPhoto ? `<img class="r360-av-img" src="/api/housing/residents/${r.id}/photo?t=${Date.now()}" alt="" title="${esc(r.photo_consent||'Photo on file')}"/>` : `<div class="r360-av">${esc(initials(r.name))}</div>`}
             <span class="r360-av-cam">📷</span>
           </div>
           ${r.hasPhoto?`<button class="r360-av-x" onclick="removeResidentPhoto(${r.id})" title="Remove photo">✕</button>`:''}
-          <input id="r360photo" type="file" accept="image/*" style="display:none" onchange="uploadResidentPhoto(${r.id}, this.files[0])"/>
+          <input id="r360photo" type="file" accept="image/*" style="display:none" onchange="pickResidentPhoto(${r.id}, this.files[0])"/>
         </div>
         <div style="flex:1;min-width:220px">
           <h3 style="font-size:23px;font-family:var(--serif);margin:0">${esc(r.name)}</h3>
@@ -936,4 +947,4 @@ async function openIncidentForm(presetResident){
 async function closeIncident(id){ const follow_up=prompt('Resolution / follow-up note:'); if(follow_up===null) return; try{ await api('/housing/incidents/'+id,{method:'POST',body:JSON.stringify({status:'closed',follow_up})}); loadHIncidents(); }catch(e){ alert(e.message); } }
 
 /* expose to window for inline handlers & app.js show() */
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto});

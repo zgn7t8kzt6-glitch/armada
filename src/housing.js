@@ -295,6 +295,8 @@ export function housingSchema() {
   for (const col of ['time TEXT', 'status TEXT', 'notified TEXT', 'reported_by TEXT', 'follow_up TEXT']) {
     try { db.exec(`ALTER TABLE housing_incidents ADD COLUMN ${col}`); } catch { /* already exists */ }
   }
+  // Migration: photo consent attestation (who/when).
+  try { db.exec(`ALTER TABLE housing_residents ADD COLUMN photo_consent TEXT`); } catch { /* already exists */ }
 }
 
 /* ───────────────────────── Seed (sample so it looks alive) ───────────────────────── */
@@ -823,12 +825,16 @@ export function mountHousing(app) {
   });
 
   app.post('/api/housing/residents/:id/photo', requireAuth, (req, res) => {
-    const cur = db.prepare(`SELECT id, name FROM housing_residents WHERE id=?`).get(req.params.id);
+    const cur = db.prepare(`SELECT id, name, photo_consent FROM housing_residents WHERE id=?`).get(req.params.id);
     if (!cur) return res.status(404).json({ error: 'Not found' });
     let photo = req.body?.photo ?? null;
     if (photo !== null) {
       if (typeof photo !== 'string' || !/^data:image\/[\w.+-]+;base64,/.test(photo)) return res.status(400).json({ error: 'Expected an image.' });
       if (photo.length > 3_000_000) return res.status(413).json({ error: 'Image too large — it should resize client-side first.' });
+      // A face photo is PHI: require a consent attestation (this time, or already on file).
+      const consented = req.body?.consent === true;
+      if (!consented && !cur.photo_consent) return res.status(400).json({ error: 'Photo consent is required before saving a resident photo.' });
+      if (consented) db.prepare(`UPDATE housing_residents SET photo_consent=? WHERE id=?`).run(`Consent on file — ${req.user.name} · ${todayStr()}`, cur.id);
     }
     db.prepare(`UPDATE housing_residents SET photo=? WHERE id=?`).run(photo, cur.id);
     audit({ user: req.user, action: photo ? 'HOUSING_PHOTO_SET' : 'HOUSING_PHOTO_CLEAR', detail: cur.name, ip: req.ip });

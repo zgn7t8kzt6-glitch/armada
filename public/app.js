@@ -164,7 +164,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',plan:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',plan:'command',excellence:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -193,6 +193,7 @@ const VIEW_ROLES = {
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
+  excellence:  ['Executive Director','Director of Operations','Clinical Director'],
   dignity:     ['BHT / Tech','Nurse','Clinical Director'],
   engagement:  ['BHT / Tech','Therapist','Clinical Director'],
   program:     ['BHT / Tech','Therapist','Clinical Director'],
@@ -302,6 +303,7 @@ function show(v){
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
   if(v==='plan') loadPlan();
+  if(v==='excellence') loadExcellence();
   if(v==='leadership') loadLeadership();
   if(v==='compliance') loadCompliance();
   if(v==='askai') loadAskAI();
@@ -2442,6 +2444,45 @@ async function togglePlanTask(id,done){
 async function setPlanStart(){
   const date=$('planStart')?$('planStart').value:''; if(!date) return;
   try{ await api('/plan/start',{method:'POST',body:JSON.stringify({date})}); loadPlan(); loadPlanMorning(); }catch(e){ alert(e.message); }
+}
+/* ---- Excellence Standards ---- */
+async function loadExcellence(){
+  let d; try{ d=await api('/excellence'); }catch(e){ if($('exDefects'))$('exDefects').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const c=d.cfg, set=(id,v)=>{ if($(id)) $(id).value=v||''; };
+  set('ex_goalText',c.goalText); set('ex_goalTarget',c.goalTarget); set('ex_goalDeadline',c.goalDeadline);
+  set('ex_empowerment',c.empowerment); set('ex_budget',c.budget); set('ex_nonneg',c.nonneg); set('ex_anticipation',c.anticipation); set('ex_interview',c.interview);
+  const m=d.metrics||{}; const tgt=parseFloat(c.goalTarget)||null;
+  const hit=tgt!=null&&m.ratio!=null&&m.ratio<=tgt;
+  $('exGoalProgress').innerHTML=`
+    <div class="ret-card ${m.ratio!=null&&m.ratio>1.5?'rc-high':''}"><div class="n">${m.ratio==null?'—':m.ratio+'×'}</div><div class="l">Weekend ÷ weekday AMA now</div></div>
+    <div class="ret-card ${hit?'rc-warn':''}"><div class="n">${tgt?tgt+'×':'—'}</div><div class="l">Target ${hit?'✓ hit':''}</div></div>
+    <div class="ret-card"><div class="n">${m.weekendRate==null?'—':m.weekendRate+'%'}</div><div class="l">Weekend AMA rate</div></div>
+    <div class="ret-card"><div class="n">${m.weekdayRate==null?'—':m.weekdayRate+'%'}</div><div class="l">Weekday AMA rate</div></div>`;
+  // AMA defect log
+  const wkEnd=d.defects.filter(x=>x.weekend).length, wkDay=d.defects.length-wkEnd;
+  $('exDefectStats').innerHTML=`
+    <div class="ret-card"><div class="n">${d.defects.length}</div><div class="l">AMAs · 60 days</div></div>
+    <div class="ret-card ${wkEnd>wkDay?'rc-high':''}"><div class="n">${wkEnd}</div><div class="l">On weekends</div></div>
+    <div class="ret-card"><div class="n">${wkDay}</div><div class="l">On weekdays</div></div>
+    <div class="ret-card"><div class="n">${d.nearMisses.length}</div><div class="l">Near-misses saved</div></div>`;
+  const rows=d.defects.map(x=>`<div class="pc-note" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span style="min-width:150px"><strong>${esc(x.name)}</strong> <span class="hint">${esc(x.date)}${x.weekend?' · weekend':''}</span></span>
+      <input class="sans" style="flex:1;min-width:180px" value="${esc(x.root_cause)}" placeholder="root cause${x.reason?' (Kipu: '+esc(x.reason).slice(0,40)+')':''}" onchange="tagRootCause(${x.client_id},'${esc(x.name).replace(/'/g,"\\'")}',${x.weekend?1:0},this.value)"/>
+    </div>`).join('');
+  const nm=d.nearMisses.map(x=>`<div class="pc-note">💪 <strong>${esc(x.client_name||'A patient')}</strong> — ${esc(x.root_cause)} <span class="hint">· ${esc(x.by_name||'')} ${esc(x.at||'')}${x.weekend?' · weekend':''}</span></div>`).join('');
+  $('exDefects').innerHTML = (rows||'<div class="hint">No AMAs in the last 60 days.</div>') + (nm?'<div class="cmd-sub">Near-misses (talked back into bed)</div>'+nm:'');
+}
+async function saveExcellence(){
+  const g=id=>($(id)||{}).value||'';
+  const body={ goalText:g('ex_goalText'),goalTarget:g('ex_goalTarget'),goalDeadline:g('ex_goalDeadline'),empowerment:g('ex_empowerment'),budget:g('ex_budget'),nonneg:g('ex_nonneg'),anticipation:g('ex_anticipation'),interview:g('ex_interview') };
+  try{ await api('/excellence/config',{method:'POST',body:JSON.stringify(body)}); if($('ex_msg'))$('ex_msg').textContent='✓ Saved'; setTimeout(()=>{if($('ex_msg'))$('ex_msg').textContent='';},2000); }catch(e){ if($('ex_msg'))$('ex_msg').textContent=e.message; }
+}
+async function tagRootCause(client_id,client_name,weekend,root_cause){
+  try{ await api('/excellence/defect',{method:'POST',body:JSON.stringify({client_id,client_name,weekend,root_cause})}); }catch(e){ alert(e.message); }
+}
+async function addNearMiss(){
+  const cause=($('ex_nmcause')||{}).value||''; if(!cause.trim()){ return; }
+  try{ await api('/excellence/defect',{method:'POST',body:JSON.stringify({client_name:($('ex_nmname')||{}).value||'',root_cause:cause})}); $('ex_nmname').value='';$('ex_nmcause').value=''; loadExcellence(); }catch(e){ alert(e.message); }
 }
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }

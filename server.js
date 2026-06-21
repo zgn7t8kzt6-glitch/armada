@@ -2312,6 +2312,84 @@ app.get('/api/belonging-pulse/stats', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
   res.json(belongingStats(+req.query.days || 30));
 });
+
+// ── Excellence Standards (the Schulze playbook gaps, made operational) ────────
+const EXCELLENCE_DEFAULTS = {
+  goalText: 'Cut our weekend AMA rate to within 1.2× of our weekday rate.',
+  goalTarget: '1.2',
+  goalDeadline: '',
+  empowerment: [
+    'Order better/different food or an extra snack or drink',
+    'Get a comfort item — blanket, fan, eye mask, fidget',
+    'Place a supervised phone call home',
+    'Offer a 1:1 walk or a quiet space',
+    'Move a room for noise, light, or a roommate conflict',
+    'Expedite a comfort-med conversation with the nurse',
+  ].join('\n'),
+  budget: 'Up to $75 per patient, per shift, no approval needed — just log it.',
+  nonneg: [
+    'A warm welcome by preferred name in the first 10 minutes — always.',
+    'The Dignity Kit is delivered as a moment of welcome, not a supply drop.',
+    'Every AMA gets a calm, no-shame recovery attempt before they walk.',
+    'No patient waits in withdrawal — comfort needs are answered fast.',
+    'The door stays open: every discharge ends with "you can always come back."',
+  ].join('\n'),
+  anticipation: [
+    'Hours 6–12: anxiety climbs — round proactively, reassure, set expectations.',
+    'Hours 12–24: peak discomfort begins — "I came to check on you because hour 24 is hard."',
+    'Hours 24–48: hardest window + most AMAs — extra check-ins, comfort meds on time.',
+    'Overnight & weekends: thinnest support, highest risk — pre-position help.',
+    'Day 3+: boredom & doubt — engagement, purpose, connect to their "why."',
+  ].join('\n'),
+  interview: [
+    'Tell me about a time you helped someone who was at their worst.',
+    'What does treating someone with dignity look like when they\'re difficult?',
+    'Describe a time you noticed a need before anyone asked.',
+    'Why do you want to work in detox specifically?',
+  ].join('\n'),
+};
+function excellenceCfg() {
+  let c = {}; try { c = JSON.parse(getState('excellence_cfg') || '{}'); } catch { c = {}; }
+  return { ...EXCELLENCE_DEFAULTS, ...c };
+}
+app.get('/api/excellence', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const split = weekendAmaSplit();
+  const ratio = (split.weekendRate != null && split.weekdayRate) ? Math.round(split.weekendRate / split.weekdayRate * 10) / 10 : null;
+  // Recent AMA discharges, left-joined to any logged root cause, + manual near-misses.
+  const amas = db.prepare(`SELECT id, pref, name, discharge_date, discharge_reason FROM clients
+    WHERE discharge_status = 'AMA' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-60 day') ORDER BY discharge_date DESC LIMIT 40`).all();
+  const logged = {}; db.prepare(`SELECT client_id, root_cause FROM ama_defects WHERE client_id IS NOT NULL`).all().forEach((r) => { logged[r.client_id] = r.root_cause; });
+  const isWknd = (d) => [0, 6].includes(new Date((d || '').slice(0, 10) + 'T12:00:00Z').getUTCDay());
+  const defectList = amas.map((c) => ({ client_id: c.id, name: c.pref || c.name, date: (c.discharge_date || '').slice(0, 10), weekend: isWknd(c.discharge_date), reason: c.discharge_reason || '', root_cause: logged[c.id] || '' }));
+  const nearMisses = db.prepare(`SELECT id, client_name, root_cause, weekend, by_name, substr(created_at,1,10) at FROM ama_defects WHERE kind = 'near_miss' ORDER BY id DESC LIMIT 20`).all();
+  res.json({ cfg: excellenceCfg(), metrics: { ...split, ratio }, defects: defectList, nearMisses });
+});
+app.post('/api/excellence/config', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const b = req.body || {}; const cur = excellenceCfg();
+  for (const k of ['goalText', 'goalTarget', 'goalDeadline', 'empowerment', 'budget', 'nonneg', 'anticipation', 'interview']) {
+    if (b[k] != null) cur[k] = String(b[k]).slice(0, 4000);
+  }
+  setState('excellence_cfg', JSON.stringify(cur));
+  res.json({ ok: true });
+});
+app.post('/api/excellence/defect', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const b = req.body || {};
+  if (b.client_id) {  // tag an existing AMA's root cause (upsert by client)
+    const existing = db.prepare(`SELECT id FROM ama_defects WHERE client_id = ? AND kind = 'ama'`).get(b.client_id);
+    if (existing) db.prepare(`UPDATE ama_defects SET root_cause = ?, by_name = ? WHERE id = ?`).run((b.root_cause || '').slice(0, 300), req.user.name, existing.id);
+    else db.prepare(`INSERT INTO ama_defects (client_id, client_name, kind, root_cause, weekend, by_name) VALUES (?,?, 'ama', ?, ?, ?)`)
+      .run(b.client_id, (b.client_name || '').slice(0, 80), (b.root_cause || '').slice(0, 300), b.weekend ? 1 : 0, req.user.name);
+  } else {  // manual near-miss ("talked back into bed")
+    const name = (b.client_name || '').trim(); const rc = (b.root_cause || '').trim();
+    if (!rc) return res.status(400).json({ error: 'What was the root cause?' });
+    db.prepare(`INSERT INTO ama_defects (client_name, kind, root_cause, weekend, by_name) VALUES (?, 'near_miss', ?, ?, ?)`)
+      .run(name.slice(0, 80), rc.slice(0, 300), [0, 6].includes(new Date().getDay()) ? 1 : 0, req.user.name);
+  }
+  res.json({ ok: true });
+});
 app.post('/api/plan/task', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
   const id = String(req.body?.id || ''); if (!BELONGING_PLAN.some((t) => t.id === id)) return res.status(400).json({ error: 'Unknown task' });

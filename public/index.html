@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616CO" />
+<link rel="stylesheet" href="/styles.css?v=20260616CP" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -56,6 +56,7 @@
     <button data-view="today">Today</button>
     <button data-view="command" data-admin>Command Center</button>
     <button data-view="plan" data-admin data-subview>90-Day Plan</button>
+    <button data-view="excellence" data-admin data-subview>Excellence Standards</button>
     <button data-view="leadership" data-admin>Leadership</button>
     <button data-view="compliance" data-admin>Documentation</button>
     <button data-view="report" class="active">Shift Playbook</button>
@@ -342,6 +343,52 @@
       </div>
       <div id="planMetrics" class="ret-cards"></div>
       <div id="planTasks"></div>
+    </section>
+
+    <!-- EXCELLENCE STANDARDS -->
+    <section id="excellence" class="view">
+      <div class="card cmd-hero">
+        <h3>🏛️ Excellence Standards</h3>
+        <p class="sub sans">The Schulze playbook, made operational — the standards that turn the principles into daily action. Edit any of them for Akron.</p>
+      </div>
+      <div class="card" style="border-left:4px solid #c8a44d">
+        <h3>🎯 Our audacious goal</h3>
+        <div id="exGoalProgress" class="ret-cards" style="margin:8px 0"></div>
+        <label>Goal</label><input id="ex_goalText"/>
+        <div class="grid2"><div><label>Target (weekend ÷ weekday AMA ratio)</label><input id="ex_goalTarget" placeholder="1.2"/></div><div><label>By when</label><input id="ex_goalDeadline" type="date"/></div></div>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="saveExcellence()">Save</button><span class="hint" id="ex_msg"></span></div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:280px;border-left:4px solid #3f8c5a">
+          <h3>🤝 Empowerment envelope</h3>
+          <p class="sub sans" style="margin:0 0 6px">What frontline staff are <strong>trusted to do on the spot</strong> to keep a wavering patient — no approval needed.</p>
+          <textarea id="ex_empowerment" rows="7"></textarea>
+          <label>Comfort budget</label><input id="ex_budget"/>
+        </div>
+        <div class="card" style="flex:1;min-width:280px;border-left:4px solid var(--danger)">
+          <h3>🚫 Never compromise</h3>
+          <p class="sub sans" style="margin:0 0 6px">The standards we hold <strong>even on the worst-staffed weekend night.</strong> Everything else can flex; these can't.</p>
+          <textarea id="ex_nonneg" rows="9"></textarea>
+        </div>
+      </div>
+      <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:280px;border-left:4px solid #7a5cc0">
+          <h3>🕐 Anticipation map</h3>
+          <p class="sub sans" style="margin:0 0 6px">Withdrawal is predictable — round <strong>before</strong> the hard hours, not after the call light.</p>
+          <textarea id="ex_anticipation" rows="7"></textarea>
+        </div>
+        <div class="card" style="flex:1;min-width:280px;border-left:4px solid #0b2a4a">
+          <h3>🎙️ Select, don't hire</h3>
+          <p class="sub sans" style="margin:0 0 6px">Values-based questions for floor-staff interviews — hire the disposition, train the skills.</p>
+          <textarea id="ex_interview" rows="6"></textarea>
+        </div>
+      </div>
+      <div class="card" style="border-left:4px solid var(--danger)">
+        <h3>🧯 AMA defect log <span class="hint" style="font-weight:400">— a complaint is a gift; find the pattern</span></h3>
+        <div id="exDefectStats" class="ret-cards" style="margin:8px 0"></div>
+        <div class="handoff-add"><input id="ex_nmname" class="sans" style="max-width:150px" placeholder="Near-miss: who (optional)"/><input id="ex_nmcause" class="sans" style="flex:1" placeholder="Talked back into bed — what was the real root cause?"/><button class="btn btn-gold sans" onclick="addNearMiss()">Log near-miss</button></div>
+        <div id="exDefects" style="margin-top:10px"></div>
+      </div>
     </section>
 
     <!-- ENGAGEMENT & REWARDS -->
@@ -1971,6 +2018,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616CO"></script>
+<script src="/app.js?v=20260616CP"></script>
 </body>
 </html>

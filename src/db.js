@@ -273,6 +273,18 @@ CREATE TABLE IF NOT EXISTS belonging_pulses (
   weekend INTEGER NOT NULL DEFAULT 0,        -- submitted on a weekend (weekend-staff signal)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- AMA defect log (Schulze "a complaint is a gift"): every AMA / near-AMA tagged
+-- with a root cause so patterns (esp. nights/weekends) point at fixable gaps.
+CREATE TABLE IF NOT EXISTS ama_defects (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER,
+  client_name TEXT,
+  kind TEXT NOT NULL DEFAULT 'ama',          -- ama | near_miss
+  root_cause TEXT,
+  weekend INTEGER NOT NULL DEFAULT 0,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
 CREATE TABLE IF NOT EXISTS staff_pulses (

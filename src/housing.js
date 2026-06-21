@@ -1211,8 +1211,16 @@ export function buildDailyMovement(date) {
     ${emailSection('Maintenance', null)}
     <div style="font-size:15px">${openWO} open work order${openWO === 1 ? '' : 's'}${urgentWO.length ? ` · <b style="color:${EM.red}">${urgentWO.length} urgent</b>` : ''}${lowStock ? ` · <b>${lowStock}</b> supply item(s) low` : ''}.</div>
     ${urgentWO.length ? '<div style="margin-top:6px">' + emailList(urgentWO, w => `<b style="color:${EM.red}">Urgent:</b> ${esc(w.title)}${w.house ? ' — ' + esc(w.house) : ''}`) + '</div>' : ''}
-    ${emailSection('Activities this week', activitiesWeek.length)}
-    ${emailList(activitiesWeek, a => `<b>${esc(new Date(a.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }))}</b>${a.time ? ' ' + esc(a.time) : ''} — ${esc(a.title)}<span style="color:${EM.soft}">${a.house ? ' · ' + esc(a.house) : ''}</span>`)}
+    ${emailSection('This week’s activities', activitiesWeek.length)}
+    ${(() => {
+    const byDay = {}; for (const a of activitiesWeek) { (byDay[a.date] = byDay[a.date] || []).push(a); }
+    const days = Object.keys(byDay).sort();
+    return emailList(days, d => {
+      const items = byDay[d];
+      const label = new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      return `<b>${label}</b> <span style="color:${EM.soft}">(${items.length})</span> — ${items.map(a => esc(a.title)).join(' · ')}`;
+    });
+  })()}
     ${emailSection('Census by house', null)}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;font-size:14px;border:1px solid ${EM.line};border-radius:10px;overflow:hidden">
       <tr style="background:${EM.teal};color:#fff"><th align="left" style="padding:9px 12px;font-weight:600">House</th><th align="left" style="padding:9px 12px;font-weight:600">Program</th><th align="right" style="padding:9px 12px;font-weight:600">Filled</th><th align="right" style="padding:9px 12px;font-weight:600">Open</th></tr>

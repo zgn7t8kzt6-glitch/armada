@@ -171,19 +171,26 @@ async function loadResidents(){
 function openImportForm(){
   if(!isAdmin()){ alert('Importing the patient export is restricted to the owner/admin.'); return; }
   const save = hmodal(`<h3>Import patients (Akron export)</h3>
-    <p class="sub sans" style="margin:.2em 0 1em">Upload the CSV you downloaded from the patient app. Dayton sites are <b>excluded automatically</b> — only people whose room/house matches one of the 10 Akron homes are imported. Current residents are seated in open beds; this clears the placeholder census first. Safe to re-run (duplicates are skipped).</p>
-    <label>Patient export file (.csv)</label>
-    <input id="imp_file" type="file" accept=".csv,text/csv"/>
+    <p class="sub sans" style="margin:.2em 0 1em">Dayton sites are <b>excluded automatically</b> — only people whose room/house matches one of the 10 Akron homes are imported. Current residents are seated in open beds; this clears the placeholder census first. Safe to re-run (duplicates are skipped).</p>
+    <label>Option A — upload the CSV file</label>
+    <input id="imp_file" type="file" accept=".csv,text/csv,text/plain"/>
+    <div class="hint" style="margin:10px 0 4px;text-align:center">— or —</div>
+    <label>Option B — paste the spreadsheet text here</label>
+    <textarea id="imp_text" rows="6" placeholder="Open the file, select all (Ctrl/Cmd+A), copy, and paste here. The first line should start with first_name,middle_name,last_name…" style="font-family:monospace;font-size:11px;white-space:pre"></textarea>
     <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:500">
       <input id="imp_alumni" type="checkbox"/> Also import past residents as alumni (discharged, no bed)
     </label>
     <div id="imp_status" class="hint" style="margin-top:10px"></div>`);
   save.textContent = 'Import';
   save.onclick = async () => {
+    const st=$('imp_status');
     const f = $('imp_file').files[0];
-    if(!f){ alert('Choose the CSV file first.'); return; }
-    const st=$('imp_status'); st.textContent='Reading file…';
-    let text; try{ text = await f.text(); }catch(e){ st.textContent='Could not read file: '+e.message; return; }
+    const pasted = ($('imp_text').value||'').trim();
+    let text='';
+    if(f){ st.textContent='Reading file…'; try{ text = await f.text(); }catch(e){ st.textContent='Could not read file: '+e.message; return; } }
+    else if(pasted){ text = pasted; }
+    else { alert('Choose a CSV file or paste the spreadsheet text.'); return; }
+    if(!/first_name/i.test(text.slice(0,500))){ st.textContent='That doesn’t look like the patient export — the first line should start with first_name,middle_name,last_name,… Try copying the whole sheet including the header row.'; return; }
     st.textContent='Importing '+(text.length/1024|0)+' KB…'; save.disabled=true;
     try{
       const out = await api('/housing/import', { method:'POST', body: JSON.stringify({ csv:text, includeAlumni: $('imp_alumni').checked }) });

@@ -371,15 +371,19 @@ const JUNK_RE = /chore|checklist|duplicate file|training/i;
 
 // CSV → rows[][], handling quoted fields, escaped quotes, and CRLF/LF.
 function parseCsv(text) {
-  const rows = []; let row = []; let field = ''; let inQ = false;
   const s = String(text).replace(/\r\n?/g, '\n');
+  // Auto-detect the delimiter from the header line: pasting from a spreadsheet
+  // often yields tab-separated values rather than commas.
+  const head = s.slice(0, s.indexOf('\n') < 0 ? s.length : s.indexOf('\n'));
+  const delim = (head.split('\t').length > head.split(',').length) ? '\t' : ',';
+  const rows = []; let row = []; let field = ''; let inQ = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (inQ) {
       if (c === '"') { if (s[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
       else field += c;
     } else if (c === '"') inQ = true;
-    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === delim) { row.push(field); field = ''; }
     else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
     else field += c;
   }

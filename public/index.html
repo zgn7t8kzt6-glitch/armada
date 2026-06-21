@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260621X" />
+<link rel="stylesheet" href="/styles.css?v=20260621Y" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -125,6 +125,7 @@
     <button data-view="hincidents">Incident Reports</button>
     <button data-view="voice">Resident Voice &amp; Kiosk</button>
     <button data-view="maintenance">Maintenance &amp; Supplies</button>
+    <button data-view="movement">Daily Movement</button>
     <button data-view="coordination">Clinical Coordination</button>
     <button data-view="employment">Employment</button>
     <button data-view="rentrun">Rent Run</button>
@@ -2307,6 +2308,19 @@
       </div>
     </section>
 
+    <section id="movement" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>📋 Daily Movement</h3><p class="sub sans" style="margin:0">Where we stand today — intakes, discharges and census — auto-emailed to clinical and leadership each morning.</p></div>
+          <div class="toolbar" style="margin:0;gap:8px">
+            <button class="btn btn-ghost sans" onclick="openMovementSettings()">⚙ Recipients &amp; schedule</button>
+            <button class="btn btn-primary sans" onclick="sendDailyMovement()">✉ Send now</button>
+          </div>
+        </div>
+        <div id="movementBody" style="margin-top:14px"></div>
+      </div>
+    </section>
+
     <!-- generic housing modal -->
     <div id="hModal" class="hmodal" style="display:none"><div class="hmodal-card"><div id="hModalBody"></div></div></div>
   </main>
@@ -2322,7 +2336,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260621X"></script>
-<script src="/housing.js?v=20260621X"></script>
+<script src="/app.js?v=20260621Y"></script>
+<script src="/housing.js?v=20260621Y"></script>
 </body>
 </html>

@@ -1134,4 +1134,45 @@ async function loadOrders(){
 }
 async function orderStatus(id,status){ if(status==='received'&&!confirm('Receive this order? It will add the quantities back into inventory.')) return; try{ await api('/housing/orders/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadOrders(); }catch(e){ alert(e.message); } }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,openSlKioskCode,loadMaintenance,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadInventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+/* ============================ DAILY MOVEMENT ============================ */
+let MOVE=null;
+async function loadDailyMovement(){
+  let d; try{ d=await api('/housing/daily-movement'); }catch(e){ $('movementBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  MOVE=d;
+  const k=[['Census',d.census],['Intakes',d.intakes.length],['Discharges',d.discharges.length],['Open beds',d.open],['Occupancy',d.occPct+'%']];
+  const status = !d.emailReady ? '<span class="chip" style="background:#fdeaea;color:#b3382f;border-color:#f3c4c0">Email not connected</span>'
+    : (d.recipients.length ? `<span class="hint">Sends to ${d.recipients.length} recipient(s)${d.auto?` · auto at ${d.hour}:00`:' · auto off'}${d.lastSent?` · last sent ${esc(d.lastSent)}`:''}</span>` : '<span class="chip" style="background:#fbe9d8;color:#a35a23;border-color:#f0c9a3">No recipients set</span>');
+  const lst=(a,f)=>a.length?'<ul style="margin:6px 0 0;padding-left:18px">'+a.map(f).join('')+'</ul>':'<div class="hint">None today.</div>';
+  $('movementBody').innerHTML=`
+    <div class="ret-cards">${k.map(c=>`<div class="ret-card"><div class="n">${c[1]}</div><div class="l">${c[0]}</div></div>`).join('')}</div>
+    <div style="margin:10px 0">${status}</div>
+    <div class="r360-grid">
+      <div class="card"><h3>Intakes today (${d.intakes.length})</h3>${lst(d.intakes,i=>`<li>${esc(i.name)} — ${esc(i.house||'unassigned')}${i.loc?' · '+esc(i.loc):''}</li>`)}</div>
+      <div class="card"><h3>Discharges today (${d.discharges.length})</h3>${lst(d.discharges,x=>`<li>${esc(x.name)} — ${esc(x.discharge_type||'discharged')}${x.house?' · '+esc(x.house):''}</li>`)}</div>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>Census by house</h3>
+      <table class="tbl"><thead><tr><th>House</th><th>Program</th><th style="text-align:right">Filled</th><th style="text-align:right">Open</th></tr></thead>
+      <tbody>${d.byHouse.map(h=>`<tr><td>${esc(h.name)}</td><td>${esc(h.program)}</td><td style="text-align:right">${h.occupied}/${h.capacity}</td><td style="text-align:right">${h.open}</td></tr>`).join('')}
+      <tr style="font-weight:700;border-top:2px solid var(--navy)"><td>Total</td><td></td><td style="text-align:right">${d.occupied}/${d.capacity}</td><td style="text-align:right">${d.open}</td></tr></tbody></table></div>`;
+}
+async function sendDailyMovement(){
+  if(MOVE && !MOVE.emailReady){ alert('Email isn’t connected yet — set it up in Settings → Email first.'); return; }
+  if(!confirm('Send today’s Daily Movement report to clinical and leadership now?')) return;
+  try{ const r=await api('/housing/daily-movement/send',{method:'POST',body:'{}'}); alert(`Sent to ${r.sent}/${r.total} recipient(s).`+(r.failed&&r.failed.length?'\nFailed: '+r.failed.join(', '):'')); }
+  catch(e){ alert(e.message); }
+}
+async function openMovementSettings(){
+  const d=MOVE||await api('/housing/daily-movement');
+  const save=hmodal(`<h3>Daily Movement — recipients & schedule</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">Who gets the morning report, and when it sends automatically. Separate multiple emails with commas.</p>
+    <label>Clinical recipients</label><input id="mv_clin" value="${esc(d.clinical||'')}" placeholder="clinical@armadarecovery.com"/>
+    <label style="margin-top:8px">Leadership recipients</label><input id="mv_lead" value="${esc(d.leadership||'')}" placeholder="shlomo@armadarecovery.com"/>
+    <div class="grid2" style="margin-top:10px">
+      <div><label style="display:flex;gap:8px;align-items:center"><input id="mv_auto" type="checkbox" ${d.auto?'checked':''}/> Auto-send daily</label></div>
+      <div><label>Hour (0–23, ET)</label><input id="mv_hour" type="number" min="0" max="23" value="${d.hour??8}"/></div>
+    </div>
+    ${d.emailReady?'':'<div class="hint" style="margin-top:8px;color:var(--danger)">⚠ Email isn’t connected — connect it in Settings → Email or this won’t send.</div>'}`);
+  save.onclick=async()=>{ try{ await api('/housing/daily-movement/settings',{method:'POST',body:JSON.stringify({clinical:$('mv_clin').value,leadership:$('mv_lead').value,auto:$('mv_auto').checked,hour:+$('mv_hour').value})}); closeHModal(); loadDailyMovement(); }catch(e){ alert(e.message); } };
+}
+
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,openSlKioskCode,loadMaintenance,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadInventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

@@ -161,7 +161,7 @@ const GROUP_OF={
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
-  housing:'housing',houses:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',maintenance:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
+  housing:'housing',houses:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',maintenance:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
   mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
@@ -220,7 +220,7 @@ const VIEW_ROLES = {
 };
 // Recovery Housing is a separate world from clinical detox. Only housing staff
 // (and the owner/admin) ever see it; nobody on the detox/clinical side does.
-const HOUSING_VIEWS = ['housing','houses','residents','resident','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','maintenance','coordination','employment','rentrun','ledger','orh','housingoutcomes'];
+const HOUSING_VIEWS = ['housing','houses','residents','resident','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','maintenance','movement','coordination','employment','rentrun','ledger','orh','housingoutcomes'];
 const HOUSING_ROLES = ['Housing Director','House Manager','Recovery Coach'];
 const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // The handful of shared pages housing staff still get (their own tasks/comms/learning) —
@@ -232,9 +232,9 @@ const ROLE_MENU = {
   'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedboard','clients','dignity','mytasks','messages','team','training','library'],
   'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
-  'Housing Director': ['housing','houses','residents','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','maintenance','coordination','employment','rentrun','ledger','orh','housingoutcomes','mytasks','messages'],
-  'House Manager':    ['housing','houses','residents','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','maintenance','coordination','employment','rentrun','ledger','mytasks','messages'],
-  'Recovery Coach':   ['housing','residents','intake','screens','houselife','shiftreports','hincidents','voice','maintenance','coordination','employment','mytasks','messages'],
+  'Housing Director': ['housing','houses','residents','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','maintenance','movement','coordination','employment','rentrun','ledger','orh','housingoutcomes','mytasks','messages'],
+  'House Manager':    ['housing','houses','residents','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','maintenance','movement','coordination','employment','rentrun','ledger','mytasks','messages'],
+  'Recovery Coach':   ['housing','residents','intake','screens','houselife','shiftreports','hincidents','voice','maintenance','movement','coordination','employment','mytasks','messages'],
 };
 function flatMenu(){
   // Admins + leadership always get the full nav (Command Center, etc.) — the flat
@@ -321,7 +321,7 @@ function show(v){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',housing:'Recovery Housing HQ',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',maintenance:'Maintenance & Supplies'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',housing:'Recovery Housing HQ',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',maintenance:'Maintenance & Supplies',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
@@ -401,6 +401,7 @@ function show(v){
   if(v==='hincidents' && window.loadHIncidents) loadHIncidents();
   if(v==='voice' && window.loadVoice) loadVoice();
   if(v==='maintenance' && window.loadMaintenance) loadMaintenance();
+  if(v==='movement' && window.loadDailyMovement) loadDailyMovement();
 }
 
 /* ---- clients ---- */

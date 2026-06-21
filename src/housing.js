@@ -12,8 +12,9 @@
 // id so a person can be one record across detox → residential → housing.
 
 import crypto from 'node:crypto';
-import { db, audit, getState, setState } from './db.js';
+import { db, audit, getState, setState, appToday, APP_TZ } from './db.js';
 import { requireAuth, requireAdmin } from './auth.js';
+import { sendEmail, emailConfigured, emailStatus } from './report.js';
 
 /* ───────────────────────── Domain knowledge ───────────────────────── */
 
@@ -761,6 +762,66 @@ function seedHousingSupplies() {
 // Low = at or below par. Used for the reorder suggestion.
 const isLow = (it) => (it.qty ?? 0) <= (it.par ?? 0);
 
+/* ───────────── Daily Movement report (auto-emailed to clinical + leadership) ───────────── */
+// One dated snapshot of the houses: who came in, who left, and where the census
+// stands — the morning number clinical and leadership want.
+export function buildDailyMovement(date) {
+  date = date || appToday();
+  const intakes = db.prepare(`SELECT r.name, r.loc, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.move_in=? ORDER BY h.name, r.name`).all(date);
+  const discharges = db.prepare(`SELECT r.name, r.discharge_type, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.discharge_date=? ORDER BY r.name`).all(date);
+  const occ = occMap();
+  const houses = db.prepare(`SELECT * FROM housing_houses WHERE active=1 ORDER BY program, name`).all();
+  const capacity = houses.reduce((a, h) => a + (h.capacity || 0), 0);
+  const occupied = Object.values(occ).reduce((a, o) => a + (o.occupied || 0), 0);
+  const open = Object.values(occ).reduce((a, o) => a + (o.open || 0), 0);
+  const census = db.prepare(`SELECT COUNT(*) c FROM housing_residents WHERE status='active'`).get().c;
+  const byHouse = houses.map(h => { const o = occ[h.id] || {}; return { name: h.name, program: h.program || '', occupied: o.occupied || 0, capacity: h.capacity || 0, open: o.open || 0 }; });
+  const byProgram = {};
+  for (const h of houses) { const o = occ[h.id] || {}; byProgram[h.program || 'Other'] = (byProgram[h.program || 'Other'] || 0) + (o.occupied || 0); }
+  const occPct = capacity ? Math.round(occupied / capacity * 100) : 0;
+  const kpis = { date, intakes: intakes.length, discharges: discharges.length, census, occupied, capacity, open, occPct };
+
+  const pretty = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const li = (a, fmt) => a.length ? '<ul style="margin:6px 0 0;padding-left:18px">' + a.map(fmt).join('') + '</ul>' : '<p style="color:#888;margin:6px 0 0">None.</p>';
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;color:#1d2b2a">
+    <h2 style="color:#235056;margin:0 0 2px">Armada Sober Living — Daily Movement</h2>
+    <div style="color:#5a6b69;font-size:14px;margin-bottom:14px">${pretty}</div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
+      ${[['Census', census], ['Intakes', intakes.length], ['Discharges', discharges.length], ['Open beds', open], ['Occupancy', occPct + '%']].map(c =>
+    `<td align="center" style="background:#f4f7ef;border:1px solid #e3e9da;border-radius:8px;padding:10px 6px"><div style="font-size:24px;font-weight:700;color:#235056">${c[1]}</div><div style="font-size:11px;color:#5a6b69;text-transform:uppercase;letter-spacing:.4px">${c[0]}</div></td>`).join('<td style="width:8px"></td>')}
+    </tr></table>
+    <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Intakes (${intakes.length})</h3>
+    ${li(intakes, i => `<li>${i.name} — ${i.house || 'unassigned'}${i.loc ? ' · ' + i.loc : ''}</li>`)}
+    <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Discharges (${discharges.length})</h3>
+    ${li(discharges, d => `<li>${d.name} — ${d.discharge_type || 'discharged'}${d.house ? ' · ' + d.house : ''}</li>`)}
+    <h3 style="color:#235056;margin:16px 0 4px;font-size:15px">Census by house</h3>
+    <table width="100%" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px">
+      <tr style="background:#235056;color:#fff"><th align="left">House</th><th align="left">Program</th><th align="right">Filled</th><th align="right">Open</th></tr>
+      ${byHouse.map((h, n) => `<tr style="background:${n % 2 ? '#f7f9f4' : '#fff'}"><td>${h.name}</td><td>${h.program}</td><td align="right">${h.occupied}/${h.capacity}</td><td align="right">${h.open}</td></tr>`).join('')}
+      <tr style="font-weight:700;border-top:2px solid #235056"><td>Total</td><td>${Object.entries(byProgram).map(([p, n]) => `${p} ${n}`).join(' · ')}</td><td align="right">${occupied}/${capacity}</td><td align="right">${open}</td></tr>
+    </table>
+    <p style="color:#9aa7a4;font-size:12px;margin-top:18px">Armada Recovery Housing · automated daily movement report</p>
+  </div>`;
+  return { ...kpis, intakes, discharges, byHouse, byProgram, subject: `Sober Living Daily Movement — ${pretty} · census ${census}, +${intakes.length}/-${discharges.length}`, html };
+}
+function movementRecipients() {
+  const a = (getState('housing_movement_clinical') || '').split(',');
+  const b = (getState('housing_movement_leadership') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '').split(',');
+  return [...new Set([...a, ...b].map(s => s.trim()).filter(Boolean))];
+}
+async function deliverDailyMovement(date) {
+  if (!emailConfigured()) return { error: 'Email isn’t connected yet (Settings → Email).' };
+  const list = movementRecipients();
+  if (!list.length) return { error: 'Add clinical / leadership recipients first.' };
+  const e = buildDailyMovement(date);
+  let sent = 0; const failed = [];
+  for (const r of list) {
+    try { await sendEmail({ to: r, subject: e.subject, html: e.html, suppressCc: true }); sent += 1; }
+    catch (err) { failed.push(`${r} (${err.message})`); }
+  }
+  return { sent, total: list.length, failed, census: e.census, intakes: e.intakes.length, discharges: e.discharges.length };
+}
+
 export function mountHousing(app) {
   housingSchema();
   try {
@@ -1272,6 +1333,61 @@ export function mountHousing(app) {
     audit({ user: req.user, action: 'HOUSING_ORDER_' + (status || '').toUpperCase(), detail: o.vendor, ip: req.ip });
     res.json({ ok: true });
   });
+
+  // ---- Daily Movement report (preview, send now, auto-email settings) ----
+  const canMovement = (u) => u && (u.role === 'admin' || u.job_role === 'Executive Director' || HOUSING_ACCESS_ROLES.includes(u.job_role));
+  app.get('/api/housing/daily-movement', requireAuth, (req, res) => {
+    const report = buildDailyMovement(req.query.date);
+    res.json({
+      ...report,
+      recipients: movementRecipients(),
+      clinical: getState('housing_movement_clinical') || '',
+      leadership: getState('housing_movement_leadership') || getState('census_email_to') || '',
+      auto: getState('housing_movement_auto') === 'on',
+      hour: +(getState('housing_movement_hour') || 8),
+      emailReady: emailConfigured(), from: emailStatus().from || '',
+      lastSent: getState('housing_movement_last') || null,
+    });
+  });
+  app.post('/api/housing/daily-movement/send', requireAuth, async (req, res) => {
+    if (!canMovement(req.user)) return res.status(403).json({ error: 'Leadership / housing staff only.' });
+    try {
+      const r = await deliverDailyMovement(req.body?.date);
+      if (r.error) return res.status(400).json(r);
+      audit({ user: req.user, action: 'HOUSING_MOVEMENT_SEND', detail: `${r.sent}/${r.total} · census ${r.census} · +${r.intakes}/-${r.discharges}`, ip: req.ip });
+      if (!r.sent) return res.status(502).json({ error: 'Could not send to anyone. ' + (r.failed[0] || '') });
+      res.json({ ok: true, ...r });
+    } catch (e) { res.status(502).json({ error: e.message }); }
+  });
+  app.post('/api/housing/daily-movement/settings', requireAuth, (req, res) => {
+    if (!(req.user.role === 'admin' || req.user.job_role === 'Executive Director')) return res.status(403).json({ error: 'Leadership only.' });
+    const b = req.body || {};
+    if (b.clinical != null) setState('housing_movement_clinical', String(b.clinical).trim());
+    if (b.leadership != null) setState('housing_movement_leadership', String(b.leadership).trim());
+    if (b.auto != null) setState('housing_movement_auto', b.auto ? 'on' : 'off');
+    if (b.hour != null) setState('housing_movement_hour', String(Math.min(23, Math.max(0, num(b.hour)))));
+    audit({ user: req.user, action: 'HOUSING_MOVEMENT_SETTINGS', ip: req.ip });
+    res.json({ ok: true });
+  });
+  // In-app daily scheduler (always-on web service; no external cron needed).
+  if (!app._housingMovementTimer) {
+    app._housingMovementTimer = setInterval(async () => {
+      try {
+        if (getState('housing_movement_auto') !== 'on') return;
+        const hour = Math.min(23, Math.max(0, +(getState('housing_movement_hour') || 8)));
+        const parts = new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(new Date());
+        const h = (+parts.find(p => p.type === 'hour').value) % 24;
+        const m = +parts.find(p => p.type === 'minute').value;
+        if (h !== hour || m > 9) return;
+        const today = appToday();
+        if (getState('housing_movement_last') === today) return;
+        setState('housing_movement_last', today);   // mark before sending to avoid double-fire
+        const r = await deliverDailyMovement(today);
+        audit({ user: { name: 'System (auto-movement)' }, action: 'HOUSING_MOVEMENT_AUTO', detail: r.error ? ('blocked: ' + r.error) : `${r.sent}/${r.total} · census ${r.census}`, ip: 'scheduler' });
+      } catch (e) { console.error('[housing movement auto]', e.message); }
+    }, 60 * 1000);
+    app._housingMovementTimer.unref?.();
+  }
 
   // ---- Recovery capital ----
   app.post('/api/housing/residents/:id/reccap', requireAuth, (req, res) => {

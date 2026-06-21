@@ -1438,6 +1438,14 @@ export function mountHousing(app) {
       + db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE type='Return to use' AND date>=?`).get(monthStart).c;
     const grievOpen = db.prepare(`SELECT COUNT(*) c FROM housing_grievances WHERE status='open'`).get().c;
     const openIncidents = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE status='open'`).get().c;
+    // Open beds split by the house's gender, so you can see men's vs women's availability.
+    const openByGender = { Men: 0, Women: 0, Any: 0 };
+    houses.forEach(h => {
+      const occd = occ[h.id]?.occupied || 0;
+      const openH = Math.max(0, (h.capacity || 0) - occd);
+      const g = (h.gender === 'Men' || h.gender === 'Women') ? h.gender : 'Any';
+      openByGender[g] += openH;
+    });
 
     res.json({
       kpis: {
@@ -1445,7 +1453,7 @@ export function mountHousing(app) {
         occPct: capacity ? Math.round((occupied / capacity) * 100) : 0,
         reccapAvg, balanceOut, screensDue, underDose, orhPct, returnsToUse, grievOpen, openIncidents,
       },
-      byLoc,
+      byLoc, openByGender,
       houses: houses.map(h => ({
         ...h,
         occ: occ[h.id] || { open: 0, occupied: 0, hold: 0, maintenance: 0 },

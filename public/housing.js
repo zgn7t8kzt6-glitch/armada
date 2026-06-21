@@ -54,9 +54,13 @@ async function loadHousingHQ(){
   await hMeta();
   let d; try{ d=await api('/housing/overview'); }catch(e){ $('hqKpis').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   const k=d.kpis;
+  const g=d.openByGender||{Men:0,Women:0,Any:0};
   $('hqKpis').innerHTML = `
     <div class="ret-card"><div class="n">${k.occupied}/${k.capacity}</div><div class="l">Beds filled · ${k.occPct}%</div></div>
-    <div class="ret-card ${k.open?'':''}"><div class="n">${k.open}</div><div class="l">Open beds</div></div>
+    <div class="ret-card"><div class="n">${k.open}</div><div class="l">Open beds total</div></div>
+    <div class="ret-card"><div class="n">${g.Men||0}</div><div class="l">♂ Men's beds open</div></div>
+    <div class="ret-card"><div class="n">${g.Women||0}</div><div class="l">♀ Women's beds open</div></div>
+    ${g.Any?`<div class="ret-card"><div class="n">${g.Any}</div><div class="l">Co-ed / any beds open</div></div>`:''}
     <div class="ret-card"><div class="n">${k.reccapAvg??'—'}</div><div class="l">Avg recovery capital</div></div>
     <div class="ret-card ${k.underDose?'rc-warn':''}"><div class="n">${k.underDose}</div><div class="l">Clinical under-dose</div></div>
     <div class="ret-card ${k.screensDue?'rc-warn':''}"><div class="n">${k.screensDue}</div><div class="l">Screens due</div></div>

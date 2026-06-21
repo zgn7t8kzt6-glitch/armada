@@ -1,6 +1,15 @@
 /* Armada Recovery Housing — front-end for the sober-living suite.
    Loaded after app.js, so it shares its globals (api, $, esc, today, initials, ME, show). */
-const HOUSING = { meta:null, residents:[], resStatus:'active', houses:[] };
+const HOUSING = { meta:null, residents:[], resStatus:'active', houses:[], tenure:'all' };
+
+// Early-tenure milestone buckets — the highest-risk window in recovery housing,
+// where the "anticipated stay" needs the most touchpoints.
+const TENURE_BUCKETS = [
+  ['t30',  'First 30 days',  d => d <= 30],
+  ['t60',  '31–60 days',     d => d > 30 && d <= 60],
+  ['t90',  '61–90 days',     d => d > 60 && d <= 90],
+  ['t90p', '90+ days',       d => d > 90],
+];
 
 async function hMeta(){ if(!HOUSING.meta){ try{ HOUSING.meta = await api('/housing/meta'); }catch(e){ HOUSING.meta={reccapDomains:[],phases:[],loc:{},orhStandards:[]}; } } return HOUSING.meta; }
 
@@ -217,13 +226,21 @@ function openImportForm(){
     }catch(e){ st.textContent='Import failed: '+e.message; save.disabled=false; }
   };
 }
+function setTenure(t){ HOUSING.tenure = (HOUSING.tenure===t ? 'all' : t); renderResidents(); }
 function renderResidents(){
   const q=($('resSearch')?.value||'').toLowerCase();
   let rows = HOUSING.residents.filter(r=>!q || (r.name||'').toLowerCase().includes(q));
-  if(!rows.length){ $('residentsTable').innerHTML='<div class="empty">No residents.</div>'; return; }
+  // Milestone band — counts across the loaded set, clickable to filter the list.
+  const counts = {}; TENURE_BUCKETS.forEach(b=>counts[b[0]] = rows.filter(r=>b[2](r.los||0)).length);
+  const band = `<div class="tenure-band">${TENURE_BUCKETS.map(b=>`
+    <button class="tenure-pill ${HOUSING.tenure===b[0]?'on':''}" onclick="setTenure('${b[0]}')">
+      <span class="tn">${counts[b[0]]}</span><span class="tl">${b[1]}</span></button>`).join('')}
+    <button class="tenure-pill ${HOUSING.tenure==='all'?'on':''}" onclick="setTenure('all')"><span class="tn">${rows.length}</span><span class="tl">All</span></button></div>`;
+  if(HOUSING.tenure!=='all'){ const f=TENURE_BUCKETS.find(b=>b[0]===HOUSING.tenure); if(f) rows = rows.filter(r=>f[2](r.los||0)); }
+  if(!rows.length){ $('residentsTable').innerHTML=band+'<div class="empty">No residents in this group.</div>'; return; }
   const dq = rows.filter(r=>!dobCheck(r.dob).ok).length;
   const dqBanner = dq ? `<div class="hint" style="margin:0 0 8px;padding:8px 10px;background:#fbe9d8;border:1px solid #f0c9a3;border-radius:8px;color:#a35a23">⚠ ${dq} resident${dq>1?'s have':' has'} a missing or implausible date of birth (common after import). Open a record and click <b>Fix</b> to correct it.</div>` : '';
-  $('residentsTable').innerHTML = dqBanner + `<table class="tbl"><thead><tr>
+  $('residentsTable').innerHTML = band + dqBanner + `<table class="tbl"><thead><tr>
     <th>Resident</th><th>House · bed</th><th>LOC</th><th>Phase</th><th>Days</th><th>Sober</th><th>Recovery capital</th><th>Clinical dose</th><th>Balance</th>
     </tr></thead><tbody>${rows.map(r=>{
       const phase=(HOUSING.meta.phases.find(p=>p.n===r.phase)||{}).name||r.phase;
@@ -896,4 +913,4 @@ async function openIncidentForm(presetResident){
 async function closeIncident(id){ const follow_up=prompt('Resolution / follow-up note:'); if(follow_up===null) return; try{ await api('/housing/incidents/'+id,{method:'POST',body:JSON.stringify({status:'closed',follow_up})}); loadHIncidents(); }catch(e){ alert(e.message); } }
 
 /* expose to window for inline handlers & app.js show() */
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure});

@@ -1,6 +1,6 @@
 /* Armada Recovery Housing — front-end for the sober-living suite.
    Loaded after app.js, so it shares its globals (api, $, esc, today, initials, ME, show). */
-const HOUSING = { meta:null, residents:[], resStatus:'active', houses:[], tenure:'all' };
+const HOUSING = { meta:null, residents:[], resStatus:'active', houses:[], tenure:'all', restr:null };
 
 // Early-tenure milestone buckets — the highest-risk window in recovery housing,
 // where the "anticipated stay" needs the most touchpoints.
@@ -40,6 +40,14 @@ function dobCheck(dob){
   return { ok:true, age, msg:'' };
 }
 function dqBadge(dob){ const c=dobCheck(dob); return c.ok?'':`<span class="chip" title="${esc(c.msg)}" style="background:#fbe9d8;color:#a35a23;border-color:#f0c9a3;cursor:help">⚠ check DOB</span>`; }
+// Restriction chip for the residents list: red when on restriction, green when
+// the window has elapsed and they qualify to come off.
+function restrChip(r){
+  const x=r&&r.restriction; if(!x) return '';
+  if(x.eligible) return `<span class="chip" title="${esc(x.type)} — window elapsed" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">🔓 eligible to lift</span>`;
+  const left=x.daysLeft!=null?` · ${x.daysLeft}d left`:'';
+  return `<span class="chip" title="${esc(x.type)}${x.reason?' — '+esc(x.reason):''}" style="background:#fdeaea;color:#b3382f;border-color:#f3c4c0">🔒 ${esc(x.type)}${left}</span>`;
+}
 
 /* ============================ HOUSING HQ ============================ */
 async function loadHousingHQ(){
@@ -227,6 +235,27 @@ function openImportForm(){
   };
 }
 function setTenure(t){ HOUSING.tenure = (HOUSING.tenure===t ? 'all' : t); renderResidents(); }
+function setRestrFilter(f){ HOUSING.restr = (HOUSING.restr===f ? null : f); renderResidents(); }
+async function openRestrictionForm(id){
+  let meta; try{ meta=await api('/housing/restrictions/meta'); }catch(e){ meta={types:[]}; }
+  const opts=meta.types.map(t=>`<option value="${esc(t[0])}" data-days="${t[1]}" data-hint="${esc(t[2])}">${esc(t[0])}</option>`).join('');
+  const save=hmodal(`<h3>Place on restriction</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">Track the hold and when the resident qualifies to come off it.</p>
+    <div class="grid2">
+      <div><label>Type</label><select id="rs_type" onchange="(function(s){var o=s.options[s.selectedIndex];document.getElementById('rs_days').value=o.dataset.days||'';document.getElementById('rs_hint').textContent=o.dataset.hint||'';})(this)">${opts}</select></div>
+      <div><label>Length (days, blank = open-ended)</label><input id="rs_days" type="number" min="0" value="${meta.types[0]?meta.types[0][1]:''}"/></div>
+      <div><label>Start date</label><input id="rs_start" type="date" value="${today()}"/></div>
+      <div><label>&nbsp;</label><div id="rs_hint" class="hint">${meta.types[0]?esc(meta.types[0][2]):''}</div></div>
+    </div>
+    <label>Reason</label><input id="rs_reason" placeholder="What happened / why"/>
+    <label>Conditions to come off</label><textarea id="rs_cond" rows="2" placeholder="e.g. 14 clean days, attend all meetings, meet with house manager"></textarea>`);
+  save.textContent='Place restriction';
+  save.onclick=async()=>{ try{ await api(`/housing/residents/${id}/restriction`,{method:'POST',body:JSON.stringify({type:$('rs_type').value,days:$('rs_days').value,start_date:$('rs_start').value,reason:$('rs_reason').value,conditions:$('rs_cond').value})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
+}
+async function liftRestriction(restrId, residentId){
+  const note=prompt('Note (optional) — how they earned it / met conditions:'); if(note===null) return;
+  try{ await api(`/housing/restrictions/${restrId}/lift`,{method:'POST',body:JSON.stringify({note})}); openResident(residentId); }catch(e){ alert(e.message); }
+}
 function renderResidents(){
   const q=($('resSearch')?.value||'').toLowerCase();
   let rows = HOUSING.residents.filter(r=>!q || (r.name||'').toLowerCase().includes(q));
@@ -237,16 +266,23 @@ function renderResidents(){
       <span class="tn">${counts[b[0]]}</span><span class="tl">${b[1]}</span></button>`).join('')}
     <button class="tenure-pill ${HOUSING.tenure==='all'?'on':''}" onclick="setTenure('all')"><span class="tn">${rows.length}</span><span class="tl">All</span></button></div>`;
   if(HOUSING.tenure!=='all'){ const f=TENURE_BUCKETS.find(b=>b[0]===HOUSING.tenure); if(f) rows = rows.filter(r=>f[2](r.los||0)); }
-  if(!rows.length){ $('residentsTable').innerHTML=band+'<div class="empty">No residents in this group.</div>'; return; }
+  // Restriction filter band
+  const onR=rows.filter(r=>r.restriction).length, eligR=rows.filter(r=>r.restriction&&r.restriction.eligible).length;
+  const rb = (onR||eligR||HOUSING.restr) ? `<div class="tenure-band" style="margin-bottom:10px">
+    <button class="tenure-pill ${HOUSING.restr==='on'?'on':''}" onclick="setRestrFilter('on')"><span class="tn">${onR}</span><span class="tl">🔒 On restriction</span></button>
+    <button class="tenure-pill ${HOUSING.restr==='elig'?'on':''}" onclick="setRestrFilter('elig')"><span class="tn">${eligR}</span><span class="tl">🔓 Eligible to lift</span></button></div>` : '';
+  if(HOUSING.restr==='on') rows=rows.filter(r=>r.restriction);
+  else if(HOUSING.restr==='elig') rows=rows.filter(r=>r.restriction&&r.restriction.eligible);
+  if(!rows.length){ $('residentsTable').innerHTML=band+rb+'<div class="empty">No residents in this group.</div>'; return; }
   const dq = rows.filter(r=>!dobCheck(r.dob).ok).length;
   const dqBanner = dq ? `<div class="hint" style="margin:0 0 8px;padding:8px 10px;background:#fbe9d8;border:1px solid #f0c9a3;border-radius:8px;color:#a35a23">⚠ ${dq} resident${dq>1?'s have':' has'} a missing or implausible date of birth (common after import). Open a record and click <b>Fix</b> to correct it.</div>` : '';
-  $('residentsTable').innerHTML = band + dqBanner + `<table class="tbl"><thead><tr>
+  $('residentsTable').innerHTML = band + rb + dqBanner + `<table class="tbl"><thead><tr>
     <th>Resident</th><th>House · bed</th><th>LOC</th><th>Phase</th><th>Days</th><th>Sober</th><th>Recovery capital</th><th>Clinical dose</th><th>Balance</th><th></th>
     </tr></thead><tbody>${rows.map(r=>{
       const phase=(HOUSING.meta.phases.find(p=>p.n===r.phase)||{}).name||r.phase;
       const dosePct=r.clinTarget?Math.round(r.clinHoursWk/r.clinTarget*100):100;
       return `<tr style="cursor:pointer" onclick="openResident(${r.id})">
-        <td><span class="res-cell">${r.hasPhoto?`<img class="res-thumb" loading="lazy" src="/api/housing/residents/${r.id}/photo" alt=""/>`:`<span class="res-thumb res-thumb-i">${esc(initials(r.name))}</span>`}<b>${esc(r.name)}</b> ${dqBadge(r.dob)}</span></td>
+        <td><span class="res-cell">${r.hasPhoto?`<img class="res-thumb" loading="lazy" src="/api/housing/residents/${r.id}/photo" alt=""/>`:`<span class="res-thumb res-thumb-i">${esc(initials(r.name))}</span>`}<b>${esc(r.name)}</b> ${dqBadge(r.dob)} ${restrChip(r)}</span></td>
         <td>${r.house?esc(r.house.name):'<span class="hint">unassigned</span>'}${r.bed?' · '+esc(r.bed.label):''}</td>
         <td>${hLocPill(r.loc)}</td>
         <td>${esc(phase)}</td>
@@ -357,9 +393,17 @@ async function openResident(id){
           <button class="btn btn-ghost btn-sm sans" onclick="openSupportForm(${r.id})">+ Meeting/support</button>
           <button class="btn btn-ghost btn-sm sans" onclick="openScreenForm(${r.id})">+ Screen</button>
           <button class="btn btn-ghost btn-sm sans" onclick="openLedgerForm(${r.id})">+ Charge/pay</button>
+          ${r.status==='active'?`<button class="btn btn-ghost btn-sm sans" onclick="openRestrictionForm(${r.id})">${r.restriction?'Change restriction':'🔒 Restrict'}</button>`:''}
           ${r.status==='active'?`<button class="btn btn-danger btn-sm sans" onclick="openDischargeForm(${r.id})">Discharge</button>`:`<span class="chip">${esc(r.status)}${r.discharge_type?' · '+esc(r.discharge_type):''}</span>`}
         </div>
       </div>
+      ${r.restriction?(()=>{ const x=r.restriction; const c=x.eligible?'#2f7a4f':'#b3382f'; const bg=x.eligible?'#e8f3ec':'#fdeaea'; const bd=x.eligible?'#bfe0cb':'#f3c4c0';
+        return `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:${bg};border:1px solid ${bd};color:${c}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div><b>${x.eligible?'🔓 Eligible to come off restriction':'🔒 On restriction'}</b> — ${esc(x.type)}${x.daysLeft!=null&&!x.eligible?` · ${x.daysLeft} day(s) left`:''}
+              <div class="hint" style="color:${c}">${x.reason?esc(x.reason)+' · ':''}Since ${esc(x.start_date||'')}${x.end_date?' → '+esc(x.end_date):''} · by ${esc(x.placed_by||'')}${x.conditions?'<br>Conditions: '+esc(x.conditions):''}</div></div>
+            <button class="btn ${x.eligible?'btn-primary':'btn-ghost'} btn-sm sans no-print" onclick="liftRestriction(${x.id},${r.id})">Lift restriction</button>
+          </div></div>`; })():''}
       <div class="phase-track" style="margin-top:16px">${phaseTrack}</div>
     </div>
 
@@ -992,4 +1036,4 @@ async function openSlKioskCode(){
   save.onclick=async()=>{ const code=$('slk_code').value.trim(); if(code.length<6){ alert('Use at least 6 characters.'); return; } try{ await api('/housing/kiosk-code',{method:'POST',body:JSON.stringify({code})}); closeHModal(); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,openSlKioskCode,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,openSlKioskCode,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

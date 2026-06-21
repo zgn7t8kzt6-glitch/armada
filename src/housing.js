@@ -324,6 +324,16 @@ export function housingSchema() {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     response_id INTEGER, question_id INTEGER, value_num REAL, value_text TEXT
   );
+  -- Restrictions: new-resident blackout, behavioral/privilege holds, etc., with
+  -- the criteria for coming off so staff can see who qualifies to be lifted.
+  CREATE TABLE IF NOT EXISTS housing_restrictions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, type TEXT, reason TEXT,
+    start_date TEXT, days INTEGER, end_date TEXT, conditions TEXT,
+    status TEXT DEFAULT 'active', placed_by TEXT,
+    lifted_by TEXT, lifted_at TEXT, lift_note TEXT,
+    created TEXT DEFAULT (datetime('now'))
+  );
   `);
   // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
   try { db.exec(`ALTER TABLE housing_houses ADD COLUMN program TEXT`); } catch { /* already exists */ }
@@ -460,6 +470,27 @@ function houseFromRoom(room, facility) {
 }
 
 const programToLoc = (p) => (p === 'PHP' ? 'PHP' : (p === 'Graduate' ? 'MON' : 'IOP'));
+
+// Restriction types and how each is typically cleared (shown to staff as guidance).
+const RESTRICTION_TYPES = [
+  ['New-resident blackout', 14, 'No outside passes; phone limits; escorted outings. Standard intake stabilization.'],
+  ['Behavioral restriction', 7, 'Imposed after a rule violation; off when conditions are met.'],
+  ['Privilege / phase hold', 7, 'Privileges paused; restored on review.'],
+  ['Curfew restriction', 7, 'Earlier curfew / sign-in required.'],
+  ['Medical / safety hold', 0, 'Cleared by staff when medically/behaviorally safe.'],
+];
+// The active restriction for a resident (most recent still-active one), with the
+// computed "eligible to lift" signal: the time window has elapsed.
+function currentRestriction(rid) {
+  const r = db.prepare(`SELECT * FROM housing_restrictions WHERE resident_id=? AND status='active' ORDER BY id DESC LIMIT 1`).get(rid);
+  if (!r) return null;
+  const today = todayStr();
+  let eligible = false, daysLeft = null;
+  if (r.end_date) { eligible = today >= r.end_date; daysLeft = Math.max(0, Math.round((new Date(r.end_date) - new Date(today)) / 86400000)); }
+  else if (r.days && r.start_date) { const done = Math.round((new Date(today) - new Date(r.start_date)) / 86400000); daysLeft = Math.max(0, r.days - done); eligible = done >= r.days; }
+  else eligible = true; // open-ended (e.g. medical) — staff decide, so always reviewable
+  return { ...r, eligible, daysLeft };
+}
 
 // If raw HTML-table markup is pasted (copying from the data shown as a web
 // page), flatten <tr>/<td> into tab-separated rows before parsing.
@@ -600,6 +631,7 @@ function residentCard(r) {
     lastScreen: lastScreen(r.id),
     packet: packetStatus(r.id),
     payplan: currentPayplan(r.id) || null,
+    restriction: currentRestriction(r.id),
     employment_status: (currentEmployment(r.id)?.status) || null,
     jobSearchWk: jobsearchThisWeek(r.id),
     house: r.house_id ? (db.prepare(`SELECT name,level,color FROM housing_houses WHERE id=?`).get(r.house_id) || null) : null,
@@ -1032,6 +1064,32 @@ export function mountHousing(app) {
     db.prepare(`UPDATE housing_residents SET status='discharged', bed_id=NULL, discharge_date=?, discharge_type=?, notes=COALESCE(notes,'')||? WHERE id=?`)
       .run(b.date || todayStr(), b.type || 'Completed', b.note ? `\n[Discharge ${b.date || todayStr()}] ${b.note}` : '', req.params.id);
     audit({ user: req.user, action: 'HOUSING_DISCHARGE', detail: `${cur.name} — ${b.type || 'Completed'}`, ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ---- Restrictions (blackout / behavioral holds + eligibility to lift) ----
+  app.get('/api/housing/restrictions/meta', requireAuth, (req, res) => res.json({ types: RESTRICTION_TYPES }));
+  app.post('/api/housing/residents/:id/restriction', requireAuth, (req, res) => {
+    const cur = db.prepare(`SELECT id, name FROM housing_residents WHERE id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    const start = b.start_date || todayStr();
+    const days = b.days != null && b.days !== '' ? Math.max(0, num(b.days)) : null;
+    let end = b.end_date || null;
+    if (!end && days) { const d = new Date(start); d.setDate(d.getDate() + days); end = d.toISOString().slice(0, 10); }
+    // one active restriction at a time — supersede any existing active one
+    db.prepare(`UPDATE housing_restrictions SET status='superseded' WHERE resident_id=? AND status='active'`).run(cur.id);
+    db.prepare(`INSERT INTO housing_restrictions (resident_id,type,reason,start_date,days,end_date,conditions,placed_by) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(cur.id, b.type || 'Behavioral restriction', b.reason || null, start, days, end, b.conditions || null, req.user.name);
+    audit({ user: req.user, action: 'HOUSING_RESTRICTION_SET', detail: `${cur.name} — ${b.type || ''}`, ip: req.ip });
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/restrictions/:id/lift', requireAuth, (req, res) => {
+    const cur = db.prepare(`SELECT r.*, h.name FROM housing_restrictions r LEFT JOIN housing_residents h ON h.id=r.resident_id WHERE r.id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    db.prepare(`UPDATE housing_restrictions SET status='lifted', lifted_by=?, lifted_at=datetime('now'), lift_note=? WHERE id=?`)
+      .run(req.user.name, (req.body?.note || '').trim() || null, req.params.id);
+    audit({ user: req.user, action: 'HOUSING_RESTRICTION_LIFT', detail: cur.name, ip: req.ip });
     res.json({ ok: true });
   });
 

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260621M" />
+<link rel="stylesheet" href="/styles.css?v=20260621N" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -120,6 +120,9 @@
     <button data-view="intake">Intake &amp; Forms</button>
     <button data-view="screens">Drug Screening</button>
     <button data-view="houselife">House Life</button>
+    <button data-view="housingstaff">Staffing</button>
+    <button data-view="shiftreports">Shift Reports</button>
+    <button data-view="hincidents">Incident Reports</button>
     <button data-view="coordination">Clinical Coordination</button>
     <button data-view="employment">Employment</button>
     <button data-view="rentrun">Rent Run</button>
@@ -2236,6 +2239,45 @@
       </div>
     </section>
 
+    <!-- Staffing / shift coverage -->
+    <section id="housingstaff" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>👥 Staffing &amp; shift coverage</h3><p class="sub sans" style="margin:0">Who's covering each house, each shift. You can't ask depleted staff to care for people at their lowest — cover every house, flag every gap.</p></div>
+          <div style="display:flex;gap:8px;align-items:center"><input id="hsDate" type="date" style="width:auto" onchange="loadHousingStaff()"/><button class="btn btn-ghost sans" onclick="loadHousingStaff()">↻</button></div>
+        </div>
+        <div id="hsKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div id="hsBody" style="margin-top:12px;overflow:auto"></div>
+      </div>
+    </section>
+
+    <!-- Shift reports -->
+    <section id="shiftreports" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>📝 Shift reports</h3><p class="sub sans" style="margin:0">The end-of-shift handoff — head count, who's out, meds, safety checks, and what the next shift needs to know. Documented every shift.</p></div>
+          <div style="display:flex;gap:8px;align-items:center"><select id="srHouse" style="width:auto" onchange="loadShiftReports()"></select><button class="btn btn-primary sans" onclick="openShiftReportForm()">+ New report</button></div>
+        </div>
+        <div id="srMissing"></div>
+        <div id="srBody" style="margin-top:10px"></div>
+      </div>
+    </section>
+
+    <!-- Incident reports -->
+    <section id="hincidents" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🚨 Incident reports</h3><p class="sub sans" style="margin:0">Every incident documented with the action taken and who was notified. A complaint — or a crisis — is a gift: capture it, recover instantly, fix the system.</p></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="seg" id="incSeg"><button class="on" data-st="all" onclick="setIncStatus('all')">All</button><button data-st="open" onclick="setIncStatus('open')">Open</button><button data-st="closed" onclick="setIncStatus('closed')">Closed</button></span>
+            <button class="btn btn-primary sans" onclick="openIncidentForm()">+ Report incident</button>
+          </div>
+        </div>
+        <div id="incKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div id="incBody" style="margin-top:12px"></div>
+      </div>
+    </section>
+
     <!-- generic housing modal -->
     <div id="hModal" class="hmodal" style="display:none"><div class="hmodal-card"><div id="hModalBody"></div></div></div>
   </main>
@@ -2251,7 +2293,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260621M"></script>
-<script src="/housing.js?v=20260621M"></script>
+<script src="/app.js?v=20260621N"></script>
+<script src="/housing.js?v=20260621N"></script>
 </body>
 </html>

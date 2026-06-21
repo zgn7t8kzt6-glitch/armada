@@ -147,6 +147,8 @@ export const FORM_TEMPLATES = [
 export const EMPLOYMENT_STATUSES = ['Employed — full-time', 'Employed — part-time', 'Self-employed', 'Unemployed — actively seeking', 'In school / training', 'Unable to work (disability)', 'Not seeking — early recovery'];
 export const JOBSEARCH_ACTIVITIES = ['Application submitted', 'Interview', 'Resume / cover letter', 'Job fair / agency', 'Follow-up call', 'Offer received', 'Hired', 'Lost / left job', 'Orientation / first day'];
 export const RENT_STATUSES = ['Paid', 'Partial', 'Promise to pay', 'Scholarship covered', 'Waived', 'Missed'];
+export const HOUSING_SHIFTS = ['Day', 'Evening', 'Overnight'];
+export const HOUSING_INCIDENT_TYPES = ['Return to use', 'Overdose', 'Medical emergency', 'Behavioral / altercation', 'Property damage', 'Rule violation', 'AWOL / walk-off', 'Theft', 'Self-harm', 'Police / EMS called', 'Successful intervention', 'Other'];
 
 const J = (v) => JSON.stringify(v ?? null);
 const P = (v, d = null) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -273,9 +275,26 @@ export function housingSchema() {
     resident_id INTEGER, date TEXT, activity TEXT, employer TEXT, detail TEXT,
     outcome TEXT, by TEXT, created TEXT DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS housing_staff_shifts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    house_id INTEGER, date TEXT, shift TEXT, user_id INTEGER, staff_name TEXT,
+    role TEXT, status TEXT DEFAULT 'scheduled', note TEXT, by TEXT,
+    created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_shift_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    house_id INTEGER, date TEXT, shift TEXT, on_duty TEXT,
+    present_count INTEGER, expected_count INTEGER, out_residents TEXT,
+    meds_note TEXT, safety TEXT, summary TEXT, handoff TEXT, escalation INTEGER DEFAULT 0,
+    by TEXT, created TEXT DEFAULT (datetime('now'))
+  );
   `);
   // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
   try { db.exec(`ALTER TABLE housing_houses ADD COLUMN program TEXT`); } catch { /* already exists */ }
+  // Migration: richer incident reports.
+  for (const col of ['time TEXT', 'status TEXT', 'notified TEXT', 'reported_by TEXT', 'follow_up TEXT']) {
+    try { db.exec(`ALTER TABLE housing_incidents ADD COLUMN ${col}`); } catch { /* already exists */ }
+  }
 }
 
 /* ───────────────────────── Seed (sample so it looks alive) ───────────────────────── */
@@ -459,12 +478,13 @@ export function mountHousing(app) {
     const returnsToUse = db.prepare(`SELECT COUNT(*) c FROM housing_screens WHERE result='positive' AND date>=?`).get(monthStart).c
       + db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE type='Return to use' AND date>=?`).get(monthStart).c;
     const grievOpen = db.prepare(`SELECT COUNT(*) c FROM housing_grievances WHERE status='open'`).get().c;
+    const openIncidents = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE status='open'`).get().c;
 
     res.json({
       kpis: {
         houses: houses.length, capacity, occupied, open: Math.max(0, capacity - occupied),
         occPct: capacity ? Math.round((occupied / capacity) * 100) : 0,
-        reccapAvg, balanceOut, screensDue, underDose, orhPct, returnsToUse, grievOpen,
+        reccapAvg, balanceOut, screensDue, underDose, orhPct, returnsToUse, grievOpen, openIncidents,
       },
       byLoc,
       houses: houses.map(h => ({
@@ -819,13 +839,98 @@ export function mountHousing(app) {
     res.json({ ok: true });
   });
 
-  // ---- Incidents (housing) ----
+  // ---- Incident reports (housing) ----
+  app.get('/api/housing/incidents', requireAuth, (req, res) => {
+    const status = req.query.status || 'all';
+    const where = status === 'all' ? '' : `WHERE i.status=?`;
+    const rows = (status === 'all'
+      ? db.prepare(`SELECT i.*, h.name house_name, r.name resident_name FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id LEFT JOIN housing_residents r ON r.id=i.resident_id ORDER BY i.date DESC, i.id DESC LIMIT 200`).all()
+      : db.prepare(`SELECT i.*, h.name house_name, r.name resident_name FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id LEFT JOIN housing_residents r ON r.id=i.resident_id ${where} ORDER BY i.date DESC, i.id DESC LIMIT 200`).all(status));
+    const open = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE status='open'`).get().c;
+    const high = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE severity='high'`).get().c;
+    const monthStart = todayStr().slice(0, 8) + '01';
+    const month = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE date>=?`).get(monthStart).c;
+    res.json({ rows, types: HOUSING_INCIDENT_TYPES, stats: { open, high, month, total: rows.length } });
+  });
+
   app.post('/api/housing/incidents', requireAuth, (req, res) => {
     const b = req.body || {};
-    db.prepare(`INSERT INTO housing_incidents (house_id,resident_id,date,type,severity,summary,action,by) VALUES (?,?,?,?,?,?,?,?)`)
-      .run(b.house_id ? num(b.house_id) : null, b.resident_id ? num(b.resident_id) : null, b.date || todayStr(), b.type || 'Other', b.severity || 'low', b.summary || '', b.action || null, req.user.name);
+    const r = db.prepare(`INSERT INTO housing_incidents (house_id,resident_id,date,time,type,severity,summary,action,notified,follow_up,status,reported_by,by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      b.house_id ? num(b.house_id) : null, b.resident_id ? num(b.resident_id) : null, b.date || todayStr(), b.time || null,
+      b.type || 'Other', b.severity || 'low', b.summary || '', b.action || null, b.notified || null, b.follow_up || null,
+      b.status || 'open', b.reported_by || req.user.name, req.user.name);
+    audit({ user: req.user, action: 'HOUSING_INCIDENT', detail: `${b.type || 'Other'} (${b.severity || 'low'})`, ip: req.ip });
+    res.json({ ok: true, id: Number(r.lastInsertRowid) });
+  });
+
+  app.post('/api/housing/incidents/:id', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const cur = db.prepare(`SELECT * FROM housing_incidents WHERE id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    const f = (k, d) => (b[k] !== undefined ? b[k] : d);
+    db.prepare(`UPDATE housing_incidents SET type=?,severity=?,summary=?,action=?,notified=?,follow_up=?,status=? WHERE id=?`)
+      .run(f('type', cur.type), f('severity', cur.severity), f('summary', cur.summary), f('action', cur.action), f('notified', cur.notified), f('follow_up', cur.follow_up), f('status', cur.status), req.params.id);
     res.json({ ok: true });
   });
+
+  // ---- Staffing / shift coverage ----
+  app.get('/api/housing/staffing', requireAuth, (req, res) => {
+    const date = req.query.date || todayStr();
+    const houses = db.prepare(`SELECT id,name,program,level FROM housing_houses WHERE active=1 ORDER BY level DESC, name`).all();
+    const assigns = db.prepare(`SELECT * FROM housing_staff_shifts WHERE date=?`).all(date);
+    const grid = {};
+    houses.forEach(h => { grid[h.id] = {}; HOUSING_SHIFTS.forEach(s => grid[h.id][s] = []); });
+    assigns.forEach(a => { if (grid[a.house_id] && grid[a.house_id][a.shift]) grid[a.house_id][a.shift].push(a); });
+    const staff = db.prepare(`SELECT id,name,job_role FROM users WHERE active=1 AND (role='admin' OR job_role IN ('Housing Director','House Manager','Recovery Coach')) ORDER BY name`).all();
+    const gaps = [];
+    houses.forEach(h => HOUSING_SHIFTS.forEach(s => { if (!grid[h.id][s].length) gaps.push(`${h.name} · ${s}`); }));
+    res.json({ date, shifts: HOUSING_SHIFTS, houses, grid, staff, gaps });
+  });
+
+  app.post('/api/housing/staffing', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const u = b.user_id ? db.prepare(`SELECT name,job_role FROM users WHERE id=?`).get(num(b.user_id)) : null;
+    db.prepare(`INSERT INTO housing_staff_shifts (house_id,date,shift,user_id,staff_name,role,status,by) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(num(b.house_id), b.date || todayStr(), b.shift || 'Day', b.user_id ? num(b.user_id) : null, u?.name || b.staff_name || 'Staff', u?.job_role || b.role || null, b.status || 'scheduled', req.user.name);
+    res.json({ ok: true });
+  });
+
+  app.post('/api/housing/staffing/:id', requireAuth, (req, res) => {
+    db.prepare(`UPDATE housing_staff_shifts SET status=? WHERE id=?`).run(req.body?.status || 'scheduled', req.params.id);
+    res.json({ ok: true });
+  });
+  app.delete('/api/housing/staffing/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM housing_staff_shifts WHERE id=?`).run(req.params.id); res.json({ ok: true }); });
+
+  // ---- Shift reports ----
+  app.get('/api/housing/shiftreports', requireAuth, (req, res) => {
+    const houseId = req.query.house_id ? num(req.query.house_id) : null;
+    const rows = (houseId
+      ? db.prepare(`SELECT s.*, h.name house_name FROM housing_shift_reports s LEFT JOIN housing_houses h ON h.id=s.house_id WHERE s.house_id=? ORDER BY s.date DESC, s.id DESC LIMIT 60`).all(houseId)
+      : db.prepare(`SELECT s.*, h.name house_name FROM housing_shift_reports s LEFT JOIN housing_houses h ON h.id=s.house_id ORDER BY s.date DESC, s.id DESC LIMIT 60`).all())
+      .map(r => ({ ...r, safety: P(r.safety, {}) }));
+    const houses = db.prepare(`SELECT id,name,program FROM housing_houses WHERE active=1 ORDER BY level DESC, name`).all();
+    // which house/shift still needs a report today
+    const today = todayStr();
+    const doneToday = {}; db.prepare(`SELECT house_id,shift FROM housing_shift_reports WHERE date=?`).all(today).forEach(r => doneToday[r.house_id + '|' + r.shift] = 1);
+    const missing = [];
+    houses.forEach(h => HOUSING_SHIFTS.forEach(s => { if (!doneToday[h.id + '|' + s]) missing.push(`${h.name} · ${s}`); }));
+    res.json({ rows, houses, shifts: HOUSING_SHIFTS, missingToday: missing });
+  });
+
+  app.post('/api/housing/shiftreports', requireAuth, (req, res) => {
+    const b = req.body || {};
+    db.prepare(`INSERT INTO housing_shift_reports (house_id,date,shift,on_duty,present_count,expected_count,out_residents,meds_note,safety,summary,handoff,escalation,by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      num(b.house_id), b.date || todayStr(), b.shift || 'Day', b.on_duty || req.user.name,
+      b.present_count != null ? num(b.present_count) : null, b.expected_count != null ? num(b.expected_count) : null,
+      b.out_residents || null, b.meds_note || null, J(b.safety || {}), b.summary || null, b.handoff || null,
+      b.escalation ? 1 : 0, req.user.name);
+    audit({ user: req.user, action: 'HOUSING_SHIFT_REPORT', detail: `${b.shift} report`, ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ---- Intake & forms ----
 
   // ---- Intake & forms ----
   app.get('/api/housing/forms/templates', requireAuth, (req, res) => res.json({ templates: FORM_TEMPLATES }));

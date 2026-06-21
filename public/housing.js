@@ -704,5 +704,117 @@ function openPayplanForm(rid){
   save.onclick=async()=>{ try{ await api(`/housing/residents/${rid}/payplan`,{method:'POST',body:JSON.stringify({weekly_amount:+$('pp_amt').value,due_day:$('pp_day').value,source:$('pp_src').value,deposit:+$('pp_dep').value,arrangement:$('pp_arr').value})}); closeHModal(); if($('rentrun').classList.contains('active'))loadRentRun(); else if(HOUSING.current)openResident(rid); }catch(e){ alert(e.message); } };
 }
 
+/* ============================ STAFFING / COVERAGE ============================ */
+async function loadHousingStaff(){
+  if($('hsDate') && !$('hsDate').value) $('hsDate').value=today();
+  let d; try{ d=await api('/housing/staffing?date='+($('hsDate')?$('hsDate').value:today())); }catch(e){ $('hsBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  HOUSING.staff=d.staff;
+  const filled=d.houses.length*d.shifts.length - d.gaps.length;
+  $('hsKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${d.houses.length}</div><div class="l">Houses</div></div>
+    <div class="ret-card"><div class="n">${filled}</div><div class="l">Shifts covered</div></div>
+    <div class="ret-card ${d.gaps.length?'rc-high':''}"><div class="n">${d.gaps.length}</div><div class="l">Coverage gaps</div></div>
+    <div class="ret-card"><div class="n">${d.staff.length}</div><div class="l">Housing staff</div></div>`;
+  const cell=(hid,shift)=>{
+    const list=(d.grid[hid]&&d.grid[hid][shift])||[];
+    const chips=list.map(a=>`<div class="chip" style="margin:2px 0;display:inline-flex;gap:6px;align-items:center">${a.status==='called_off'?'⚠️ ':''}${esc(a.staff_name)}${a.role?' <span class="hint">'+esc(a.role)+'</span>':''} <a onclick="removeStaffShift(${a.id})" style="cursor:pointer;color:var(--muted)">✕</a></div>`).join('');
+    return `<td style="vertical-align:top;min-width:150px">${chips||'<span class="hint">—</span>'}<div><button class="btn btn-ghost btn-sm sans" style="padding:3px 8px;margin-top:4px" onclick="assignStaffShift(${hid},'${shift}')">+ Assign</button></div></td>`;
+  };
+  $('hsBody').innerHTML=`<table class="tbl"><thead><tr><th>House</th>${d.shifts.map(s=>`<th>${esc(s)}</th>`).join('')}</tr></thead><tbody>${d.houses.map(h=>`
+    <tr><td><b>${esc(h.name)}</b> ${hProg(h.program)}</td>${d.shifts.map(s=>cell(h.id,s)).join('')}</tr>`).join('')}</tbody></table>`;
+}
+function assignStaffShift(houseId,shift){
+  const opts=(HOUSING.staff||[]).map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.job_role||'')}</option>`).join('');
+  const save=hmodal(`<h3>Assign staff — ${esc(shift)} shift</h3>
+    <label>Staff member</label><select id="ss_user"><option value="">— choose —</option>${opts}</select>
+    <label>Or type a name (e.g. agency / per-diem)</label><input id="ss_name" placeholder="Name"/>
+    <label>Status</label><select id="ss_status"><option value="scheduled">Scheduled</option><option value="confirmed">Confirmed</option><option value="called_off">Called off</option></select>`);
+  save.onclick=async()=>{ const uid=$('ss_user').value, nm=$('ss_name').value; if(!uid&&!nm){ alert('Pick or type a staff member.'); return; }
+    try{ await api('/housing/staffing',{method:'POST',body:JSON.stringify({house_id:houseId,shift,date:$('hsDate').value,user_id:uid||null,staff_name:nm,status:$('ss_status').value})}); closeHModal(); loadHousingStaff(); }catch(e){ alert(e.message); } };
+}
+async function removeStaffShift(id){ try{ await api('/housing/staffing/'+id,{method:'DELETE'}); loadHousingStaff(); }catch(e){ alert(e.message); } }
+
+/* ============================ SHIFT REPORTS ============================ */
+async function loadShiftReports(){
+  let d; try{ d=await api('/housing/shiftreports'+($('srHouse')&&$('srHouse').value?'?house_id='+$('srHouse').value:'')); }catch(e){ $('srBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const sel=$('srHouse'); if(sel && !sel.dataset.filled){ sel.innerHTML='<option value="">All houses</option>'+d.houses.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join(''); sel.dataset.filled='1'; }
+  $('srMissing').innerHTML = d.missingToday.length?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">⏳ <b>${d.missingToday.length}</b> shift report(s) not yet filed today <span class="hint">· ${d.missingToday.slice(0,6).map(esc).join(', ')}${d.missingToday.length>6?'…':''}</span></div></div>`:'<div class="hint">✅ All shift reports filed for today.</div>';
+  $('srBody').innerHTML = d.rows.length?d.rows.map(r=>{
+    const head=(r.present_count!=null)?`${r.present_count}${r.expected_count!=null?'/'+r.expected_count:''} present`:'';
+    return `<div class="card" style="margin-bottom:12px">
+      <div class="cmd-hero-row"><div><h3 style="font-size:15px">${esc(r.house_name||'')} · ${esc(r.shift)} <span class="hint" style="font-weight:400">· ${esc(r.date)} · ${esc(r.on_duty||'')}</span> ${r.escalation?'<span class="badge-danger">escalation</span>':''}</h3></div><span class="chip">${esc(head)}</span></div>
+      ${r.out_residents?`<div class="kv"><span class="k">Out / passes</span><span class="v">${esc(r.out_residents)}</span></div>`:''}
+      ${r.summary?`<p style="margin:8px 0 4px">${esc(r.summary)}</p>`:''}
+      ${r.meds_note?`<div class="hint">💊 ${esc(r.meds_note)}</div>`:''}
+      ${r.safety&&Object.keys(r.safety).length?`<div class="hint">🛡️ ${Object.entries(r.safety).filter(([k,v])=>v).map(([k])=>esc(k)).join(' · ')||'—'}</div>`:''}
+      ${r.handoff?`<div class="pc-note" style="margin-top:6px">➡️ <b>Handoff:</b> ${esc(r.handoff)}</div>`:''}
+    </div>`;
+  }).join(''):'<div class="empty">No shift reports yet — file the first one.</div>';
+}
+function openShiftReportForm(){
+  const houses=(HOUSING.houses&&HOUSING.houses.length)?HOUSING.houses:null;
+  api('/housing/houses').then(hs=>{ HOUSING.houses=hs;
+    const opts=hs.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('');
+    const save=hmodal(`<h3>New shift report</h3>
+      <div class="grid2"><div><label>House</label><select id="sr_house">${opts}</select></div>
+      <div><label>Shift</label><select id="sr_shift"><option>Day</option><option>Evening</option><option>Overnight</option></select></div>
+      <div><label>On duty</label><input id="sr_onduty" value="${esc((ME&&ME.name)||'')}"/></div>
+      <div><label>Date</label><input id="sr_date" type="date" value="${today()}"/></div>
+      <div><label>Present (head count)</label><input id="sr_present" type="number"/></div>
+      <div><label>Expected</label><input id="sr_expected" type="number"/></div></div>
+      <label>Residents out / on pass</label><input id="sr_out" placeholder="names + return time"/>
+      <label>Meds / MAT note</label><input id="sr_meds" placeholder="all observed doses given, exceptions…"/>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px;font-weight:500"><input type="checkbox" id="sf_naloxone" checked style="width:auto"/> Naloxone on site</label>
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px;font-weight:500"><input type="checkbox" id="sf_doors" checked style="width:auto"/> Doors/locks secure</label>
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px;font-weight:500"><input type="checkbox" id="sf_curfew" checked style="width:auto"/> Curfew/bed check done</label>
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px;font-weight:500"><input type="checkbox" id="sr_esc" style="width:auto"/> ⚠️ Escalation needed</label>
+      </div>
+      <label>Shift summary / notable events</label><textarea id="sr_summary" rows="3"></textarea>
+      <label>Handoff to next shift</label><textarea id="sr_handoff" rows="2"></textarea>`);
+    save.onclick=async()=>{ try{ await api('/housing/shiftreports',{method:'POST',body:JSON.stringify({house_id:+$('sr_house').value,shift:$('sr_shift').value,on_duty:$('sr_onduty').value,date:$('sr_date').value,present_count:$('sr_present').value,expected_count:$('sr_expected').value,out_residents:$('sr_out').value,meds_note:$('sr_meds').value,summary:$('sr_summary').value,handoff:$('sr_handoff').value,escalation:$('sr_esc').checked?1:0,safety:{ 'Naloxone on site':$('sf_naloxone').checked,'Doors secure':$('sf_doors').checked,'Curfew check done':$('sf_curfew').checked }})}); closeHModal(); loadShiftReports(); }catch(e){ alert(e.message); } };
+  });
+}
+
+/* ============================ INCIDENT REPORTS ============================ */
+async function loadHIncidents(){
+  let d; try{ d=await api('/housing/incidents?status='+(HOUSING.incStatus||'all')); }catch(e){ $('incBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  HOUSING.incTypes=d.types;
+  $('incKpis').innerHTML=`
+    <div class="ret-card ${d.stats.open?'rc-warn':''}"><div class="n">${d.stats.open}</div><div class="l">Open</div></div>
+    <div class="ret-card ${d.stats.high?'rc-high':''}"><div class="n">${d.stats.high}</div><div class="l">High severity</div></div>
+    <div class="ret-card"><div class="n">${d.stats.month}</div><div class="l">This month</div></div>
+    <div class="ret-card"><div class="n">${d.stats.total}</div><div class="l">Showing</div></div>`;
+  const sevColor=s=>({high:'#c06a52',medium:'#d29a5e',low:'#a7ba86'}[s]||'#6f7a75');
+  $('incBody').innerHTML = d.rows.length?d.rows.map(i=>`<div class="card" style="margin-bottom:12px;border-left:4px solid ${sevColor(i.severity)}">
+      <div class="cmd-hero-row"><div><h3 style="font-size:15px">${esc(i.type)} <span class="loc-pill" style="background:${sevColor(i.severity)}">${esc(i.severity||'')}</span> ${i.status==='closed'?'<span class="chip">closed</span>':'<span class="badge-danger">open</span>'}</h3>
+        <p class="sub sans" style="margin:2px 0 0">${esc(i.house_name||'')}${i.resident_name?' · '+esc(i.resident_name):''} · ${esc(i.date)}${i.time?' '+esc(i.time):''} · by ${esc(i.reported_by||i.by||'')}</p></div>
+        ${i.status!=='closed'?`<button class="btn btn-gold btn-sm sans" onclick="closeIncident(${i.id})">Mark closed</button>`:''}</div>
+      ${i.summary?`<p style="margin:8px 0 4px">${esc(i.summary)}</p>`:''}
+      ${i.action?`<div class="kv"><span class="k">Action taken</span><span class="v" style="max-width:65%">${esc(i.action)}</span></div>`:''}
+      ${i.notified?`<div class="kv"><span class="k">Notified</span><span class="v">${esc(i.notified)}</span></div>`:''}
+      ${i.follow_up?`<div class="kv"><span class="k">Follow-up</span><span class="v" style="max-width:65%">${esc(i.follow_up)}</span></div>`:''}
+    </div>`).join(''):'<div class="empty">No incidents — keep it that way. 🙏</div>';
+}
+function setIncStatus(st){ HOUSING.incStatus=st; document.querySelectorAll('#incSeg button').forEach(b=>b.classList.toggle('on',b.dataset.st===st)); loadHIncidents(); }
+async function openIncidentForm(presetResident){
+  const houses=await api('/housing/houses');
+  const residents=await api('/housing/residents?status=active');
+  const types=HOUSING.incTypes||['Return to use','Overdose','Medical emergency','Behavioral / altercation','Property damage','Rule violation','AWOL / walk-off','Theft','Self-harm','Police / EMS called','Successful intervention','Other'];
+  const save=hmodal(`<h3>🚨 Report an incident</h3>
+    <div class="grid2"><div><label>House</label><select id="ic_house">${houses.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select></div>
+    <div><label>Resident (if any)</label><select id="ic_res"><option value="">— none / multiple —</option>${residents.map(r=>`<option value="${r.id}" ${r.id===presetResident?'selected':''}>${esc(r.name)}</option>`).join('')}</select></div>
+    <div><label>Type</label><select id="ic_type">${types.map(t=>`<option>${esc(t)}</option>`).join('')}</select></div>
+    <div><label>Severity</label><select id="ic_sev"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+    <div><label>Date</label><input id="ic_date" type="date" value="${today()}"/></div>
+    <div><label>Time</label><input id="ic_time" type="time"/></div></div>
+    <label>What happened</label><textarea id="ic_sum" rows="3"></textarea>
+    <label>Immediate action taken</label><textarea id="ic_action" rows="2"></textarea>
+    <label>Who was notified (clinical, ED, family, 911…)</label><input id="ic_notified"/>`);
+  save.onclick=async()=>{ if(!$('ic_sum').value.trim()){ alert('Describe what happened.'); return; }
+    try{ await api('/housing/incidents',{method:'POST',body:JSON.stringify({house_id:+$('ic_house').value,resident_id:$('ic_res').value||null,type:$('ic_type').value,severity:$('ic_sev').value,date:$('ic_date').value,time:$('ic_time').value,summary:$('ic_sum').value,action:$('ic_action').value,notified:$('ic_notified').value,status:'open'})}); closeHModal(); if($('hincidents').classList.contains('active'))loadHIncidents(); else if(HOUSING.current)openResident(HOUSING.current.id); }catch(e){ alert(e.message); } };
+}
+async function closeIncident(id){ const follow_up=prompt('Resolution / follow-up note:'); if(follow_up===null) return; try{ await api('/housing/incidents/'+id,{method:'POST',body:JSON.stringify({status:'closed',follow_up})}); loadHIncidents(); }catch(e){ alert(e.message); } }
+
 /* expose to window for inline handlers & app.js show() */
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident});

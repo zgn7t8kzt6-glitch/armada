@@ -147,8 +147,37 @@ function openHouseForm(id){
 function setResStatus(st){ HOUSING.resStatus=st; document.querySelectorAll('#resStatusSeg button').forEach(b=>b.classList.toggle('on',b.dataset.st===st)); loadResidents(); }
 async function loadResidents(){
   await hMeta();
+  const ib=$('resImportBtn'); if(ib) ib.style.display = isAdmin() ? '' : 'none';
   let rows; try{ rows=await api('/housing/residents?status='+HOUSING.resStatus); }catch(e){ $('residentsTable').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   HOUSING.residents = rows; renderResidents();
+}
+
+// Bulk import the Akron patient export (admin only). Dayton is excluded server-side
+// and residents are tied only to the 10 Akron houses by their room/facility.
+function openImportForm(){
+  if(!isAdmin()){ alert('Importing the patient export is restricted to the owner/admin.'); return; }
+  const save = hmodal(`<h3>Import patients (Akron export)</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">Upload the CSV you downloaded from the patient app. Dayton sites are <b>excluded automatically</b> — only people whose room/house matches one of the 10 Akron homes are imported. Current residents are seated in open beds; this clears the placeholder census first. Safe to re-run (duplicates are skipped).</p>
+    <label>Patient export file (.csv)</label>
+    <input id="imp_file" type="file" accept=".csv,text/csv"/>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:500">
+      <input id="imp_alumni" type="checkbox"/> Also import past residents as alumni (discharged, no bed)
+    </label>
+    <div id="imp_status" class="hint" style="margin-top:10px"></div>`);
+  save.textContent = 'Import';
+  save.onclick = async () => {
+    const f = $('imp_file').files[0];
+    if(!f){ alert('Choose the CSV file first.'); return; }
+    const st=$('imp_status'); st.textContent='Reading file…';
+    let text; try{ text = await f.text(); }catch(e){ st.textContent='Could not read file: '+e.message; return; }
+    st.textContent='Importing '+(text.length/1024|0)+' KB…'; save.disabled=true;
+    try{
+      const out = await api('/housing/import', { method:'POST', body: JSON.stringify({ csv:text, includeAlumni: $('imp_alumni').checked }) });
+      st.innerHTML = `<b style="color:var(--navy)">Done.</b> ${out.imported} current placed in beds${out.alumni?`, ${out.alumni} alumni`:''}. `
+        + `Skipped ${out.dayton} Dayton, ${out.dups} duplicates, ${out.junk} non-resident rows.`;
+      setTimeout(()=>{ closeHModal(); loadResidents(); loadHousingHQ&&loadHousingHQ(); }, 1800);
+    }catch(e){ st.textContent='Import failed: '+e.message; save.disabled=false; }
+  };
 }
 function renderResidents(){
   const q=($('resSearch')?.value||'').toLowerCase();
@@ -817,4 +846,4 @@ async function openIncidentForm(presetResident){
 async function closeIncident(id){ const follow_up=prompt('Resolution / follow-up note:'); if(follow_up===null) return; try{ await api('/housing/incidents/'+id,{method:'POST',body:JSON.stringify({status:'closed',follow_up})}); loadHIncidents(); }catch(e){ alert(e.message); } }
 
 /* expose to window for inline handlers & app.js show() */
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm});

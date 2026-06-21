@@ -358,6 +358,145 @@ export function seedHousing() {
 // Tables wiped + reloaded when the real roster is (re)applied to an existing DB.
 const HOUSING_TABLES = ['housing_beds','housing_residents','housing_reccap','housing_supports','housing_screens','housing_chorelog','housing_curfew','housing_meetings','housing_ledger','housing_coordination','housing_orh','housing_inspections','housing_grievances','housing_incidents','housing_forms','housing_payplans','housing_rentlog','housing_employment','housing_jobsearch','housing_houses'];
 
+/* ───────────────────────── Akron patient-export import ───────────────────────── */
+// The weekly Kipu/patient export ("download patients") carries every site —
+// Akron AND Dayton. Per the owner: EXCLUDE Dayton, and tie residents ONLY to the
+// 10 Akron houses already in the system, mapping each person to a house by their
+// `room` / `facility`. Current residents are seated in open beds; the rest can
+// optionally come in as alumni (discharged) for history. No PHI is stored in the
+// repo — the file is uploaded into the running app and parsed server-side.
+
+const DAYTON_RE = /dayton|lansing|cherrywood|smithsville|adalbert/i;
+const JUNK_RE = /chore|checklist|duplicate file|training/i;
+
+// CSV → rows[][], handling quoted fields, escaped quotes, and CRLF/LF.
+function parseCsv(text) {
+  const rows = []; let row = []; let field = ''; let inQ = false;
+  const s = String(text).replace(/\r\n?/g, '\n');
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inQ) {
+      if (c === '"') { if (s[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+const cleanCell = (v) => {
+  const s = String(v ?? '').trim();
+  return (s === '' || s === '--' || s === '-' || /^\[no name\]$/i.test(s)) ? '' : s;
+};
+// "MM/DD/YYYY" → "YYYY-MM-DD" (blank / -- → null)
+function usDate(v) {
+  const m = String(v || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
+}
+
+// Map a row's room + facility to one of our 10 Akron house names (null = not ours).
+function houseFromRoom(room, facility) {
+  const r = cleanCell(room);
+  const f = String(facility || '').trim();
+  // Coventry IS the Glenmount building; its rooms are 4-digit numbers (2189, 2201…).
+  if (/glenmount/i.test(f)) return 'Coventry';
+  if (/^\d{3,4}$/.test(r)) return 'Coventry';
+  const probe = `${r} ${f}`.toLowerCase();
+  if (/wilbeth/.test(probe))   return 'Wilbeth';
+  if (/mildred/.test(probe))   return 'Mildred';
+  if (/12th/.test(probe))      return '12th St SW';
+  if (/18th/.test(probe))      return '18th St SW';
+  if (/27th/.test(probe))      return '27th St SW';
+  if (/raasch/.test(probe))    return 'Raasch';
+  if (/long/.test(probe))      return 'Long St';
+  if (/high\s*st/.test(probe)) return 'High St';
+  if (/perkins/.test(probe))   return 'Perkins';
+  return null;
+}
+
+const programToLoc = (p) => (p === 'PHP' ? 'PHP' : (p === 'Graduate' ? 'MON' : 'IOP'));
+
+// Parse + load. opts.includeAlumni also brings Past residents in as discharged.
+export function importAkronCsv(csvText, opts = {}, user = { name: 'system' }) {
+  const includeAlumni = !!opts.includeAlumni;
+  const rows = parseCsv(csvText);
+  if (rows.length < 2) return { error: 'That file looks empty.' };
+  const hdr = rows[0].map(h => h.trim().toLowerCase());
+  const ix = (n) => hdr.indexOf(n);
+  const C = {
+    first: ix('first_name'), middle: ix('middle_name'), last: ix('last_name'),
+    email: ix('email'), phone: ix('phone'), status: ix('status'), categories: ix('categories'),
+    room: ix('room'), dob: ix('birthdate'), facility: ix('facility'),
+    admitted: ix('admitted_at'), discharged: ix('discharged_at'), reason: ix('reason_for_discharge'),
+    employment: ix('employment'), insurance: ix('insurance_name'), sober: ix('latest_sobriety_date'),
+  };
+  if (C.first < 0 || C.last < 0 || C.facility < 0) return { error: 'Unexpected columns — is this the patient export CSV?' };
+
+  const houseByName = {};
+  db.prepare(`SELECT id,name,program,gender FROM housing_houses`).all().forEach(h => { houseByName[h.name] = h; });
+  const findOpenBed = db.prepare(`SELECT id FROM housing_beds WHERE house_id=? AND status='open' ORDER BY id LIMIT 1`);
+  const fillBed = db.prepare(`UPDATE housing_beds SET status='occupied', resident_id=?, notes=NULL WHERE id=?`);
+  const existsResident = db.prepare(`SELECT id FROM housing_residents WHERE lower(name)=? AND IFNULL(dob,'')=? LIMIT 1`);
+  const insResident = db.prepare(`INSERT INTO housing_residents
+    (name,dob,phone,email,house_id,bed_id,loc,status,move_in,discharge_date,discharge_type,sober_date,employment,insurance,notes)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+
+  // Free placeholder census seats (resident_id NULL) so real people take them.
+  const clearedBeds = db.prepare(`UPDATE housing_beds SET status='open', notes=NULL WHERE resident_id IS NULL AND status='occupied'`).run().changes;
+
+  const stat = { imported: 0, alumni: 0, placed: 0, dayton: 0, junk: 0, dups: 0, noHouse: 0 };
+  db.exec('BEGIN');
+  try {
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length < 3) continue;
+      const g = (k) => (C[k] >= 0 ? (row[C[k]] ?? '') : '');
+      const facility = String(g('facility')).trim();
+      if (DAYTON_RE.test(facility)) { stat.dayton++; continue; }
+      if (JUNK_RE.test(facility) || JUNK_RE.test(String(g('categories')))) { stat.junk++; continue; }
+
+      const name = [cleanCell(g('first')), cleanCell(g('middle')), cleanCell(g('last'))]
+        .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      if (!name || /no name/i.test(name)) { stat.junk++; continue; }
+
+      const isCurrent = String(g('status')).trim().toLowerCase() === 'current';
+      if (!isCurrent && !includeAlumni) continue;
+
+      const houseName = houseFromRoom(g('room'), facility);
+      const h = houseName && houseByName[houseName];
+      if (!h) { stat.noHouse++; continue; }
+
+      const dob = usDate(g('dob'));
+      if (existsResident.get(name.toLowerCase(), dob || '')) { stat.dups++; continue; }
+
+      let bedId = null, status = 'discharged';
+      if (isCurrent) {
+        status = 'active';
+        const bed = findOpenBed.get(h.id);
+        if (bed) { bedId = bed.id; stat.placed++; }
+      }
+      const rid = Number(insResident.run(
+        name, dob, cleanCell(g('phone')) || null, cleanCell(g('email')) || null,
+        h.id, bedId, programToLoc(h.program), status,
+        usDate(g('admitted')),
+        isCurrent ? null : usDate(g('discharged')),
+        isCurrent ? null : (cleanCell(g('reason')) || 'Discharged'),
+        usDate(g('sober')),
+        cleanCell(g('employment')) || null, cleanCell(g('insurance')) || null,
+        `Imported from Akron patient export ${todayStr()}`,
+      ).lastInsertRowid);
+      if (bedId) fillBed.run(rid, bedId);
+      if (isCurrent) stat.imported++; else stat.alumni++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  audit({ user, action: 'HOUSING_CSV_IMPORT', detail: `current=${stat.imported} alumni=${stat.alumni} placed=${stat.placed} dayton=${stat.dayton} junk=${stat.junk} dups=${stat.dups} noHouse=${stat.noHouse}` });
+  return { ok: true, clearedBeds, ...stat };
+}
+
 /* ───────────────────────── Helpers ───────────────────────── */
 
 const occMap = () => {
@@ -627,6 +766,21 @@ export function mountHousing(app) {
     }
     audit({ user: req.user, action: 'HOUSING_RESIDENT_ADD', detail: b.name, ip: req.ip });
     res.json({ ok: true, id });
+  });
+
+  // Bulk import the Akron patient export (Kipu "download patients" CSV). This is
+  // PHI in volume, so it is admin-only and never persisted to the repo — the file
+  // is uploaded into the running app, parsed, Dayton excluded, and tied only to
+  // the 10 Akron houses.
+  app.post('/api/housing/import', requireAuth, requireAdmin, (req, res) => {
+    const csv = req.body?.csv;
+    if (!csv || typeof csv !== 'string' || csv.length < 40) return res.status(400).json({ error: 'Upload the patient-export CSV.' });
+    try {
+      const out = importAkronCsv(csv, { includeAlumni: !!req.body.includeAlumni }, req.user);
+      if (out.error) return res.status(400).json(out);
+      audit({ user: req.user, action: 'HOUSING_IMPORT', detail: `imported ${out.imported} current / ${out.alumni} alumni`, ip: req.ip });
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   app.post('/api/housing/residents/:id', requireAuth, (req, res) => {

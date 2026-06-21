@@ -1040,12 +1040,12 @@ async function openSlKioskCode(){
 /* ============================ MAINTENANCE & SUPPLIES ============================ */
 let MAINT_META=null;
 async function maintMeta(){ if(!MAINT_META){ try{ MAINT_META=await api('/housing/maintenance/meta'); }catch(e){ MAINT_META={areas:[],categories:[],houses:[]}; } } return MAINT_META; }
-function setMaintTab(t){ HOUSING.maintTab=t; document.querySelectorAll('#maintSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); loadMaintenance(); }
-async function loadMaintenance(){
+function setMaintTab(t){ HOUSING.maintTab=t; document.querySelectorAll('#maintSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); loadHmaint(); }
+async function loadHmaint(){
   await maintMeta();
   const tab=HOUSING.maintTab||'work';
   if(tab==='work') return loadWorkOrders();
-  if(tab==='inv') return loadInventory();
+  if(tab==='inv') return loadHinventory();
   return loadOrders();
 }
 async function loadWorkOrders(){
@@ -1079,7 +1079,7 @@ async function closeWorkOrder(id){
   const save=hmodal(`<h3>Complete work order</h3><label>How was it resolved?</label><textarea id="wo_res" rows="2"></textarea><label>Cost (optional)</label><input id="wo_cost" type="number" step="0.01" placeholder="0.00"/>`);
   save.onclick=async()=>{ try{ await api('/housing/maintenance/'+id,{method:'POST',body:JSON.stringify({status:'done',resolution:$('wo_res').value,cost:$('wo_cost').value||null})}); closeHModal(); loadWorkOrders(); }catch(e){ alert(e.message); } };
 }
-async function loadInventory(){
+async function loadHinventory(){
   let d; try{ d=await api('/housing/inventory'); }catch(e){ $('maintBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   $('maintKpis').innerHTML=`<div class="ret-card"><div class="n">${d.kpis.items}</div><div class="l">Stock items</div></div>
     <div class="ret-card ${d.kpis.low?'rc-high':''}"><div class="n">${d.kpis.low}</div><div class="l">Low / at par</div></div>
@@ -1095,7 +1095,7 @@ async function loadInventory(){
       <div class="toolbar" style="margin:0;gap:8px"><button class="btn btn-gold sans" onclick="suggestReorder()">⚡ Generate reorder</button><button class="btn btn-primary sans" onclick="openInvForm()">+ Item</button></div></div>
     <table class="tbl" style="margin-top:8px"><thead><tr><th>Item</th><th>On hand</th><th>Par</th><th>Reorder qty</th><th>Unit $</th><th>Status</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=7 class="hint">No items.</td></tr>'}</tbody></table>`;
 }
-async function adjItem(id,delta){ try{ await api('/housing/inventory/'+id+'/adjust',{method:'POST',body:JSON.stringify({delta})}); loadInventory(); }catch(e){ alert(e.message); } }
+async function adjItem(id,delta){ try{ await api('/housing/inventory/'+id+'/adjust',{method:'POST',body:JSON.stringify({delta})}); loadHinventory(); }catch(e){ alert(e.message); } }
 async function openInvForm(id){
   await maintMeta();
   const it=id?(await api('/housing/inventory')).items.find(x=>x.id===id):{};
@@ -1113,7 +1113,7 @@ async function openInvForm(id){
       <div><label>SKU</label><input id="iv_sku" value="${esc(it.sku||'')}"/></div>
     </div>
     <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="iv_auto" type="checkbox" ${it.auto!==0?'checked':''}/> Include in automated reordering</label>`);
-  save.onclick=async()=>{ const body={id:id||undefined,name:$('iv_name').value,category:$('iv_cat').value,unit:$('iv_unit').value,qty:+$('iv_qty').value,par:+$('iv_par').value,reorder_qty:+$('iv_ro').value,unit_cost:+$('iv_cost').value,vendor:$('iv_vendor').value,sku:$('iv_sku').value,auto:$('iv_auto').checked?1:0}; if(!body.name.trim()){ alert('Name?'); return; } try{ await api('/housing/inventory',{method:'POST',body:JSON.stringify(body)}); closeHModal(); loadInventory(); }catch(e){ alert(e.message); } };
+  save.onclick=async()=>{ const body={id:id||undefined,name:$('iv_name').value,category:$('iv_cat').value,unit:$('iv_unit').value,qty:+$('iv_qty').value,par:+$('iv_par').value,reorder_qty:+$('iv_ro').value,unit_cost:+$('iv_cost').value,vendor:$('iv_vendor').value,sku:$('iv_sku').value,auto:$('iv_auto').checked?1:0}; if(!body.name.trim()){ alert('Name?'); return; } try{ await api('/housing/inventory',{method:'POST',body:JSON.stringify(body)}); closeHModal(); loadHinventory(); }catch(e){ alert(e.message); } };
 }
 async function suggestReorder(){
   try{ const r=await api('/housing/orders/suggest',{method:'POST',body:'{}'}); if(r.empty){ alert('Nothing is at or below par — stock looks good.'); return; } alert(`Built ${r.orders} reorder${r.orders>1?'s':''} covering ${r.items} low item(s). See the Orders tab.`); setMaintTab('orders'); }catch(e){ alert(e.message); }
@@ -1179,4 +1179,4 @@ async function openMovementSettings(){
   save.onclick=async()=>{ try{ await api('/housing/daily-movement/settings',{method:'POST',body:JSON.stringify({clinical:$('mv_clin').value,leadership:$('mv_lead').value,auto:$('mv_auto').checked,hour:+$('mv_hour').value,alerts:$('mv_alerts').checked})}); closeHModal(); loadDailyMovement(); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadMaintenance,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadInventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

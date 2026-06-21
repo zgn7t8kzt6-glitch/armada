@@ -1158,9 +1158,9 @@ async function loadActSchedule(){
     <div class="ret-card ${d.kpis.needsCompletion?'rc-warn':''}"><div class="n">${d.kpis.needsCompletion}</div><div class="l">Past — mark complete</div></div>`;
   // group by day across the 7-day week
   const days=[]; for(let i=0;i<7;i++){ const dd=new Date(from); dd.setDate(dd.getDate()+i); days.push(dd.toISOString().slice(0,10)); }
-  const today=today();
+  const todayStr=today();
   const fmtDay=ds=>new Date(ds+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
-  const evCard=e=>{ const past=e.date<today && e.status==='planned';
+  const evCard=e=>{ const past=e.date<todayStr && e.status==='planned';
     return `<div class="cmd-row ${past?'cmd-row-flag':''}"><div class="cmd-row-main">
       ${e.status==='completed'?'✅ ':e.status==='cancelled'?'✖ ':'🎉 '}<b>${esc(e.title)}</b> ${actDimChip(e.dimension)}
       <span class="hint">${e.time?'· '+esc(e.time)+' ':''}${e.house?'· '+esc(e.house)+' ':''}${e.lead_staff?'· lead '+esc(e.lead_staff):''}</span>
@@ -1168,7 +1168,7 @@ async function loadActSchedule(){
       ${e.status==='cancelled'?'<span class="hint"> · cancelled</span>':''}</div>
       <div class="toolbar" style="margin:0;gap:6px">${e.status==='planned'?`<button class="btn btn-primary btn-sm sans" onclick="completeActivity(${e.id})">Mark done</button><button class="btn btn-ghost btn-sm sans" onclick="cancelActivity(${e.id})">Cancel</button>`:e.status==='completed'?`<button class="btn btn-ghost btn-sm sans" onclick="openActFeedback(${e.id})">+ Feedback</button>`:''}</div></div>`; };
   const body=days.map(ds=>{ const evs=d.events.filter(e=>e.date===ds);
-    return `<div style="margin-bottom:14px"><div style="font-weight:700;color:var(--navy);border-bottom:2px solid var(--gold-soft,#eadfbf);padding-bottom:4px;margin-bottom:6px">${fmtDay(ds)}${ds===today?' <span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">today</span>':''}</div>
+    return `<div style="margin-bottom:14px"><div style="font-weight:700;color:var(--navy);border-bottom:2px solid var(--gold-soft,#eadfbf);padding-bottom:4px;margin-bottom:6px">${fmtDay(ds)}${ds===todayStr?' <span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">today</span>':''}</div>
       ${evs.length?evs.map(evCard).join(''):'<div class="hint" style="padding:2px 0 6px">No activities planned.</div>'}</div>`; }).join('');
   $('actBody').innerHTML=`<div class="toolbar" style="justify-content:space-between;align-items:center">
       <div class="toolbar" style="margin:0;gap:6px;align-items:center">

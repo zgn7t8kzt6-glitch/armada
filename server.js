@@ -2465,6 +2465,63 @@ app.delete('/api/onboarding/:id', requireAuth, (req, res) => {
   db.prepare(`DELETE FROM onboardings WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
 });
+
+// ── Playbook scorecard: all 20 Schulze principles, live status on one screen ──
+app.get('/api/playbook', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const ama = weekendAmaSplit();
+  const ratio = (ama.weekendRate != null && ama.weekdayRate) ? Math.round(ama.weekendRate / ama.weekdayRate * 10) / 10 : null;
+  const bel = belongingStats(30), comfort = comfortStats(30), cfg = excellenceCfg();
+  const tgt = parseFloat(cfg.goalTarget) || null;
+  const lines = (s) => String(s || '').split('\n').filter((x) => x.trim()).length;
+  const recog7 = db.prepare(`SELECT COUNT(*) n FROM kudos WHERE created_at >= datetime('now','-7 day')`).get().n;
+  const openReq = db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`).get().n;
+  const amasTotal = (ama.weekendAma || 0) + (ama.weekdayAma || 0);
+  const amasTagged = db.prepare(`SELECT COUNT(*) n FROM ama_defects WHERE kind='ama' AND root_cause IS NOT NULL AND root_cause != ''`).get().n;
+  const dischRows = db.prepare(`SELECT departure_steps, aftercare_dest, discharge_reason, discharge_improve FROM clients WHERE source='kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-7 day')`).all();
+  const dischInc = dischRows.filter((c) => dischargeMissing(c).length).length;
+  const alumni = db.prepare(`SELECT COUNT(*) n FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-90 day')`).get().n;
+  const obAll = db.prepare(`SELECT id, start_date FROM onboardings`).all();
+  const obDone = {}; db.prepare(`SELECT onboarding_id, task_id FROM onboarding_progress WHERE done = 1`).all().forEach((r) => { (obDone[r.onboarding_id] = obDone[r.onboarding_id] || new Set()).add(r.task_id); });
+  const today = appToday();
+  const obDue = obAll.filter((h) => { const day = Math.floor((Date.parse(today) - Date.parse(h.start_date)) / 864e5) + 1; const d = obDone[h.id] || new Set(); return day >= 21 && ['d21-checkin', 'd21-belonging', 'd21-growth'].some((t) => !d.has(t)); }).length;
+  const planStart = getState('belonging_plan_start');
+  const planDay = planStart ? Math.max(1, Math.floor((Date.parse(today) - Date.parse(planStart)) / 864e5) + 1) : null;
+  const lineupAuto = getState('lineup_auto') === 'on';
+  const P = (n, title, status, value, view) => ({ n, title, status, value, view });
+  res.json({ parts: [
+    { part: 'Purpose & Identity', items: [
+      P(1, 'Define a purpose', 'on', getState('purpose') ? 'Set' : 'Default in use', 'lineup'),
+      P(2, 'Ladies & Gentlemen (two-way dignity)', 'on', 'Staff Voice + recognition live', 'workplace'),
+      P(3, 'Gold Standards, said daily', 'on', 'Value of the day in the lineup', 'lineup'),
+    ] },
+    { part: 'The Patient Promise', items: [
+      P(4, 'The three things every patient wants', 'on', 'Defect-free · timely · caring', 'excellence'),
+      P(5, 'Caring is the differentiator', 'on', 'Care Cards + Dignity Kits', 'clients'),
+      P(6, 'Anticipate needs', lines(cfg.anticipation) ? 'on' : 'off', lines(cfg.anticipation) + '-point anticipation map', 'excellence'),
+      P(7, 'Three Steps (fond farewell)', dischInc ? 'watch' : 'on', dischInc ? dischInc + ' discharges need the form' : 'Farewells on track', 'dischargepage'),
+    ] },
+    { part: 'Service Execution', items: [
+      P(8, 'Empowerment envelope', lines(cfg.empowerment) ? 'set' : 'off', lines(cfg.empowerment) + ' on-the-spot fixes defined', 'excellence'),
+      P(9, 'AMA = defect, root-caused', amasTagged < amasTotal ? 'watch' : 'on', `${amasTotal} AMAs/60d · ${amasTagged} tagged`, 'excellence'),
+      P(10, 'Lateral service ("not my job")', openReq ? 'watch' : 'on', openReq ? openReq + ' open requests' : 'Requests clear', 'concierge'),
+      P(11, 'Daily lineup', 'on', lineupAuto ? 'Auto-sends 8am' : 'Manual send', 'lineup'),
+    ] },
+    { part: 'People', items: [
+      P(12, "Select, don't hire", lines(cfg.interview) ? 'set' : 'off', lines(cfg.interview) + ' values questions', 'excellence'),
+      P(13, 'Sacred onboarding (Day 1/21)', obDue ? 'watch' : 'on', obAll.length ? `${obAll.length} in, ${obDue} Day-21 due` : 'No one onboarding', 'onboarding'),
+      P(14, 'Care for staff first', planDay ? 'on' : 'off', planDay ? '90-Day Plan: Day ' + planDay : 'Plan not started', 'plan'),
+      P(15, 'Leadership vs management', 'on', 'Morale + belonging dashboards', 'workplace'),
+      P(16, 'Belonging — post wins', recog7 ? 'on' : 'watch', `${recog7} recognitions/wk · belonging ${bel.avg != null ? bel.avg + '/5' : '—'}`, 'workplace'),
+    ] },
+    { part: 'Excellence as a System', items: [
+      P(17, 'Measure everything', 'on', `Wknd AMA ${ama.weekendRate ?? '—'}% · comfort ${comfort.avgMin ?? '—'}m`, 'excellence'),
+      P(18, 'Audacious goal', (ratio != null && tgt && ratio <= tgt) ? 'on' : 'watch', ratio != null ? `${ratio}× (target ${cfg.goalTarget}×)` : 'No AMA data yet', 'excellence'),
+      P(19, 'Never compromise', lines(cfg.nonneg) ? 'set' : 'off', lines(cfg.nonneg) + ' non-negotiables', 'excellence'),
+      P(20, 'Loyalty & alumni', 'on', `${alumni} alumni (90d) · aftercare on`, 'alumni'),
+    ] },
+  ] });
+});
 app.post('/api/plan/task', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
   const id = String(req.body?.id || ''); if (!BELONGING_PLAN.some((t) => t.id === id)) return res.status(400).json({ error: 'Unknown task' });

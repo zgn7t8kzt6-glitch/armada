@@ -58,6 +58,7 @@
     <button data-view="plan" data-admin data-subview>90-Day Plan</button>
     <button data-view="excellence" data-admin data-subview>Excellence Standards</button>
     <button data-view="onboarding" data-admin data-subview>Onboarding</button>
+    <button data-view="playbook" data-admin data-subview>Playbook Scorecard</button>
     <button data-view="leadership" data-admin>Leadership</button>
     <button data-view="compliance" data-admin>Documentation</button>
     <button data-view="report" class="active">Shift Playbook</button>
@@ -405,6 +406,15 @@
         <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="addOnboarding()">Add new hire</button><span class="hint" id="ob_msg"></span></div>
       </div>
       <div id="obList"></div>
+    </section>
+
+    <!-- PLAYBOOK SCORECARD -->
+    <section id="playbook" class="view">
+      <div class="card cmd-hero">
+        <div class="cmd-hero-row"><div><h3>📋 Playbook Scorecard</h3><p class="sub sans">All 20 Schulze principles, live, on one screen. The chain to keep in front of everyone: belonging → service consistency (esp. weekends) → AMA ↓ → census ↑ → margin.</p></div><button class="btn btn-ghost sans" onclick="loadPlaybook()">Refresh</button></div>
+        <div id="pbSummary" class="ret-cards" style="margin-top:10px"></div>
+      </div>
+      <div id="pbParts"></div>
     </section>
 
     <!-- ENGAGEMENT & REWARDS -->

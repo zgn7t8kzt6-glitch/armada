@@ -164,7 +164,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',plan:'command',excellence:'command',onboarding:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -195,6 +195,7 @@ const VIEW_ROLES = {
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
   excellence:  ['Executive Director','Director of Operations','Clinical Director'],
   onboarding:  ['Executive Director','Director of Operations','Clinical Director'],
+  playbook:    ['Executive Director','Director of Operations','Clinical Director'],
   dignity:     ['BHT / Tech','Nurse','Clinical Director'],
   engagement:  ['BHT / Tech','Therapist','Clinical Director'],
   program:     ['BHT / Tech','Therapist','Clinical Director'],
@@ -306,6 +307,7 @@ function show(v){
   if(v==='plan') loadPlan();
   if(v==='excellence') loadExcellence();
   if(v==='onboarding') loadOnboarding();
+  if(v==='playbook') loadPlaybookScore();
   if(v==='leadership') loadLeadership();
   if(v==='compliance') loadCompliance();
   if(v==='askai') loadAskAI();
@@ -2529,6 +2531,21 @@ async function addOnboarding(){
 }
 async function toggleOnboard(id,task_id,done){ try{ await api('/onboarding/'+id+'/task',{method:'POST',body:JSON.stringify({task_id,done})}); loadOnboarding(); }catch(e){ alert(e.message); } }
 async function removeOnboarding(id,name){ if(!confirm('Remove '+name+' from onboarding?'))return; try{ await api('/onboarding/'+id,{method:'DELETE'}); loadOnboarding(); }catch(e){ alert(e.message); } }
+/* ---- Playbook scorecard ---- */
+async function loadPlaybookScore(){
+  let d; try{ d=await api('/playbook'); }catch(e){ if($('pbParts'))$('pbParts').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const all=d.parts.flatMap(p=>p.items);
+  const cnt=s=>all.filter(i=>i.status===s).length;
+  const dot=s=> s==='on'?'<span class="risk risk-low">live</span>' : s==='set'?'<span class="risk risk-low">set</span>' : s==='watch'?'<span class="risk risk-warn">watch</span>' : '<span class="risk risk-high">to do</span>';
+  $('pbSummary').innerHTML=`
+    <div class="ret-card"><div class="n">${cnt('on')+cnt('set')}/20</div><div class="l">Operational</div></div>
+    <div class="ret-card ${cnt('watch')?'rc-warn':''}"><div class="n">${cnt('watch')}</div><div class="l">Needs attention</div></div>
+    <div class="ret-card ${cnt('off')?'rc-high':''}"><div class="n">${cnt('off')}</div><div class="l">To set up</div></div>`;
+  $('pbParts').innerHTML = d.parts.map(p=>`<div class="card"><h3 style="font-size:15px">${esc(p.part)}</h3>
+    ${p.items.map(i=>`<div class="cmd-row" style="cursor:${i.view?'pointer':'default'}" ${i.view?`onclick="show('${i.view}')"`:''}>
+        <div class="cmd-row-main"><strong>${i.n}. ${esc(i.title)}</strong><div class="hint">${esc(i.value||'')}</div></div>
+        ${dot(i.status)}${i.view?'<span class="hint" style="margin-left:6px">›</span>':''}</div>`).join('')}</div>`).join('');
+}
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;

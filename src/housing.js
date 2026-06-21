@@ -383,6 +383,21 @@ export function housingSchema() {
     event_id INTEGER, resident_id INTEGER, enjoyed INTEGER, engaged INTEGER,
     repeat INTEGER, comment TEXT, source TEXT DEFAULT 'staff', created TEXT DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS housing_shift_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT, house_id INTEGER, shift TEXT, task_key TEXT,
+    done INTEGER DEFAULT 0, done_by TEXT, done_at TEXT, note TEXT
+  );
+  CREATE TABLE IF NOT EXISTS housing_onboarding (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, item_key TEXT,
+    done INTEGER DEFAULT 0, done_by TEXT, done_at TEXT, note TEXT
+  );
+  CREATE TABLE IF NOT EXISTS housing_recognition (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_user TEXT, to_name TEXT, to_user_id INTEGER, standard TEXT,
+    message TEXT, kudos INTEGER DEFAULT 0, created TEXT DEFAULT (datetime('now'))
+  );
   `);
   // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
   try { db.exec(`ALTER TABLE housing_houses ADD COLUMN program TEXT`); } catch { /* already exists */ }
@@ -909,6 +924,102 @@ function emailList(arr, fmt) {
 /* ───────────── Daily Movement report (auto-emailed to clinical + leadership) ───────────── */
 // One dated snapshot of the houses: who came in, who left, and where the census
 // stands — the morning number clinical and leadership want.
+/* ───────────────── Hilltop Staff Operating System ─────────────────
+   The Ritz-style daily operating model for sober-living staff: a focus
+   board, per-shift task checklists, a Day-1 resident onboarding playbook,
+   service standards read at line-up, and peer recognition. */
+
+// Twelve service standards (Ritz-Carlton "Gold Standards", adapted for
+// recovery housing). Read one at line-up each day; rotates through all twelve.
+const HILLTOP_STANDARDS = [
+  'Every resident is greeted by name, with genuine warmth — every time.',
+  'We anticipate needs and act before a resident has to ask.',
+  'A warm welcome, a fond farewell, and real care for everything in between.',
+  'Recovery happens in relationship. We earn trust in the small moments.',
+  'We own every concern we hear until it is truly resolved.',
+  'We are empowered to do whatever it takes to keep a resident safe and engaged.',
+  'Order and cleanliness signal dignity — the house reflects our standard.',
+  'We protect privacy and confidentiality without exception.',
+  'We celebrate milestones — 24 hours, 30/60/90 days. Every win counts.',
+  'We model the recovery we ask for: honesty, accountability, and service.',
+  'No one sits in crisis alone, eats alone, or struggles unnoticed.',
+  'We treat each other as we treat residents — with recognition and respect.',
+];
+const HILLTOP_CREDO = 'We are recovery professionals creating a safe, dignified home where people rebuild their lives. Our care is the difference between a bed and a turning point.';
+const HILLTOP_THREE_STEPS = [
+  'A warm welcome — use the resident’s name.',
+  'Anticipate and meet needs; own every concern.',
+  'A fond farewell with genuine encouragement.',
+];
+function standardOfDay(date) {
+  const d = new Date((date || todayStr()) + 'T00:00:00');
+  const start = new Date(d.getFullYear(), 0, 0);
+  const doy = Math.floor((d - start) / 86400000);
+  const i = ((doy % HILLTOP_STANDARDS.length) + HILLTOP_STANDARDS.length) % HILLTOP_STANDARDS.length;
+  return { index: i + 1, total: HILLTOP_STANDARDS.length, text: HILLTOP_STANDARDS[i] };
+}
+
+// Per-shift task checklists. Keyed by shift; each item is [key, label].
+const SHIFT_TASKS = {
+  Day: [
+    ['am_headcount', 'Morning headcount & wellness check'],
+    ['meds_am', 'Observe AM medication / MAT doses'],
+    ['breakfast', 'Breakfast handled · kitchen stocked'],
+    ['checkins', 'Confirm everyone did their kiosk check-in'],
+    ['transport', 'Coordinate PHP/IOP transport & attendance'],
+    ['chores_assign', 'Assign & verify daily chores'],
+    ['house_walk', 'House walkthrough — clean, safe, in repair'],
+    ['appts', 'Confirm appointments / interviews / court'],
+    ['supplies', 'Note any low supplies for reorder'],
+    ['report', 'File the Day shift report (handoff)'],
+  ],
+  Evening: [
+    ['pm_headcount', 'Evening headcount'],
+    ['meds_pm', 'Observe PM medication / MAT doses'],
+    ['dinner', 'Dinner handled · kitchen clean'],
+    ['meeting', 'Transport / hold 12-step or house meeting'],
+    ['activity', 'Facilitate the scheduled activity'],
+    ['chores_check', 'Verify chores completed'],
+    ['newcomer', '1:1 check-in with the newest residents'],
+    ['conflict', 'Address any house conflicts early'],
+    ['report', 'File the Evening shift report (handoff)'],
+  ],
+  Overnight: [
+    ['curfew', 'Curfew check — everyone accounted for'],
+    ['bed_check', 'Overnight bed checks'],
+    ['doors', 'Doors & windows secured'],
+    ['naloxone', 'Naloxone on site & accessible'],
+    ['quiet', 'Quiet hours observed'],
+    ['disturb', 'Log any disturbances / wellness concerns'],
+    ['am_prep', 'Prep for morning (coffee, transport list)'],
+    ['report', 'File the Overnight shift report (handoff)'],
+  ],
+};
+
+// Day-1 resident onboarding playbook — the "first day" experience, by phase.
+const FIRST_DAY = [
+  ['Arrival (first hour)', 'greet', 'Warm welcome by name; introduce yourself & the house'],
+  ['Arrival (first hour)', 'search', 'Belongings & contraband check per policy; document property'],
+  ['Arrival (first hour)', 'welcome_kit', 'Assign bed/room; provide linens & welcome kit'],
+  ['Arrival (first hour)', 'tour', 'House tour — kitchen, baths, exits, common areas'],
+  ['Arrival (first hour)', 'naloxone', 'Show naloxone location & how to use it'],
+  ['First 24 hours', 'agreement', 'Review & sign resident agreement / house rules'],
+  ['First 24 hours', 'roi', 'Consents / ROIs & emergency contacts on file'],
+  ['First 24 hours', 'schedule', 'Walk through the daily & weekly schedule + curfew'],
+  ['First 24 hours', 'meds', 'Med reconciliation & MAT plan; secure medications'],
+  ['First 24 hours', 'screen', 'Baseline drug screen collected'],
+  ['First 24 hours', 'buddy', 'Assign a peer buddy / introduce a sponsor'],
+  ['First 24 hours', 'first_meeting', 'Get to the first house meeting / 12-step'],
+  ['First 24 hours', 'needs', 'Meet immediate needs — food, hygiene, clothing, phone'],
+  ['First 24 hours', 'kiosk', 'Set up kiosk check-in & show how it works'],
+  ['First week', 'goals', 'Set initial recovery goals / recovery-capital baseline'],
+  ['First week', 'clinical', 'Confirm PHP/IOP enrollment & first session'],
+  ['First week', 'chore', 'Assign first chore & explain expectations'],
+  ['First week', 'benefits', 'Start ID / benefits / employment conversation'],
+  ['First week', 'family', 'Family notification per consent'],
+  ['First week', 'retention72', '72-hour 1:1 retention check'],
+];
+
 export function buildDailyMovement(date) {
   date = date || appToday();
   const intakes = db.prepare(`SELECT r.name, r.loc, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.move_in=? ORDER BY h.name, r.name`).all(date);
@@ -2044,7 +2155,117 @@ export function mountHousing(app) {
     res.json({ ok: true });
   });
 
-  // ---- Intake & forms ----
+  // ════════════ Staff Operating System (Hilltop) ════════════
+  // Focus board for the on-shift team: what to act on first, the service
+  // standard of the day, and the recognition feed.
+  app.get('/api/housing/staffhub', requireAuth, (req, res) => {
+    const date = req.query.date || todayStr();
+    const ago = (n) => { const d = new Date(date); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+    const arrivals = db.prepare(`SELECT r.id, r.name, r.move_in, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active' AND r.move_in>=? ORDER BY r.move_in DESC, r.name`).all(ago(3)).map(r => {
+      const done = db.prepare(`SELECT COUNT(*) c FROM housing_onboarding WHERE resident_id=? AND done=1`).get(r.id).c;
+      return { ...r, done, total: FIRST_DAY.length };
+    });
+    const offRestriction = db.prepare(`SELECT resident_id FROM housing_restrictions WHERE status='active'`).all()
+      .map(x => { const c = currentRestriction(x.resident_id); if (!c || !c.eligible) return null; const rr = db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(x.resident_id); return { resident_id: x.resident_id, name: rr?.name || '', type: c.type }; })
+      .filter(Boolean);
+    const active = db.prepare(`SELECT id,name FROM housing_residents WHERE status='active'`).all();
+    const checkedIn = {}; db.prepare(`SELECT DISTINCT resident_id FROM housing_checkins WHERE date=?`).all(date).forEach(c => { checkedIn[c.resident_id] = 1; });
+    const missing = active.filter(r => !checkedIn[r.id]);
+    const activities = db.prepare(`SELECT title, time, status FROM housing_activity_events WHERE date=? AND status!='cancelled' ORDER BY time`).all(date);
+    const openReq = db.prepare(`SELECT COUNT(*) c FROM housing_requests WHERE status='open'`).get().c;
+    const urgentReq = db.prepare(`SELECT COUNT(*) c FROM housing_requests WHERE status='open' AND priority='Urgent'`).get().c;
+    const openWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done'`).get().c;
+    const urgentWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done' AND priority='Urgent'`).get().c;
+    const lowStock = db.prepare(`SELECT COUNT(*) c FROM housing_inventory WHERE qty<=par`).get().c;
+    const houses = db.prepare(`SELECT id,name FROM housing_houses WHERE active=1`).all();
+    const doneToday = {}; db.prepare(`SELECT house_id,shift FROM housing_shift_reports WHERE date=?`).all(date).forEach(r => { doneToday[r.house_id + '|' + r.shift] = 1; });
+    let reportsMissing = 0; houses.forEach(h => HOUSING_SHIFTS.forEach(s => { if (!doneToday[h.id + '|' + s]) reportsMissing++; }));
+    const recognition = db.prepare(`SELECT * FROM housing_recognition ORDER BY id DESC LIMIT 6`).all();
+    res.json({
+      date, standard: standardOfDay(date), credo: HILLTOP_CREDO, threeSteps: HILLTOP_THREE_STEPS,
+      focus: {
+        arrivals, offRestriction,
+        missingCheckin: { count: missing.length, total: active.length, sample: missing.slice(0, 10).map(r => r.name) },
+        activities, openReq, urgentReq, openWO, urgentWO, lowStock, reportsMissing,
+      },
+      recognition,
+    });
+  });
+
+  // Per-shift task checklist (by house + shift + date).
+  app.get('/api/housing/shift-tasks', requireAuth, (req, res) => {
+    const date = req.query.date || todayStr();
+    const shift = HOUSING_SHIFTS.includes(req.query.shift) ? req.query.shift : 'Day';
+    const houseId = req.query.house_id ? num(req.query.house_id) : 0;
+    const houses = db.prepare(`SELECT id,name,program FROM housing_houses WHERE active=1 ORDER BY level DESC, name`).all();
+    const rows = db.prepare(`SELECT task_key, done, done_by, done_at FROM housing_shift_tasks WHERE date=? AND shift=? AND IFNULL(house_id,0)=?`).all(date, shift, houseId);
+    const map = {}; rows.forEach(r => { map[r.task_key] = r; });
+    const tasks = (SHIFT_TASKS[shift] || []).map(([key, label]) => ({ key, label, done: map[key]?.done ? 1 : 0, done_by: map[key]?.done_by || null, done_at: map[key]?.done_at || null }));
+    res.json({ date, shift, houseId, shifts: HOUSING_SHIFTS, houses, tasks });
+  });
+  app.post('/api/housing/shift-tasks', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const date = b.date || todayStr();
+    const shift = HOUSING_SHIFTS.includes(b.shift) ? b.shift : 'Day';
+    const houseId = b.house_id ? num(b.house_id) : 0;
+    const key = String(b.task_key || '');
+    const done = b.done ? 1 : 0;
+    const stamp = done ? new Date().toISOString() : null; const who = done ? req.user.name : null;
+    const ex = db.prepare(`SELECT id FROM housing_shift_tasks WHERE date=? AND shift=? AND IFNULL(house_id,0)=? AND task_key=?`).get(date, shift, houseId, key);
+    if (ex) db.prepare(`UPDATE housing_shift_tasks SET done=?, done_by=?, done_at=? WHERE id=?`).run(done, who, stamp, ex.id);
+    else db.prepare(`INSERT INTO housing_shift_tasks (date,house_id,shift,task_key,done,done_by,done_at) VALUES (?,?,?,?,?,?,?)`).run(date, houseId || null, shift, key, done, who, stamp);
+    res.json({ ok: true });
+  });
+
+  // Day-1 onboarding playbook per resident.
+  app.get('/api/housing/firstday', requireAuth, (req, res) => {
+    const residents = db.prepare(`SELECT r.id, r.name, r.move_in, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active' ORDER BY r.move_in DESC, r.name LIMIT 80`).all().map(r => {
+      const done = db.prepare(`SELECT COUNT(*) c FROM housing_onboarding WHERE resident_id=? AND done=1`).get(r.id).c;
+      return { ...r, done, total: FIRST_DAY.length };
+    });
+    res.json({ residents });
+  });
+  app.get('/api/housing/firstday/:id', requireAuth, (req, res) => {
+    const rid = num(req.params.id);
+    const resident = db.prepare(`SELECT r.id, r.name, r.move_in, r.loc, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.id=?`).get(rid);
+    if (!resident) return res.status(404).json({ error: 'Not found' });
+    const map = {}; db.prepare(`SELECT item_key, done, done_by FROM housing_onboarding WHERE resident_id=?`).all(rid).forEach(r => { map[r.item_key] = r; });
+    const phases = [];
+    for (const [phase, key, label] of FIRST_DAY) {
+      let p = phases.find(x => x.phase === phase); if (!p) { p = { phase, items: [] }; phases.push(p); }
+      p.items.push({ key, label, done: map[key]?.done ? 1 : 0, done_by: map[key]?.done_by || null });
+    }
+    const done = Object.values(map).filter(m => m.done).length;
+    res.json({ resident, phases, done, total: FIRST_DAY.length });
+  });
+  app.post('/api/housing/firstday/:id', requireAuth, (req, res) => {
+    const rid = num(req.params.id); const b = req.body || {};
+    const key = String(b.item_key || ''); const done = b.done ? 1 : 0;
+    const stamp = done ? new Date().toISOString() : null; const who = done ? req.user.name : null;
+    const ex = db.prepare(`SELECT id FROM housing_onboarding WHERE resident_id=? AND item_key=?`).get(rid, key);
+    if (ex) db.prepare(`UPDATE housing_onboarding SET done=?, done_by=?, done_at=? WHERE id=?`).run(done, who, stamp, ex.id);
+    else db.prepare(`INSERT INTO housing_onboarding (resident_id,item_key,done,done_by,done_at) VALUES (?,?,?,?,?)`).run(rid, key, done, who, stamp);
+    res.json({ ok: true });
+  });
+
+  // Peer recognition (Ritz "wow" stories) — give a shout-out, add kudos.
+  app.get('/api/housing/recognition', requireAuth, (req, res) => {
+    const feed = db.prepare(`SELECT * FROM housing_recognition ORDER BY id DESC LIMIT 50`).all();
+    const top = db.prepare(`SELECT to_name, COUNT(*) c FROM housing_recognition WHERE created>=date('now','-30 days') GROUP BY to_name ORDER BY c DESC LIMIT 5`).all();
+    const staff = db.prepare(`SELECT id,name,job_role FROM users WHERE active=1 AND (role='admin' OR job_role IN ('Housing Director','House Manager','Recovery Coach')) ORDER BY name`).all();
+    res.json({ feed, top, staff, standards: HILLTOP_STANDARDS });
+  });
+  app.post('/api/housing/recognition', requireAuth, (req, res) => {
+    const b = req.body || {};
+    if (!b.to_name || !String(b.message || '').trim()) return res.status(400).json({ error: 'Pick a teammate and write a note.' });
+    db.prepare(`INSERT INTO housing_recognition (from_user,to_name,to_user_id,standard,message) VALUES (?,?,?,?,?)`)
+      .run(req.user.name, String(b.to_name), b.to_user_id ? num(b.to_user_id) : null, b.standard || null, String(b.message).trim());
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/recognition/:id/kudos', requireAuth, (req, res) => {
+    db.prepare(`UPDATE housing_recognition SET kudos=kudos+1 WHERE id=?`).run(num(req.params.id));
+    res.json({ ok: true });
+  });
 
   // ---- Intake & forms ----
   app.get('/api/housing/forms/templates', requireAuth, (req, res) => res.json({ templates: FORM_TEMPLATES }));

@@ -1376,4 +1376,119 @@ async function openMovementSettings(){
   save.onclick=async()=>{ try{ await api('/housing/daily-movement/settings',{method:'POST',body:JSON.stringify({clinical:$('mv_clin').value,leadership:$('mv_lead').value,auto:$('mv_auto').checked,hour:+$('mv_hour').value,alerts:$('mv_alerts').checked})}); closeHModal(); loadDailyMovement(); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+/* ============================ STAFF HUB — the operating system ============================ */
+function setHubTab(t){ HOUSING.hubTab=t; loadStaffHub(); }
+async function loadStaffHub(){
+  const tab=HOUSING.hubTab||'focus';
+  document.querySelectorAll('#hubSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+  if(tab==='tasks') return hubTasks();
+  if(tab==='firstday') return hubFirstDay();
+  if(tab==='recog') return hubRecognition();
+  return hubFocus();
+}
+async function hubFocus(){
+  let d; try{ d=await api('/housing/staffhub'); }catch(e){ $('hubBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const f=d.focus, st=d.standard;
+  const actNeeded=f.arrivals.filter(a=>a.done<a.total).length+f.offRestriction.length+(f.missingCheckin.count?1:0)+(f.urgentReq?1:0)+(f.urgentWO?1:0)+(f.reportsMissing?1:0);
+  const kpis=`<div class="ret-cards" style="margin:16px 0">
+    <div class="ret-card ${f.arrivals.length?'':''}"><div class="n">${f.arrivals.length}</div><div class="l">New arrivals (3d)</div></div>
+    <div class="ret-card ${f.missingCheckin.count?'rc-warn':''}"><div class="n">${f.missingCheckin.count}</div><div class="l">No check-in today</div></div>
+    <div class="ret-card ${f.offRestriction.length?'rc-elev':''}"><div class="n">${f.offRestriction.length}</div><div class="l">Eligible off restriction</div></div>
+    <div class="ret-card ${f.urgentReq?'rc-high':''}"><div class="n">${f.openReq}</div><div class="l">Open requests${f.urgentReq?` · ${f.urgentReq} urgent`:''}</div></div>
+    <div class="ret-card ${f.urgentWO?'rc-high':''}"><div class="n">${f.openWO}</div><div class="l">Open work orders</div></div>
+    <div class="ret-card ${f.reportsMissing?'rc-warn':''}"><div class="n">${f.reportsMissing}</div><div class="l">Shift reports to file</div></div></div>`;
+  const standard=`<div class="card anchor-card" style="margin-bottom:18px">
+    <div class="anchor-head">Standard of the day · #${st.index} of ${st.total}</div>
+    <div class="anchor-words">${esc(st.text)}</div>
+    <div class="anchor-foot">The three steps of service: ${d.threeSteps.map(esc).join(' &nbsp;·&nbsp; ')}</div></div>`;
+  const arrivals = f.arrivals.length? f.arrivals.map(a=>`<div class="cmd-row"><div class="cmd-row-main">👋 <b>${esc(a.name)}</b> <span class="hint">· ${esc(a.house||'unassigned')} · in ${esc(a.move_in||'')}</span></div>
+    <span class="chip ${a.done>=a.total?'':'chip-warn'}">First-day ${a.done}/${a.total}</span>
+    <button class="btn btn-primary btn-sm sans" onclick="HOUSING.fdId=${a.id};setHubTab('firstday')">Open playbook</button></div>`).join('') : '<div class="hint">No new arrivals in the last 3 days.</div>';
+  const offR = f.offRestriction.length? f.offRestriction.map(r=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">✅ <b>${esc(r.name)}</b> <span class="hint">· ${esc(r.type||'restriction')} — criteria met, review to lift</span></div></div>`).join('') : '<div class="hint">No one is currently eligible to come off restriction.</div>';
+  const acts = f.activities.length? f.activities.map(a=>`<div class="cmd-row"><div class="cmd-row-main">${a.status==='completed'?'✅':'🎉'} ${a.time?'<b>'+esc(a.time)+'</b> · ':''}${esc(a.title)}</div></div>`).join('') : '<div class="hint">Nothing scheduled today — add something in Activities.</div>';
+  const missing = f.missingCheckin.count? `<div class="cmd-row ${f.missingCheckin.count?'cmd-row-flag':''}"><div class="cmd-row-main">⏳ <b>${f.missingCheckin.count}</b> of ${f.missingCheckin.total} residents haven't checked in <span class="hint">· ${f.missingCheckin.sample.map(esc).join(', ')}${f.missingCheckin.count>10?'…':''}</span></div></div>` : '<div class="hint">✅ Everyone has checked in today.</div>';
+  const ops=`${f.lowStock?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">📦 <b>${f.lowStock}</b> supply item(s) at/below par — reorder in Maintenance &amp; Supplies</div></div>`:''}
+    ${f.urgentWO?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">🔧 <b>${f.urgentWO}</b> urgent work order(s) open</div></div>`:''}
+    ${f.reportsMissing?`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">📝 <b>${f.reportsMissing}</b> shift report(s) not yet filed today</div></div>`:''}
+    ${(!f.lowStock&&!f.urgentWO&&!f.reportsMissing)?'<div class="hint">✅ Operations are clean — nothing urgent.</div>':''}`;
+  const recog = d.recognition.length? d.recognition.slice(0,3).map(r=>`<div class="wow">“${esc(r.message)}”<div class="wow-meta">★ ${esc(r.to_name)} — from ${esc(r.from_user)}${r.standard?' · '+esc(r.standard):''}</div></div>`).join('') : '<div class="hint">No shout-outs yet — be the first in the Recognition tab.</div>';
+  $('hubBody').innerHTML=`${kpis}${standard}
+    <div class="cmd-grid">
+      <div class="card"><h3>👋 New arrivals — run the first-day playbook</h3><div style="margin-top:8px">${arrivals}</div></div>
+      <div class="card"><h3>✅ Eligible to come off restriction</h3><div style="margin-top:8px">${offR}</div></div>
+      <div class="card"><h3>⏳ Daily check-ins</h3><div style="margin-top:8px">${missing}</div></div>
+      <div class="card"><h3>🎉 Today's activities</h3><div style="margin-top:8px">${acts}</div></div>
+      <div class="card"><h3>🛠 Operations to clear</h3><div style="margin-top:8px">${ops}</div></div>
+      <div class="card"><h3>⭐ Recent recognition <button class="btn btn-ghost btn-sm sans" style="float:right" onclick="setHubTab('recog')">Give one →</button></h3><div style="margin-top:8px">${recog}</div></div>
+    </div>`;
+}
+async function hubTasks(){
+  if(!HOUSING.hubShift) HOUSING.hubShift=(new Date().getHours()<14?'Day':new Date().getHours()<22?'Evening':'Overnight');
+  const q=`shift=${encodeURIComponent(HOUSING.hubShift)}${HOUSING.hubHouse?'&house_id='+HOUSING.hubHouse:''}`;
+  let d; try{ d=await api('/housing/shift-tasks?'+q); }catch(e){ $('hubBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const done=d.tasks.filter(t=>t.done).length;
+  const shiftSeg=d.shifts.map(s=>`<button class="${s===d.shift?'on':''}" onclick="HOUSING.hubShift='${s}';hubTasks()">${esc(s)}</button>`).join('');
+  const houseOpts=`<option value="">All houses (shared)</option>`+d.houses.map(h=>`<option value="${h.id}" ${String(HOUSING.hubHouse)===String(h.id)?'selected':''}>${esc(h.name)}</option>`).join('');
+  const rows=d.tasks.map(t=>`<div class="todo ${t.done?'done':''}">
+    <div class="box" onclick="toggleShiftTask('${t.key}',${t.done?0:1})">${t.done?'✓':''}</div>
+    <div class="txt">${esc(t.label)}${t.done&&t.done_by?`<span class="hint"> · ${esc(t.done_by)}</span>`:''}</div></div>`).join('');
+  $('hubBody').innerHTML=`<div class="card">
+    <div class="cmd-hero-row" style="align-items:center">
+      <div><h3>🗒 Shift checklist</h3><p class="sub sans" style="margin:0">The non-negotiables for every shift. Check them off as you go — leadership sees what's done.</p></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="seg">${shiftSeg}</span>
+        <select style="width:auto" onchange="HOUSING.hubHouse=this.value;hubTasks()">${houseOpts}</select>
+      </div></div>
+    <div class="ret-cards" style="margin:14px 0"><div class="ret-card ${done>=d.tasks.length?'':'rc-warn'}"><div class="n">${done}/${d.tasks.length}</div><div class="l">${esc(d.shift)} tasks done</div></div></div>
+    <div>${rows}</div></div>`;
+}
+async function toggleShiftTask(key,done){
+  try{ await api('/housing/shift-tasks',{method:'POST',body:JSON.stringify({shift:HOUSING.hubShift,house_id:HOUSING.hubHouse||null,task_key:key,done})}); hubTasks(); }catch(e){ alert(e.message); }
+}
+async function hubFirstDay(){
+  if(HOUSING.fdId){ return openFirstDay(HOUSING.fdId); }
+  let d; try{ d=await api('/housing/firstday'); }catch(e){ $('hubBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const rows=d.residents.length? d.residents.map(r=>{ const pct=r.total?Math.round(r.done/r.total*100):0;
+    return `<div class="cmd-row" style="cursor:pointer" onclick="HOUSING.fdId=${r.id};hubFirstDay()"><div class="cmd-row-main"><b>${esc(r.name)}</b> <span class="hint">· ${esc(r.house||'unassigned')} · in ${esc(r.move_in||'—')}</span>
+      <div class="occbar" style="margin-top:6px;max-width:240px"><span style="width:${pct}%"></span></div></div>
+      <span class="chip ${r.done>=r.total?'':'chip-warn'}">${r.done}/${r.total}</span></div>`; }).join('') : '<div class="empty">No active residents yet.</div>';
+  $('hubBody').innerHTML=`<div class="card"><h3>🧭 First-day playbook</h3><p class="sub sans">Pick a resident to run their welcome &amp; onboarding. Newest first — the goal is 100% before the first 72 hours are up.</p><div style="margin-top:10px">${rows}</div></div>`;
+}
+async function openFirstDay(id){
+  let d; try{ d=await api('/housing/firstday/'+id); }catch(e){ $('hubBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const r=d.resident; const pct=d.total?Math.round(d.done/d.total*100):0;
+  const phases=d.phases.map(p=>`<div style="margin-bottom:14px"><div style="font-weight:700;color:var(--navy);border-bottom:2px solid var(--gold-soft,#eadfbf);padding-bottom:4px;margin-bottom:6px">${esc(p.phase)}</div>
+    ${p.items.map(it=>`<div class="todo ${it.done?'done':''}"><div class="box" onclick="toggleOnboard(${id},'${it.key}',${it.done?0:1})">${it.done?'✓':''}</div><div class="txt">${esc(it.label)}${it.done&&it.done_by?`<span class="hint"> · ${esc(it.done_by)}</span>`:''}</div></div>`).join('')}</div>`).join('');
+  $('hubBody').innerHTML=`<div class="card">
+    <div class="cmd-hero-row" style="align-items:center"><div><h3>🧭 First day — ${esc(r.name)}</h3><p class="sub sans" style="margin:0">${esc(r.house||'unassigned')} · moved in ${esc(r.move_in||'—')} · ${esc(r.loc||'')}</p></div>
+      <button class="btn btn-ghost sans" onclick="HOUSING.fdId=null;hubFirstDay()">← All residents</button></div>
+    <div class="ret-cards" style="margin:14px 0"><div class="ret-card ${pct===100?'':'rc-warn'}"><div class="n">${d.done}/${d.total}</div><div class="l">${pct}% complete</div></div></div>
+    ${phases}</div>`;
+}
+async function toggleOnboard(id,key,done){
+  try{ await api('/housing/firstday/'+id,{method:'POST',body:JSON.stringify({item_key:key,done})}); openFirstDay(id); }catch(e){ alert(e.message); }
+}
+async function hubRecognition(){
+  let d; try{ d=await api('/housing/recognition'); }catch(e){ $('hubBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  HOUSING.recStaff=d.staff; HOUSING.recStds=d.standards;
+  const top=d.top.length? d.top.map((t,i)=>`<span class="chip" style="margin:2px 4px 2px 0">${i===0?'🏆 ':''}${esc(t.to_name)} · ${t.c}</span>`).join('') : '<span class="hint">No recognition in the last 30 days yet.</span>';
+  const feed=d.feed.length? d.feed.map(r=>`<div class="wow">“${esc(r.message)}”<div class="wow-meta">★ <b>${esc(r.to_name)}</b> — from ${esc(r.from_user)}${r.standard?' · lives the standard: '+esc(r.standard):''} ${r.created?'· '+esc(String(r.created).slice(0,10)):''} <a onclick="kudosRecognition(${r.id})" style="cursor:pointer;color:var(--gold);font-weight:600;margin-left:6px">👏 ${r.kudos||0}</a></div></div>`).join('') : '<div class="empty">No shout-outs yet — give the first one.</div>';
+  $('hubBody').innerHTML=`<div class="cmd-grid">
+    <div class="card"><h3>⭐ Give recognition</h3><p class="sub sans">Catch a teammate living a Hilltop standard. Recognition is how culture compounds.</p>
+      <label>Teammate</label><input id="rec_name" list="rec_staff" placeholder="Name"/>
+      <datalist id="rec_staff">${d.staff.map(s=>`<option value="${esc(s.name)}">`).join('')}</datalist>
+      <label>Standard they lived (optional)</label><select id="rec_std"><option value="">—</option>${d.standards.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select>
+      <label>What they did</label><textarea id="rec_msg" rows="3" placeholder="Be specific — what happened and why it mattered."></textarea>
+      <div class="toolbar" style="margin-top:10px"><button class="btn btn-gold sans" onclick="giveRecognition()">Send recognition</button></div></div>
+    <div class="card"><h3>🏆 Most recognized · 30 days</h3><div style="margin:8px 0 16px">${top}</div><h3>Recent shout-outs</h3><div style="margin-top:8px">${feed}</div></div>
+  </div>`;
+}
+async function giveRecognition(){
+  const to=$('rec_name').value.trim(), msg=$('rec_msg').value.trim();
+  if(!to||!msg){ alert('Pick a teammate and write a note.'); return; }
+  const m=(HOUSING.recStaff||[]).find(s=>s.name===to);
+  try{ await api('/housing/recognition',{method:'POST',body:JSON.stringify({to_name:to,to_user_id:m?m.id:null,standard:$('rec_std').value||null,message:msg})}); hubRecognition(); }catch(e){ alert(e.message); }
+}
+async function kudosRecognition(id){ try{ await api('/housing/recognition/'+id+'/kudos',{method:'POST',body:'{}'}); hubRecognition(); }catch(e){ alert(e.message); } }
+
+Object.assign(window,{loadStaffHub,setHubTab,hubFocus,hubTasks,toggleShiftTask,hubFirstDay,openFirstDay,toggleOnboard,hubRecognition,giveRecognition,kudosRecognition,loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

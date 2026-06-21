@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260622M" />
+<link rel="stylesheet" href="/styles.css?v=20260622N" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -114,6 +114,7 @@
     <button data-view="audit" data-admin>Audit Log</button>
     <!-- Hilltop Recovery Home (sober-living suite) -->
     <button data-view="housing">Hilltop HQ</button>
+    <button data-view="staffhub">Staff Hub</button>
     <button data-view="houses">Houses &amp; Beds</button>
     <button data-view="residents">Residents</button>
     <button data-view="resident" data-subview>Resident 360</button>
@@ -2309,6 +2310,21 @@
       </div>
     </section>
 
+    <section id="staffhub" class="view">
+      <div class="card hq-hero">
+        <div class="cmd-hero-row">
+          <div><h3>⛰ Staff Hub — your shift, the Hilltop way</h3><p class="sub sans" style="margin:0">What to focus on first, the daily standard we live by, the first-day playbook for new residents, and recognition for the team. This is how we run a best-in-class recovery home.</p></div>
+          <span class="seg" id="hubSeg">
+            <button class="on" data-t="focus" onclick="setHubTab('focus')">My Shift</button>
+            <button data-t="tasks" onclick="setHubTab('tasks')">Shift Tasks</button>
+            <button data-t="firstday" onclick="setHubTab('firstday')">First Day</button>
+            <button data-t="recog" onclick="setHubTab('recog')">Recognition</button>
+          </span>
+        </div>
+      </div>
+      <div id="hubBody"></div>
+    </section>
+
     <section id="activities" class="view">
       <div class="card">
         <div class="cmd-hero-row">
@@ -2352,7 +2368,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260622M"></script>
-<script src="/housing.js?v=20260622M"></script>
+<script src="/app.js?v=20260622N"></script>
+<script src="/housing.js?v=20260622N"></script>
 </body>
 </html>

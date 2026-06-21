@@ -652,13 +652,16 @@ body{
 
 /* ── KPI / stat tiles: the hero numbers ────────────────────────────────── */
 .ret-cards{gap:18px}
-.ret-card{position:relative;overflow:hidden;border-radius:18px;padding:24px 18px 22px;
+.ret-card{position:relative;overflow:visible;border-radius:18px;
   background:linear-gradient(180deg,#fff,#fcfaf5)}
-.ret-card::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;
+.ret-card::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;border-radius:18px 18px 0 0;
   background:var(--grad);opacity:.9}
-.ret-card .n{font-size:44px;letter-spacing:-.03em}
-.ret-card .l{font-size:10px;letter-spacing:1px;margin-top:10px}
 .ret-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
+@media(min-width:641px){
+  .ret-card{padding:24px 16px 22px;min-width:140px}
+  .ret-card .n{font-size:36px;letter-spacing:-.03em;white-space:nowrap}
+  .ret-card .l{font-size:10px;letter-spacing:1px;margin-top:10px}
+}
 [data-theme="dark"] .ret-card{background:linear-gradient(180deg,#18232e,#141d26)}
 .cmd-day{border-radius:16px;padding:18px 12px;background:linear-gradient(180deg,#fff,#faf8f3);transition:transform .16s,box-shadow .16s}
 .cmd-day:hover{transform:translateY(-2px);box-shadow:var(--shadow)}

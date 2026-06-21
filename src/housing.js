@@ -790,6 +790,19 @@ const isLow = (it) => (it.qty ?? 0) <= (it.par ?? 0);
 // self-worth, mutual-aid attendance tracks with abstinence, and sober fun
 // rebuilds the reward system.
 const ACTIVITY_DIMENSIONS = ['Physical', 'Social', 'Emotional', 'Spiritual', 'Intellectual', 'Occupational', 'Environmental', 'Financial', 'Recreational'];
+// A ready-made balanced weekly program (the "set schedule" a good house runs):
+// daily morning anchors + a spread across exercise, mutual-aid, life-skills,
+// fun nights, service and rest. Staff generate it for a week, then tweak.
+// [dayOfWeek 0=Sun..6=Sat, 'HH:MM', catalog activity name]
+const ACTIVITY_WEEK_TEMPLATE = [
+  [0, '09:00', 'Gratitude circle / check-in'], [0, '11:00', 'Mutual-aid meeting (AA/NA/SMART)'], [0, '17:00', 'Community dinner (cook together)'],
+  [1, '08:00', 'Morning walk / run club'], [1, '09:00', 'Gratitude circle / check-in'], [1, '16:00', 'Job-readiness / resume workshop'], [1, '18:30', 'Yoga / stretch'],
+  [2, '08:00', 'Morning walk / run club'], [2, '09:00', 'Gratitude circle / check-in'], [2, '17:00', 'Pickup basketball'], [2, '19:00', 'Mutual-aid meeting (AA/NA/SMART)'],
+  [3, '08:00', 'Morning walk / run club'], [3, '09:00', 'Gratitude circle / check-in'], [3, '15:00', 'Life-skills class'], [3, '19:00', 'Game night'],
+  [4, '08:00', 'Morning walk / run club'], [4, '09:00', 'Gratitude circle / check-in'], [4, '16:30', 'Mindfulness meditation'], [4, '19:00', 'Art / painting / pottery'],
+  [5, '09:00', 'Gratitude circle / check-in'], [5, '17:00', 'House BBQ / cookout'], [5, '20:00', 'Movie night'],
+  [6, '10:00', 'Hiking trip'], [6, '18:00', 'Bonfire & storytelling'],
+];
 function seedHousingActivities() {
   if (db.prepare(`SELECT COUNT(*) c FROM housing_activity_catalog`).get().c) return;
   const ins = db.prepare(`INSERT INTO housing_activity_catalog (name,dimension,recovery_domain,description,effectiveness,cost,setting,duration_min,evidence) VALUES (?,?,?,?,?,?,?,?,?)`);
@@ -1604,6 +1617,26 @@ export function mountHousing(app) {
     for (const d of dates) ins.run(cat?.id || null, title, dim, b.house_id ? num(b.house_id) : null, d, b.time || null, b.location || null, b.lead_staff || null, b.recurring || 'none');
     audit({ user: req.user, action: 'HOUSING_ACTIVITY_PLAN', detail: `${title} ×${dates.length}`, ip: req.ip });
     res.json({ ok: true, created: dates.length });
+  });
+  // One-click suggested week: lay down the balanced template for a week, skipping
+  // any (title, date) already on the calendar so it's safe to re-run.
+  app.post('/api/housing/activities/schedule/generate', requireAuth, (req, res) => {
+    const b = req.body || {};
+    let start = b.weekStart || todayStr();
+    const sd = new Date(start + 'T00:00:00'); sd.setDate(sd.getDate() - sd.getDay()); start = sd.toISOString().slice(0, 10); // snap to Sunday
+    const catByName = {}; db.prepare(`SELECT id,name,dimension FROM housing_activity_catalog`).all().forEach(c => { catByName[c.name] = c; });
+    const exists = db.prepare(`SELECT 1 FROM housing_activity_events WHERE title=? AND date=? LIMIT 1`);
+    const ins = db.prepare(`INSERT INTO housing_activity_events (catalog_id,title,dimension,house_id,date,time,lead_staff,recurring) VALUES (?,?,?,?,?,?,?, 'none')`);
+    let made = 0, skipped = 0;
+    for (const [dow, time, name] of ACTIVITY_WEEK_TEMPLATE) {
+      const d = new Date(sd); d.setDate(d.getDate() + dow); const date = d.toISOString().slice(0, 10);
+      const cat = catByName[name];
+      if (exists.get(name, date)) { skipped++; continue; }
+      ins.run(cat?.id || null, name, cat?.dimension || null, b.house_id ? num(b.house_id) : null, date, time, b.lead_staff || null);
+      made++;
+    }
+    audit({ user: req.user, action: 'HOUSING_ACTIVITY_GENERATE', detail: `week ${start}: +${made}`, ip: req.ip });
+    res.json({ ok: true, made, skipped, weekStart: start });
   });
   app.post('/api/housing/activities/schedule/:id', requireAuth, (req, res) => {
     const cur = db.prepare(`SELECT * FROM housing_activity_events WHERE id=?`).get(req.params.id);

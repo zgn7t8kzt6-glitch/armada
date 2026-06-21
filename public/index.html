@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260621W" />
+<link rel="stylesheet" href="/styles.css?v=20260621X" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -124,6 +124,7 @@
     <button data-view="shiftreports">Shift Reports</button>
     <button data-view="hincidents">Incident Reports</button>
     <button data-view="voice">Resident Voice &amp; Kiosk</button>
+    <button data-view="maintenance">Maintenance &amp; Supplies</button>
     <button data-view="coordination">Clinical Coordination</button>
     <button data-view="employment">Employment</button>
     <button data-view="rentrun">Rent Run</button>
@@ -2291,6 +2292,21 @@
       </div>
     </section>
 
+    <section id="maintenance" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🔧 Maintenance &amp; Supplies</h3><p class="sub sans" style="margin:0">Work orders, stock on hand, and automated reordering when supplies run low. Excellence is in the details residents never have to ask about.</p></div>
+          <span class="seg" id="maintSeg">
+            <button class="on" data-t="work" onclick="setMaintTab('work')">Work orders</button>
+            <button data-t="inv" onclick="setMaintTab('inv')">Inventory</button>
+            <button data-t="orders" onclick="setMaintTab('orders')">Orders</button>
+          </span>
+        </div>
+        <div id="maintKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div id="maintBody" style="margin-top:14px"></div>
+      </div>
+    </section>
+
     <!-- generic housing modal -->
     <div id="hModal" class="hmodal" style="display:none"><div class="hmodal-card"><div id="hModalBody"></div></div></div>
   </main>
@@ -2306,7 +2322,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260621W"></script>
-<script src="/housing.js?v=20260621W"></script>
+<script src="/app.js?v=20260621X"></script>
+<script src="/housing.js?v=20260621X"></script>
 </body>
 </html>

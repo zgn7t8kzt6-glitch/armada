@@ -1036,4 +1036,102 @@ async function openSlKioskCode(){
   save.onclick=async()=>{ const code=$('slk_code').value.trim(); if(code.length<6){ alert('Use at least 6 characters.'); return; } try{ await api('/housing/kiosk-code',{method:'POST',body:JSON.stringify({code})}); closeHModal(); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,openSlKioskCode,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+/* ============================ MAINTENANCE & SUPPLIES ============================ */
+let MAINT_META=null;
+async function maintMeta(){ if(!MAINT_META){ try{ MAINT_META=await api('/housing/maintenance/meta'); }catch(e){ MAINT_META={areas:[],categories:[],houses:[]}; } } return MAINT_META; }
+function setMaintTab(t){ HOUSING.maintTab=t; document.querySelectorAll('#maintSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); loadMaintenance(); }
+async function loadMaintenance(){
+  await maintMeta();
+  const tab=HOUSING.maintTab||'work';
+  if(tab==='work') return loadWorkOrders();
+  if(tab==='inv') return loadInventory();
+  return loadOrders();
+}
+async function loadWorkOrders(){
+  let d; try{ d=await api('/housing/maintenance?status='+(HOUSING.maintWO||'open')); }catch(e){ $('maintBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('maintKpis').innerHTML=`<div class="ret-card ${d.kpis.urgent?'rc-high':''}"><div class="n">${d.kpis.urgent}</div><div class="l">Urgent</div></div>
+    <div class="ret-card ${d.kpis.open?'rc-warn':''}"><div class="n">${d.kpis.open}</div><div class="l">Open work orders</div></div>`;
+  const seg=`<span class="seg" style="margin-bottom:10px">${['open','all','done'].map(s=>`<button class="${(HOUSING.maintWO||'open')===s?'on':''}" onclick="HOUSING.maintWO='${s}';loadWorkOrders()">${s[0].toUpperCase()+s.slice(1)}</button>`).join('')}</span>`;
+  const row=m=>`<div class="cmd-row ${m.priority==='Urgent'&&m.status!=='done'?'cmd-row-flag':''}"><div class="cmd-row-main">
+    ${m.status==='done'?'✅ ':(m.priority==='Urgent'?'🔴 ':'🔧 ')}<b>${esc(m.title)}</b> <span class="hint">· ${esc(m.house||'—')} · ${esc(m.area||'')}${m.assigned_to?' · '+esc(m.assigned_to):''} · ${esc((m.created||'').slice(0,10))}</span>
+    ${m.detail?'<br>'+esc(m.detail):''}${m.status==='done'&&m.resolution?'<br><span class="hint">Resolved: '+esc(m.resolution)+(m.cost?' · $'+m.cost:'')+'</span>':''}</div>
+    <div class="toolbar" style="margin:0;gap:6px">${m.status!=='done'?`<button class="btn btn-ghost btn-sm sans" onclick="closeWorkOrder(${m.id})">Mark done</button>`:`<span class="chip">done</span>`}</div></div>`;
+  $('maintBody').innerHTML=`<div class="toolbar" style="justify-content:space-between"><div>${seg}</div><button class="btn btn-primary sans" onclick="openMaintForm()">+ Work order</button></div>
+    ${d.rows.length?d.rows.map(row).join(''):'<div class="hint">No work orders.</div>'}`;
+}
+async function openMaintForm(){
+  await maintMeta();
+  const houseOpts=MAINT_META.houses.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('');
+  const areaOpts=MAINT_META.areas.map(a=>`<option>${esc(a)}</option>`).join('');
+  const save=hmodal(`<h3>New work order</h3>
+    <label>What needs fixing?</label><input id="wo_title" placeholder="e.g. Leaking faucet in upstairs bath"/>
+    <div class="grid2">
+      <div><label>House</label><select id="wo_house"><option value="">— pick —</option>${houseOpts}</select></div>
+      <div><label>Area</label><select id="wo_area">${areaOpts}</select></div>
+      <div><label>Priority</label><select id="wo_pri"><option>Normal</option><option>Urgent</option><option>Low</option></select></div>
+      <div><label>Assign to (optional)</label><input id="wo_assign"/></div>
+    </div>
+    <label>Details</label><textarea id="wo_detail" rows="2"></textarea>`);
+  save.onclick=async()=>{ if(!$('wo_title').value.trim()){ alert('Title?'); return; } try{ await api('/housing/maintenance',{method:'POST',body:JSON.stringify({title:$('wo_title').value,house_id:$('wo_house').value||null,area:$('wo_area').value,priority:$('wo_pri').value,assigned_to:$('wo_assign').value,detail:$('wo_detail').value})}); closeHModal(); loadWorkOrders(); }catch(e){ alert(e.message); } };
+}
+async function closeWorkOrder(id){
+  const save=hmodal(`<h3>Complete work order</h3><label>How was it resolved?</label><textarea id="wo_res" rows="2"></textarea><label>Cost (optional)</label><input id="wo_cost" type="number" step="0.01" placeholder="0.00"/>`);
+  save.onclick=async()=>{ try{ await api('/housing/maintenance/'+id,{method:'POST',body:JSON.stringify({status:'done',resolution:$('wo_res').value,cost:$('wo_cost').value||null})}); closeHModal(); loadWorkOrders(); }catch(e){ alert(e.message); } };
+}
+async function loadInventory(){
+  let d; try{ d=await api('/housing/inventory'); }catch(e){ $('maintBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('maintKpis').innerHTML=`<div class="ret-card"><div class="n">${d.kpis.items}</div><div class="l">Stock items</div></div>
+    <div class="ret-card ${d.kpis.low?'rc-high':''}"><div class="n">${d.kpis.low}</div><div class="l">Low / at par</div></div>
+    <div class="ret-card"><div class="n">${money(d.kpis.reorderValue)}</div><div class="l">Reorder value</div></div>`;
+  const rows=d.items.map(i=>`<tr class="${i.low?'':''}" style="${i.low?'background:#fdeaea':''}">
+    <td><b>${esc(i.name)}</b> <span class="hint">${esc(i.category||'')}${i.vendor?' · '+esc(i.vendor):''}</span></td>
+    <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm sans" onclick="adjItem(${i.id},-1)">−</button> <b>${i.qty}</b> <button class="btn btn-ghost btn-sm sans" onclick="adjItem(${i.id},1)">+</button> <span class="hint">${esc(i.unit||'')}</span></td>
+    <td>${i.par}</td><td>${i.reorder_qty}</td><td>${money(i.unit_cost)}</td>
+    <td>${i.low?'<span class="chip" style="background:#fdeaea;color:#b3382f;border-color:#f3c4c0">LOW</span>':'<span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">OK</span>'}</td>
+    <td style="text-align:right"><button class="btn btn-ghost btn-sm sans" onclick="openInvForm(${i.id})">Edit</button></td></tr>`).join('');
+  $('maintBody').innerHTML=`<div class="toolbar" style="justify-content:space-between">
+      <div class="hint">At/below par = LOW. Tap −/+ to count stock in or out.</div>
+      <div class="toolbar" style="margin:0;gap:8px"><button class="btn btn-gold sans" onclick="suggestReorder()">⚡ Generate reorder</button><button class="btn btn-primary sans" onclick="openInvForm()">+ Item</button></div></div>
+    <table class="tbl" style="margin-top:8px"><thead><tr><th>Item</th><th>On hand</th><th>Par</th><th>Reorder qty</th><th>Unit $</th><th>Status</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=7 class="hint">No items.</td></tr>'}</tbody></table>`;
+}
+async function adjItem(id,delta){ try{ await api('/housing/inventory/'+id+'/adjust',{method:'POST',body:JSON.stringify({delta})}); loadInventory(); }catch(e){ alert(e.message); } }
+async function openInvForm(id){
+  await maintMeta();
+  const it=id?(await api('/housing/inventory')).items.find(x=>x.id===id):{};
+  const catOpts=MAINT_META.categories.map(c=>`<option ${it.category===c?'selected':''}>${esc(c)}</option>`).join('');
+  const save=hmodal(`<h3>${id?'Edit':'New'} stock item</h3>
+    <label>Name</label><input id="iv_name" value="${esc(it.name||'')}"/>
+    <div class="grid2">
+      <div><label>Category</label><select id="iv_cat">${catOpts}</select></div>
+      <div><label>Unit</label><input id="iv_unit" value="${esc(it.unit||'each')}"/></div>
+      <div><label>On hand</label><input id="iv_qty" type="number" step="0.01" value="${it.qty??0}"/></div>
+      <div><label>Par (reorder point)</label><input id="iv_par" type="number" step="0.01" value="${it.par??0}"/></div>
+      <div><label>Reorder qty</label><input id="iv_ro" type="number" step="0.01" value="${it.reorder_qty??0}"/></div>
+      <div><label>Unit cost</label><input id="iv_cost" type="number" step="0.01" value="${it.unit_cost??0}"/></div>
+      <div><label>Vendor</label><input id="iv_vendor" value="${esc(it.vendor||'')}"/></div>
+      <div><label>SKU</label><input id="iv_sku" value="${esc(it.sku||'')}"/></div>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="iv_auto" type="checkbox" ${it.auto!==0?'checked':''}/> Include in automated reordering</label>`);
+  save.onclick=async()=>{ const body={id:id||undefined,name:$('iv_name').value,category:$('iv_cat').value,unit:$('iv_unit').value,qty:+$('iv_qty').value,par:+$('iv_par').value,reorder_qty:+$('iv_ro').value,unit_cost:+$('iv_cost').value,vendor:$('iv_vendor').value,sku:$('iv_sku').value,auto:$('iv_auto').checked?1:0}; if(!body.name.trim()){ alert('Name?'); return; } try{ await api('/housing/inventory',{method:'POST',body:JSON.stringify(body)}); closeHModal(); loadInventory(); }catch(e){ alert(e.message); } };
+}
+async function suggestReorder(){
+  try{ const r=await api('/housing/orders/suggest',{method:'POST',body:'{}'}); if(r.empty){ alert('Nothing is at or below par — stock looks good.'); return; } alert(`Built ${r.orders} reorder${r.orders>1?'s':''} covering ${r.items} low item(s). See the Orders tab.`); setMaintTab('orders'); }catch(e){ alert(e.message); }
+}
+async function loadOrders(){
+  let d; try{ d=await api('/housing/orders'); }catch(e){ $('maintBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const sug=d.orders.filter(o=>o.status==='suggested').length;
+  $('maintKpis').innerHTML=`<div class="ret-card ${sug?'rc-warn':''}"><div class="n">${sug}</div><div class="l">Suggested orders</div></div>
+    <div class="ret-card"><div class="n">${d.orders.filter(o=>o.status==='ordered').length}</div><div class="l">Placed</div></div>`;
+  const card=o=>`<div class="card" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div><b>${esc(o.vendor||'Vendor')}</b> <span class="chip">${esc(o.status)}</span> <span class="hint">· ${esc((o.created||'').slice(0,10))} · ${money(o.total)}</span></div>
+    <div class="toolbar" style="margin:0;gap:6px">
+      ${o.status==='suggested'?`<button class="btn btn-primary btn-sm sans" onclick="orderStatus(${o.id},'ordered')">Mark ordered</button><button class="btn btn-ghost btn-sm sans" onclick="orderStatus(${o.id},'cancelled')">Cancel</button>`:''}
+      ${o.status==='ordered'?`<button class="btn btn-gold btn-sm sans" onclick="orderStatus(${o.id},'received')">Receive → restock</button>`:''}
+    </div></div>
+    <table class="tbl" style="margin-top:8px"><tbody>${o.lines.map(l=>`<tr><td>${esc(l.name)}</td><td style="text-align:right">${l.qty} × ${money(l.unit_cost)}</td></tr>`).join('')}</tbody></table></div>`;
+  $('maintBody').innerHTML=`<div class="toolbar" style="justify-content:flex-end"><button class="btn btn-gold sans" onclick="suggestReorder()">⚡ Generate reorder from low stock</button></div>
+    ${d.orders.length?d.orders.map(card).join(''):'<div class="hint">No orders yet. Use “Generate reorder” to build one from low stock.</div>'}`;
+}
+async function orderStatus(id,status){ if(status==='received'&&!confirm('Receive this order? It will add the quantities back into inventory.')) return; try{ await api('/housing/orders/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadOrders(); }catch(e){ alert(e.message); } }
+
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,openSlKioskCode,loadMaintenance,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadInventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

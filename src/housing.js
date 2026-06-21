@@ -334,6 +334,33 @@ export function housingSchema() {
     lifted_by TEXT, lifted_at TEXT, lift_note TEXT,
     created TEXT DEFAULT (datetime('now'))
   );
+  -- Maintenance work orders per house.
+  CREATE TABLE IF NOT EXISTS housing_maintenance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    house_id INTEGER, area TEXT, title TEXT, detail TEXT,
+    priority TEXT DEFAULT 'Normal', status TEXT DEFAULT 'open',
+    assigned_to TEXT, reported_by TEXT, cost REAL,
+    resolution TEXT, resolved_at TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  -- Inventory: stock items with a par (reorder point) so we know what's low.
+  CREATE TABLE IF NOT EXISTS housing_inventory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    house_id INTEGER, name TEXT, category TEXT, unit TEXT DEFAULT 'each',
+    qty REAL DEFAULT 0, par REAL DEFAULT 0, reorder_qty REAL DEFAULT 0,
+    vendor TEXT, sku TEXT, unit_cost REAL DEFAULT 0, auto INTEGER DEFAULT 1,
+    updated TEXT DEFAULT (datetime('now')), created TEXT DEFAULT (datetime('now'))
+  );
+  -- Reorder/purchase orders + their lines.
+  CREATE TABLE IF NOT EXISTS housing_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vendor TEXT, status TEXT DEFAULT 'suggested', total REAL DEFAULT 0,
+    note TEXT, by TEXT, ordered_at TEXT, received_at TEXT,
+    created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_order_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER, item_id INTEGER, name TEXT, qty REAL, unit_cost REAL DEFAULT 0
+  );
   `);
   // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
   try { db.exec(`ALTER TABLE housing_houses ADD COLUMN program TEXT`); } catch { /* already exists */ }
@@ -705,6 +732,35 @@ function seedHousingSurveys() {
   ].forEach((row, i) => q.run(sid, row[0], row[1], row[2], i));
 }
 
+const MAINT_AREAS = ['Plumbing', 'Electrical', 'HVAC / heating', 'Appliance', 'Furniture', 'Doors / locks / keys', 'Pest control', 'Safety (smoke/CO/extinguisher)', 'Cleaning / janitorial', 'Grounds / exterior', 'Other'];
+const SUPPLY_CATEGORIES = ['Household', 'Cleaning', 'Paper goods', 'Kitchen / food', 'Toiletries', 'Safety', 'Drug screens / medical', 'Office', 'Bedding', 'Other'];
+// A sensible starter stock list (central = no specific house) so automated
+// reordering works out of the box; quantities start at 0 so everything reads low
+// until staff do a first count.
+function seedHousingSupplies() {
+  if (db.prepare(`SELECT COUNT(*) c FROM housing_inventory`).get().c) return;
+  const ins = db.prepare(`INSERT INTO housing_inventory (house_id,name,category,unit,qty,par,reorder_qty,unit_cost) VALUES (NULL,?,?,?,0,?,?,?)`);
+  [
+    ['Toilet paper', 'Paper goods', 'case', 4, 6, 28], ['Paper towels', 'Paper goods', 'case', 3, 4, 24],
+    ['Trash bags (kitchen)', 'Cleaning', 'box', 4, 6, 12], ['Trash bags (lawn)', 'Cleaning', 'box', 2, 3, 14],
+    ['Laundry detergent', 'Cleaning', 'jug', 4, 6, 13], ['Dish soap', 'Cleaning', 'bottle', 4, 6, 4],
+    ['All-purpose cleaner', 'Cleaning', 'bottle', 4, 6, 5], ['Bleach', 'Cleaning', 'jug', 3, 4, 4],
+    ['Disinfectant wipes', 'Cleaning', 'canister', 6, 8, 5], ['Hand soap', 'Toiletries', 'bottle', 6, 8, 3],
+    ['Shampoo / body wash', 'Toiletries', 'bottle', 6, 8, 4], ['Toothpaste', 'Toiletries', 'tube', 8, 12, 2],
+    ['Toothbrush', 'Toiletries', 'each', 10, 20, 1], ['Razors', 'Toiletries', 'pack', 6, 10, 6],
+    ['Coffee', 'Kitchen / food', 'can', 6, 8, 9], ['Sugar', 'Kitchen / food', 'bag', 3, 4, 4],
+    ['Creamer', 'Kitchen / food', 'tub', 4, 6, 5], ['Paper plates', 'Paper goods', 'pack', 4, 6, 7],
+    ['Plastic cutlery', 'Paper goods', 'pack', 4, 6, 6], ['Drug screen cups (12-panel)', 'Drug screens / medical', 'box', 2, 4, 90],
+    ['Breathalyzer mouthpieces', 'Drug screens / medical', 'pack', 2, 3, 15], ['Nitrile gloves', 'Safety', 'box', 4, 6, 9],
+    ['Naloxone (Narcan)', 'Safety', 'box', 4, 6, 0], ['Smoke detector batteries (9V)', 'Safety', 'pack', 4, 6, 12],
+    ['First-aid kit refill', 'Safety', 'kit', 2, 3, 25], ['Light bulbs (LED)', 'Household', 'pack', 4, 6, 10],
+    ['Bed sheets (twin set)', 'Bedding', 'set', 6, 10, 18], ['Pillows', 'Bedding', 'each', 6, 10, 8],
+    ['Towels', 'Bedding', 'each', 10, 16, 6], ['Printer paper', 'Office', 'ream', 3, 4, 6],
+  ].forEach(r => ins.run(r[0], r[1], r[2], r[3], r[4], r[5]));
+}
+// Low = at or below par. Used for the reorder suggestion.
+const isLow = (it) => (it.qty ?? 0) <= (it.par ?? 0);
+
 export function mountHousing(app) {
   housingSchema();
   try {
@@ -720,6 +776,7 @@ export function mountHousing(app) {
     }
   } catch (e) { console.error('[housing] seed:', e.message); }
   try { seedHousingSurveys(); } catch (e) { console.error('[housing] survey seed:', e.message); }
+  try { seedHousingSupplies(); } catch (e) { console.error('[housing] supply seed:', e.message); }
 
   /* ---- Sober Living resident kiosk (separate code; NOT behind staff auth) ---- */
   app.get('/api/sl-kiosk/data', requireSlKiosk, (req, res) => {
@@ -1090,6 +1147,129 @@ export function mountHousing(app) {
     db.prepare(`UPDATE housing_restrictions SET status='lifted', lifted_by=?, lifted_at=datetime('now'), lift_note=? WHERE id=?`)
       .run(req.user.name, (req.body?.note || '').trim() || null, req.params.id);
     audit({ user: req.user, action: 'HOUSING_RESTRICTION_LIFT', detail: cur.name, ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ---- Maintenance & Supplies (work orders, inventory, automated reordering) ----
+  app.get('/api/housing/maintenance/meta', requireAuth, (req, res) => res.json({
+    areas: MAINT_AREAS, categories: SUPPLY_CATEGORIES,
+    houses: db.prepare(`SELECT id, name FROM housing_houses WHERE active=1 ORDER BY name`).all(),
+  }));
+
+  app.get('/api/housing/maintenance', requireAuth, (req, res) => {
+    const status = req.query.status || 'open';
+    const where = status === 'all' ? '' : `WHERE m.status=?`;
+    const rows = (status === 'all'
+      ? db.prepare(`SELECT m.*, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id ORDER BY (m.status='open') DESC, (m.priority='Urgent') DESC, m.id DESC`).all()
+      : db.prepare(`SELECT m.*, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id ${where} ORDER BY (m.priority='Urgent') DESC, m.id DESC`).all(status));
+    res.json({
+      rows,
+      kpis: {
+        open: db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status='open'`).get().c,
+        urgent: db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status='open' AND priority='Urgent'`).get().c,
+      },
+    });
+  });
+  app.post('/api/housing/maintenance', requireAuth, (req, res) => {
+    const b = req.body || {};
+    if (!(b.title || '').trim()) return res.status(400).json({ error: 'What needs fixing?' });
+    db.prepare(`INSERT INTO housing_maintenance (house_id,area,title,detail,priority,reported_by,assigned_to) VALUES (?,?,?,?,?,?,?)`)
+      .run(b.house_id ? num(b.house_id) : null, b.area || 'Other', b.title.trim(), b.detail || null, b.priority || 'Normal', req.user.name, b.assigned_to || null);
+    audit({ user: req.user, action: 'HOUSING_MAINT_ADD', detail: b.title, ip: req.ip });
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/maintenance/:id', requireAuth, (req, res) => {
+    const cur = db.prepare(`SELECT * FROM housing_maintenance WHERE id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    if (b.status === 'done') {
+      db.prepare(`UPDATE housing_maintenance SET status='done', resolution=?, cost=?, resolved_at=datetime('now') WHERE id=?`)
+        .run((b.resolution || '').trim() || null, b.cost != null ? num(b.cost) : cur.cost, req.params.id);
+    } else {
+      const sets = []; const vals = [];
+      for (const c of ['area', 'title', 'detail', 'priority', 'status', 'assigned_to']) if (b[c] !== undefined) { sets.push(`${c}=?`); vals.push(b[c]); }
+      if (sets.length) { vals.push(req.params.id); db.prepare(`UPDATE housing_maintenance SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+    }
+    res.json({ ok: true });
+  });
+
+  // Inventory
+  app.get('/api/housing/inventory', requireAuth, (req, res) => {
+    const items = db.prepare(`SELECT i.*, h.name house FROM housing_inventory i LEFT JOIN housing_houses h ON h.id=i.house_id ORDER BY i.category, i.name`).all()
+      .map(i => ({ ...i, low: isLow(i) }));
+    const low = items.filter(i => i.low);
+    res.json({
+      items, categories: SUPPLY_CATEGORIES,
+      kpis: {
+        items: items.length, low: low.length,
+        reorderValue: +low.reduce((a, i) => a + (i.reorder_qty || 0) * (i.unit_cost || 0), 0).toFixed(2),
+      },
+    });
+  });
+  app.post('/api/housing/inventory', requireAuth, (req, res) => {
+    const b = req.body || {};
+    if (b.id) {
+      const cur = db.prepare(`SELECT * FROM housing_inventory WHERE id=?`).get(b.id);
+      if (!cur) return res.status(404).json({ error: 'Not found' });
+      const sets = []; const vals = [];
+      for (const c of ['name', 'category', 'unit', 'qty', 'par', 'reorder_qty', 'vendor', 'sku', 'unit_cost', 'auto', 'house_id']) if (b[c] !== undefined) { sets.push(`${c}=?`); vals.push(b[c] === '' ? null : b[c]); }
+      sets.push(`updated=datetime('now')`); vals.push(b.id);
+      db.prepare(`UPDATE housing_inventory SET ${sets.join(',')} WHERE id=?`).run(...vals);
+    } else {
+      if (!(b.name || '').trim()) return res.status(400).json({ error: 'Item name?' });
+      db.prepare(`INSERT INTO housing_inventory (house_id,name,category,unit,qty,par,reorder_qty,vendor,sku,unit_cost) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .run(b.house_id ? num(b.house_id) : null, b.name.trim(), b.category || 'Other', b.unit || 'each', num(b.qty), num(b.par), num(b.reorder_qty), b.vendor || null, b.sku || null, num(b.unit_cost));
+    }
+    res.json({ ok: true });
+  });
+  // Quick stock adjust (count in / use): delta can be + or -.
+  app.post('/api/housing/inventory/:id/adjust', requireAuth, (req, res) => {
+    const cur = db.prepare(`SELECT * FROM housing_inventory WHERE id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    const qty = b.set != null ? num(b.set) : Math.max(0, (cur.qty || 0) + num(b.delta));
+    db.prepare(`UPDATE housing_inventory SET qty=?, updated=datetime('now') WHERE id=?`).run(qty, req.params.id);
+    res.json({ ok: true, qty });
+  });
+
+  // Orders + automated reordering
+  app.get('/api/housing/orders', requireAuth, (req, res) => {
+    const orders = db.prepare(`SELECT * FROM housing_orders ORDER BY id DESC LIMIT 40`).all().map(o => ({
+      ...o, lines: db.prepare(`SELECT * FROM housing_order_lines WHERE order_id=?`).all(o.id),
+    }));
+    res.json({ orders });
+  });
+  // Build a suggested order from everything at/below par that's set to auto-reorder.
+  app.post('/api/housing/orders/suggest', requireAuth, (req, res) => {
+    const low = db.prepare(`SELECT * FROM housing_inventory WHERE auto=1`).all().filter(isLow);
+    if (!low.length) return res.json({ ok: true, empty: true });
+    // group by vendor so each order goes to one supplier
+    const byVendor = {};
+    for (const it of low) { const v = it.vendor || 'Unassigned vendor'; (byVendor[v] = byVendor[v] || []).push(it); }
+    const made = [];
+    for (const [vendor, items] of Object.entries(byVendor)) {
+      const total = items.reduce((a, i) => a + (i.reorder_qty || 0) * (i.unit_cost || 0), 0);
+      const oid = Number(db.prepare(`INSERT INTO housing_orders (vendor,status,total,by) VALUES (?,?,?,?)`).run(vendor, 'suggested', +total.toFixed(2), req.user.name).lastInsertRowid);
+      const ln = db.prepare(`INSERT INTO housing_order_lines (order_id,item_id,name,qty,unit_cost) VALUES (?,?,?,?,?)`);
+      for (const it of items) ln.run(oid, it.id, it.name, it.reorder_qty || 0, it.unit_cost || 0);
+      made.push(oid);
+    }
+    audit({ user: req.user, action: 'HOUSING_ORDER_SUGGEST', detail: `${low.length} low items → ${made.length} order(s)`, ip: req.ip });
+    res.json({ ok: true, orders: made.length, items: low.length });
+  });
+  app.post('/api/housing/orders/:id/status', requireAuth, (req, res) => {
+    const o = db.prepare(`SELECT * FROM housing_orders WHERE id=?`).get(req.params.id);
+    if (!o) return res.status(404).json({ error: 'Not found' });
+    const status = req.body?.status;
+    if (status === 'ordered') db.prepare(`UPDATE housing_orders SET status='ordered', ordered_at=datetime('now') WHERE id=?`).run(o.id);
+    else if (status === 'received') {
+      // Receiving restocks inventory by each line's quantity.
+      const lines = db.prepare(`SELECT * FROM housing_order_lines WHERE order_id=?`).all(o.id);
+      const upd = db.prepare(`UPDATE housing_inventory SET qty=qty+?, updated=datetime('now') WHERE id=?`);
+      for (const l of lines) if (l.item_id) upd.run(l.qty || 0, l.item_id);
+      db.prepare(`UPDATE housing_orders SET status='received', received_at=datetime('now') WHERE id=?`).run(o.id);
+    } else if (status === 'cancelled') db.prepare(`UPDATE housing_orders SET status='cancelled' WHERE id=?`).run(o.id);
+    audit({ user: req.user, action: 'HOUSING_ORDER_' + (status || '').toUpperCase(), detail: o.vendor, ip: req.ip });
     res.json({ ok: true });
   });
 

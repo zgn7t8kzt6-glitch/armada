@@ -11,7 +11,7 @@
 // routes, mounted from server.js. It links to the existing `clients` table by
 // id so a person can be one record across detox → residential → housing.
 
-import { db, audit } from './db.js';
+import { db, audit, getState, setState } from './db.js';
 import { requireAuth, requireAdmin } from './auth.js';
 
 /* ───────────────────────── Domain knowledge ───────────────────────── */
@@ -274,136 +274,70 @@ export function housingSchema() {
     outcome TEXT, by TEXT, created TEXT DEFAULT (datetime('now'))
   );
   `);
+  // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
+  try { db.exec(`ALTER TABLE housing_houses ADD COLUMN program TEXT`); } catch { /* already exists */ }
 }
 
 /* ───────────────────────── Seed (sample so it looks alive) ───────────────────────── */
+
+// The real Armada recovery-housing roster (from the weekly occupancy email).
+// Beds are generated per location; current census occupancy is reflected by
+// marking that many beds occupied (name pending — assigned at real intake).
+const REAL_HOUSES = [
+  // name, gender, program, level, totalBeds, occupied, overflow, note
+  ['Coventry',    'Men',   'PHP',      'L3', 44, 36, 0, ''],
+  ['High St',     'Women', 'PHP',      'L3', 10,  9, 2, '2 overflow beds available'],
+  ['Perkins',     'Women', 'PHP',      'L3', 10,  5, 0, 'Pause on filling until girls can move from High St'],
+  ['Long St',     'Women', 'IOP',      'L2',  5,  5, 0, ''],
+  ['Mildred',     'Men',   'IOP',      'L2',  7,  5, 0, ''],
+  ['12th St SW',  'Men',   'IOP',      'L2',  9,  5, 0, ''],
+  ['Raasch',      'Men',   'IOP',      'L2',  5,  4, 0, ''],
+  ['27th St SW',  'Women', 'IOP',      'L2',  5,  3, 0, ''],
+  ['18th St SW',  'Men',   'IOP',      'L2',  5,  5, 0, ''],
+  ['Wilbeth',     'Men',   'Graduate', 'L2',  5,  4, 0, "Men's graduate house"],
+];
+const PROGRAM_COLOR = { PHP: '#235056', IOP: '#5fb0c2', Graduate: '#a7ba86' };
 
 export function seedHousing() {
   const has = db.prepare(`SELECT COUNT(*) c FROM housing_houses`).get().c;
   if (has) return 0;
 
-  const mkHouse = db.prepare(`INSERT INTO housing_houses (name,level,orh_cert,address,city,gender,mat_friendly,capacity,manager,phone,opened,color,notes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  const houses = [
-    ['Cuyahoga House', 'L3', 'ORH-OH-2024-0142', '418 Marshall Ave', 'Akron', 'Men', 1, 10, 'Marcus Webb', '330-555-0142', '2023-03-01', '#235056', 'Flagship Level 3, paired with PHP/IOP at Armada clinical.'],
-    ['Summit House',   'L3', 'ORH-OH-2024-0157', '92 Crestline Dr',  'Akron', 'Women', 1, 8, 'Renee Adkins', '330-555-0157', '2023-08-15', '#5fb0c2', 'Women’s Level 3; trauma-informed, MAT-supportive.'],
-    ['Towpath House',  'L2', 'ORH-OH-2025-0203', '1140 Canal St',    'Akron', 'Men', 1, 12, 'Darnell Price', '330-555-0203', '2024-11-01', '#a7ba86', 'Level 2 step-down for residents earning independence.'],
-  ];
-  const houseIds = houses.map(h => Number(mkHouse.run(...h).lastInsertRowid));
+  const mkHouse = db.prepare(`INSERT INTO housing_houses (name,level,gender,program,mat_friendly,capacity,color,notes)
+    VALUES (?,?,?,?,?,?,?,?)`);
+  const mkBed = db.prepare(`INSERT INTO housing_beds (house_id,room,label,status,notes) VALUES (?,?,?,?,?)`);
 
-  // Beds
-  const mkBed = db.prepare(`INSERT INTO housing_beds (house_id,room,label,status) VALUES (?,?,?,?)`);
-  const capPlan = [10, 8, 12];
-  const bedIds = {};
-  houseIds.forEach((hid, i) => {
-    bedIds[hid] = [];
-    for (let r = 1; r <= Math.ceil(capPlan[i] / 2); r++) {
-      for (const b of ['A', 'B']) {
-        if (bedIds[hid].length >= capPlan[i]) break;
-        const room = String(r).padStart(2, '0');
-        bedIds[hid].push(Number(mkBed.run(hid, room, room + b, 'open').lastInsertRowid));
-      }
+  REAL_HOUSES.forEach(([name, gender, program, level, total, occupied, overflow, note]) => {
+    const hid = Number(mkHouse.run(name, level, gender, program, 1, total, PROGRAM_COLOR[program] || '#235056', note).lastInsertRowid);
+    // standard beds — first `occupied` are filled (census), the rest open
+    for (let i = 1; i <= total; i++) {
+      const filled = i <= occupied;
+      mkBed.run(hid, String(Math.ceil(i / 2)), 'B' + i, filled ? 'occupied' : 'open', filled ? 'Census occupant — assign resident at intake' : null);
     }
+    // overflow beds (extra capacity beyond the standard count)
+    for (let o = 1; o <= (overflow || 0); o++) mkBed.run(hid, 'OF', 'OF' + o, 'open', 'Overflow bed');
   });
 
-  // Residents (de-identified sample) + occupy beds
-  const mkRes = db.prepare(`INSERT INTO housing_residents
-    (name,house_id,bed_id,loc,phase,status,move_in,sober_date,recovery_coach,payer,employment,mat,sponsor,home_group,goals)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  const setBed = db.prepare(`UPDATE housing_beds SET status='occupied', resident_id=? WHERE id=?`);
-  const setResBed = db.prepare(`UPDATE housing_residents SET bed_id=? WHERE id=?`);
-  const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
-  const sample = [
-    ['Jordan M.', 0, 'PHP', 1, daysAgo(8),  daysAgo(20),  'Marcus Webb', 'SOR scholarship', 'Job searching', 'Suboxone', 'Not yet', 'Tuesday Big Book', 'Get to 90 days; reconnect with daughter'],
-    ['Andre T.',  0, 'IOP', 2, daysAgo(34), daysAgo(50),  'Marcus Webb', 'Medicaid',        'Part-time — warehouse', 'Vivitrol', 'Ray K.', 'Men’s Step Study', 'Full-time work; driver’s license back'],
-    ['Chris B.',  0, 'IOP', 3, daysAgo(67), daysAgo(96),  'Marcus Webb', 'Self-pay',        'Full-time — line cook', 'None', 'Tom V.', 'Sunrise Group', 'Save for apartment; sponsor a newcomer'],
-    ['Maria S.',  1, 'PHP', 1, daysAgo(11), daysAgo(15),  'Renee Adkins', 'SOR scholarship', 'Unemployed', 'Suboxone', 'Not yet', 'Women’s Serenity', 'Stabilize; safety plan; childcare'],
-    ['Tonya R.',  1, 'IOP', 2, daysAgo(41), daysAgo(63),  'Renee Adkins', 'Private — Anthem', 'Part-time — retail', 'None', 'Gail P.', 'Women’s Serenity', 'GED; rebuild trust with family'],
-    ['Latoya W.', 1, 'OP',  3, daysAgo(78), daysAgo(120), 'Renee Adkins', 'Self-pay',        'Full-time — CNA', 'None', 'Denise M.', 'Hope & Healing', 'Transition to own place; mentor'],
-    ['Devon H.',  2, 'OP',  4, daysAgo(120),daysAgo(150), 'Darnell Price', 'Self-pay',       'Full-time — logistics', 'None', 'Phil R.', 'Towpath Nooners', 'Move to independent housing this month'],
-    ['Marcus L.', 2, 'IOP', 3, daysAgo(55), daysAgo(70),  'Darnell Price', 'Medicaid',        'Apprenticeship — HVAC', 'Vivitrol', 'Sam D.', 'Towpath Nooners', 'Finish apprenticeship; rebuild credit'],
-  ];
-  const resIds = [];
-  sample.forEach((s, i) => {
-    const hid = houseIds[s[1]];
-    const rid = Number(mkRes.run(s[0], hid, null, s[2], s[3], 'active', s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12]).lastInsertRowid);
-    resIds.push(rid);
-    const bed = bedIds[hid].find(bId => db.prepare(`SELECT status FROM housing_beds WHERE id=?`).get(bId).status === 'open');
-    if (bed) { setBed.run(rid, bed); setResBed.run(bed, rid); }
-  });
-
-  // Recovery-capital baselines, supports, screens, ledger, coordination
-  const mkCap = db.prepare(`INSERT INTO housing_reccap (resident_id,date,scores,total,by,note) VALUES (?,?,?,?,?,?)`);
-  const mkSup = db.prepare(`INSERT INTO housing_supports (resident_id,date,type,detail,by) VALUES (?,?,?,?,?)`);
-  const mkScr = db.prepare(`INSERT INTO housing_screens (resident_id,date,panel,observed,result,scheduled,collected_by) VALUES (?,?,?,?,?,?,?)`);
-  const mkLed = db.prepare(`INSERT INTO housing_ledger (resident_id,date,kind,amount,payer,memo,by) VALUES (?,?,?,?,?,?,?)`);
-  const mkCoord = db.prepare(`INSERT INTO housing_coordination (resident_id,date,week,hours,kind,with_clinical,roi,by,note) VALUES (?,?,?,?,?,?,?,?,?)`);
-  const weekKey = (d) => { const dt = new Date(d); const day = dt.getDay(); dt.setDate(dt.getDate() - day); return dt.toISOString().slice(0, 10); };
-  resIds.forEach((rid, i) => {
-    const base = 4 + (i % 5);
-    const scores = {}; let tot = 0;
-    RECCAP_DOMAINS.forEach((d, j) => { const v = Math.max(2, Math.min(9, base + ((i + j) % 4) - 1)); scores[d[0]] = v; tot += v; });
-    mkCap.run(rid, daysAgo(7), J(scores), +(tot / RECCAP_DOMAINS.length).toFixed(1), 'system', 'Baseline assessment');
-    mkSup.run(rid, daysAgo(2), 'meeting', '12-step meeting', 'system');
-    mkSup.run(rid, daysAgo(5), 'meeting', 'Home group', 'system');
-    mkScr.run(rid, daysAgo(3), '12-panel', 1, 'negative', 1, 'House staff');
-    mkLed.run(rid, daysAgo(7), 'charge', 175, sample[i][6], 'Weekly bed fee', 'system');
-    if (i % 3 === 0) mkLed.run(rid, daysAgo(3), 'payment', 175, sample[i][6], 'Weekly bed fee paid', 'system');
-    const loc = sample[i][2];
-    const target = LOC[loc]?.weeklyHours || 0;
-    if (target) mkCoord.run(rid, daysAgo(1), weekKey(todayStr()), Math.max(0, target - (i % 3) * 2), loc, 1, 1, 'system', 'Attended scheduled groups at Armada clinical');
-  });
-
-  // ORH status per house (mostly met on L3 flagships, gaps on the newer L2)
+  // ORH/NARR status + inspections per house (mostly met; a few gaps to work)
+  const houseIds = db.prepare(`SELECT id, level FROM housing_houses`).all();
   const mkOrh = db.prepare(`INSERT INTO housing_orh (house_id,code,status,updated_by,updated) VALUES (?,?,?,?,?)`);
-  houseIds.forEach((hid, i) => {
-    const level = i === 2 ? 2 : 3;
-    ORH_STANDARDS.forEach((s, j) => {
-      if (s[3] > level) return; // not required at this level
-      const status = (i === 2 && j % 5 === 0) ? 'partial' : (j % 11 === 0 ? 'gap' : 'met');
-      mkOrh.run(hid, s[1], status, 'system', daysAgo(14));
-    });
-  });
-
-  // Inspections
   const mkIns = db.prepare(`INSERT INTO housing_inspections (house_id,date,type,result,note,by) VALUES (?,?,?,?,?,?)`);
-  houseIds.forEach((hid) => {
-    mkIns.run(hid, daysAgo(40), 'Fire & safety', 'Pass', 'Annual fire inspection — detectors & extinguishers OK', 'system');
-    mkIns.run(hid, daysAgo(10), 'House walkthrough', 'Pass', 'Monthly walkthrough — clean, in good repair', 'system');
-  });
-
-  // Payment plans, employment, job-search, and a partial intake packet per resident
-  const mkPlan = db.prepare(`INSERT INTO housing_payplans (resident_id,weekly_amount,due_day,source,arrangement,deposit,start_date,active,by) VALUES (?,?,?,?,?,?,?,1,?)`);
-  const mkEmp = db.prepare(`INSERT INTO housing_employment (resident_id,status,employer,position,wage,hours,goal,weekly_target,by,date) VALUES (?,?,?,?,?,?,?,?,?,?)`);
-  const mkJob = db.prepare(`INSERT INTO housing_jobsearch (resident_id,date,activity,employer,detail,by) VALUES (?,?,?,?,?,?)`);
-  const mkRent = db.prepare(`INSERT INTO housing_rentlog (resident_id,week,due,collected,status,note,by,date) VALUES (?,?,?,?,?,?,?,?)`);
-  const mkForm = db.prepare(`INSERT INTO housing_forms (resident_id,type,data,status,signed_by,signed_date,staff,updated) VALUES (?,?,?,?,?,?,?,datetime('now'))`);
-  const empPlan = [
-    ['Unemployed — actively seeking', '', 'Land part-time work within 30 days', 5],
-    ['Employed — part-time', 'Summit Warehouse', 'Move to full-time', 3],
-    ['Employed — full-time', 'Akron Bistro', 'Save 1 month rent', 1],
-    ['Unemployed — actively seeking', '', 'Resume + 3 applications/week', 5],
-    ['Employed — part-time', 'Towpath Retail', 'GED then full-time', 3],
-    ['Employed — full-time', 'Mercy CNA', 'Keep CNA license active', 1],
-    ['Employed — full-time', 'Pratt Logistics', 'Independent apartment', 1],
-    ['In school / training', 'HVAC apprenticeship', 'Finish apprenticeship', 2],
-  ];
-  resIds.forEach((rid, i) => {
-    mkPlan.run(rid, 175, 'Friday', sample[i][6], `Pays $175 every Friday from ${/employ|warehouse|cook|cna|logistics|hvac|retail/i.test(sample[i][8]) ? 'paycheck (direct from employer pay day)' : 'scholarship + family until employed'}. Promise-to-pay allowed once/month with a documented catch-up date.`, 175, daysAgo(30), 'system');
-    const e = empPlan[i % empPlan.length];
-    mkEmp.run(rid, e[0], e[1], e[1] ? 'Staff' : '', e[1] ? '$15/hr' : '', e[1] ? '24/wk' : '', e[2], e[3], 'system', daysAgo(7));
-    if (/seeking/i.test(e[0])) { mkJob.run(rid, daysAgo(2), 'Application submitted', 'Local employer', 'Applied online', 'system'); mkJob.run(rid, daysAgo(5), 'Resume / cover letter', '', 'Updated resume with coach', 'system'); }
-    // current-week rent: most paid, a couple promise-to-pay
-    const wkNow = weekKey(todayStr());
-    if (i % 4 === 0) mkRent.run(rid, wkNow, 175, 0, 'Promise to pay', 'Payday Friday — will pay full', 'system', todayStr());
-    else if (i % 3 !== 1) { mkRent.run(rid, wkNow, 175, 175, 'Paid', 'Paid in full', 'system', todayStr()); }
-    // intake packet: first ~5 residents fully signed, rest partial (shows the gap)
-    const signCount = i < 5 ? FORM_TEMPLATES.length : 3;
-    FORM_TEMPLATES.slice(0, signCount).forEach(t => mkForm.run(rid, t.type, J({}), 'complete', sample[i][0], daysAgo(20 - i), 'system'));
+  const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  houseIds.forEach((h, i) => {
+    const lvl = h.level === 'L3' ? 3 : 2;
+    ORH_STANDARDS.forEach((stx, j) => {
+      if (stx[3] > lvl) return;
+      const status = (j % 9 === 0) ? 'partial' : (j % 13 === 0 ? 'gap' : 'met');
+      mkOrh.run(h.id, stx[1], status, 'system', daysAgo(14));
+    });
+    mkIns.run(h.id, daysAgo(35), 'Fire & safety', 'Pass', 'Annual fire inspection — detectors & extinguishers OK', 'system');
+    mkIns.run(h.id, daysAgo(8), 'House walkthrough', 'Pass', 'Monthly walkthrough — clean, in good repair', 'system');
   });
 
   return houseIds.length;
 }
+
+// Tables wiped + reloaded when the real roster is (re)applied to an existing DB.
+const HOUSING_TABLES = ['housing_beds','housing_residents','housing_reccap','housing_supports','housing_screens','housing_chorelog','housing_curfew','housing_meetings','housing_ledger','housing_coordination','housing_orh','housing_inspections','housing_grievances','housing_incidents','housing_forms','housing_payplans','housing_rentlog','housing_employment','housing_jobsearch','housing_houses'];
 
 /* ───────────────────────── Helpers ───────────────────────── */
 
@@ -473,7 +407,18 @@ function requireHousing(req, res, next) {
 
 export function mountHousing(app) {
   housingSchema();
-  try { seedHousing(); } catch (e) { console.error('[housing] seed:', e.message); }
+  try {
+    // One-time: replace the earlier demo houses with the real Armada roster
+    // (Coventry, High St, Perkins, …) and the live bed census from Neil's email.
+    if (getState('housing_real_roster_v1') !== 'done') {
+      HOUSING_TABLES.forEach(t => { try { db.exec(`DELETE FROM ${t}`); } catch { /* table may not exist yet */ } });
+      seedHousing();
+      setState('housing_real_roster_v1', 'done');
+      console.log('[housing] loaded the real house roster (105 beds across 10 homes)');
+    } else {
+      seedHousing();
+    }
+  } catch (e) { console.error('[housing] seed:', e.message); }
   // Gate the entire /api/housing surface to housing staff + admin/ED (defense in
   // depth — the front-end already hides it, this stops direct API access too).
   app.use('/api/housing', requireAuth, requireHousing);
@@ -489,9 +434,12 @@ export function mountHousing(app) {
     const occ = occMap();
     const residents = db.prepare(`SELECT * FROM housing_residents WHERE status='active'`).all();
     const capacity = houses.reduce((a, h) => a + (h.capacity || 0), 0);
-    const occupied = residents.length;
-    const byLoc = {}; Object.keys(LOC).forEach(k => byLoc[k] = 0);
-    residents.forEach(r => { byLoc[r.loc] = (byLoc[r.loc] || 0) + 1; });
+    // occupancy is bed-based (reflects the census even before every resident has
+    // an individual record), with residents counted when they're entered.
+    const occupied = Object.values(occ).reduce((a, o) => a + (o.occupied || 0), 0) || residents.length;
+    // by program (PHP / IOP / Graduate) from occupied beds per house
+    const byLoc = {};
+    houses.forEach(h => { const k = h.program || h.gender || 'Other'; byLoc[k] = (byLoc[k] || 0) + ((occ[h.id]?.occupied) || 0); });
     // recovery capital average
     const caps = residents.map(r => latestCap(r.id)).filter(Boolean);
     const reccapAvg = caps.length ? +(caps.reduce((a, c) => a + c.total, 0) / caps.length).toFixed(1) : null;
@@ -540,10 +488,10 @@ export function mountHousing(app) {
 
   app.post('/api/housing/houses', requireAuth, requireAdmin, (req, res) => {
     const b = req.body || {};
-    const r = db.prepare(`INSERT INTO housing_houses (name,level,orh_cert,address,city,gender,mat_friendly,capacity,manager,phone,opened,color,notes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    const r = db.prepare(`INSERT INTO housing_houses (name,level,orh_cert,address,city,gender,program,mat_friendly,capacity,manager,phone,opened,color,notes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       (b.name || 'New House').trim(), b.level || 'L2', b.orh_cert || null, b.address || null, b.city || null,
-      b.gender || 'Any', b.mat_friendly ? 1 : 0, num(b.capacity), b.manager || null, b.phone || null,
+      b.gender || 'Any', b.program || null, b.mat_friendly ? 1 : 0, num(b.capacity), b.manager || null, b.phone || null,
       b.opened || null, b.color || null, b.notes || null);
     audit({ user: req.user, action: 'HOUSING_HOUSE_ADD', detail: b.name, ip: req.ip });
     res.json({ ok: true, id: Number(r.lastInsertRowid) });
@@ -554,9 +502,9 @@ export function mountHousing(app) {
     const cur = db.prepare(`SELECT * FROM housing_houses WHERE id=?`).get(req.params.id);
     if (!cur) return res.status(404).json({ error: 'Not found' });
     const f = (k, d) => (b[k] !== undefined ? b[k] : d);
-    db.prepare(`UPDATE housing_houses SET name=?,level=?,orh_cert=?,address=?,city=?,gender=?,mat_friendly=?,capacity=?,manager=?,phone=?,opened=?,color=?,notes=?,active=? WHERE id=?`)
+    db.prepare(`UPDATE housing_houses SET name=?,level=?,orh_cert=?,address=?,city=?,gender=?,program=?,mat_friendly=?,capacity=?,manager=?,phone=?,opened=?,color=?,notes=?,active=? WHERE id=?`)
       .run(f('name', cur.name), f('level', cur.level), f('orh_cert', cur.orh_cert), f('address', cur.address), f('city', cur.city),
-        f('gender', cur.gender), b.mat_friendly !== undefined ? (b.mat_friendly ? 1 : 0) : cur.mat_friendly, num(f('capacity', cur.capacity)),
+        f('gender', cur.gender), f('program', cur.program), b.mat_friendly !== undefined ? (b.mat_friendly ? 1 : 0) : cur.mat_friendly, num(f('capacity', cur.capacity)),
         f('manager', cur.manager), f('phone', cur.phone), f('opened', cur.opened), f('color', cur.color), f('notes', cur.notes),
         b.active !== undefined ? (b.active ? 1 : 0) : cur.active, req.params.id);
     res.json({ ok: true });

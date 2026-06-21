@@ -7,6 +7,7 @@ async function hMeta(){ if(!HOUSING.meta){ try{ HOUSING.meta = await api('/housi
 /* ---- shared helpers ---- */
 const money = n => '$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0});
 function hLvl(l){ return l==='L3' ? '<span class="lvl lvl-l3">★ Level 3 · Supervised</span>' : '<span class="lvl lvl-l2">Level 2 · Monitored</span>'; }
+function hProg(p){ if(!p) return ''; const c={PHP:'#c06a52',IOP:'#d29a5e',Graduate:'#7e9a5e'}[p]||'#5fb0c2'; return `<span class="loc-pill" style="background:${c}">${esc(p)}</span>`; }
 function hLocPill(loc){ const m=(HOUSING.meta&&HOUSING.meta.loc)||{}; const c=(m[loc]&&m[loc].color)||'#6f7a75'; return `<span class="loc-pill" style="background:${c}">${esc(loc||'—')}</span>`; }
 function hRing(pct, value, label, color){
   color = color || (pct>=70?'#5fb0c2':pct>=40?'#d29a5e':'#c06a52');
@@ -56,8 +57,8 @@ function houseMiniCard(h){
   return `<div class="house-card" onclick="show('houses')" style="cursor:pointer">
     <div class="house-top" style="background:linear-gradient(120deg,${esc(h.color||'#235056')},#2d6168)">
       <h4>${esc(h.name)}</h4>
-      <div class="meta">${esc(h.city||'')} · ${esc(h.gender||'Any')} ${h.mat_friendly?'· MAT-friendly':''}</div>
-      <div style="margin-top:8px">${hLvl(h.level)}</div>
+      <div class="meta">${esc(h.gender||'Any')} ${h.mat_friendly?'· MAT-friendly':''}</div>
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${hProg(h.program)} ${hLvl(h.level)}</div>
     </div>
     <div class="house-body">
       <div style="display:flex;justify-content:space-between;font-size:12px"><span class="hint">Occupancy</span><b>${filled}/${cap}</b></div>
@@ -81,8 +82,8 @@ async function loadHouses(){
       </button>`).join('');
     return `<div class="card">
       <div class="cmd-hero-row">
-        <div><h3 style="font-size:18px">${esc(h.name)} ${hLvl(h.level)} ${h.mat_friendly?'<span class="mat-pill">MAT</span>':''} ${h.active?'':'<span class="chip">inactive</span>'}</h3>
-          <p class="sub sans" style="margin:2px 0 0">${esc(h.address||'')}${h.city?', '+esc(h.city):''} · ${esc(h.gender||'Any')} · House mgr: ${esc(h.manager||'—')}${h.orh_cert?' · '+esc(h.orh_cert):''}</p></div>
+        <div><h3 style="font-size:18px">${esc(h.name)} ${hProg(h.program)} ${hLvl(h.level)} ${h.mat_friendly?'<span class="mat-pill">MAT</span>':''} ${h.active?'':'<span class="chip">inactive</span>'}</h3>
+          <p class="sub sans" style="margin:2px 0 0">${esc(h.gender||'Any')}${h.address?' · '+esc(h.address):''}${h.city?', '+esc(h.city):''} · House mgr: ${esc(h.manager||'—')}${h.notes?' · '+esc(h.notes):''}</p></div>
         <div style="text-align:right">
           <div style="font-size:13px"><b>${filled}/${cap}</b> filled · ${h.occ.open||0} open</div>
           <div class="occbar ${pct>=100?'full':''}" style="width:160px;margin-left:auto"><span style="width:${pct}%"></span></div>
@@ -129,7 +130,7 @@ function openHouseForm(id){
     <div class="grid2">
       <div><label>NARR / ORH level</label><select id="hf_level"><option value="L3" ${h.level==='L3'?'selected':''}>Level 3 — Supervised</option><option value="L2" ${h.level!=='L3'?'selected':''}>Level 2 — Monitored</option></select></div>
       <div><label>ORH certificate #</label><input id="hf_cert" value="${esc(h.orh_cert||'')}"/></div>
-      <div><label>City</label><input id="hf_city" value="${esc(h.city||'')}"/></div>
+      <div><label>Program</label><select id="hf_program"><option value="">—</option>${['PHP','IOP','Graduate'].map(p=>`<option ${h.program===p?'selected':''}>${p}</option>`).join('')}</select></div>
       <div><label>Capacity (beds)</label><input id="hf_cap" type="number" value="${h.capacity||0}"/></div>
       <div><label>Gender</label><select id="hf_gender"><option ${h.gender==='Any'?'selected':''}>Any</option><option ${h.gender==='Men'?'selected':''}>Men</option><option ${h.gender==='Women'?'selected':''}>Women</option></select></div>
       <div><label>House manager</label><input id="hf_mgr" value="${esc(h.manager||'')}"/></div>
@@ -137,7 +138,7 @@ function openHouseForm(id){
     <label>Address</label><input id="hf_addr" value="${esc(h.address||'')}"/>
     <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500"><input type="checkbox" id="hf_mat" ${h.mat_friendly!==0?'checked':''} style="width:auto"/> MAT-supportive (no one excluded for prescribed medication)</label>`);
   save.onclick = async () => {
-    const body = { name:$('hf_name').value, level:$('hf_level').value, orh_cert:$('hf_cert').value, city:$('hf_city').value, capacity:+$('hf_cap').value, gender:$('hf_gender').value, manager:$('hf_mgr').value, address:$('hf_addr').value, mat_friendly:$('hf_mat').checked };
+    const body = { name:$('hf_name').value, level:$('hf_level').value, orh_cert:$('hf_cert').value, program:$('hf_program').value, capacity:+$('hf_cap').value, gender:$('hf_gender').value, manager:$('hf_mgr').value, address:$('hf_addr').value, mat_friendly:$('hf_mat').checked };
     try{ await api(id?`/housing/houses/${id}`:'/housing/houses',{method:'POST',body:JSON.stringify(body)}); closeHModal(); loadHouses(); }catch(e){ alert(e.message); }
   };
 }

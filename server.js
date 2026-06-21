@@ -3284,8 +3284,15 @@ function effectiveValue() {
 // morning's 8am lineup (peer shout-outs + extra-mile moments captured by midnight).
 function lineupRecognition() {
   const since = dayBoundsUtc(addDays(appToday(), -1)).start;
-  const kudos = db.prepare(`SELECT to_name, from_name, text FROM kudos WHERE created_at >= ? AND to_name IS NOT NULL AND to_name != '' ORDER BY id DESC LIMIT 12`).all(since);
-  const moments = db.prepare(`SELECT person, story FROM extra_mile WHERE created_at >= ? ORDER BY id DESC LIMIT 8`).all(since);
+  // Until the app is live for everyone, only feature what leadership CAPTURED from
+  // the emailed replies — not in-app recognition (kudos from logged-in staff /
+  // auto top-responder). Captured kudos have no from_id; captured moments are
+  // source 'lineup'. Once app_live is on, include everything.
+  const live = appLive();
+  const kFilter = live ? '' : 'AND from_id IS NULL';
+  const eFilter = live ? '' : `AND source = 'lineup'`;
+  const kudos = db.prepare(`SELECT to_name, from_name, text FROM kudos WHERE created_at >= ? AND to_name IS NOT NULL AND to_name != '' ${kFilter} ORDER BY id DESC LIMIT 12`).all(since);
+  const moments = db.prepare(`SELECT person, story FROM extra_mile WHERE created_at >= ? ${eFilter} ORDER BY id DESC LIMIT 8`).all(since);
   if (!kudos.length && !moments.length) return '';
   const clean = (s) => htmlEsc(String(s || '').replace(/^🙌\s*/, ''));
   const li = (name, what, who) => `<li style="margin:3px 0"><b>${htmlEsc(name)}</b> — ${clean(what)}${who ? ` <span style="color:#999">— ${htmlEsc(who)}</span>` : ''}</li>`;

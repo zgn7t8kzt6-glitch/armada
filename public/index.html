@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260621J" />
+<link rel="stylesheet" href="/styles.css?v=20260621K" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -117,9 +117,12 @@
     <button data-view="houses">Houses &amp; Beds</button>
     <button data-view="residents">Residents</button>
     <button data-view="resident" data-subview>Resident 360</button>
+    <button data-view="intake">Intake &amp; Forms</button>
     <button data-view="screens">Drug Screening</button>
     <button data-view="houselife">House Life</button>
     <button data-view="coordination">Clinical Coordination</button>
+    <button data-view="employment">Employment</button>
+    <button data-view="rentrun">Rent Run</button>
     <button data-view="ledger">Rent &amp; Funding</button>
     <button data-view="orh">ORH Compliance</button>
     <button data-view="housingoutcomes">Housing Outcomes</button>
@@ -2207,11 +2210,47 @@
       </div>
     </section>
 
+    <!-- Intake & Forms -->
+    <section id="intake" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>📋 Intake &amp; forms</h3><p class="sub sans" style="margin:0">The admission packet — application, resident &amp; financial agreements, ROIs and consents. Lead with the warm welcome, then the paperwork. Every form maps to an ORH/NARR standard.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadIntake()">↻ Refresh</button>
+        </div>
+        <div id="intakeRoster" style="margin-top:10px;overflow:auto"></div>
+      </div>
+      <div id="intakePacket"></div>
+    </section>
+
+    <!-- Employment & Job Search -->
+    <section id="employment" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>💼 Employment &amp; job search</h3><p class="sub sans" style="margin:0">Does each resident have a job — and if not, what are they doing about it? Meaningful activity is recovery capital. Set a weekly job-search target and log every step.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadEmployment()">↻ Refresh</button>
+        </div>
+        <div id="empKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div id="empBody" style="margin-top:12px;overflow:auto"></div>
+      </div>
+    </section>
+
+    <!-- Rent Run -->
+    <section id="rentrun" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>💰 Rent run — weekly collection</h3><p class="sub sans" style="margin:0">Work the list every week. Each resident has a documented payment plan; record Paid / Partial / Promise-to-pay / Missed with a note — it posts to their ledger and creates the paper trail.</p></div>
+          <div style="display:flex;gap:8px;align-items:center"><input id="rrWeek" type="date" style="width:auto" onchange="loadRentRun()"/><button class="btn btn-ghost sans" onclick="loadRentRun()">↻</button></div>
+        </div>
+        <div id="rrKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div id="rrBody" style="margin-top:12px;overflow:auto"></div>
+      </div>
+    </section>
+
     <!-- generic housing modal -->
     <div id="hModal" class="hmodal" style="display:none"><div class="hmodal-card"><div id="hModalBody"></div></div></div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260621J"></script>
-<script src="/housing.js?v=20260621"></script>
+<script src="/app.js?v=20260621K"></script>
+<script src="/housing.js?v=20260621K"></script>
 </body>
 </html>

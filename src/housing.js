@@ -82,6 +82,72 @@ export const ORH_STANDARDS = [
   ['neighbor', 'N3', 'Community relations plan; complaints logged & resolved', 2],
 ];
 
+// The intake packet — every form a resident fills out on the way in, mapped to
+// ORH/NARR standards. Each field: k(ey), l(abel), t(ype), o(ptions). Forms with
+// sign:true require a typed e-signature. cat groups them in the UI.
+export const FORM_TEMPLATES = [
+  { type: 'application', name: 'Admission Application', cat: 'Admission', orh: '', sign: false, fields: [
+    { k: 'referral_source', l: 'Referral source', t: 'text' },
+    { k: 'clinical_loc', l: 'Clinical level of care', t: 'select', o: ['PHP', 'IOP', 'OP', 'None yet'] },
+    { k: 'primary_substance', l: 'Primary substance', t: 'text' },
+    { k: 'last_use', l: 'Date of last use', t: 'date' },
+    { k: 'mat', l: 'On MAT? (med)', t: 'text' },
+    { k: 'legal_status', l: 'Legal status / probation / court', t: 'text' },
+    { k: 'insurance', l: 'Insurance / Medicaid #', t: 'text' },
+    { k: 'income', l: 'Current income source', t: 'text' },
+    { k: 'emergency_name', l: 'Emergency contact name', t: 'text' },
+    { k: 'emergency_phone', l: 'Emergency contact phone', t: 'text' },
+    { k: 'allergies', l: 'Allergies', t: 'text' },
+    { k: 'medical_needs', l: 'Medical / mental-health needs', t: 'textarea' },
+  ] },
+  { type: 'resident_agreement', name: 'Resident Agreement & House Rules', cat: 'Admission', orh: 'A2', sign: true, fields: [
+    { k: 'curfew_ack', l: 'I understand the curfew & overnight policy', t: 'check' },
+    { k: 'chores_ack', l: 'I will complete assigned chores & attend house meetings', t: 'check' },
+    { k: 'meetings_ack', l: 'I will attend the required recovery meetings per week', t: 'check' },
+    { k: 'guests_ack', l: 'I understand the guest & visitation policy', t: 'check' },
+    { k: 'zero_tolerance_ack', l: 'I understand the no alcohol/drugs/weapons policy', t: 'check' },
+    { k: 'notes', l: 'Notes / exceptions discussed', t: 'textarea' },
+  ] },
+  { type: 'financial_agreement', name: 'Financial Agreement & Fee Schedule', cat: 'Financial', orh: 'A3', sign: true, fields: [
+    { k: 'weekly_fee', l: 'Weekly bed fee ($)', t: 'number' },
+    { k: 'due_day', l: 'Rent due day', t: 'select', o: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] },
+    { k: 'deposit', l: 'Deposit / move-in amount ($)', t: 'number' },
+    { k: 'source', l: 'How rent will be paid (funding source)', t: 'select', o: ['Self-pay (employment)', 'SOR / STAR scholarship', 'Family support', 'Medicaid (clinical)', 'Mixed / see plan'] },
+    { k: 'payment_plan', l: 'Payment plan — how & when they will pay each week', t: 'textarea' },
+    { k: 'late_ack', l: 'I understand the late-payment & promise-to-pay process', t: 'check' },
+    { k: 'refund_ack', l: 'I have received the refund policy', t: 'check' },
+  ] },
+  { type: 'roi', name: 'Release of Information (Clinical)', cat: 'Compliance', orh: 'R2', sign: true, fields: [
+    { k: 'release_to', l: 'Release to / from', t: 'text' },
+    { k: 'purpose', l: 'Purpose of disclosure', t: 'text' },
+    { k: 'expires', l: 'Expiration date', t: 'date' },
+  ] },
+  { type: 'screening_consent', name: 'Drug & Alcohol Screening Consent', cat: 'Compliance', orh: 'R4', sign: true, fields: [
+    { k: 'random_ack', l: 'I consent to random & observed drug/alcohol screening', t: 'check' },
+    { k: 'positive_ack', l: 'I understand the response to a positive/refused screen', t: 'check' },
+  ] },
+  { type: 'naloxone_ack', name: 'Overdose Response & Naloxone', cat: 'Compliance', orh: 'R6', sign: true, fields: [
+    { k: 'location_ack', l: 'I know where naloxone is kept in the house', t: 'check' },
+    { k: 'trained_ack', l: 'I have been shown how to respond to an overdose', t: 'check' },
+  ] },
+  { type: 'mat_agreement', name: 'MAT Support Agreement', cat: 'Compliance', orh: 'R5', sign: true, fields: [
+    { k: 'med', l: 'Prescribed medication (if any)', t: 'text' },
+    { k: 'prescriber', l: 'Prescriber / clinic', t: 'text' },
+    { k: 'storage_ack', l: 'I will store medication securely as directed', t: 'check' },
+  ] },
+  { type: 'rights_ack', name: 'Resident Rights & Code of Ethics', cat: 'Compliance', orh: 'A4', sign: true, fields: [
+    { k: 'rights_ack', l: 'I received & understand my rights as a resident', t: 'check' },
+    { k: 'ethics_ack', l: 'I received the NARR Code of Ethics', t: 'check' },
+  ] },
+  { type: 'grievance_ack', name: 'Grievance & Appeal Process', cat: 'Compliance', orh: 'A5', sign: true, fields: [
+    { k: 'grievance_ack', l: 'I understand how to file a grievance & appeal', t: 'check' },
+  ] },
+];
+
+export const EMPLOYMENT_STATUSES = ['Employed — full-time', 'Employed — part-time', 'Self-employed', 'Unemployed — actively seeking', 'In school / training', 'Unable to work (disability)', 'Not seeking — early recovery'];
+export const JOBSEARCH_ACTIVITIES = ['Application submitted', 'Interview', 'Resume / cover letter', 'Job fair / agency', 'Follow-up call', 'Offer received', 'Hired', 'Lost / left job', 'Orientation / first day'];
+export const RENT_STATUSES = ['Paid', 'Partial', 'Promise to pay', 'Scholarship covered', 'Waived', 'Missed'];
+
 const J = (v) => JSON.stringify(v ?? null);
 const P = (v, d = null) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
 const num = (v, d = 0) => { const n = +v; return Number.isFinite(n) ? n : d; };
@@ -177,6 +243,35 @@ export function housingSchema() {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     house_id INTEGER, resident_id INTEGER, date TEXT, type TEXT, severity TEXT,
     summary TEXT, action TEXT, by TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_forms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, type TEXT, status TEXT DEFAULT 'not_started',
+    data TEXT, signed_by TEXT, signed_date TEXT, staff TEXT,
+    created TEXT DEFAULT (datetime('now')), updated TEXT
+  );
+  CREATE TABLE IF NOT EXISTS housing_payplans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, weekly_amount REAL DEFAULT 0, due_day TEXT, source TEXT,
+    arrangement TEXT, deposit REAL DEFAULT 0, start_date TEXT, active INTEGER DEFAULT 1,
+    by TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_rentlog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, week TEXT, due REAL DEFAULT 0, collected REAL DEFAULT 0,
+    status TEXT, promise_date TEXT, note TEXT, by TEXT, date TEXT,
+    created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_employment (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, status TEXT, employer TEXT, position TEXT, wage TEXT,
+    hours TEXT, goal TEXT, weekly_target INTEGER DEFAULT 5, note TEXT, by TEXT,
+    date TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_jobsearch (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER, date TEXT, activity TEXT, employer TEXT, detail TEXT,
+    outcome TEXT, by TEXT, created TEXT DEFAULT (datetime('now'))
   );
   `);
 }
@@ -277,6 +372,36 @@ export function seedHousing() {
     mkIns.run(hid, daysAgo(10), 'House walkthrough', 'Pass', 'Monthly walkthrough — clean, in good repair', 'system');
   });
 
+  // Payment plans, employment, job-search, and a partial intake packet per resident
+  const mkPlan = db.prepare(`INSERT INTO housing_payplans (resident_id,weekly_amount,due_day,source,arrangement,deposit,start_date,active,by) VALUES (?,?,?,?,?,?,?,1,?)`);
+  const mkEmp = db.prepare(`INSERT INTO housing_employment (resident_id,status,employer,position,wage,hours,goal,weekly_target,by,date) VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  const mkJob = db.prepare(`INSERT INTO housing_jobsearch (resident_id,date,activity,employer,detail,by) VALUES (?,?,?,?,?,?)`);
+  const mkRent = db.prepare(`INSERT INTO housing_rentlog (resident_id,week,due,collected,status,note,by,date) VALUES (?,?,?,?,?,?,?,?)`);
+  const mkForm = db.prepare(`INSERT INTO housing_forms (resident_id,type,data,status,signed_by,signed_date,staff,updated) VALUES (?,?,?,?,?,?,?,datetime('now'))`);
+  const empPlan = [
+    ['Unemployed — actively seeking', '', 'Land part-time work within 30 days', 5],
+    ['Employed — part-time', 'Summit Warehouse', 'Move to full-time', 3],
+    ['Employed — full-time', 'Akron Bistro', 'Save 1 month rent', 1],
+    ['Unemployed — actively seeking', '', 'Resume + 3 applications/week', 5],
+    ['Employed — part-time', 'Towpath Retail', 'GED then full-time', 3],
+    ['Employed — full-time', 'Mercy CNA', 'Keep CNA license active', 1],
+    ['Employed — full-time', 'Pratt Logistics', 'Independent apartment', 1],
+    ['In school / training', 'HVAC apprenticeship', 'Finish apprenticeship', 2],
+  ];
+  resIds.forEach((rid, i) => {
+    mkPlan.run(rid, 175, 'Friday', sample[i][6], `Pays $175 every Friday from ${/employ|warehouse|cook|cna|logistics|hvac|retail/i.test(sample[i][8]) ? 'paycheck (direct from employer pay day)' : 'scholarship + family until employed'}. Promise-to-pay allowed once/month with a documented catch-up date.`, 175, daysAgo(30), 'system');
+    const e = empPlan[i % empPlan.length];
+    mkEmp.run(rid, e[0], e[1], e[1] ? 'Staff' : '', e[1] ? '$15/hr' : '', e[1] ? '24/wk' : '', e[2], e[3], 'system', daysAgo(7));
+    if (/seeking/i.test(e[0])) { mkJob.run(rid, daysAgo(2), 'Application submitted', 'Local employer', 'Applied online', 'system'); mkJob.run(rid, daysAgo(5), 'Resume / cover letter', '', 'Updated resume with coach', 'system'); }
+    // current-week rent: most paid, a couple promise-to-pay
+    const wkNow = weekKey(todayStr());
+    if (i % 4 === 0) mkRent.run(rid, wkNow, 175, 0, 'Promise to pay', 'Payday Friday — will pay full', 'system', todayStr());
+    else if (i % 3 !== 1) { mkRent.run(rid, wkNow, 175, 175, 'Paid', 'Paid in full', 'system', todayStr()); }
+    // intake packet: first ~5 residents fully signed, rest partial (shows the gap)
+    const signCount = i < 5 ? FORM_TEMPLATES.length : 3;
+    FORM_TEMPLATES.slice(0, signCount).forEach(t => mkForm.run(rid, t.type, J({}), 'complete', sample[i][0], daysAgo(20 - i), 'system'));
+  });
+
   return houseIds.length;
 }
 
@@ -303,6 +428,16 @@ const weekKey = (d = todayStr()) => { const dt = new Date(d); dt.setDate(dt.getD
 const meetingsThisWeek = (rid) => db.prepare(`SELECT COUNT(*) c FROM housing_supports WHERE resident_id=? AND type='meeting' AND date>=?`).get(rid, weekKey()).c;
 const clinHoursThisWeek = (rid) => db.prepare(`SELECT COALESCE(SUM(hours),0) h FROM housing_coordination WHERE resident_id=? AND week=?`).get(rid, weekKey()).h;
 const lastScreen = (rid) => db.prepare(`SELECT * FROM housing_screens WHERE resident_id=? ORDER BY date DESC, id DESC LIMIT 1`).get(rid);
+const currentPayplan = (rid) => db.prepare(`SELECT * FROM housing_payplans WHERE resident_id=? AND active=1 ORDER BY id DESC LIMIT 1`).get(rid);
+const currentEmployment = (rid) => db.prepare(`SELECT * FROM housing_employment WHERE resident_id=? ORDER BY date DESC, id DESC LIMIT 1`).get(rid);
+const jobsearchThisWeek = (rid) => db.prepare(`SELECT COUNT(*) c FROM housing_jobsearch WHERE resident_id=? AND date>=?`).get(rid, weekKey()).c;
+function packetStatus(rid) {
+  const total = FORM_TEMPLATES.length;
+  const rows = db.prepare(`SELECT type, status FROM housing_forms WHERE resident_id=?`).all(rid);
+  const m = {}; rows.forEach(r => m[r.type] = r.status);
+  const done = FORM_TEMPLATES.filter(t => m[t.type] === 'complete').length;
+  return { done, total, pct: Math.round(done / total * 100), map: m };
+}
 
 function residentCard(r) {
   const cap = latestCap(r.id);
@@ -316,6 +451,10 @@ function residentCard(r) {
     clinHoursWk: clinHoursThisWeek(r.id),
     clinTarget: LOC[r.loc]?.weeklyHours || 0,
     lastScreen: lastScreen(r.id),
+    packet: packetStatus(r.id),
+    payplan: currentPayplan(r.id) || null,
+    employment_status: (currentEmployment(r.id)?.status) || null,
+    jobSearchWk: jobsearchThisWeek(r.id),
     house: r.house_id ? (db.prepare(`SELECT name,level,color FROM housing_houses WHERE id=?`).get(r.house_id) || null) : null,
     bed: r.bed_id ? (db.prepare(`SELECT room,label FROM housing_beds WHERE id=?`).get(r.bed_id) || null) : null,
   };
@@ -490,6 +629,12 @@ export function mountHousing(app) {
       ledger: db.prepare(`SELECT * FROM housing_ledger WHERE resident_id=? ORDER BY date DESC, id DESC LIMIT 40`).all(r.id),
       coordination: db.prepare(`SELECT * FROM housing_coordination WHERE resident_id=? ORDER BY date DESC LIMIT 20`).all(r.id),
       incidents: db.prepare(`SELECT * FROM housing_incidents WHERE resident_id=? ORDER BY date DESC LIMIT 20`).all(r.id),
+      forms: db.prepare(`SELECT * FROM housing_forms WHERE resident_id=?`).all(r.id).map(f => ({ ...f, data: P(f.data, {}) })),
+      payplanHistory: db.prepare(`SELECT * FROM housing_payplans WHERE resident_id=? ORDER BY id DESC LIMIT 10`).all(r.id),
+      rentlog: db.prepare(`SELECT * FROM housing_rentlog WHERE resident_id=? ORDER BY week DESC, id DESC LIMIT 16`).all(r.id),
+      employment: currentEmployment(r.id) || null,
+      employmentHistory: db.prepare(`SELECT * FROM housing_employment WHERE resident_id=? ORDER BY date DESC LIMIT 10`).all(r.id),
+      jobsearch: db.prepare(`SELECT * FROM housing_jobsearch WHERE resident_id=? ORDER BY date DESC LIMIT 30`).all(r.id),
     });
   });
 
@@ -731,6 +876,128 @@ export function mountHousing(app) {
     const b = req.body || {};
     db.prepare(`INSERT INTO housing_incidents (house_id,resident_id,date,type,severity,summary,action,by) VALUES (?,?,?,?,?,?,?,?)`)
       .run(b.house_id ? num(b.house_id) : null, b.resident_id ? num(b.resident_id) : null, b.date || todayStr(), b.type || 'Other', b.severity || 'low', b.summary || '', b.action || null, req.user.name);
+    res.json({ ok: true });
+  });
+
+  // ---- Intake & forms ----
+  app.get('/api/housing/forms/templates', requireAuth, (req, res) => res.json({ templates: FORM_TEMPLATES }));
+
+  // Intake roster — who still has an incomplete packet
+  app.get('/api/housing/intake', requireAuth, (req, res) => {
+    const residents = db.prepare(`SELECT id,name,house_id,loc,move_in,status FROM housing_residents WHERE status IN ('active','waitlist') ORDER BY move_in DESC`).all();
+    const rows = residents.map(r => ({
+      ...r, house: db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(r.house_id)?.name || '',
+      packet: packetStatus(r.id),
+    }));
+    res.json({ templates: FORM_TEMPLATES, residents: rows });
+  });
+
+  // Save / sign one form for a resident
+  app.post('/api/housing/residents/:id/forms', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const tmpl = FORM_TEMPLATES.find(t => t.type === b.type);
+    if (!tmpl) return res.status(400).json({ error: 'Unknown form' });
+    const status = b.sign ? 'complete' : (b.status || 'in_progress');
+    const existing = db.prepare(`SELECT id FROM housing_forms WHERE resident_id=? AND type=?`).get(req.params.id, b.type);
+    if (existing) {
+      db.prepare(`UPDATE housing_forms SET data=?, status=?, signed_by=?, signed_date=?, staff=?, updated=datetime('now') WHERE id=?`)
+        .run(J(b.data || {}), status, b.sign ? (b.signed_by || null) : null, b.sign ? (b.signed_date || todayStr()) : null, req.user.name, existing.id);
+    } else {
+      db.prepare(`INSERT INTO housing_forms (resident_id,type,data,status,signed_by,signed_date,staff,updated) VALUES (?,?,?,?,?,?,?,datetime('now'))`)
+        .run(req.params.id, b.type, J(b.data || {}), status, b.sign ? (b.signed_by || null) : null, b.sign ? (b.signed_date || todayStr()) : null, req.user.name);
+    }
+    // The financial agreement seeds the payment plan automatically.
+    if (b.type === 'financial_agreement' && b.sign && b.data) {
+      const d = b.data;
+      db.prepare(`UPDATE housing_payplans SET active=0 WHERE resident_id=?`).run(req.params.id);
+      db.prepare(`INSERT INTO housing_payplans (resident_id,weekly_amount,due_day,source,arrangement,deposit,start_date,active,by) VALUES (?,?,?,?,?,?,?,1,?)`)
+        .run(req.params.id, num(d.weekly_fee), d.due_day || null, d.source || null, d.payment_plan || null, num(d.deposit), todayStr(), req.user.name);
+    }
+    audit({ user: req.user, action: 'HOUSING_FORM', detail: `${b.type}${b.sign ? ' signed' : ''}`, ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ---- Payment plan ----
+  app.post('/api/housing/residents/:id/payplan', requireAuth, (req, res) => {
+    const b = req.body || {};
+    db.prepare(`UPDATE housing_payplans SET active=0 WHERE resident_id=?`).run(req.params.id);
+    db.prepare(`INSERT INTO housing_payplans (resident_id,weekly_amount,due_day,source,arrangement,deposit,start_date,active,by) VALUES (?,?,?,?,?,?,?,1,?)`)
+      .run(req.params.id, num(b.weekly_amount), b.due_day || null, b.source || null, b.arrangement || null, num(b.deposit), b.start_date || todayStr(), req.user.name);
+    audit({ user: req.user, action: 'HOUSING_PAYPLAN', detail: `$${b.weekly_amount}/wk`, ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ---- Rent Run (documented weekly collection) ----
+  app.get('/api/housing/rentrun', requireAuth, (req, res) => {
+    const wk = weekKey(req.query.week || todayStr());
+    const residents = db.prepare(`SELECT id,name,house_id,payer FROM housing_residents WHERE status='active' ORDER BY name`).all();
+    const rows = residents.map(r => {
+      const plan = currentPayplan(r.id);
+      const log = db.prepare(`SELECT * FROM housing_rentlog WHERE resident_id=? AND week=? ORDER BY id DESC LIMIT 1`).get(r.id, wk);
+      return {
+        id: r.id, name: r.name, house: db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(r.house_id)?.name || '',
+        due: plan ? plan.weekly_amount : 0, dueDay: plan?.due_day || '', source: plan?.source || r.payer || '',
+        arrangement: plan?.arrangement || '', hasPlan: !!plan, balance: balanceOf(r.id),
+        log: log || null,
+      };
+    });
+    const collected = db.prepare(`SELECT COALESCE(SUM(collected),0) s FROM housing_rentlog WHERE week=?`).get(wk).s;
+    const expected = rows.reduce((a, r) => a + (r.due || 0), 0);
+    const worked = rows.filter(r => r.log).length;
+    res.json({ week: wk, rows, stats: { expected, collected, worked, total: rows.length, noPlan: rows.filter(r => !r.hasPlan).length } });
+  });
+
+  app.post('/api/housing/rentrun', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const wk = weekKey(b.week || todayStr());
+    const rid = num(b.resident_id);
+    const existing = db.prepare(`SELECT id FROM housing_rentlog WHERE resident_id=? AND week=?`).get(rid, wk);
+    if (existing) db.prepare(`UPDATE housing_rentlog SET due=?, collected=?, status=?, promise_date=?, note=?, by=?, date=? WHERE id=?`)
+      .run(num(b.due), num(b.collected), b.status || null, b.promise_date || null, b.note || null, req.user.name, todayStr(), existing.id);
+    else db.prepare(`INSERT INTO housing_rentlog (resident_id,week,due,collected,status,promise_date,note,by,date) VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(rid, wk, num(b.due), num(b.collected), b.status || null, b.promise_date || null, b.note || null, req.user.name, todayStr());
+    // a real collection posts to the ledger
+    if (num(b.collected) > 0 && b.post !== false) {
+      db.prepare(`INSERT INTO housing_ledger (resident_id,date,kind,amount,payer,memo,by) VALUES (?,?,?,?,?,?,?)`)
+        .run(rid, todayStr(), 'payment', num(b.collected), b.source || null, `Weekly rent (${wk})`, req.user.name);
+    }
+    audit({ user: req.user, action: 'HOUSING_RENT', detail: `${b.status} $${b.collected}`, ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ---- Employment & job search ----
+  app.get('/api/housing/employment', requireAuth, (req, res) => {
+    const residents = db.prepare(`SELECT id,name,house_id FROM housing_residents WHERE status='active' ORDER BY name`).all();
+    const rows = residents.map(r => {
+      const e = currentEmployment(r.id);
+      const wk = jobsearchThisWeek(r.id);
+      const seeking = !e || /seeking|unemployed/i.test(e.status || '');
+      return {
+        id: r.id, name: r.name, house: db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(r.house_id)?.name || '',
+        status: e?.status || 'Not assessed', employer: e?.employer || '', goal: e?.goal || '',
+        target: e?.weekly_target ?? 5, jobSearchWk: wk, seeking,
+        lastActivity: db.prepare(`SELECT date,activity,employer FROM housing_jobsearch WHERE resident_id=? ORDER BY date DESC LIMIT 1`).get(r.id) || null,
+      };
+    });
+    const employed = rows.filter(r => /employed|self-employed/i.test(r.status) && !/unemployed/i.test(r.status)).length;
+    const seekingCount = rows.filter(r => r.seeking).length;
+    const behind = rows.filter(r => r.seeking && r.jobSearchWk < r.target).length;
+    res.json({ rows, stats: { total: rows.length, employed, seeking: seekingCount, behind } });
+  });
+
+  app.post('/api/housing/residents/:id/employment', requireAuth, (req, res) => {
+    const b = req.body || {};
+    db.prepare(`INSERT INTO housing_employment (resident_id,status,employer,position,wage,hours,goal,weekly_target,note,by,date) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(req.params.id, b.status || null, b.employer || null, b.position || null, b.wage || null, b.hours || null, b.goal || null, num(b.weekly_target, 5), b.note || null, req.user.name, b.date || todayStr());
+    // keep the resident summary field in sync for rosters
+    db.prepare(`UPDATE housing_residents SET employment=? WHERE id=?`).run(b.employer ? `${b.status} — ${b.employer}` : (b.status || null), req.params.id);
+    res.json({ ok: true });
+  });
+
+  app.post('/api/housing/residents/:id/jobsearch', requireAuth, (req, res) => {
+    const b = req.body || {};
+    db.prepare(`INSERT INTO housing_jobsearch (resident_id,date,activity,employer,detail,outcome,by) VALUES (?,?,?,?,?,?,?)`)
+      .run(req.params.id, b.date || todayStr(), b.activity || 'Application submitted', b.employer || null, b.detail || null, b.outcome || null, req.user.name);
     res.json({ ok: true });
   });
 

@@ -199,7 +199,7 @@ async function openResidentForm(){
 
 /* ---- Resident 360 ---- */
 async function openResident(id){
-  await hMeta();
+  await hMeta(); await hFormTemplates();
   let r; try{ r=await api('/housing/residents/'+id); }catch(e){ alert(e.message); return; }
   HOUSING.current=r;
   show('resident');
@@ -289,6 +289,33 @@ async function openResident(id){
       <div class="card">
         <h3>Supports &amp; meetings</h3>
         ${r.supports&&r.supports.length?r.supports.slice(0,8).map(s=>`<div class="pc-note">${s.type==='meeting'?'🙏':s.type==='employment'?'💼':'🤝'} <b>${esc(s.date)}</b> · ${esc(s.type)}${s.detail?' — '+esc(s.detail):''}</div>`).join(''):'<div class="hint">None logged yet.</div>'}
+      </div>
+
+      <div class="card">
+        <h3>Intake packet <span class="hint" style="font-weight:400">· ${r.packet.done}/${r.packet.total} complete</span></h3>
+        <div style="display:flex;align-items:center;gap:10px;margin:6px 0 10px"><div class="dose ${r.packet.pct<100?'low':''}" style="flex:1"><span style="width:${r.packet.pct}%"></span></div><b>${r.packet.pct}%</b></div>
+        ${(r.forms&&r.forms.length)?r.forms.filter(f=>f.status==='complete').slice(0,4).map(f=>`<div class="pc-note">✅ ${esc((HOUSING.formTemplates&&HOUSING.formTemplates.find(t=>t.type===f.type)||{}).name||f.type)}${f.signed_by?' · '+esc(f.signed_by):''}</div>`).join(''):''}
+        <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="openPacket(${r.id})">${r.packet.pct<100?'Complete packet':'View packet'}</button></div>
+      </div>
+
+      <div class="card">
+        <h3>Payment plan &amp; rent</h3>
+        ${r.payplan?`<div class="kv"><span class="k">Weekly</span><span class="v">${money(r.payplan.weekly_amount)} · due ${esc(r.payplan.due_day||'—')}</span></div>
+          <div class="kv"><span class="k">Funding</span><span class="v">${esc(r.payplan.source||'—')}</span></div>
+          <div class="kv"><span class="k">Balance</span><span class="v">${r.balance>0?`<span style="color:var(--danger)">${money(r.balance)}</span>`:money(r.balance)}</span></div>
+          ${r.payplan.arrangement?`<p class="hint" style="margin-top:8px">📝 ${esc(r.payplan.arrangement)}</p>`:''}`:'<div class="hint">No payment plan yet — set one so rent is a documented process.</div>'}
+        ${(r.rentlog&&r.rentlog.length)?`<div class="hint" style="margin-top:8px">Recent weeks:</div>`+r.rentlog.slice(0,4).map(l=>`<div class="pc-note">${l.status==='Paid'?'✅':l.status==='Missed'?'❌':'•'} <b>${esc(l.week)}</b> · ${esc(l.status||'')}${l.collected?' · '+money(l.collected):''}${l.note?' — '+esc(l.note):''}</div>`).join(''):''}
+        <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="openPayplanForm(${r.id})">${r.payplan?'Edit plan':'Set plan'}</button></div>
+      </div>
+
+      <div class="card">
+        <h3>Employment &amp; job search</h3>
+        <div class="kv"><span class="k">Status</span><span class="v">${esc((r.employment&&r.employment.status)||'Not assessed')}</span></div>
+        ${r.employment&&r.employment.employer?`<div class="kv"><span class="k">Employer</span><span class="v">${esc(r.employment.employer)}${r.employment.position?' · '+esc(r.employment.position):''}</span></div>`:''}
+        ${r.employment&&r.employment.goal?`<div class="kv"><span class="k">Goal</span><span class="v" style="max-width:60%">${esc(r.employment.goal)}</span></div>`:''}
+        <div class="kv"><span class="k">Job search this week</span><span class="v">${r.jobSearchWk||0}${r.employment&&r.employment.weekly_target?' / '+r.employment.weekly_target:''}</span></div>
+        ${(r.jobsearch&&r.jobsearch.length)?r.jobsearch.slice(0,4).map(j=>`<div class="pc-note">💼 <b>${esc(j.date)}</b> · ${esc(j.activity)}${j.employer?' — '+esc(j.employer):''}${j.detail?' ('+esc(j.detail)+')':''}</div>`).join(''):'<div class="hint" style="margin-top:6px">No job-search steps logged.</div>'}
+        <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="openJobSearchForm(${r.id})">+ Log step</button><button class="btn btn-ghost btn-sm sans" onclick="openEmploymentForm(${r.id})">Edit status</button></div>
       </div>
     </div>`;
 }
@@ -531,5 +558,150 @@ async function loadHousingOutcomes(){
   $('hoDispo').innerHTML = dispo.length?dispo.map(([k,v])=>`<div class="cmd-row"><div class="cmd-row-main">${esc(k)}</div><b>${v}</b></div>`).join(''):'<div class="hint">No discharges yet — every warm farewell is a future admission.</div>';
 }
 
+/* ============================ INTAKE & FORMS ============================ */
+async function hFormTemplates(){ if(!HOUSING.formTemplates){ try{ HOUSING.formTemplates=(await api('/housing/forms/templates')).templates; }catch(e){ HOUSING.formTemplates=[]; } } return HOUSING.formTemplates; }
+async function loadIntake(){
+  await hFormTemplates();
+  let d; try{ d=await api('/housing/intake'); }catch(e){ $('intakeRoster').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('intakeRoster').innerHTML = d.residents.length?`<table class="tbl"><thead><tr><th>Resident</th><th>House</th><th>Status</th><th>Moved in</th><th>Intake packet</th><th></th></tr></thead><tbody>${d.residents.map(r=>`
+    <tr><td><b>${esc(r.name)}</b></td><td class="hint">${esc(r.house||'')}</td><td>${esc(r.status)}</td><td class="hint">${esc(r.move_in||'')}</td>
+      <td style="min-width:160px"><div style="display:flex;align-items:center;gap:8px"><div class="dose ${r.packet.pct<100?'low':''}" style="flex:1"><span style="width:${r.packet.pct}%"></span></div><b>${r.packet.done}/${r.packet.total}</b></div></td>
+      <td><button class="btn ${r.packet.pct<100?'btn-gold':'btn-ghost'} btn-sm sans" onclick="openPacket(${r.id})">${r.packet.pct<100?'Complete packet':'View packet'}</button></td>
+    </tr>`).join('')}</tbody></table>`:'<div class="empty">No residents in intake.</div>';
+  $('intakePacket').innerHTML='';
+}
+async function openPacket(rid){
+  await hFormTemplates();
+  let r; try{ r=await api('/housing/residents/'+rid); }catch(e){ alert(e.message); return; }
+  HOUSING.current=r;
+  const byType={}; (r.forms||[]).forEach(f=>byType[f.type]=f);
+  const cats={};
+  HOUSING.formTemplates.forEach(t=>{ (cats[t.cat]=cats[t.cat]||[]).push(t); });
+  const sec = Object.keys(cats).map(cat=>`<h3 style="margin:14px 0 6px">${esc(cat)}</h3>${cats[cat].map(t=>{
+    const f=byType[t.type]; const done=f&&f.status==='complete';
+    return `<div class="cmd-row">
+      <div class="cmd-row-main"><b>${esc(t.name)}</b> ${t.orh?`<span class="chip">ORH ${esc(t.orh)}</span>`:''} ${t.sign?'<span class="hint">· e-signature</span>':''}
+        ${done?`<div class="hint">✅ ${f.signed_by?'signed by '+esc(f.signed_by)+' · ':''}${esc(f.signed_date||f.updated||'')}</div>`:'<div class="hint">Not completed</div>'}</div>
+      <button class="btn ${done?'btn-ghost':'btn-gold'} btn-sm sans" onclick="openFormModal(${rid},'${t.type}')">${done?'View / edit':(t.sign?'Fill & sign':'Fill')}</button>
+    </div>`;
+  }).join('')}`).join('');
+  $('intakePacket').innerHTML = `<div class="card">
+    <div class="cmd-hero-row"><div><h3>📋 ${esc(r.name)} — intake packet <span class="hint" style="font-weight:400">· ${r.packet.done}/${r.packet.total} complete</span></h3></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="openResident(${rid})">Open Resident 360 →</button></div>
+    ${sec}</div>`;
+  $('intakePacket').scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function openFormModal(rid,type){
+  await hFormTemplates();
+  const t=HOUSING.formTemplates.find(x=>x.type===type); if(!t) return;
+  let existing={}; let signedBy='';
+  try{ const r=HOUSING.current&&HOUSING.current.id===rid?HOUSING.current:await api('/housing/residents/'+rid); const f=(r.forms||[]).find(x=>x.type===type); if(f){ existing=f.data||{}; signedBy=f.signed_by||''; } }catch(e){}
+  const field=(fl)=>{
+    const v=existing[fl.k]; const id='ff_'+fl.k;
+    if(fl.t==='textarea') return `<label>${esc(fl.l)}</label><textarea id="${id}" rows="2">${esc(v||'')}</textarea>`;
+    if(fl.t==='check') return `<label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500;margin-top:10px"><input type="checkbox" id="${id}" ${v?'checked':''} style="width:auto"/> ${esc(fl.l)}</label>`;
+    if(fl.t==='select') return `<label>${esc(fl.l)}</label><select id="${id}">${fl.o.map(o=>`<option ${v===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+    return `<label>${esc(fl.l)}</label><input id="${id}" type="${fl.t==='number'?'number':fl.t==='date'?'date':'text'}" value="${esc(v||'')}"/>`;
+  };
+  const sign = t.sign?`<hr><label>Resident signature (type full name)</label><input id="ff_sig" value="${esc(signedBy)}" placeholder="Full legal name"/>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500;margin-top:8px"><input type="checkbox" id="ff_signed" style="width:auto"/> Resident has reviewed and agrees to this document (${new Date().toLocaleDateString()})</label>`:'';
+  const save=hmodal(`<h3>${esc(t.name)}</h3>${t.orh?`<p class="sub sans">Maps to ORH/NARR standard ${esc(t.orh)}.</p>`:''}${t.fields.map(field).join('')}${sign}`);
+  save.onclick=async()=>{
+    const data={}; t.fields.forEach(fl=>{ const el=$('ff_'+fl.k); if(!el) return; data[fl.k]=fl.t==='check'?el.checked:el.value; });
+    const doSign=t.sign?$('ff_signed').checked:true;
+    if(t.sign && doSign && !$('ff_sig').value.trim()){ alert('Type the resident signature to complete.'); return; }
+    try{ await api(`/housing/residents/${rid}/forms`,{method:'POST',body:JSON.stringify({type,data,sign:doSign,signed_by:t.sign?$('ff_sig').value:null})}); closeHModal();
+      if($('intake').classList.contains('active')){ openPacket(rid); loadIntake(); } else if(HOUSING.current){ openResident(rid); }
+    }catch(e){ alert(e.message); }
+  };
+}
+
+/* ============================ EMPLOYMENT & JOB SEARCH ============================ */
+async function loadEmployment(){
+  let d; try{ d=await api('/housing/employment'); }catch(e){ $('empBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('empKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${d.stats.employed}</div><div class="l">Employed / in school</div></div>
+    <div class="ret-card"><div class="n">${d.stats.total?Math.round(d.stats.employed/d.stats.total*100):0}%</div><div class="l">Employment rate</div></div>
+    <div class="ret-card ${d.stats.seeking?'rc-warn':''}"><div class="n">${d.stats.seeking}</div><div class="l">Actively seeking</div></div>
+    <div class="ret-card ${d.stats.behind?'rc-high':''}"><div class="n">${d.stats.behind}</div><div class="l">Behind on job search</div></div>`;
+  $('empBody').innerHTML=`<table class="tbl"><thead><tr><th>Resident</th><th>House</th><th>Status</th><th>Employer / goal</th><th>Job search this week</th><th>Last step</th><th></th></tr></thead><tbody>${d.rows.map(r=>{
+    const pct=r.target?Math.round(r.jobSearchWk/r.target*100):100;
+    return `<tr>
+      <td><b style="cursor:pointer" onclick="openResident(${r.id})">${esc(r.name)}</b></td>
+      <td class="hint">${esc(r.house)}</td>
+      <td>${esc(r.status)}</td>
+      <td>${esc(r.employer||'')}${r.goal?`<div class="hint">🎯 ${esc(r.goal)}</div>`:''}</td>
+      <td>${r.seeking?`<div style="display:flex;align-items:center;gap:8px"><div class="dose ${pct<100?'low':''}" style="width:70px"><span style="width:${Math.min(100,pct)}%"></span></div><span class="hint">${r.jobSearchWk}/${r.target}</span></div>`:'<span class="hint">—</span>'}</td>
+      <td class="hint">${r.lastActivity?esc(r.lastActivity.date)+' · '+esc(r.lastActivity.activity):'—'}</td>
+      <td style="white-space:nowrap"><button class="btn btn-gold btn-sm sans" onclick="openJobSearchForm(${r.id})">+ Step</button> <button class="btn btn-ghost btn-sm sans" onclick="openEmploymentForm(${r.id})">Edit</button></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+function openEmploymentForm(rid){
+  const e=(HOUSING.current&&HOUSING.current.id===rid&&HOUSING.current.employment)||{};
+  const stat=['Employed — full-time','Employed — part-time','Self-employed','Unemployed — actively seeking','In school / training','Unable to work (disability)','Not seeking — early recovery'];
+  const save=hmodal(`<h3>Employment status &amp; goal</h3>
+    <label>Status</label><select id="ef_status">${stat.map(s=>`<option ${e.status===s?'selected':''}>${esc(s)}</option>`).join('')}</select>
+    <div class="grid2"><div><label>Employer</label><input id="ef_employer" value="${esc(e.employer||'')}"/></div>
+    <div><label>Position</label><input id="ef_pos" value="${esc(e.position||'')}"/></div>
+    <div><label>Wage</label><input id="ef_wage" value="${esc(e.wage||'')}" placeholder="$15/hr"/></div>
+    <div><label>Hours/wk</label><input id="ef_hours" value="${esc(e.hours||'')}"/></div>
+    <div><label>Weekly job-search target</label><input id="ef_target" type="number" value="${e.weekly_target??5}"/></div></div>
+    <label>Employment goal &amp; plan</label><textarea id="ef_goal" rows="2" placeholder="What's the next step, and how will they get there?">${esc(e.goal||'')}</textarea>`);
+  save.onclick=async()=>{ try{ await api(`/housing/residents/${rid}/employment`,{method:'POST',body:JSON.stringify({status:$('ef_status').value,employer:$('ef_employer').value,position:$('ef_pos').value,wage:$('ef_wage').value,hours:$('ef_hours').value,weekly_target:+$('ef_target').value,goal:$('ef_goal').value})}); closeHModal(); if($('employment').classList.contains('active'))loadEmployment(); else if(HOUSING.current)openResident(rid); }catch(e){ alert(e.message); } };
+}
+function openJobSearchForm(rid){
+  const acts=['Application submitted','Interview','Resume / cover letter','Job fair / agency','Follow-up call','Offer received','Hired','Lost / left job','Orientation / first day'];
+  const save=hmodal(`<h3>Log a job-search step</h3>
+    <div class="grid2"><div><label>Activity</label><select id="js_act">${acts.map(a=>`<option>${esc(a)}</option>`).join('')}</select></div>
+    <div><label>Date</label><input id="js_date" type="date" value="${today()}"/></div></div>
+    <label>Employer / where</label><input id="js_emp"/>
+    <label>Detail / outcome</label><input id="js_detail"/>`);
+  save.onclick=async()=>{ try{ await api(`/housing/residents/${rid}/jobsearch`,{method:'POST',body:JSON.stringify({activity:$('js_act').value,date:$('js_date').value,employer:$('js_emp').value,detail:$('js_detail').value})}); closeHModal(); if($('employment').classList.contains('active'))loadEmployment(); else if(HOUSING.current)openResident(rid); }catch(e){ alert(e.message); } };
+}
+
+/* ============================ RENT RUN ============================ */
+async function loadRentRun(){
+  if($('rrWeek') && !$('rrWeek').value) $('rrWeek').value=today();
+  let d; try{ d=await api('/housing/rentrun?week='+($('rrWeek')?$('rrWeek').value:today())); }catch(e){ $('rrBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const collPct=d.stats.expected?Math.round(d.stats.collected/d.stats.expected*100):0;
+  $('rrKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${money(d.stats.expected)}</div><div class="l">Expected this week</div></div>
+    <div class="ret-card"><div class="n">${money(d.stats.collected)}</div><div class="l">Collected · ${collPct}%</div></div>
+    <div class="ret-card ${d.stats.worked<d.stats.total?'rc-warn':''}"><div class="n">${d.stats.worked}/${d.stats.total}</div><div class="l">Residents worked</div></div>
+    <div class="ret-card ${d.stats.noPlan?'rc-high':''}"><div class="n">${d.stats.noPlan}</div><div class="l">No payment plan</div></div>`;
+  const stOpts=['','Paid','Partial','Promise to pay','Scholarship covered','Waived','Missed'];
+  $('rrBody').innerHTML=`<table class="tbl"><thead><tr><th>Resident</th><th>House</th><th>Plan</th><th>Due</th><th>Status</th><th>Collected</th><th>Note</th><th></th></tr></thead><tbody>${d.rows.map(r=>{
+    const log=r.log||{};
+    return `<tr ${log.status?'style="background:rgba(47,122,79,.04)"':''}>
+      <td><b style="cursor:pointer" onclick="openResident(${r.id})">${esc(r.name)}</b></td>
+      <td class="hint">${esc(r.house)}</td>
+      <td>${r.hasPlan?`<span class="hint" title="${esc(r.arrangement)}">${money(r.due)}/wk · ${esc(r.dueDay||'')}</span>`:`<button class="btn btn-danger btn-sm sans" onclick="openPayplanForm(${r.id})">Set plan</button>`}</td>
+      <td><b>${money(r.due)}</b></td>
+      <td><select id="rr_status_${r.id}" style="width:auto;padding:6px 8px">${stOpts.map(s=>`<option ${log.status===s?'selected':''}>${esc(s)}</option>`).join('')}</select></td>
+      <td><input id="rr_amt_${r.id}" type="number" value="${log.collected!=null?log.collected:''}" placeholder="${r.due}" style="width:90px;padding:6px 8px"/></td>
+      <td><input id="rr_note_${r.id}" value="${esc(log.note||'')}" placeholder="promise date, etc." style="min-width:140px;padding:6px 8px"/></td>
+      <td><button class="btn btn-gold btn-sm sans" onclick="recordRent(${r.id},${r.due})">Save</button></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+async function recordRent(rid,due){
+  const status=$('rr_status_'+rid).value; const collected=+($('rr_amt_'+rid).value||0); const note=$('rr_note_'+rid).value;
+  if(!status){ alert('Pick a status.'); return; }
+  try{ await api('/housing/rentrun',{method:'POST',body:JSON.stringify({resident_id:rid,week:$('rrWeek').value,due,collected,status,note})}); loadRentRun(); }catch(e){ alert(e.message); }
+}
+function openPayplanForm(rid){
+  const p=(HOUSING.current&&HOUSING.current.id===rid&&HOUSING.current.payplan)||{};
+  const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const srcs=['Self-pay (employment)','SOR / STAR scholarship','Family support','Medicaid (clinical)','Mixed / see plan'];
+  const save=hmodal(`<h3>Payment plan</h3><p class="sub sans">How &amp; when this resident pays each week — documented and agreed.</p>
+    <div class="grid2"><div><label>Weekly amount ($)</label><input id="pp_amt" type="number" value="${p.weekly_amount||175}"/></div>
+    <div><label>Due day</label><select id="pp_day">${days.map(dd=>`<option ${p.due_day===dd?'selected':''}>${esc(dd)}</option>`).join('')}</select></div>
+    <div><label>Funding source</label><select id="pp_src">${srcs.map(s=>`<option ${p.source===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+    <div><label>Deposit ($)</label><input id="pp_dep" type="number" value="${p.deposit||0}"/></div></div>
+    <label>The arrangement — how they will pay</label><textarea id="pp_arr" rows="3" placeholder="e.g. $175 every Friday from paycheck; if short, promise-to-pay with catch-up by the following Tuesday.">${esc(p.arrangement||'')}</textarea>`);
+  save.onclick=async()=>{ try{ await api(`/housing/residents/${rid}/payplan`,{method:'POST',body:JSON.stringify({weekly_amount:+$('pp_amt').value,due_day:$('pp_day').value,source:$('pp_src').value,deposit:+$('pp_dep').value,arrangement:$('pp_arr').value})}); closeHModal(); if($('rentrun').classList.contains('active'))loadRentRun(); else if(HOUSING.current)openResident(rid); }catch(e){ alert(e.message); } };
+}
+
 /* expose to window for inline handlers & app.js show() */
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm});

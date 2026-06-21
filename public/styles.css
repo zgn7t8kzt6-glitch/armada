@@ -654,8 +654,8 @@ body{
 .ret-cards{gap:18px}
 .ret-card{position:relative;overflow:visible;border-radius:18px;
   background:linear-gradient(180deg,#fff,#fcfaf5)}
-.ret-card::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;border-radius:18px 18px 0 0;
-  background:var(--grad);opacity:.9}
+.ret-card::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:44px;height:4px;
+  border-radius:0 0 5px 5px;background:var(--grad);opacity:.95}
 .ret-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
 @media(min-width:641px){
   .ret-card{padding:24px 16px 22px;min-width:140px}

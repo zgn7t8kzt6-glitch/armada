@@ -2694,11 +2694,17 @@ export function mountHousing(app) {
     discharged.forEach(r => { const t = r.discharge_type || 'Unknown'; dispo[t] = (dispo[t] || 0) + 1; });
     // returns to use (all-time)
     const returns = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE type='Return to use'`).get().c;
+    // loyalty (alumni would-recommend → NPS) for the best-in-class target panel
+    const recs = db.prepare(`SELECT would_recommend v FROM housing_alumni_checkins WHERE would_recommend IS NOT NULL`).all().map(r => r.v);
+    const nps = recs.length ? Math.round((recs.filter(v => v >= 9).length - recs.filter(v => v <= 6).length) / recs.length * 100) : null;
+    // activities programmed in the trailing week (the engagement floor we measure on)
+    const wkStart = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); })();
+    const activitiesWk = db.prepare(`SELECT COUNT(*) c FROM housing_activity_events WHERE date>=? AND date<=? AND status!='cancelled'`).get(wkStart, todayStr()).c;
     res.json({
       avgLos, active: active.length, discharged: discharged.length,
       retention: { d30: retained(30), d90: retained(90), d180: retained(180) },
       reccap: { first: avgFirst, last: avgLast, delta: (avgFirst != null && avgLast != null) ? +(avgLast - avgFirst).toFixed(1) : null },
-      emplRate, employed, dispo, returns,
+      emplRate, employed, dispo, returns, nps, activitiesWk,
     });
   });
 }

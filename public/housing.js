@@ -740,7 +740,7 @@ async function loadHousingOutcomes(){
   $('hoReccap').innerHTML = d.reccap.first!=null?`<div style="display:flex;gap:16px;align-items:center">${hRing(Math.round((d.reccap.last||0)*10), d.reccap.last, 'now')}<div><div class="hint">Intake average</div><div style="font-size:20px;font-family:var(--serif);color:var(--navy)">${d.reccap.first} → ${d.reccap.last}</div><div class="hint">${d.reccap.delta>=0?'Growing':'Declining'} by ${Math.abs(d.reccap.delta)} on average</div></div></div>`:'<div class="hint">Not enough assessments yet.</div>';
   const dispo=Object.entries(d.dispo);
   $('hoDispo').innerHTML = dispo.length?dispo.map(([k,v])=>`<div class="cmd-row"><div class="cmd-row-main">${esc(k)}</div><b>${v}</b></div>`).join(''):'<div class="hint">No discharges yet — every warm farewell is a future admission.</div>';
-  loadTargets({d90:ret.d90, employed:d.emplRate, reccap:d.reccap.delta, returns:d.returns});
+  loadTargets({d90:ret.d90, employed:d.emplRate, reccap:d.reccap.delta, returns:d.returns, nps:d.nps, activities:d.activitiesWk});
 }
 
 /* ============================ INTAKE & FORMS ============================ */

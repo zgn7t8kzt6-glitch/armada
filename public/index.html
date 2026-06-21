@@ -73,6 +73,7 @@
     <button data-view="rounds">Rounds</button>
     <button data-view="roundscan">Scan Rounds</button>
     <button data-view="bedboard">Bed Turnover</button>
+    <button data-view="bedmap">Bed Board</button>
     <button data-view="engagement">Engagement</button>
     <button data-view="program">Program</button>
     <button data-view="meals">Meals</button>
@@ -1782,6 +1783,27 @@
       </div>
       <div class="card"><h3>Needs cleaning</h3><div id="tovDirty"></div></div>
       <div class="card"><h3>Cleaned — open <span class="hint" style="font-weight:400">(last 24h)</span></h3><div id="tovClean"></div></div>
+    </section>
+
+    <!-- BED BOARD (occupancy) -->
+    <section id="bedmap" class="view">
+      <div class="card">
+        <div class="cmd-hero-row">
+          <div><h3>🛏️ Bed Board</h3><p class="sub sans" style="margin:0">Exactly where every client is — room &amp; bed, live from Kipu — and which beds are open.</p></div>
+          <button class="btn btn-ghost sans" onclick="loadBedMap()">Refresh</button>
+        </div>
+        <div id="bmKpis" class="ret-cards" style="margin-top:12px"></div>
+        <div class="handoff-add no-print" style="gap:6px;flex-wrap:wrap;align-items:end;margin-top:10px" data-admin>
+          <button class="btn btn-gold btn-sm sans" onclick="syncBeds()" title="Create a bed for every room/bed Kipu shows occupied">⟳ Build from Kipu</button>
+          <div class="field" style="margin:0"><label>Total beds</label><input id="bm_total" type="number" min="1" max="200" style="width:80px" onchange="setBedTotal()"/></div>
+          <div class="field" style="margin:0"><label>Add an open bed (room)</label><input id="bm_room" placeholder="e.g. 204"/></div>
+          <div class="field" style="margin:0"><label>Bed</label><input id="bm_label" placeholder="A" style="width:60px"/></div>
+          <button class="btn btn-ghost btn-sm sans" onclick="bmAddBed()">+ Add bed</button>
+          <span class="hint" id="bm_msg"></span>
+        </div>
+      </div>
+      <div id="bmUnplaced"></div>
+      <div id="bmBoard"></div>
     </section>
 
     <!-- SCHEDULE BUILDER -->

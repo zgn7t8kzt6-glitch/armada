@@ -1394,6 +1394,14 @@ if (getState('concierge_email_seed_v1') !== 'done') {
   setState('concierge_email', 'shlomo@armadarecovery.com');
   setState('concierge_email_seed_v1', 'done');
 }
+// One-time: set the Armada credo (the "Why we're here" on the lineup + 8am email)
+// and the short daily credo + motto for the Gold Standards. Written with leadership.
+if (getState('credo_seed_v1') !== 'done') {
+  setState('purpose', "Everyone who comes to us wants to be better — but that hope is fragile, and detox is only the doorway. Our work is to make people feel so important and so genuinely cared for that they don't give up when it gets hard, and don't walk away when they feel a little better. We're not here to get someone through three days — we're here to reconnect them to why they came, show them a future is real, and set them up for the long road. So that years from now, they're still here to say it started with us.");
+  setState('credo_short', "Detox is three days. Recovery is a life. Make these days the reason they don't quit.");
+  setState('credo_motto', "We don't process patients — we give people their life back.");
+  setState('credo_seed_v1', 'done');
+}
 // One-time: feature Jasmine as the current recognition-raffle winner on the
 // lineup (per leadership). Auto-clears after a week; editable from the raffle UI.
 if (getState('raffle_winner_seed_v1') !== 'done') {

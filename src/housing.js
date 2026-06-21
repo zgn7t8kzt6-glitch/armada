@@ -819,6 +819,19 @@ function movementRecipients() {
   const b = (getState('housing_movement_leadership') || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '').split(',');
   return [...new Set([...a, ...b].map(s => s.trim()).filter(Boolean))];
 }
+// Real-time alert to housing leadership/clinical for urgent events (serious
+// incidents, distress kiosk requests). On by default; uses the same recipients.
+function housingAlertsOn() { return getState('housing_alerts') !== 'off'; }
+async function alertHousing(subject, bodyHtml) {
+  try {
+    if (!housingAlertsOn() || !emailConfigured()) return;
+    const list = movementRecipients(); if (!list.length) return;
+    const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;color:#1d2b2a">
+      <h2 style="color:#b3382f;margin:0 0 8px">Armada Sober Living — Alert</h2>${bodyHtml}
+      <p style="color:#9aa7a4;font-size:12px;margin-top:16px">Automated alert · Armada Recovery Housing</p></div>`;
+    for (const r of list) { try { await sendEmail({ to: r, subject, html, suppressCc: true }); } catch { /* keep going */ } }
+  } catch { /* never block the request on an alert */ }
+}
 async function deliverDailyMovement(date) {
   if (!emailConfigured()) return { error: 'Email isn’t connected yet (Settings → Email).' };
   const list = movementRecipients();
@@ -874,6 +887,10 @@ export function mountHousing(app) {
     const priority = SL_DISTRESS.test(text) ? 'Urgent' : 'Normal';
     db.prepare(`INSERT INTO housing_requests (resident_id,category,text,priority) VALUES (?,?,?,?)`)
       .run(b.resident_id, b.category || 'Something else', text.slice(0, 800), priority);
+    if (priority === 'Urgent') {
+      const who = db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(b.resident_id)?.name || 'A resident';
+      alertHousing(`⚠ Urgent kiosk request — ${who}`, `<p><b>${who}</b> sent an urgent request from the Sober Living kiosk:</p><blockquote style="border-left:3px solid #b3382f;padding-left:10px;color:#444">${text.replace(/[<>&]/g, '')}</blockquote><p>Go to them now.</p>`);
+    }
     res.json({ ok: true });
   });
   app.post('/api/sl-kiosk/suggestion', requireSlKiosk, (req, res) => {
@@ -1368,6 +1385,7 @@ export function mountHousing(app) {
       leadership: getState('housing_movement_leadership') || getState('census_email_to') || '',
       auto: getState('housing_movement_auto') === 'on',
       hour: +(getState('housing_movement_hour') || 8),
+      alerts: housingAlertsOn(),
       emailReady: emailConfigured(), from: emailStatus().from || '',
       lastSent: getState('housing_movement_last') || null,
     });
@@ -1388,6 +1406,7 @@ export function mountHousing(app) {
     if (b.clinical != null) setState('housing_movement_clinical', String(b.clinical).trim());
     if (b.leadership != null) setState('housing_movement_leadership', String(b.leadership).trim());
     if (b.auto != null) setState('housing_movement_auto', b.auto ? 'on' : 'off');
+    if (b.alerts != null) setState('housing_alerts', b.alerts ? 'on' : 'off');
     if (b.hour != null) setState('housing_movement_hour', String(Math.min(23, Math.max(0, num(b.hour)))));
     audit({ user: req.user, action: 'HOUSING_MOVEMENT_SETTINGS', ip: req.ip });
     res.json({ ok: true });
@@ -1620,6 +1639,13 @@ export function mountHousing(app) {
       b.type || 'Other', b.severity || 'low', b.summary || '', b.action || null, b.notified || null, b.follow_up || null,
       b.status || 'open', b.reported_by || req.user.name, req.user.name);
     audit({ user: req.user, action: 'HOUSING_INCIDENT', detail: `${b.type || 'Other'} (${b.severity || 'low'})`, ip: req.ip });
+    if (/high|critical/i.test(b.severity || '')) {
+      const where = b.house_id ? (db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(num(b.house_id))?.name || '') : '';
+      const who = b.resident_id ? (db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(num(b.resident_id))?.name || '') : '';
+      alertHousing(`🚨 ${b.severity} incident — ${b.type || 'Incident'}${where ? ' · ' + where : ''}`,
+        `<p>A <b>${(b.severity || '').toLowerCase()}</b>-severity incident was logged${where ? ' at <b>' + where + '</b>' : ''}${who ? ' involving <b>' + who + '</b>' : ''}:</p>
+         <p><b>${(b.type || 'Incident').replace(/[<>&]/g, '')}</b> — ${(b.summary || '').replace(/[<>&]/g, '')}</p>${b.action ? '<p>Action: ' + (b.action).replace(/[<>&]/g, '') + '</p>' : ''}`);
+    }
     res.json({ ok: true, id: Number(r.lastInsertRowid) });
   });
 

@@ -1702,4 +1702,112 @@ function openKnowMe(id){
   save.onclick=async()=>{ try{ await api('/housing/residents/'+id,{method:'POST',body:JSON.stringify({pref_motivate:$('km_mot').value,pref_trigger:$('km_trig').value,pref_bestday:$('km_day').value})}); closeHModal(); openResident(id); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{hubLineup,logLineup,editStandards,loadServiceRecovery,openServiceRecovery,resolveServiceRecovery,claimRequest,loadStaffDev,openStaffDev,toggleStaffOnboard,setCompetency,editStaffProfile,loadFarewell,openFarewell,toggleFarewell,openAlumniCheckin,loadTargets,editTargets,openKnowMe,loadStaffHub,setHubTab,hubFocus,hubTasks,toggleShiftTask,hubFirstDay,openFirstDay,toggleOnboard,hubRecognition,giveRecognition,kudosRecognition,loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+/* ============================ VEHICLES & TRANSPORTATION ============================ */
+async function loadFleet(){
+  let d; try{ d=await api('/housing/fleet'); }catch(e){ $('fleetBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  HOUSING.fleet=d; const k=d.kpis;
+  const kpis=`<div class="ret-cards" style="margin:0 0 16px">
+    <div class="ret-card"><div class="n">${k.total}</div><div class="l">Vehicles</div></div>
+    <div class="ret-card ${k.serviceDue?'rc-warn':''}"><div class="n">${k.serviceDue}</div><div class="l">Service due</div></div>
+    <div class="ret-card ${k.needPretrip?'rc-warn':''}"><div class="n">${k.needPretrip}</div><div class="l">Pre-trip due today</div></div>
+    <div class="ret-card ${k.openIssues?'rc-high':''}"><div class="n">${k.openIssues}</div><div class="l">Flagged issues</div></div></div>`;
+  const num=n=>n!=null?Number(n).toLocaleString():'—';
+  const cards=d.vehicles.length? d.vehicles.map(v=>{
+    const checkOk=v.lastCheck && v.lastCheck.date===today() && v.lastCheck.passed && !v.lastCheck.issues;
+    return `<div class="card" style="margin-bottom:14px">
+      <div class="cmd-hero-row" style="align-items:flex-start">
+        <div><h3 style="font-size:17px">🚐 ${esc(v.name)} <span class="hint" style="font-weight:400">${esc([v.year,v.make,v.model].filter(Boolean).join(' '))}${v.plate?' · '+esc(v.plate):''}</span></h3>
+          <div class="hint">Odometer ${num(v.odometer)} mi${v.mpg!=null?' · '+v.mpg+' mpg avg':''}${v.fuel30?' · fuel 30d '+money(v.fuel30):''}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${v.serviceDue?'<span class="chip chip-warn">Service due</span>':'<span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">Service OK</span>'}
+          ${v.lastCheck&&v.lastCheck.issues?'<span class="chip" style="background:#fbe9e7;color:#b3382f;border-color:#f3c4c0">Issue flagged</span>':checkOk?'<span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">Pre-trip ✓ today</span>':'<span class="chip chip-warn">Pre-trip due</span>'}
+        </div>
+      </div>
+      <div class="kv"><span class="k">Next service</span><span class="v">${v.nextOdo?num(v.nextOdo)+' mi':''}${v.nextDate?(v.nextOdo?' · ':'')+esc(v.nextDate):''}${!v.nextOdo&&!v.nextDate?'No service logged yet':''}</span></div>
+      <div class="kv"><span class="k">Last cleaned</span><span class="v">${v.lastClean?esc(v.lastClean.date)+(v.lastClean.passed?' ✅':''):'—'}</span></div>
+      ${v.lastCheck&&v.lastCheck.issues?`<div class="pc-note" style="color:#b3382f">⚠ ${esc(v.lastCheck.issues)}</div>`:''}
+      <div class="toolbar no-print" style="justify-content:flex-start;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-primary btn-sm sans" onclick="openVehCheck(${v.id},'pretrip')">✓ Pre-trip</button>
+        <button class="btn btn-gold btn-sm sans" onclick="openVehFuel(${v.id})">⛽ Gas</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="openVehCheck(${v.id},'clean')">🧽 Cleanliness</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="openVehMaint(${v.id})">🔧 Service</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="openVehicle(${v.id})">History</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="openVehForm(${v.id})">Edit</button>
+      </div></div>`;
+  }).join('') : '<div class="card"><div class="empty">No vehicles yet — add your first to start tracking gas, maintenance & checks.</div></div>';
+  $('fleetBody').innerHTML=`${kpis}<div class="toolbar"><button class="btn btn-primary sans" onclick="openVehForm()">+ Add vehicle</button></div>${cards}`;
+}
+function openVehForm(id){
+  const v=(id&&HOUSING.fleet)?HOUSING.fleet.vehicles.find(x=>x.id===id):null;
+  const save=hmodal(`<h3>${v?'Edit vehicle':'Add vehicle'}</h3>
+    <label>Name / label</label><input id="vf_name" value="${esc(v?.name||'')}" placeholder="e.g. Van 1 — Coventry"/>
+    <div class="grid2">
+      <div><label>Year</label><input id="vf_year" type="number" value="${esc(v?.year??'')}"/></div>
+      <div><label>Make</label><input id="vf_make" value="${esc(v?.make||'')}"/></div>
+      <div><label>Model</label><input id="vf_model" value="${esc(v?.model||'')}"/></div>
+      <div><label>Plate</label><input id="vf_plate" value="${esc(v?.plate||'')}"/></div>
+      <div><label>Odometer (mi)</label><input id="vf_odo" type="number" value="${esc(v?.odometer??'')}"/></div>
+      <div><label>Service every (mi)</label><input id="vf_int" type="number" value="${esc(v?.service_interval||5000)}"/></div>
+    </div>
+    <label>Notes</label><input id="vf_notes" value="${esc(v?.notes||'')}"/>`);
+  save.onclick=async()=>{ const body={id:id||null,name:$('vf_name').value,year:$('vf_year').value,make:$('vf_make').value,model:$('vf_model').value,plate:$('vf_plate').value,odometer:$('vf_odo').value,service_interval:$('vf_int').value,notes:$('vf_notes').value};
+    if(!body.name.trim()){ alert('Name the vehicle.'); return; }
+    try{ await api('/housing/fleet/vehicle',{method:'POST',body:JSON.stringify(body)}); closeHModal(); loadFleet(); }catch(e){ alert(e.message); } };
+}
+function openVehFuel(id){
+  const save=hmodal(`<h3>⛽ Log gas</h3>
+    <div class="grid2">
+      <div><label>Date</label><input id="fu_date" type="date" value="${today()}"/></div>
+      <div><label>Odometer (mi)</label><input id="fu_odo" type="number"/></div>
+      <div><label>Gallons</label><input id="fu_gal" type="number" step="0.01"/></div>
+      <div><label>Cost ($)</label><input id="fu_cost" type="number" step="0.01"/></div>
+    </div><p class="hint">MPG is calculated automatically from the odometer at your last fill-up.</p>`);
+  save.onclick=async()=>{ try{ const r=await api('/housing/fleet/fuel',{method:'POST',body:JSON.stringify({vehicle_id:id,date:$('fu_date').value,odometer:$('fu_odo').value,gallons:$('fu_gal').value,cost:$('fu_cost').value})}); closeHModal(); loadFleet(); if(r&&r.mpg) console.log('mpg',r.mpg); }catch(e){ alert(e.message); } };
+}
+function openVehMaint(id){
+  const save=hmodal(`<h3>🔧 Log service / maintenance</h3>
+    <div class="grid2">
+      <div><label>Date</label><input id="mt_date" type="date" value="${today()}"/></div>
+      <div><label>Odometer (mi)</label><input id="mt_odo" type="number"/></div>
+      <div><label>Service done</label><input id="mt_svc" placeholder="Oil change, tires, brakes…"/></div>
+      <div><label>Vendor</label><input id="mt_vendor"/></div>
+      <div><label>Cost ($)</label><input id="mt_cost" type="number" step="0.01"/></div>
+      <div><label>Next due (mi)</label><input id="mt_nodo" type="number"/></div>
+      <div><label>Next due (date)</label><input id="mt_ndate" type="date"/></div>
+    </div>`);
+  save.onclick=async()=>{ if(!$('mt_svc').value.trim()){ alert('What service was done?'); return; } try{ await api('/housing/fleet/maint',{method:'POST',body:JSON.stringify({vehicle_id:id,date:$('mt_date').value,odometer:$('mt_odo').value,service:$('mt_svc').value,vendor:$('mt_vendor').value,cost:$('mt_cost').value,next_due_odo:$('mt_nodo').value,next_due_date:$('mt_ndate').value})}); closeHModal(); loadFleet(); }catch(e){ alert(e.message); } };
+}
+function openVehCheck(id,type){
+  const list=(HOUSING.fleet?(type==='clean'?HOUSING.fleet.clean:HOUSING.fleet.pretrip):[])||[];
+  const title=type==='clean'?'🧽 Cleanliness check':'✓ Pre-trip transportation check';
+  const checks=list.map(it=>`<label style="display:flex;align-items:center;gap:9px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500;margin:6px 0"><input type="checkbox" class="vc_item" data-l="${esc(it)}" checked style="width:auto"/> ${esc(it)}</label>`).join('');
+  const trip = type==='clean'?'':`<div class="grid2"><div><label>Driver</label><input id="vc_driver" value="${esc((ME&&ME.name)||'')}"/></div><div><label>Destination</label><input id="vc_dest"/></div><div><label>Odometer out</label><input id="vc_odo" type="number"/></div></div>`;
+  const save=hmodal(`<h3>${title}</h3><p class="sub sans" style="margin:.2em 0 1em">Uncheck anything that isn't right and note the issue — leadership is alerted to safety problems.</p>
+    ${trip}<div style="margin-top:6px">${checks}</div>
+    <label>Issues / notes (optional)</label><textarea id="vc_issues" rows="2" placeholder="Anything that needs fixing"></textarea>`);
+  save.onclick=async()=>{ const items=[...document.querySelectorAll('.vc_item')].map(c=>({label:c.dataset.l,ok:c.checked}));
+    try{ await api('/housing/fleet/check',{method:'POST',body:JSON.stringify({vehicle_id:id,type,driver:type==='clean'?null:($('vc_driver')?.value),destination:type==='clean'?null:($('vc_dest')?.value),odo_start:type==='clean'?null:($('vc_odo')?.value),items,issues:$('vc_issues').value})}); closeHModal(); loadFleet(); }catch(e){ alert(e.message); } };
+}
+async function openVehicle(id){
+  let d; try{ d=await api('/housing/fleet/vehicle/'+id); }catch(e){ alert(e.message); return; }
+  const v=d.vehicle; const num=n=>n!=null?Number(n).toLocaleString():'—';
+  const fuelRows=d.fuel.length?d.fuel.map(f=>`<tr><td>${esc(f.date)}</td><td>${f.gallons??'—'} gal</td><td>${f.cost!=null?money(f.cost):'—'}</td><td>${num(f.odometer)}</td><td>${f.mpg!=null?f.mpg+' mpg':''}</td></tr>`).join(''):'<tr><td colspan="5" class="hint">No fuel logged.</td></tr>';
+  const maintRows=d.maint.length?d.maint.map(m=>`<tr><td>${esc(m.date)}</td><td>${esc(m.service||'')}</td><td>${m.cost!=null?money(m.cost):'—'}</td><td>${esc(m.vendor||'')}</td><td>${num(m.odometer)}</td></tr>`).join(''):'<tr><td colspan="5" class="hint">No service logged.</td></tr>';
+  const checkRows=d.checks.length?d.checks.map(c=>`<div class="cmd-row ${c.issues?'cmd-row-flag':''}"><div class="cmd-row-main">${c.type==='clean'?'🧽':'✓'} <b>${esc(c.date)}</b> · ${esc(c.type)} ${c.passed?'<span class="chip" style="background:#e8f3ec;color:#2f7a4f;border-color:#bfe0cb">passed</span>':'<span class="chip chip-warn">issues</span>'} <span class="hint">· ${esc(c.driver||c.by||'')}${c.destination?' → '+esc(c.destination):''}</span>${c.issues?`<br><span style="color:#b3382f">${esc(c.issues)}</span>`:''}</div></div>`).join(''):'<div class="hint">No checks yet.</div>';
+  $('fleetBody').innerHTML=`<div class="card">
+    <div class="cmd-hero-row" style="align-items:center"><div><h3>🚐 ${esc(v.name)}</h3><p class="sub sans" style="margin:0">${esc([v.year,v.make,v.model].filter(Boolean).join(' '))}${v.plate?' · '+esc(v.plate):''} · ${num(v.odometer)} mi${v.mpg!=null?' · '+v.mpg+' mpg':''}</p></div>
+      <button class="btn btn-ghost sans" onclick="loadFleet()">← All vehicles</button></div>
+    <div class="toolbar no-print" style="justify-content:flex-start;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm sans" onclick="openVehCheck(${v.id},'pretrip')">✓ Pre-trip</button>
+      <button class="btn btn-gold btn-sm sans" onclick="openVehFuel(${v.id})">⛽ Gas</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="openVehCheck(${v.id},'clean')">🧽 Cleanliness</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="openVehMaint(${v.id})">🔧 Service</button>
+    </div></div>
+  <div class="cmd-grid">
+    <div class="card"><h3>⛽ Fuel log</h3><table class="tbl"><thead><tr><th>Date</th><th>Gal</th><th>Cost</th><th>Odo</th><th>MPG</th></tr></thead><tbody>${fuelRows}</tbody></table></div>
+    <div class="card"><h3>🔧 Service history</h3><table class="tbl"><thead><tr><th>Date</th><th>Service</th><th>Cost</th><th>Vendor</th><th>Odo</th></tr></thead><tbody>${maintRows}</tbody></table></div>
+  </div>
+  <div class="card"><h3>✓ Checks &amp; cleanliness</h3>${checkRows}</div>`;
+}
+
+Object.assign(window,{loadFleet,openVehForm,openVehFuel,openVehMaint,openVehCheck,openVehicle,hubLineup,logLineup,editStandards,loadServiceRecovery,openServiceRecovery,resolveServiceRecovery,claimRequest,loadStaffDev,openStaffDev,toggleStaffOnboard,setCompetency,editStaffProfile,loadFarewell,openFarewell,toggleFarewell,openAlumniCheckin,loadTargets,editTargets,openKnowMe,loadStaffHub,setHubTab,hubFocus,hubTasks,toggleShiftTask,hubFirstDay,openFirstDay,toggleOnboard,hubRecognition,giveRecognition,kudosRecognition,loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

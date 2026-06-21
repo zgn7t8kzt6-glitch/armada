@@ -430,6 +430,28 @@ export function housingSchema() {
     resident_id INTEGER, date TEXT, sober INTEGER, employed INTEGER, housed INTEGER,
     would_recommend INTEGER, note TEXT, by TEXT, created TEXT DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS housing_vehicles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT, make TEXT, model TEXT, year INTEGER, plate TEXT, vin TEXT,
+    odometer INTEGER, status TEXT DEFAULT 'active', assigned_house INTEGER,
+    service_interval INTEGER DEFAULT 5000, notes TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_fuel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER, date TEXT, gallons REAL, cost REAL, odometer INTEGER, mpg REAL, by TEXT,
+    created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_vehicle_maint (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER, date TEXT, service TEXT, cost REAL, vendor TEXT, odometer INTEGER,
+    next_due_date TEXT, next_due_odo INTEGER, by TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_vehicle_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER, date TEXT, type TEXT, driver TEXT, destination TEXT,
+    odo_start INTEGER, odo_end INTEGER, items TEXT, issues TEXT, clean_ok INTEGER, passed INTEGER,
+    by TEXT, created TEXT DEFAULT (datetime('now'))
+  );
   `);
   // Migration: program (PHP / IOP / Graduate) per house, added after first ship.
   try { db.exec(`ALTER TABLE housing_houses ADD COLUMN program TEXT`); } catch { /* already exists */ }
@@ -1070,6 +1092,17 @@ function getTargets() {
   // merge saved target values over the canonical label/dir set
   return DEFAULT_TARGETS.map(t => { const s = saved.find(x => x.key === t.key); return s ? { ...t, target: num(s.target, t.target) } : t; });
 }
+// Vehicles & transportation — pre-trip safety checklist + cleanliness standard.
+const PRETRIP_CHECK = [
+  'Tires & pressure OK', 'All exterior lights working', 'Brakes feel right', 'Fluids OK (oil / coolant / washer)',
+  'All seatbelts functional', 'Mirrors & windshield clear', 'Wipers working', 'Fuel at least half a tank',
+  'Insurance card & registration in vehicle', 'Naloxone on board', 'First-aid kit present', 'No dashboard warning lights',
+];
+const CLEAN_CHECK = [
+  'Trash removed', 'Interior vacuumed', 'Seats & surfaces wiped', 'Windows cleaned',
+  'High-touch points sanitized', 'No personal items left behind', 'Exterior presentable',
+];
+
 function canManageHousing(req) {
   const u = req.user; return !!(u && (u.role === 'admin' || u.job_role === 'Executive Director' || u.job_role === 'Housing Director'));
 }
@@ -2539,6 +2572,91 @@ export function mountHousing(app) {
     if (!canManageHousing(req)) return res.status(403).json({ error: 'Leadership only.' });
     setState('hilltop_targets', J((req.body?.targets || []).map(t => ({ key: t.key, target: num(t.target) }))));
     res.json({ ok: true });
+  });
+
+  // ════════════ Vehicles & transportation ════════════
+  function vehicleSummary(v) {
+    const lastFuel = db.prepare(`SELECT * FROM housing_fuel WHERE vehicle_id=? ORDER BY date DESC, id DESC LIMIT 1`).get(v.id) || null;
+    const mpgRow = db.prepare(`SELECT AVG(mpg) a FROM housing_fuel WHERE vehicle_id=? AND mpg IS NOT NULL`).get(v.id);
+    const fuel30 = db.prepare(`SELECT IFNULL(SUM(cost),0) s FROM housing_fuel WHERE vehicle_id=? AND date>=date('now','-30 days')`).get(v.id).s;
+    const lastMaint = db.prepare(`SELECT * FROM housing_vehicle_maint WHERE vehicle_id=? ORDER BY date DESC, id DESC LIMIT 1`).get(v.id) || null;
+    const lastCheck = db.prepare(`SELECT * FROM housing_vehicle_checks WHERE vehicle_id=? AND type='pretrip' ORDER BY date DESC, id DESC LIMIT 1`).get(v.id) || null;
+    const lastClean = db.prepare(`SELECT * FROM housing_vehicle_checks WHERE vehicle_id=? AND type='clean' ORDER BY date DESC, id DESC LIMIT 1`).get(v.id) || null;
+    const interval = v.service_interval || 5000;
+    const nextOdo = lastMaint ? (lastMaint.next_due_odo || (lastMaint.odometer ? lastMaint.odometer + interval : null)) : null;
+    const nextDate = lastMaint ? lastMaint.next_due_date : null;
+    const dueByOdo = nextOdo != null && v.odometer != null && v.odometer >= nextOdo;
+    const dueByDate = nextDate && todayStr() >= nextDate;
+    const serviceDue = !!(dueByOdo || dueByDate) || !lastMaint;
+    return { ...v, lastFuel, mpg: mpgRow.a != null ? +mpgRow.a.toFixed(1) : null, fuel30, lastMaint, lastCheck, lastClean, nextOdo, nextDate, serviceDue };
+  }
+  app.get('/api/housing/fleet', requireAuth, (req, res) => {
+    const vehicles = db.prepare(`SELECT * FROM housing_vehicles WHERE status!='retired' ORDER BY name`).all().map(vehicleSummary);
+    res.json({
+      vehicles, pretrip: PRETRIP_CHECK, clean: CLEAN_CHECK,
+      kpis: {
+        total: vehicles.length,
+        serviceDue: vehicles.filter(v => v.serviceDue).length,
+        needPretrip: vehicles.filter(v => !v.lastCheck || v.lastCheck.date < todayStr()).length,
+        openIssues: vehicles.filter(v => v.lastCheck && v.lastCheck.issues).length,
+      },
+    });
+  });
+  app.get('/api/housing/fleet/vehicle/:id', requireAuth, (req, res) => {
+    const v = db.prepare(`SELECT * FROM housing_vehicles WHERE id=?`).get(req.params.id);
+    if (!v) return res.status(404).json({ error: 'Not found' });
+    res.json({
+      vehicle: vehicleSummary(v),
+      fuel: db.prepare(`SELECT * FROM housing_fuel WHERE vehicle_id=? ORDER BY date DESC, id DESC LIMIT 30`).all(v.id),
+      maint: db.prepare(`SELECT * FROM housing_vehicle_maint WHERE vehicle_id=? ORDER BY date DESC, id DESC LIMIT 30`).all(v.id),
+      checks: db.prepare(`SELECT * FROM housing_vehicle_checks WHERE vehicle_id=? ORDER BY date DESC, id DESC LIMIT 30`).all(v.id).map(c => ({ ...c, items: P(c.items, []) })),
+      pretrip: PRETRIP_CHECK, clean: CLEAN_CHECK,
+    });
+  });
+  app.post('/api/housing/fleet/vehicle', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const odo = b.odometer != null && b.odometer !== '' ? num(b.odometer) : null;
+    if (b.id) {
+      db.prepare(`UPDATE housing_vehicles SET name=?,make=?,model=?,year=?,plate=?,vin=?,odometer=?,status=?,service_interval=?,notes=? WHERE id=?`)
+        .run(b.name || 'Vehicle', b.make || null, b.model || null, b.year ? num(b.year) : null, b.plate || null, b.vin || null, odo, b.status || 'active', num(b.service_interval, 5000), b.notes || null, num(b.id));
+      return res.json({ ok: true, id: num(b.id) });
+    }
+    const r = db.prepare(`INSERT INTO housing_vehicles (name,make,model,year,plate,vin,odometer,status,service_interval,notes) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(b.name || 'Vehicle', b.make || null, b.model || null, b.year ? num(b.year) : null, b.plate || null, b.vin || null, odo, b.status || 'active', num(b.service_interval, 5000), b.notes || null);
+    res.json({ ok: true, id: Number(r.lastInsertRowid) });
+  });
+  app.post('/api/housing/fleet/fuel', requireAuth, (req, res) => {
+    const b = req.body || {}; const vid = num(b.vehicle_id);
+    const odo = b.odometer != null && b.odometer !== '' ? num(b.odometer) : null;
+    const gallons = b.gallons != null && b.gallons !== '' ? num(b.gallons) : null;
+    let mpg = null;
+    if (odo != null && gallons) {
+      const prev = db.prepare(`SELECT odometer FROM housing_fuel WHERE vehicle_id=? AND odometer IS NOT NULL AND odometer<? ORDER BY odometer DESC LIMIT 1`).get(vid, odo);
+      if (prev && prev.odometer != null) { const miles = odo - prev.odometer; if (miles > 0) mpg = +(miles / gallons).toFixed(1); }
+    }
+    db.prepare(`INSERT INTO housing_fuel (vehicle_id,date,gallons,cost,odometer,mpg,by) VALUES (?,?,?,?,?,?,?)`)
+      .run(vid, b.date || todayStr(), gallons, b.cost != null && b.cost !== '' ? num(b.cost) : null, odo, mpg, req.user.name);
+    if (odo != null) db.prepare(`UPDATE housing_vehicles SET odometer=MAX(IFNULL(odometer,0),?) WHERE id=?`).run(odo, vid);
+    res.json({ ok: true, mpg });
+  });
+  app.post('/api/housing/fleet/maint', requireAuth, (req, res) => {
+    const b = req.body || {}; const vid = num(b.vehicle_id);
+    const odo = b.odometer != null && b.odometer !== '' ? num(b.odometer) : null;
+    db.prepare(`INSERT INTO housing_vehicle_maint (vehicle_id,date,service,cost,vendor,odometer,next_due_date,next_due_odo,by) VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(vid, b.date || todayStr(), b.service || 'Service', b.cost != null && b.cost !== '' ? num(b.cost) : null, b.vendor || null, odo, b.next_due_date || null, b.next_due_odo != null && b.next_due_odo !== '' ? num(b.next_due_odo) : null, req.user.name);
+    if (odo != null) db.prepare(`UPDATE housing_vehicles SET odometer=MAX(IFNULL(odometer,0),?) WHERE id=?`).run(odo, vid);
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/fleet/check', requireAuth, (req, res) => {
+    const b = req.body || {}; const vid = num(b.vehicle_id);
+    const items = Array.isArray(b.items) ? b.items : [];
+    const passed = items.length ? (items.every(i => i.ok) ? 1 : 0) : 1;
+    db.prepare(`INSERT INTO housing_vehicle_checks (vehicle_id,date,type,driver,destination,odo_start,odo_end,items,issues,clean_ok,passed,by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(vid, b.date || todayStr(), b.type === 'clean' ? 'clean' : 'pretrip', b.driver || req.user.name, b.destination || null,
+        b.odo_start != null && b.odo_start !== '' ? num(b.odo_start) : null, b.odo_end != null && b.odo_end !== '' ? num(b.odo_end) : null,
+        J(items), b.issues || null, b.type === 'clean' ? passed : null, passed, req.user.name);
+    if (b.issues) { try { alertHousing(`${SL_BRAND} — vehicle issue flagged`, 'Vehicle needs attention', `A vehicle check flagged an issue${b.destination ? ` (trip to ${String(b.destination).replace(/[<>&]/g, '')})` : ''}: <b>${String(b.issues).replace(/[<>&]/g, '')}</b>`); } catch { /* never block */ } }
+    res.json({ ok: true, passed });
   });
 
   // ---- Intake & forms ----

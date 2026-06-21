@@ -161,7 +161,7 @@ const GROUP_OF={
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
-  housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
+  housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
   mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
@@ -220,8 +220,19 @@ const VIEW_ROLES = {
 };
 // Recovery Housing is a separate world from clinical detox. Only housing staff
 // (and the owner/admin) ever see it; nobody on the detox/clinical side does.
-const HOUSING_VIEWS = ['housing','staffhub','hstaffdev','houses','residents','resident','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','hmaint','activities','hfarewell','movement','coordination','employment','rentrun','ledger','orh','housingoutcomes'];
+const HOUSING_VIEWS = ['housing','staffhub','hstaffdev','houses','fleet','residents','resident','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','hmaint','activities','hfarewell','movement','coordination','employment','rentrun','ledger','orh','housingoutcomes'];
 const HOUSING_ROLES = ['Housing Director','House Manager','Recovery Coach'];
+// Hilltop hubs: consolidate related screens behind one sidebar item with in-page tabs.
+// The first view in each hub is its "host" (what the sidebar item opens).
+const HUBS = {
+  residents: {label:'Residents', items:[['residents','Roster'],['intake','Intake & Forms'],['screens','Drug Screening'],['hfarewell','Farewell & Alumni'],['employment','Employment']]},
+  houses:    {label:'Houses',    items:[['houses','Beds'],['houselife','House Life'],['hmaint','Maintenance & Supplies'],['fleet','Vehicles']]},
+  team:      {label:'Team & Ops',items:[['housingstaff','Staffing'],['shiftreports','Shift Reports'],['hincidents','Incident Reports'],['hstaffdev','Staff Growth']]},
+  insight:   {label:'Insight',   items:[['housingoutcomes','Outcomes'],['orh','ORH Compliance'],['movement','Daily Movement'],['coordination','Clinical Coordination']]},
+  billing:   {label:'Billing',   items:[['rentrun','Rent Run'],['ledger','Rent & Funding']]},
+};
+const HUB_OF = {};
+Object.entries(HUBS).forEach(([k,h])=>h.items.forEach(([v])=>{ HUB_OF[v]=k; }));
 const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // The handful of shared pages housing staff still get (their own tasks/comms/learning) —
 // everything else clinical/detox stays hidden from them.
@@ -232,9 +243,9 @@ const ROLE_MENU = {
   'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedboard','clients','dignity','mytasks','messages','team','training','library'],
   'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
-  'Housing Director': ['housing','staffhub','hstaffdev','houses','residents','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','hmaint','activities','hfarewell','movement','coordination','employment','rentrun','ledger','orh','housingoutcomes','mytasks','messages'],
-  'House Manager':    ['housing','staffhub','hstaffdev','houses','residents','intake','screens','houselife','housingstaff','shiftreports','hincidents','voice','hmaint','activities','hfarewell','movement','coordination','employment','rentrun','ledger','mytasks','messages'],
-  'Recovery Coach':   ['staffhub','housing','residents','intake','screens','houselife','shiftreports','hincidents','voice','hmaint','activities','hfarewell','movement','coordination','employment','mytasks','messages'],
+  'Housing Director': ['housing','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
+  'House Manager':    ['housing','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
+  'Recovery Coach':   ['staffhub','housing','voice','activities','residents','houses','mytasks','messages'],
 };
 function flatMenu(){
   // Admins + leadership always get the full nav (Command Center, etc.) — the flat
@@ -294,9 +305,11 @@ function selectGroup(g){
   const flat = flatMenu();
   if(flat){
     [...document.querySelectorAll('#nav button')].forEach(b=>{ b.style.display = (flat.includes(b.dataset.view) && canSeeView(b.dataset.view)) ? '' : 'none'; });
+    document.querySelectorAll('#nav [data-cap]').forEach(c=>{ c.style.display='none'; });
     const navEl=$('nav'); if(navEl) navEl.style.display='';
     return;
   }
+  document.querySelectorAll('#nav [data-cap]').forEach(c=>{ c.style.display = (c.dataset.group===g) ? '' : 'none'; });
   document.querySelectorAll('#groupbar button').forEach(b=>b.classList.toggle('active', b.dataset.g===g));
   const navBtns=[...document.querySelectorAll('#nav button')];
   navBtns.forEach(b=>{
@@ -313,15 +326,29 @@ function selectGroup(g){
   const navEl=document.getElementById('nav'); if(navEl) navEl.style.display = visible<=1 ? 'none' : '';
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.view));
+// In-page hub tab strip: render the tabs for whichever hub the current view belongs to.
+function renderHubTabs(v){
+  const host=document.getElementById('hubTabs'); if(!host) return;
+  const key=HUB_OF[v];
+  if(!key){ host.style.display='none'; host.innerHTML=''; return; }
+  const items=HUBS[key].items.filter(([view])=>canSeeView(view));
+  if(items.length<=1){ host.style.display='none'; host.innerHTML=''; return; }
+  host.style.display='';
+  host.innerHTML=items.map(([view,label])=>`<button class="hubtab ${view===v?'active':''}" onclick="show('${view}')">${label}</button>`).join('');
+  // keep the sidebar highlight on the hub's host even when a sub-tab view is open
+  const hostView=HUBS[key].items[0][0];
+  const hb=document.querySelector(`#nav button[data-view="${hostView}"]`); if(hb) hb.classList.add('active');
+}
 function toggleNav(){ document.getElementById('shell').classList.toggle('nav-open'); }
 function show(v){
   if(!canSeeView(v)) v='dashboard';   // role can't see this page → send to My Shift
   selectGroup(GROUP_OF[v]||'stay');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
+  renderHubTabs(v);
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
@@ -406,6 +433,7 @@ function show(v){
   if(v==='staffhub' && window.loadStaffHub) loadStaffHub();
   if(v==='hstaffdev' && window.loadStaffDev) loadStaffDev();
   if(v==='hfarewell' && window.loadFarewell) loadFarewell();
+  if(v==='fleet' && window.loadFleet) loadFleet();
 }
 
 /* ---- clients ---- */

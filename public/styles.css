@@ -715,6 +715,16 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 .login-wrap::after{content:"";position:fixed;inset:0;pointer-events:none;
   background:radial-gradient(700px 400px at 80% 10%,rgba(95,176,194,.18),transparent 60%)}
 
+/* ── Hilltop hub tabs: consolidate related screens behind one sidebar item ── */
+.hubtabs{display:flex;gap:2px;flex-wrap:wrap;margin:-6px 0 24px;border-bottom:1px solid var(--line)}
+.hubtab{font-family:var(--sans);background:none;border:none;border-bottom:2.5px solid transparent;padding:11px 18px;
+  font-size:14.5px;font-weight:600;color:var(--muted);cursor:pointer;margin-bottom:-1px;white-space:nowrap;letter-spacing:-.005em;transition:color .15s,border-color .15s}
+.hubtab:hover{color:var(--navy)}
+.hubtab.active{color:var(--navy);border-bottom-color:var(--gold)}
+[data-theme="dark"] .hubtab{color:#9aabb7}
+[data-theme="dark"] .hubtab:hover,[data-theme="dark"] .hubtab.active{color:#cfe3df}
+@media(max-width:640px){.hubtabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:18px}.hubtab{padding:10px 14px;font-size:14px}}
+
 /* ── Wide screens: KPI tiles flow into a tidy grid that fills the width ── */
 @media(min-width:1100px){
   .house-grid{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}

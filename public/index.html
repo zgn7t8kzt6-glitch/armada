@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260622R" />
+<link rel="stylesheet" href="/styles.css?v=20260622S" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -113,29 +113,34 @@
     <button data-view="users" data-admin>Staff</button>
     <button data-view="audit" data-admin>Audit Log</button>
     <!-- Hilltop Recovery Home (sober-living suite) -->
+    <div class="side-cap" data-group="housing" data-cap>Daily</div>
     <button data-view="housing">Hilltop HQ</button>
     <button data-view="staffhub">Staff Hub</button>
-    <button data-view="hstaffdev">Staff Growth</button>
-    <button data-view="houses">Houses &amp; Beds</button>
-    <button data-view="residents">Residents</button>
-    <button data-view="resident" data-subview>Resident 360</button>
-    <button data-view="intake">Intake &amp; Forms</button>
-    <button data-view="screens">Drug Screening</button>
-    <button data-view="houselife">House Life</button>
-    <button data-view="housingstaff">Staffing</button>
-    <button data-view="shiftreports">Shift Reports</button>
-    <button data-view="hincidents">Incident Reports</button>
     <button data-view="voice">Resident Voice &amp; Kiosk</button>
-    <button data-view="hmaint">Maintenance &amp; Supplies</button>
     <button data-view="activities">Activities &amp; Engagement</button>
-    <button data-view="hfarewell">Farewell &amp; Alumni</button>
-    <button data-view="movement">Daily Movement</button>
-    <button data-view="coordination">Clinical Coordination</button>
-    <button data-view="employment">Employment</button>
-    <button data-view="rentrun">Rent Run</button>
-    <button data-view="ledger">Rent &amp; Funding</button>
-    <button data-view="orh">ORH Compliance</button>
-    <button data-view="housingoutcomes">Housing Outcomes</button>
+    <div class="side-cap" data-group="housing" data-cap>Residents &amp; Houses</div>
+    <button data-view="residents">Residents</button>
+    <button data-view="houses">Houses</button>
+    <div class="side-cap" data-group="housing" data-cap>Team &amp; Ops</div>
+    <button data-view="housingstaff">Team &amp; Ops</button>
+    <div class="side-cap" data-group="housing" data-cap>Leadership</div>
+    <button data-view="housingoutcomes">Insight</button>
+    <button data-view="rentrun">Billing</button>
+    <!-- reached via in-page hub tabs, not the sidebar -->
+    <button data-view="resident" data-subview>Resident 360</button>
+    <button data-view="intake" data-subview>Intake &amp; Forms</button>
+    <button data-view="screens" data-subview>Drug Screening</button>
+    <button data-view="hfarewell" data-subview>Farewell &amp; Alumni</button>
+    <button data-view="employment" data-subview>Employment</button>
+    <button data-view="houselife" data-subview>House Life</button>
+    <button data-view="hmaint" data-subview>Maintenance &amp; Supplies</button>
+    <button data-view="shiftreports" data-subview>Shift Reports</button>
+    <button data-view="hincidents" data-subview>Incident Reports</button>
+    <button data-view="hstaffdev" data-subview>Staff Growth</button>
+    <button data-view="orh" data-subview>ORH Compliance</button>
+    <button data-view="movement" data-subview>Daily Movement</button>
+    <button data-view="coordination" data-subview>Clinical Coordination</button>
+    <button data-view="ledger" data-subview>Rent &amp; Funding</button>
   </nav>
     <a class="side-kiosk sans" href="/kiosk.html" target="_blank" title="Open the client kiosk on this device">📱 Client Kiosk ↗</a>
     <a class="side-kiosk sans" href="/training.html" target="_blank" title="Self-playing staff training" style="background:linear-gradient(160deg,#2d6168,#235056)">▶ Staff Training ↗</a>
@@ -157,6 +162,7 @@
       <button class="iconbtn" onclick="show('askai')" title="Ask AI" style="margin-left:8px">✦ Ask AI</button>
     </header>
   <main>
+    <div id="hubTabs" class="hubtabs" style="display:none"></div>
     <!-- MY SHIFT — role-tailored employee dashboard -->
     <section id="dashboard" class="view">
       <div class="card" style="border-left:4px solid var(--gold)">
@@ -2344,6 +2350,13 @@
       <div id="fwBody"></div>
     </section>
 
+    <section id="fleet" class="view">
+      <div class="card hq-hero">
+        <div><h3>🚐 Vehicles &amp; Transportation</h3><p class="sub sans" style="margin:0">Gas &amp; mileage, maintenance, cleanliness, and a pre-trip safety checklist for every vehicle — so residents always ride in a safe, clean, road-ready van.</p></div>
+      </div>
+      <div id="fleetBody"></div>
+    </section>
+
     <section id="activities" class="view">
       <div class="card">
         <div class="cmd-hero-row">
@@ -2387,7 +2400,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260622R"></script>
-<script src="/housing.js?v=20260622R"></script>
+<script src="/app.js?v=20260622S"></script>
+<script src="/housing.js?v=20260622S"></script>
 </body>
 </html>

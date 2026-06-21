@@ -888,6 +888,8 @@ export function buildDailyMovement(date) {
   const openWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done'`).get().c;
   const urgentWO = db.prepare(`SELECT m.title, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id WHERE m.status!='done' AND m.priority='Urgent' ORDER BY m.id DESC`).all();
   const lowStock = db.prepare(`SELECT COUNT(*) c FROM housing_inventory WHERE qty<=par`).get().c;
+  const wkEnd = (() => { const d = new Date(date); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+  const activitiesWeek = db.prepare(`SELECT e.title, e.date, e.time, e.dimension, h.name house FROM housing_activity_events e LEFT JOIN housing_houses h ON h.id=e.house_id WHERE e.date>=? AND e.date<=? AND e.status!='cancelled' ORDER BY e.date, e.time`).all(date, wkEnd);
   const kpis = { date, intakes: intakes.length, discharges: discharges.length, census, occupied, capacity, open, occPct, openWO, lowStock, incidents: incidents.length };
 
   const pretty = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -910,6 +912,8 @@ export function buildDailyMovement(date) {
     ${emailSection('Maintenance', null)}
     <div style="font-size:15px">${openWO} open work order${openWO === 1 ? '' : 's'}${urgentWO.length ? ` · <b style="color:${EM.red}">${urgentWO.length} urgent</b>` : ''}${lowStock ? ` · <b>${lowStock}</b> supply item(s) low` : ''}.</div>
     ${urgentWO.length ? '<div style="margin-top:6px">' + emailList(urgentWO, w => `<b style="color:${EM.red}">Urgent:</b> ${esc(w.title)}${w.house ? ' — ' + esc(w.house) : ''}`) + '</div>' : ''}
+    ${emailSection('Activities this week', activitiesWeek.length)}
+    ${emailList(activitiesWeek, a => `<b>${esc(new Date(a.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }))}</b>${a.time ? ' ' + esc(a.time) : ''} — ${esc(a.title)}<span style="color:${EM.soft}">${a.house ? ' · ' + esc(a.house) : ''}</span>`)}
     ${emailSection('Census by house', null)}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;font-size:14px;border:1px solid ${EM.line};border-radius:10px;overflow:hidden">
       <tr style="background:${EM.teal};color:#fff"><th align="left" style="padding:9px 12px;font-weight:600">House</th><th align="left" style="padding:9px 12px;font-weight:600">Program</th><th align="right" style="padding:9px 12px;font-weight:600">Filled</th><th align="right" style="padding:9px 12px;font-weight:600">Open</th></tr>
@@ -917,7 +921,7 @@ export function buildDailyMovement(date) {
       <tr style="background:${EM.sageBg};font-weight:800"><td style="padding:10px 12px">Total</td><td style="padding:10px 12px;font-weight:600;color:${EM.soft}">${Object.entries(byProgram).map(([p, n]) => `${esc(p)} ${n}`).join(' · ')}</td><td align="right" style="padding:10px 12px">${occupied}/${capacity}</td><td align="right" style="padding:10px 12px">${open}</td></tr>
     </table>`;
   const html = emailShell({ title: 'Daily Movement', subtitle: pretty, body });
-  return { ...kpis, intakes, discharges, byHouse, byProgram, incidentList: incidents, urgentWO, subject: `${SL_BRAND} — Daily Movement · ${pretty} · census ${census}, +${intakes.length}/−${discharges.length}`, html };
+  return { ...kpis, intakes, discharges, byHouse, byProgram, incidentList: incidents, urgentWO, activitiesWeek, subject: `${SL_BRAND} — Daily Movement · ${pretty} · census ${census}, +${intakes.length}/−${discharges.length}`, html };
 }
 function movementRecipients() {
   const a = (getState('housing_movement_clinical') || '').split(',');

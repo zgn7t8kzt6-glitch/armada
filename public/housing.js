@@ -1175,10 +1175,47 @@ async function loadActSchedule(){
         <button class="btn btn-ghost btn-sm sans" onclick="actWeekShift(7)">Next →</button>
         <button class="btn btn-ghost btn-sm sans" onclick="HOUSING.actWeek=weekStart();loadActSchedule()">This week</button>
       </div>
-      <button class="btn btn-primary sans" onclick="openActPlan()">+ Plan activity</button></div>
+      <div class="toolbar" style="margin:0;gap:8px"><button class="btn btn-ghost sans" onclick="printWeekFlyer()">🖨 Print this week</button><button class="btn btn-primary sans" onclick="openActPlan()">+ Plan activity</button></div></div>
     <div style="margin-top:12px">${body}</div>`;
 }
 function actWeekShift(n){ const d=new Date(HOUSING.actWeek); d.setDate(d.getDate()+n); HOUSING.actWeek=d.toISOString().slice(0,10); loadActSchedule(); }
+// Printable "This Week at Hilltop" flyer — poster for the house wall.
+async function printWeekFlyer(){
+  const from=HOUSING.actWeek||weekStart(); const toD=new Date(from); toD.setDate(toD.getDate()+6); const to=toD.toISOString().slice(0,10);
+  let d; try{ d=await api(`/housing/activities/schedule?from=${from}&to=${to}`); }catch(e){ alert(e.message); return; }
+  const evs=d.events.filter(e=>e.status!=='cancelled');
+  const fmtRange=(a,b)=>new Date(a+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric'})+' – '+new Date(b+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  const dimC={Physical:'#5fb0c2',Social:'#c89b3c',Emotional:'#a86b8c',Spiritual:'#7d6ba8',Intellectual:'#5f86c2',Occupational:'#5fa37a',Environmental:'#7d9b6a',Financial:'#b3784a',Recreational:'#c06a52'};
+  let days='';
+  for(let i=0;i<7;i++){ const ds=new Date(from); ds.setDate(ds.getDate()+i); const k=ds.toISOString().slice(0,10);
+    const list=evs.filter(e=>e.date===k);
+    days+=`<div class="d"><div class="dh">${ds.toLocaleDateString('en-US',{weekday:'long'})}<span>${ds.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span></div>
+      ${list.length?list.map(e=>`<div class="ev" style="border-left-color:${dimC[e.dimension]||'#235056'}"><b>${e.time?e.time+' · ':''}${esc(e.title)}</b>${e.location||e.house?`<span>${esc(e.location||e.house)}</span>`:''}</div>`).join(''):'<div class="none">—</div>'}</div>`;
+  }
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>This Week at Hilltop</title><style>
+    *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;color:#1f2d2b;background:#fff}
+    .wrap{max-width:900px;margin:0 auto;padding:28px}
+    .hd{text-align:center;border-bottom:4px solid #235056;padding-bottom:14px;margin-bottom:18px}
+    .hd .b{color:#235056;letter-spacing:3px;text-transform:uppercase;font-size:14px;font-weight:700}
+    .hd h1{margin:6px 0 2px;font-size:40px;color:#235056}
+    .hd .r{color:#5a6b69;font-size:17px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .d{border:1px solid #e2e8df;border-radius:12px;padding:12px 14px;break-inside:avoid}
+    .dh{font-weight:800;color:#235056;font-size:18px;display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #eef3e8;padding-bottom:6px;margin-bottom:8px}
+    .dh span{font-size:13px;color:#7d8b88;font-weight:600}
+    .ev{border-left:4px solid #235056;background:#f7f9f4;border-radius:6px;padding:7px 10px;margin:6px 0;font-size:15px}
+    .ev span{display:block;color:#6b7b78;font-size:12px;margin-top:1px}
+    .none{color:#c0c8c2;padding:4px 0}
+    .ft{text-align:center;color:#9aa7a4;font-size:12px;margin-top:18px}
+    @media print{.noprint{display:none}.wrap{padding:0}}
+  </style></head><body><div class="wrap">
+    <div class="hd"><div class="b">⛰ Hilltop Recovery Home</div><h1>This Week</h1><div class="r">${fmtRange(from,to)}</div></div>
+    <div class="grid">${days}</div>
+    <div class="ft">Show up, get involved — recovery happens together.</div>
+    <div class="noprint" style="text-align:center;margin-top:18px"><button onclick="window.print()" style="background:#235056;color:#fff;border:none;border-radius:8px;padding:10px 22px;font-size:15px;cursor:pointer">Print</button></div>
+  </div></body></html>`;
+  const w=window.open('','_blank'); if(!w){ alert('Allow pop-ups to print the flyer.'); return; } w.document.write(html); w.document.close();
+}
 async function actCatalog(){ if(!ACT_CAT){ try{ ACT_CAT=await api('/housing/activities/catalog'); }catch(e){ ACT_CAT={catalog:[],dimensions:[]}; } } return ACT_CAT; }
 async function openActPlan(catalogId){
   await actCatalog(); await hMeta();
@@ -1284,6 +1321,7 @@ async function loadDailyMovement(){
       <div class="card"><h3>Discharges today (${d.discharges.length})</h3>${lst(d.discharges,x=>`<li>${esc(x.name)} — ${esc(x.discharge_type||'discharged')}${x.house?' · '+esc(x.house):''}</li>`)}</div>
       <div class="card"><h3>Incidents today (${d.incidents})</h3>${lst(d.incidentList||[],i=>`<li>${esc(i.type||'Incident')}${i.severity?' ('+esc(i.severity)+')':''} — ${esc(i.house||'')}${i.summary?': '+esc(i.summary):''}</li>`)}</div>
       <div class="card"><h3>Maintenance</h3><p style="margin:6px 0 0">${d.openWO} open work order(s)${(d.urgentWO&&d.urgentWO.length)?` · <b style="color:var(--danger)">${d.urgentWO.length} urgent</b>`:''}${d.lowStock?` · ${d.lowStock} supply item(s) low`:''}.</p>${(d.urgentWO&&d.urgentWO.length)?lst(d.urgentWO,w=>`<li><b style="color:var(--danger)">Urgent:</b> ${esc(w.title)}${w.house?' — '+esc(w.house):''}</li>`):''}</div>
+      <div class="card"><h3>Activities this week (${(d.activitiesWeek||[]).length})</h3>${lst(d.activitiesWeek||[],a=>`<li><b>${esc(new Date(a.date+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}))}</b>${a.time?' '+esc(a.time):''} — ${esc(a.title)}${a.house?' · '+esc(a.house):''}</li>`)}</div>
     </div>
     <div class="card" style="margin-top:16px"><h3>Census by house</h3>
       <table class="tbl"><thead><tr><th>House</th><th>Program</th><th style="text-align:right">Filled</th><th style="text-align:right">Open</th></tr></thead>
@@ -1311,4 +1349,4 @@ async function openMovementSettings(){
   save.onclick=async()=>{ try{ await api('/housing/daily-movement/settings',{method:'POST',body:JSON.stringify({clinical:$('mv_clin').value,leadership:$('mv_lead').value,auto:$('mv_auto').checked,hour:+$('mv_hour').value,alerts:$('mv_alerts').checked})}); closeHModal(); loadDailyMovement(); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

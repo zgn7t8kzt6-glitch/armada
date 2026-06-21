@@ -265,12 +265,14 @@ const ROLE_MENU = {
   'Recovery Coach':   ['staffhub','housing','voice','activities','residents','houses','mytasks','messages'],
 };
 function flatMenu(){
-  // Admins + leadership always get the full nav (Command Center, etc.) — the flat
-  // menu is only for frontline staff, regardless of their job_role label.
-  if(!ME || ME.role==='admin' || ME.job_role==='Director of Operations') return null;
-  // Executive Director keeps the full nav UNLESS they're acting as housing-only (they're not a housing role) —
-  // but housing staff always get their focused, housing-only flat menu.
-  if(ME.job_role==='Executive Director' && !isHousingRole()) return null;
+  if(!ME) return null;
+  // A person's COMPANY is their job role. Hilltop staff (Housing Director / House
+  // Manager / Recovery Coach) ALWAYS get the focused, Hilltop-only flat menu —
+  // even if they're also an admin — so they never see any Armada/detox pages.
+  if(isHousingRole()) return ROLE_MENU[ME.job_role] ? ROLE_MENU[ME.job_role].filter(canSeeView) : null;
+  // Admins + leadership keep the full grouped nav.
+  if(ME.role==='admin' || ME.job_role==='Director of Operations') return null;
+  if(ME.job_role==='Executive Director') return null;
   return ROLE_MENU[ME.job_role] ? ROLE_MENU[ME.job_role].filter(canSeeView) : null;
 }
 function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role==='Director of Operations')); }
@@ -358,7 +360,7 @@ function renderHubTabs(v){
 }
 function toggleNav(){ document.getElementById('shell').classList.toggle('nav-open'); }
 function show(v){
-  if(!canSeeView(v)) v='dashboard';   // role can't see this page → send to My Shift
+  if(!canSeeView(v)) v = isHousingRole() ? 'staffhub' : 'dashboard';   // can't see it → send home (Hilltop staff never to detox)
   selectGroup(GROUP_OF[v]||'stay');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));

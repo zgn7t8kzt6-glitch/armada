@@ -1026,8 +1026,8 @@ async function voiceToWorkOrder(id){ if(!confirm('Create a maintenance work orde
 async function openSlKioskCode(){
   let d; try{ d=await api('/housing/kiosk-code'); }catch(e){ alert(e.message); return; }
   const url = location.origin+'/sl-kiosk.html';
-  const save=hmodal(`<h3>Sober Living kiosk setup</h3>
-    <p class="sub sans" style="margin:.2em 0 1em">A <b>separate</b> kiosk for the sober-living company. Open this on the resident iPad and enter the code once:</p>
+  const save=hmodal(`<h3>Hilltop Recovery Home — kiosk setup</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">A <b>separate</b> kiosk for Hilltop Recovery Home. Open this on the resident iPad and enter the code once:</p>
     <div class="kv"><span class="k">Kiosk URL</span><span class="v"><a href="${esc(url)}" target="_blank">${esc(url)}</a></span></div>
     <label style="margin-top:10px">Kiosk code ${d.weak?'<span style="color:var(--danger)">(weak — please change it)</span>':''}</label>
     <input id="slk_code" value="${esc(d.code)}" ${isAdmin()?'':'disabled'}/>

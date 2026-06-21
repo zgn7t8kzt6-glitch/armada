@@ -762,6 +762,42 @@ function seedHousingSupplies() {
 // Low = at or below par. Used for the reorder suggestion.
 const isLow = (it) => (it.qty ?? 0) <= (it.par ?? 0);
 
+/* ───────────── Branded email shell (mobile-first, email-client-safe) ───────────── */
+const SL_BRAND = 'Hilltop Recovery Home';
+const EM = { ink: '#1f2d2b', teal: '#235056', teal2: '#2d6b6b', sage: '#7d9b6a', sageBg: '#eef3e8', line: '#e2e8df', soft: '#6b7b78', paper: '#ffffff', wash: '#f4f7f3', red: '#b3382f', redBg: '#fbeceb', gold: '#bf8f3a' };
+function emailShell({ title, subtitle, accent = EM.teal, body }) {
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:${EM.wash}">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${EM.wash};padding:18px 12px">
+   <tr><td align="center">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${EM.paper};border-radius:16px;overflow:hidden;box-shadow:0 2px 10px rgba(20,40,38,.08);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${EM.ink}">
+      <tr><td style="background:${accent};padding:22px 26px">
+        <div style="font-size:13px;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.72);font-weight:600">⛰ ${SL_BRAND}</div>
+        <div style="font-size:23px;font-weight:700;color:#fff;margin-top:4px">${title}</div>
+        ${subtitle ? `<div style="font-size:14px;color:rgba(255,255,255,.85);margin-top:3px">${subtitle}</div>` : ''}
+      </td></tr>
+      <tr><td style="padding:24px 26px">${body}</td></tr>
+      <tr><td style="padding:14px 26px 24px"><div style="border-top:1px solid ${EM.line};padding-top:14px;font-size:12px;color:${EM.soft}">${SL_BRAND} · automated report from Armada. You're receiving this as clinical / leadership.</div></td></tr>
+    </table>
+   </td></tr>
+  </table></body></html>`;
+}
+// KPI cards as a wrap-friendly grid (2-up on phones via inline-block cells).
+function emailKpis(cards) {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td>` +
+    cards.map(c => `<div style="display:inline-block;width:30%;min-width:90px;vertical-align:top;background:${c.bg || EM.wash};border:1px solid ${EM.line};border-radius:12px;padding:12px 8px;margin:0 1% 8px 0;text-align:center">
+      <div style="font-size:27px;font-weight:800;color:${c.color || EM.teal};line-height:1">${c.n}</div>
+      <div style="font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:${EM.soft};margin-top:4px">${c.label}</div></div>`).join('') +
+    `</td></tr></table>`;
+}
+function emailSection(title, count, color = EM.teal) {
+  return `<div style="margin:20px 0 8px;padding-bottom:6px;border-bottom:2px solid ${EM.sageBg}">
+    <span style="font-size:16px;font-weight:700;color:${color}">${title}</span>${count != null ? `<span style="font-size:14px;color:${EM.soft};font-weight:600"> · ${count}</span>` : ''}</div>`;
+}
+function emailList(arr, fmt) {
+  if (!arr.length) return `<div style="color:${EM.soft};font-size:14px;font-style:italic">None.</div>`;
+  return arr.map(x => `<div style="font-size:15px;padding:7px 0;border-bottom:1px solid ${EM.wash}">${fmt(x)}</div>`).join('');
+}
+
 /* ───────────── Daily Movement report (auto-emailed to clinical + leadership) ───────────── */
 // One dated snapshot of the houses: who came in, who left, and where the census
 // stands — the morning number clinical and leadership want.
@@ -787,32 +823,33 @@ export function buildDailyMovement(date) {
   const kpis = { date, intakes: intakes.length, discharges: discharges.length, census, occupied, capacity, open, occPct, openWO, lowStock, incidents: incidents.length };
 
   const pretty = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  const li = (a, fmt) => a.length ? '<ul style="margin:6px 0 0;padding-left:18px">' + a.map(fmt).join('') + '</ul>' : '<p style="color:#888;margin:6px 0 0">None.</p>';
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;color:#1d2b2a">
-    <h2 style="color:#235056;margin:0 0 2px">Armada Sober Living — Daily Movement</h2>
-    <div style="color:#5a6b69;font-size:14px;margin-bottom:14px">${pretty}</div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px"><tr>
-      ${[['Census', census], ['Intakes', intakes.length], ['Discharges', discharges.length], ['Open beds', open], ['Occupancy', occPct + '%']].map(c =>
-    `<td align="center" style="background:#f4f7ef;border:1px solid #e3e9da;border-radius:8px;padding:10px 6px"><div style="font-size:24px;font-weight:700;color:#235056">${c[1]}</div><div style="font-size:11px;color:#5a6b69;text-transform:uppercase;letter-spacing:.4px">${c[0]}</div></td>`).join('<td style="width:8px"></td>')}
-    </tr></table>
-    <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Intakes (${intakes.length})</h3>
-    ${li(intakes, i => `<li>${i.name} — ${i.house || 'unassigned'}${i.loc ? ' · ' + i.loc : ''}</li>`)}
-    <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Discharges (${discharges.length})</h3>
-    ${li(discharges, d => `<li>${d.name} — ${d.discharge_type || 'discharged'}${d.house ? ' · ' + d.house : ''}</li>`)}
-    <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Incidents today (${incidents.length})</h3>
-    ${li(incidents, i => `<li>${i.type || 'Incident'}${i.severity ? ' (' + i.severity + ')' : ''} — ${i.house || ''}${i.summary ? ': ' + i.summary : ''}</li>`)}
-    <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Maintenance</h3>
-    <p style="margin:6px 0 0">${openWO} open work order${openWO === 1 ? '' : 's'}${urgentWO.length ? ` · <b style="color:#b3382f">${urgentWO.length} urgent</b>` : ''}${lowStock ? ` · ${lowStock} supply item(s) low` : ''}.</p>
-    ${urgentWO.length ? li(urgentWO, w => `<li><b style="color:#b3382f">Urgent:</b> ${w.title}${w.house ? ' — ' + w.house : ''}</li>`) : ''}
-    <h3 style="color:#235056;margin:16px 0 4px;font-size:15px">Census by house</h3>
-    <table width="100%" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px">
-      <tr style="background:#235056;color:#fff"><th align="left">House</th><th align="left">Program</th><th align="right">Filled</th><th align="right">Open</th></tr>
-      ${byHouse.map((h, n) => `<tr style="background:${n % 2 ? '#f7f9f4' : '#fff'}"><td>${h.name}</td><td>${h.program}</td><td align="right">${h.occupied}/${h.capacity}</td><td align="right">${h.open}</td></tr>`).join('')}
-      <tr style="font-weight:700;border-top:2px solid #235056"><td>Total</td><td>${Object.entries(byProgram).map(([p, n]) => `${p} ${n}`).join(' · ')}</td><td align="right">${occupied}/${capacity}</td><td align="right">${open}</td></tr>
-    </table>
-    <p style="color:#9aa7a4;font-size:12px;margin-top:18px">Armada Recovery Housing · automated daily movement report</p>
-  </div>`;
-  return { ...kpis, intakes, discharges, byHouse, byProgram, incidentList: incidents, urgentWO, subject: `Sober Living Daily Movement — ${pretty} · census ${census}, +${intakes.length}/-${discharges.length}`, html };
+  const esc = (s) => String(s ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const body = `
+    ${emailKpis([
+    { n: census, label: 'Census', color: EM.teal },
+    { n: '+' + intakes.length, label: 'Intakes', color: EM.sage },
+    { n: '−' + discharges.length, label: 'Discharges', color: EM.gold },
+    { n: open, label: 'Open beds', color: EM.teal },
+    { n: occPct + '%', label: 'Occupancy', color: EM.teal },
+    { n: incidents.length, label: 'Incidents', color: incidents.length ? EM.red : EM.teal, bg: incidents.length ? EM.redBg : EM.wash },
+  ])}
+    ${emailSection('Intakes', intakes.length, EM.sage)}
+    ${emailList(intakes, i => `<b>${esc(i.name)}</b> &nbsp;<span style="color:${EM.soft}">${esc(i.house || 'unassigned')}${i.loc ? ' · ' + esc(i.loc) : ''}</span>`)}
+    ${emailSection('Discharges', discharges.length, EM.gold)}
+    ${emailList(discharges, d => `<b>${esc(d.name)}</b> &nbsp;<span style="color:${EM.soft}">${esc(d.discharge_type || 'discharged')}${d.house ? ' · ' + esc(d.house) : ''}</span>`)}
+    ${emailSection('Incidents today', incidents.length, incidents.length ? EM.red : EM.teal)}
+    ${emailList(incidents, i => `<b style="color:${EM.red}">${esc(i.type || 'Incident')}</b>${i.severity ? ` <span style="color:${EM.soft}">(${esc(i.severity)})</span>` : ''} ${i.house ? '· ' + esc(i.house) : ''}${i.summary ? '<br><span style="color:' + EM.soft + '">' + esc(i.summary) + '</span>' : ''}`)}
+    ${emailSection('Maintenance', null)}
+    <div style="font-size:15px">${openWO} open work order${openWO === 1 ? '' : 's'}${urgentWO.length ? ` · <b style="color:${EM.red}">${urgentWO.length} urgent</b>` : ''}${lowStock ? ` · <b>${lowStock}</b> supply item(s) low` : ''}.</div>
+    ${urgentWO.length ? '<div style="margin-top:6px">' + emailList(urgentWO, w => `<b style="color:${EM.red}">Urgent:</b> ${esc(w.title)}${w.house ? ' — ' + esc(w.house) : ''}`) + '</div>' : ''}
+    ${emailSection('Census by house', null)}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;font-size:14px;border:1px solid ${EM.line};border-radius:10px;overflow:hidden">
+      <tr style="background:${EM.teal};color:#fff"><th align="left" style="padding:9px 12px;font-weight:600">House</th><th align="left" style="padding:9px 12px;font-weight:600">Program</th><th align="right" style="padding:9px 12px;font-weight:600">Filled</th><th align="right" style="padding:9px 12px;font-weight:600">Open</th></tr>
+      ${byHouse.map((h, n) => `<tr style="background:${n % 2 ? EM.wash : '#fff'}"><td style="padding:9px 12px;font-weight:600">${esc(h.name)}</td><td style="padding:9px 12px;color:${EM.soft}">${esc(h.program)}</td><td align="right" style="padding:9px 12px">${h.occupied}/${h.capacity}</td><td align="right" style="padding:9px 12px">${h.open}</td></tr>`).join('')}
+      <tr style="background:${EM.sageBg};font-weight:800"><td style="padding:10px 12px">Total</td><td style="padding:10px 12px;font-weight:600;color:${EM.soft}">${Object.entries(byProgram).map(([p, n]) => `${esc(p)} ${n}`).join(' · ')}</td><td align="right" style="padding:10px 12px">${occupied}/${capacity}</td><td align="right" style="padding:10px 12px">${open}</td></tr>
+    </table>`;
+  const html = emailShell({ title: 'Daily Movement', subtitle: pretty, body });
+  return { ...kpis, intakes, discharges, byHouse, byProgram, incidentList: incidents, urgentWO, subject: `${SL_BRAND} — Daily Movement · ${pretty} · census ${census}, +${intakes.length}/−${discharges.length}`, html };
 }
 function movementRecipients() {
   const a = (getState('housing_movement_clinical') || '').split(',');
@@ -822,13 +859,11 @@ function movementRecipients() {
 // Real-time alert to housing leadership/clinical for urgent events (serious
 // incidents, distress kiosk requests). On by default; uses the same recipients.
 function housingAlertsOn() { return getState('housing_alerts') !== 'off'; }
-async function alertHousing(subject, bodyHtml) {
+async function alertHousing(subject, title, bodyHtml) {
   try {
     if (!housingAlertsOn() || !emailConfigured()) return;
     const list = movementRecipients(); if (!list.length) return;
-    const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;color:#1d2b2a">
-      <h2 style="color:#b3382f;margin:0 0 8px">Armada Sober Living — Alert</h2>${bodyHtml}
-      <p style="color:#9aa7a4;font-size:12px;margin-top:16px">Automated alert · Armada Recovery Housing</p></div>`;
+    const html = emailShell({ title, subtitle: 'Action needed now', accent: EM.red, body: `<div style="font-size:15px;line-height:1.5">${bodyHtml}</div>` });
     for (const r of list) { try { await sendEmail({ to: r, subject, html, suppressCc: true }); } catch { /* keep going */ } }
   } catch { /* never block the request on an alert */ }
 }
@@ -889,7 +924,7 @@ export function mountHousing(app) {
       .run(b.resident_id, b.category || 'Something else', text.slice(0, 800), priority);
     if (priority === 'Urgent') {
       const who = db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(b.resident_id)?.name || 'A resident';
-      alertHousing(`⚠ Urgent kiosk request — ${who}`, `<p><b>${who}</b> sent an urgent request from the Sober Living kiosk:</p><blockquote style="border-left:3px solid #b3382f;padding-left:10px;color:#444">${text.replace(/[<>&]/g, '')}</blockquote><p>Go to them now.</p>`);
+      alertHousing(`⚠ Urgent kiosk request — ${who}`, 'Urgent resident request', `<p><b>${who}</b> sent an urgent request from the ${SL_BRAND} kiosk:</p><blockquote style="border-left:3px solid ${EM.red};margin:10px 0;padding:6px 0 6px 12px;color:#444">${text.replace(/[<>&]/g, '')}</blockquote><p><b>Go to them now.</b></p>`);
     }
     res.json({ ok: true });
   });
@@ -1642,9 +1677,9 @@ export function mountHousing(app) {
     if (/high|critical/i.test(b.severity || '')) {
       const where = b.house_id ? (db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(num(b.house_id))?.name || '') : '';
       const who = b.resident_id ? (db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(num(b.resident_id))?.name || '') : '';
-      alertHousing(`🚨 ${b.severity} incident — ${b.type || 'Incident'}${where ? ' · ' + where : ''}`,
+      alertHousing(`🚨 ${b.severity} incident — ${b.type || 'Incident'}${where ? ' · ' + where : ''}`, `${b.severity}-severity incident`,
         `<p>A <b>${(b.severity || '').toLowerCase()}</b>-severity incident was logged${where ? ' at <b>' + where + '</b>' : ''}${who ? ' involving <b>' + who + '</b>' : ''}:</p>
-         <p><b>${(b.type || 'Incident').replace(/[<>&]/g, '')}</b> — ${(b.summary || '').replace(/[<>&]/g, '')}</p>${b.action ? '<p>Action: ' + (b.action).replace(/[<>&]/g, '') + '</p>' : ''}`);
+         <p style="font-size:16px"><b>${(b.type || 'Incident').replace(/[<>&]/g, '')}</b> — ${(b.summary || '').replace(/[<>&]/g, '')}</p>${b.action ? '<p style="color:' + EM.soft + '">Action: ' + (b.action).replace(/[<>&]/g, '') + '</p>' : ''}`);
     }
     res.json({ ok: true, id: Number(r.lastInsertRowid) });
   });

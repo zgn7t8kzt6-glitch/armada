@@ -548,8 +548,10 @@ function packetStatus(rid) {
 
 function residentCard(r) {
   const cap = latestCap(r.id);
+  const { photo, ...rest } = r; // keep the base64 blob out of list/detail payloads
   return {
-    ...r,
+    ...rest,
+    hasPhoto: !!photo,
     los: losDays(r.move_in),
     soberDays: soberDays(r.sober_date),
     balance: balanceOf(r.id),
@@ -807,6 +809,29 @@ export function mountHousing(app) {
     for (const c of cols) if (b[c] !== undefined) { sets.push(`${c}=?`); vals.push(b[c]); }
     if (sets.length) { vals.push(req.params.id); db.prepare(`UPDATE housing_residents SET ${sets.join(',')} WHERE id=?`).run(...vals); }
     audit({ user: req.user, action: 'HOUSING_RESIDENT_EDIT', detail: cur.name, ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ---- Profile photo (stored as a resized data URL; served as image bytes) ----
+  app.get('/api/housing/residents/:id/photo', requireAuth, (req, res) => {
+    const row = db.prepare(`SELECT photo FROM housing_residents WHERE id=?`).get(req.params.id);
+    const m = row && row.photo && /^data:(image\/[\w.+-]+);base64,(.+)$/s.exec(row.photo);
+    if (!m) return res.status(404).end();
+    res.set('Content-Type', m[1]);
+    res.set('Cache-Control', 'private, max-age=60');
+    res.send(Buffer.from(m[2], 'base64'));
+  });
+
+  app.post('/api/housing/residents/:id/photo', requireAuth, (req, res) => {
+    const cur = db.prepare(`SELECT id, name FROM housing_residents WHERE id=?`).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Not found' });
+    let photo = req.body?.photo ?? null;
+    if (photo !== null) {
+      if (typeof photo !== 'string' || !/^data:image\/[\w.+-]+;base64,/.test(photo)) return res.status(400).json({ error: 'Expected an image.' });
+      if (photo.length > 3_000_000) return res.status(413).json({ error: 'Image too large — it should resize client-side first.' });
+    }
+    db.prepare(`UPDATE housing_residents SET photo=? WHERE id=?`).run(photo, cur.id);
+    audit({ user: req.user, action: photo ? 'HOUSING_PHOTO_SET' : 'HOUSING_PHOTO_CLEAR', detail: cur.name, ip: req.ip });
     res.json({ ok: true });
   });
 

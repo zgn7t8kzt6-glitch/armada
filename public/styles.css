@@ -537,6 +537,18 @@ footer{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px sol
 .r360-head{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
 .r360-av{width:64px;height:64px;border-radius:50%;background:var(--navy);color:var(--gold-soft);
   display:grid;place-items:center;font-family:var(--serif);font-size:24px;flex:0 0 auto}
+/* Profile photo on the resident card */
+.r360-av-wrap{position:relative;flex:0 0 auto;width:64px;height:64px}
+.r360-av-img{width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--line);background:#eee;display:block}
+.r360-av-cam{position:absolute;right:-2px;bottom:-2px;width:22px;height:22px;border-radius:50%;
+  background:var(--paper);border:1px solid var(--line);display:grid;place-items:center;font-size:11px;box-shadow:var(--shadow)}
+.r360-av-x{position:absolute;right:-8px;top:-8px;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);
+  background:var(--paper);color:var(--muted);cursor:pointer;font-size:10px;line-height:1;padding:0;display:grid;place-items:center}
+.r360-av-x:hover{color:var(--danger);border-color:var(--danger)}
+/* Resident list thumbnails */
+.res-cell{display:inline-flex;align-items:center;gap:9px}
+.res-thumb{width:30px;height:30px;border-radius:50%;object-fit:cover;flex:0 0 auto;background:#eee;border:1px solid var(--line)}
+.res-thumb-i{display:grid;place-items:center;background:var(--navy);color:var(--gold-soft);font-family:var(--serif);font-size:12px;border:none}
 .r360-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;align-items:start}
 .kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13.5px;font-family:var(--sans)}
 .kv:last-child{border-bottom:none}.kv .k{color:var(--muted)}.kv .v{font-weight:600;text-align:right}

@@ -118,7 +118,7 @@ async function boot(){
   $('r_date').value = today(); $('a_date').value = today();
   renderGroups();
   // Role-based landing: everyone opens already where they work.
-  const landing = (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
+  const landing = isHousingRole() ? 'housing' : (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
   show(landing);
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
   if(isLeadershipUser()){ pollWpBadge(); setInterval(pollWpBadge, 60000); }   // Best Place to Work attention badge
@@ -218,22 +218,42 @@ const VIEW_ROLES = {
   // Concierge requests — front desk + hands-on care
   concierge:   ['Front Desk','BHT / Tech','Nurse','Clinical Director'],
 };
+// Recovery Housing is a separate world from clinical detox. Only housing staff
+// (and the owner/admin) ever see it; nobody on the detox/clinical side does.
+const HOUSING_VIEWS = ['housing','houses','residents','resident','screens','houselife','coordination','ledger','orh','housingoutcomes'];
+const HOUSING_ROLES = ['Housing Director','House Manager','Recovery Coach'];
+const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
+// The handful of shared pages housing staff still get (their own tasks/comms/learning) —
+// everything else clinical/detox stays hidden from them.
+const UNIVERSAL_VIEWS = ['mytasks','messages','team','training','library','standard'];
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
   'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedboard','clients','dignity','mytasks','messages','team','training','library'],
   'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
+  // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
+  'Housing Director': ['housing','houses','residents','screens','houselife','coordination','ledger','orh','housingoutcomes','mytasks','messages'],
+  'House Manager':    ['housing','houses','residents','screens','houselife','coordination','ledger','mytasks','messages'],
+  'Recovery Coach':   ['housing','residents','screens','houselife','coordination','mytasks','messages'],
 };
 function flatMenu(){
   // Admins + leadership always get the full nav (Command Center, etc.) — the flat
   // menu is only for frontline staff, regardless of their job_role label.
-  if(!ME || ME.role==='admin' || ME.job_role==='Executive Director' || ME.job_role==='Director of Operations') return null;
+  if(!ME || ME.role==='admin' || ME.job_role==='Director of Operations') return null;
+  // Executive Director keeps the full nav UNLESS they're acting as housing-only (they're not a housing role) —
+  // but housing staff always get their focused, housing-only flat menu.
+  if(ME.job_role==='Executive Director' && !isHousingRole()) return null;
   return ROLE_MENU[ME.job_role] ? ROLE_MENU[ME.job_role].filter(canSeeView) : null;
 }
 function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role==='Director of Operations')); }
 function canSeeView(v){
   if(!ME) return true;
-  // Broad leadership sees every page (Command/config stays admin-only via renderGroups).
+  // Recovery Housing is walled off: only the owner/admin and housing staff see it.
+  // Nobody on the clinical/detox side does — not even the broad-leadership roles below.
+  if(HOUSING_VIEWS.includes(v)) return ME.role==='admin' || ME.job_role==='Executive Director' || HOUSING_ROLES.includes(ME.job_role);
+  // Housing-only staff never see the clinical/detox pages — just a few shared ones.
+  if(isHousingRole()) return UNIVERSAL_VIEWS.includes(v);
+  // Broad leadership sees every (non-housing) page (Command/config stays admin-only via renderGroups).
   // The Director of Operations oversees clinical, medical, admissions & case management
   // and owns QA/compliance + discharge/retention, so she needs the full picture.
   if(ME.role==='admin' || ME.job_role==='Executive Director' || ME.job_role==='Director of Operations') return true;

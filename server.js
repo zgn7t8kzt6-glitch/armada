@@ -119,7 +119,7 @@ function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
 setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach'];
 const DEPARTMENTS = ['Front Desk / Concierge', 'Clinical / Therapy', 'Nurse / Medical (comfort, not feeling well)', 'Kitchen / Dietary', 'Housekeeping', 'Maintenance', 'Transportation', 'Activities / Recreation', 'Family Services', 'Spiritual Care'];
 const SCHEDULE_TYPES = ['Group', 'Activity', 'Meal', 'Outing', 'Appointment', 'Wellness'];
 

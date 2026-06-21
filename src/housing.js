@@ -323,9 +323,21 @@ function residentCard(r) {
 
 /* ───────────────────────── Routes ───────────────────────── */
 
+// Recovery Housing is walled off from the clinical/detox side: only the
+// owner/admin, the Executive Director, and housing staff may touch any of it.
+const HOUSING_ACCESS_ROLES = ['Housing Director', 'House Manager', 'Recovery Coach'];
+function requireHousing(req, res, next) {
+  const u = req.user;
+  if (u && (u.role === 'admin' || u.job_role === 'Executive Director' || HOUSING_ACCESS_ROLES.includes(u.job_role))) return next();
+  return res.status(403).json({ error: 'Recovery Housing is restricted to housing staff.' });
+}
+
 export function mountHousing(app) {
   housingSchema();
   try { seedHousing(); } catch (e) { console.error('[housing] seed:', e.message); }
+  // Gate the entire /api/housing surface to housing staff + admin/ED (defense in
+  // depth — the front-end already hides it, this stops direct API access too).
+  app.use('/api/housing', requireAuth, requireHousing);
 
   // ---- Reference data ----
   app.get('/api/housing/meta', requireAuth, (req, res) => res.json({

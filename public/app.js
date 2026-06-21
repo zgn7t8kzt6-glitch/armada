@@ -81,7 +81,16 @@ async function doLogout(){ await api('/logout',{method:'POST'}); location.reload
 function applyTheme(t){ document.documentElement.dataset.theme = t==='dark'?'dark':''; const b=$('themeBtn'); if(b) b.textContent = t==='dark'?'☀️':'🌙'; }
 function toggleTheme(){ const cur=document.documentElement.dataset.theme==='dark'?'dark':'light'; const next=cur==='dark'?'light':'dark'; localStorage.setItem('theme',next); applyTheme(next); }
 (function initTheme(){ const saved=localStorage.getItem('theme'); const hr=new Date().getHours(); applyTheme(saved || ((hr>=19||hr<6)?'dark':'light')); })();
-if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
+if('serviceWorker' in navigator){
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  // When an updated service worker takes control, reload once so the page never
+  // keeps running against a stale/half-updated cache (auto-heals stuck devices).
+  let swReloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{ if(swReloaded||!hadController) return; swReloaded=true; location.reload(); });
+  // Also nudge for an update on every load.
+  navigator.serviceWorker.ready.then(r=>{ try{ r.update(); }catch(e){} }).catch(()=>{});
+}
 function dictateInto(btn){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){ alert('Voice capture needs Chrome or Edge.'); return; }

@@ -2149,7 +2149,8 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   res.json({
     asOf: new Date().toISOString(),
     syncedAt,
-    flow: { census: active.length, admitsToday, dischargesToday, discharges7d, admitsTodayList, dischargesTodayList, dischargesRecentList, sendouts: sendoutsActive },
+    flow: { census: active.length, admitsToday, dischargesToday, discharges7d, admitsTodayList, dischargesTodayList, dischargesRecentList, sendouts: sendoutsActive,
+      bedTotal: +(getState('detox_bed_count') || 40), bedsOpen: Math.max(0, (+(getState('detox_bed_count') || 40)) - active.length) },
     scheduled: scheduledArrivals,
     detox,
     levels: { census: locCensus, stepDowns, stepUps, stepByDest: stepDestList },

@@ -2568,6 +2568,7 @@ async function loadCommand(){
   const syncStale = syncAgo!=null && syncAgo>420;   // auto-sync runs every 6h; >7h means it's lagging
   $('cmdFlow').innerHTML = `
     <div class="ret-card ${syncStale?'rc-warn':''}" ${clk('census')}><div class="n">${f.census}</div><div class="l">Census ›</div><div class="hint" style="font-size:10px;margin-top:2px">Kipu · ${syncTxt}</div></div>
+    <div class="ret-card ${f.bedsOpen===0?'rc-high':(f.bedsOpen<=3?'rc-warn':'')}" onclick="show('bedmap')" style="cursor:pointer"><div class="n">${f.bedsOpen!=null?f.bedsOpen:'—'}</div><div class="l">Open beds ›</div><div class="hint" style="font-size:10px;margin-top:2px">of ${f.bedTotal||40}</div></div>
     ${d.scheduled?`<div class="ret-card ${d.scheduled.waiting?'rc-warn':''}" ${clk('scheduled')}><div class="n">${d.scheduled.waiting}</div><div class="l">Scheduled to arrive ›</div></div>`:''}
     <div class="ret-card" ${clk('admits')}><div class="n">${f.admitsToday}</div><div class="l">Admits today ›</div></div>
     <div class="ret-card" ${clk('dcToday')}><div class="n">${f.dischargesToday}</div><div class="l">Discharges today ›</div></div>

@@ -803,6 +803,33 @@ const ACTIVITY_WEEK_TEMPLATE = [
   [5, '09:00', 'Gratitude circle / check-in'], [5, '17:00', 'House BBQ / cookout'], [5, '20:00', 'Movie night'],
   [6, '10:00', 'Hiking trip'], [6, '18:00', 'Bonfire & storytelling'],
 ];
+// Lay the template onto a specific week (snaps to Sunday), skipping any
+// (title,date) already on the calendar so it never duplicates.
+function activityWeekGenerate(weekStart, opts = {}) {
+  const sd = new Date((weekStart || todayStr()) + 'T00:00:00'); sd.setDate(sd.getDate() - sd.getDay());
+  const startStr = sd.toISOString().slice(0, 10);
+  const catByName = {}; db.prepare(`SELECT id,name,dimension FROM housing_activity_catalog`).all().forEach(c => { catByName[c.name] = c; });
+  const exists = db.prepare(`SELECT 1 FROM housing_activity_events WHERE title=? AND date=? LIMIT 1`);
+  const ins = db.prepare(`INSERT INTO housing_activity_events (catalog_id,title,dimension,house_id,date,time,lead_staff,recurring) VALUES (?,?,?,?,?,?,?, 'none')`);
+  let made = 0, skipped = 0;
+  for (const [dow, time, name] of ACTIVITY_WEEK_TEMPLATE) {
+    const d = new Date(sd); d.setDate(d.getDate() + dow); const date = d.toISOString().slice(0, 10);
+    const cat = catByName[name];
+    if (exists.get(name, date)) { skipped++; continue; }
+    ins.run(cat?.id || null, name, cat?.dimension || null, opts.house_id ? num(opts.house_id) : null, date, time, opts.lead_staff || null);
+    made++;
+  }
+  return { made, skipped, weekStart: startStr };
+}
+// Default-on: ensure a week has the program the first time it's seen. The flag
+// means a staff member who clears a week keeps it cleared (we don't re-seed).
+function autoSeedActivityWeek(weekStart) {
+  const sd = new Date((weekStart || todayStr()) + 'T00:00:00'); sd.setDate(sd.getDate() - sd.getDay());
+  const s = sd.toISOString().slice(0, 10);
+  if (getState('act_seeded_' + s) === 'done') return;
+  try { activityWeekGenerate(s); } catch { /* catalog may not be seeded yet */ }
+  setState('act_seeded_' + s, 'done');
+}
 function seedHousingActivities() {
   if (db.prepare(`SELECT COUNT(*) c FROM housing_activity_catalog`).get().c) return;
   const ins = db.prepare(`INSERT INTO housing_activity_catalog (name,dimension,recovery_domain,description,effectiveness,cost,setting,duration_min,evidence) VALUES (?,?,?,?,?,?,?,?,?)`);
@@ -982,6 +1009,8 @@ export function mountHousing(app) {
   try { seedHousingSurveys(); } catch (e) { console.error('[housing] survey seed:', e.message); }
   try { seedHousingSupplies(); } catch (e) { console.error('[housing] supply seed:', e.message); }
   try { seedHousingActivities(); } catch (e) { console.error('[housing] activity seed:', e.message); }
+  // Default-on schedule: make sure this week (and next) always have a program.
+  try { autoSeedActivityWeek(todayStr()); const nx = new Date(); nx.setDate(nx.getDate() + 7); autoSeedActivityWeek(nx.toISOString().slice(0, 10)); } catch (e) { console.error('[housing] activity autoseed:', e.message); }
 
   /* ---- Sober Living resident kiosk (separate code; NOT behind staff auth) ---- */
   app.get('/api/sl-kiosk/data', requireSlKiosk, (req, res) => {
@@ -1586,6 +1615,7 @@ export function mountHousing(app) {
   // Schedule (calendar of events). from/to are YYYY-MM-DD; defaults to this week+.
   app.get('/api/housing/activities/schedule', requireAuth, (req, res) => {
     const from = req.query.from || todayStr();
+    autoSeedActivityWeek(from);   // default-on: the viewed week always has a program
     const to = req.query.to || (() => { const d = new Date(from); d.setDate(d.getDate() + 28); return d.toISOString().slice(0, 10); })();
     const rows = db.prepare(`SELECT e.*, h.name house, c.dimension cat_dimension FROM housing_activity_events e
       LEFT JOIN housing_houses h ON h.id=e.house_id LEFT JOIN housing_activity_catalog c ON c.id=e.catalog_id
@@ -1622,21 +1652,10 @@ export function mountHousing(app) {
   // any (title, date) already on the calendar so it's safe to re-run.
   app.post('/api/housing/activities/schedule/generate', requireAuth, (req, res) => {
     const b = req.body || {};
-    let start = b.weekStart || todayStr();
-    const sd = new Date(start + 'T00:00:00'); sd.setDate(sd.getDate() - sd.getDay()); start = sd.toISOString().slice(0, 10); // snap to Sunday
-    const catByName = {}; db.prepare(`SELECT id,name,dimension FROM housing_activity_catalog`).all().forEach(c => { catByName[c.name] = c; });
-    const exists = db.prepare(`SELECT 1 FROM housing_activity_events WHERE title=? AND date=? LIMIT 1`);
-    const ins = db.prepare(`INSERT INTO housing_activity_events (catalog_id,title,dimension,house_id,date,time,lead_staff,recurring) VALUES (?,?,?,?,?,?,?, 'none')`);
-    let made = 0, skipped = 0;
-    for (const [dow, time, name] of ACTIVITY_WEEK_TEMPLATE) {
-      const d = new Date(sd); d.setDate(d.getDate() + dow); const date = d.toISOString().slice(0, 10);
-      const cat = catByName[name];
-      if (exists.get(name, date)) { skipped++; continue; }
-      ins.run(cat?.id || null, name, cat?.dimension || null, b.house_id ? num(b.house_id) : null, date, time, b.lead_staff || null);
-      made++;
-    }
-    audit({ user: req.user, action: 'HOUSING_ACTIVITY_GENERATE', detail: `week ${start}: +${made}`, ip: req.ip });
-    res.json({ ok: true, made, skipped, weekStart: start });
+    const r = activityWeekGenerate(b.weekStart || todayStr(), { house_id: b.house_id, lead_staff: b.lead_staff });
+    setState('act_seeded_' + r.weekStart, 'done');
+    audit({ user: req.user, action: 'HOUSING_ACTIVITY_GENERATE', detail: `week ${r.weekStart}: +${r.made}`, ip: req.ip });
+    res.json({ ok: true, ...r });
   });
   app.post('/api/housing/activities/schedule/:id', requireAuth, (req, res) => {
     const cur = db.prepare(`SELECT * FROM housing_activity_events WHERE id=?`).get(req.params.id);

@@ -1633,8 +1633,8 @@ async function loadOutcomes(){
     <div class="ret-card"><div class="n">${o.feltCare!=null?o.feltCare:'—'}</div><div class="l">Felt-care (avg/5, 30d)</div></div>
     <div class="ret-card ${o.openConcerns?'rc-warn':''}"><div class="n">${o.openConcerns}</div><div class="l">Open concerns</div></div>
     <div class="ret-card"><div class="n">${o.delights30}</div><div class="l">Delights (30d)</div></div>
-    <div class="ret-card"><div class="n">${o.surveys?.recommend.avg!=null?o.surveys.recommend.avg:'—'}</div><div class="l">Recommend /5 (survey)</div></div>
-    <div class="ret-card"><div class="n">${o.surveys?.food.avg!=null?o.surveys.food.avg:'—'}</div><div class="l">Food /5 (survey)</div></div>
+    <div class="ret-card ${survCls(pct10(o.surveys?.recommend.avg))}"><div class="n">${o.surveys?.recommend.avg!=null?pct10(o.surveys.recommend.avg)+'%':'—'}</div><div class="l">Recommend (survey)</div></div>
+    <div class="ret-card ${survCls(pct10(o.surveys?.food.avg))}"><div class="n">${o.surveys?.food.avg!=null?pct10(o.surveys.food.avg)+'%':'—'}</div><div class="l">Food satisfaction (survey)</div></div>
     <div class="ret-card"><div class="n">${o.active}</div><div class="l">Active clients</div></div>`;
 
   const { followups } = await api('/followups');
@@ -4673,6 +4673,9 @@ async function genShiftBriefing(){
 
 /* ---- surveys ---- */
 let SURVEYS = [];
+const SURVEY_TARGET=92;
+function pct10(avg){ return avg==null?null:Math.round(avg*10); }          // 0-10 avg → %
+function survCls(pct){ return pct==null?'':pct>=SURVEY_TARGET?'':pct>=75?'rc-warn':'rc-high'; }
 async function loadSurveys(){
   const { surveys } = await api('/surveys'); SURVEYS = surveys;
   if($('sv_select')) $('sv_select').innerHTML = surveys.map(s=>`<option value="${s.id}">${esc(s.title)}</option>`).join('');
@@ -4703,7 +4706,7 @@ function surveyTab(which){
 function sparkSvg(series, w, h){
   w=w||120; h=h||26;
   const pts=[];
-  (series||[]).forEach((p,i)=>{ if(p.avg==null) return; const n=series.length; const x=n>1?(i/(n-1))*(w-4)+2:w/2; const y=h-3-((p.avg-1)/4)*(h-6); pts.push([x,y]); });
+  (series||[]).forEach((p,i)=>{ if(p.avg==null) return; const n=series.length; const x=n>1?(i/(n-1))*(w-4)+2:w/2; const y=h-3-(p.avg/10)*(h-6); pts.push([x,y]); });
   if(!pts.length) return '<span class="hint">no trend yet</span>';
   const line=pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
   const dots=pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="1.7" fill="var(--gold)"/>`).join('');
@@ -4713,18 +4716,18 @@ function surveyTrendBadge(s){
   if(s.dir==null) return s.recentN?'<span class="hint">new</span>':'';
   const c = s.dir==='up'?'#2d7a4f':s.dir==='down'?'var(--danger)':'var(--muted)';
   const arrow = s.dir==='up'?'▲':s.dir==='down'?'▼':'→';
-  const sign = s.trend>0?'+':'';
-  return `<span style="color:${c};font-weight:700" title="last 30 days vs the prior 30">${arrow} ${sign}${s.trend}</span>`;
+  const pts = Math.round((s.trend||0)*10);   // 0-10 avg diff → % points
+  const sign = pts>0?'+':'';
+  return `<span style="color:${c};font-weight:700" title="last 30 days vs the prior 30">${arrow} ${sign}${pts}</span>`;
 }
 async function loadCmdSurveys(){
   if(!$('cmdSurveys')) return;
   let d; try{ d=await api('/surveys/overview'); }catch(e){ $('cmdSurveys').innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
   const any = d.surveys.some(s=>s.responses);
   $('cmdSurveys').innerHTML = any ? `<div class="ret-cards">${d.surveys.map(s=>{
-      const score = s.recentAvg!=null?s.recentAvg:s.avg;
-      const low = score!=null && score<3.5;
-      return `<div class="ret-card ${low?'rc-warn':''}" style="cursor:pointer" onclick="openSurveyResults(${s.id})"><div class="n">${score!=null?score+'<span style="font-size:14px">/5</span>':'—'} ${surveyTrendBadge(s)}</div><div style="margin:2px 0">${sparkSvg(s.spark,110,22)}</div><div class="l">${esc(s.title)} · ${s.responses} ›</div></div>`;
-    }).join('')}</div><p class="hint" style="margin-top:6px">Score = last 30 days. ▲▼ vs the prior 30 days. Line = 6-month trend. Target ${d.target}/5.</p>` : '<div class="hint">No survey responses yet. Put the kiosk on the unit to start gathering them.</div>';
+      const sc = pct10(s.recentAvg!=null?s.recentAvg:s.avg);
+      return `<div class="ret-card ${survCls(sc)}" style="cursor:pointer" onclick="openSurveyResults(${s.id})"><div class="n">${sc!=null?sc+'<span style="font-size:14px">%</span>':'—'} ${surveyTrendBadge(s)}</div><div style="margin:2px 0">${sparkSvg(s.spark,110,22)}</div><div class="l">${esc(s.title)} · ${s.responses} ›</div></div>`;
+    }).join('')}</div><p class="hint" style="margin-top:6px">Score = last 30 days, shown as a %. ▲▼ vs the prior 30 days. Line = 6-month trend. Target ${SURVEY_TARGET}%.</p>` : '<div class="hint">No survey responses yet. Put the kiosk on the unit to start gathering them.</div>';
 }
 let PENDING_SURVEY=null;
 function openSurveyResults(id){ PENDING_SURVEY=id; show('surveys'); }
@@ -4734,7 +4737,7 @@ async function loadSurveyOverview(){
   let d; try{ d=await api('/surveys/overview'); }catch(e){ return; }
   $('surveyOverview').innerHTML = `<div class="card"><h3>Survey results</h3>
     <p class="sub sans">Tap <strong>View</strong> to see scores and comments. <strong>Clear</strong> erases trial/test data.</p>
-    ${d.surveys.map(s=>`<div class="todo"><div class="txt"><strong>${esc(s.title)}</strong> ${surveyTrendBadge(s)} <span style="margin-left:8px">${sparkSvg(s.spark,90,20)}</span> <span class="hint">· ${s.responses} response${s.responses===1?'':'s'}${s.avg!=null?' · all-time '+s.avg+'/5':''}${s.recentAvg!=null?' · 30d '+s.recentAvg+'/5':''}${s.last?' · last '+esc(s.last):''}</span></div>
+    ${d.surveys.map(s=>`<div class="todo"><div class="txt"><strong>${esc(s.title)}</strong> ${surveyTrendBadge(s)} <span style="margin-left:8px">${sparkSvg(s.spark,90,20)}</span> <span class="hint">· ${s.responses} response${s.responses===1?'':'s'}${s.avg!=null?' · all-time '+pct10(s.avg)+'%':''}${s.recentAvg!=null?' · 30d '+pct10(s.recentAvg)+'%':''}${s.last?' · last '+esc(s.last):''}</span></div>
       <div style="display:flex;gap:6px">${s.responses?`<button class="btn btn-gold btn-sm sans" onclick="showSurveyResults(${s.id})">View</button><button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${s.id},${s.responses})">Clear</button>`:'<span class="hint" style="align-self:center">no responses yet</span>'}</div></div>`).join('')}</div>`;
 }
 function startDue(surveyId, clientId){
@@ -4756,10 +4759,9 @@ function qInput(q){
   if(q.type==='yesno') return `<div class="sv-opts">
       <button type="button" class="sv-opt" data-v="1" onclick="pickOpt(this)">Yes</button>
       <button type="button" class="sv-opt" data-v="0" onclick="pickOpt(this)">No</button></div>`;
-  // scale / rating: 1..5
-  const labels = q.type==='rating' ? ['1','2','3','4','5'] : ['1','2','3','4','5'];
-  return `<div class="sv-opts">${labels.map((l,i)=>`<button type="button" class="sv-opt" data-v="${i+1}" onclick="pickOpt(this)">${l}</button>`).join('')}
-    <span class="hint" style="margin-left:6px">${q.type==='rating'?'1 = poor · 5 = excellent':'1 = strongly disagree · 5 = strongly agree'}</span></div>`;
+  // scale / rating: 0..10 → each point = 10%, average × 10 = the % score
+  return `<div class="sv-opts">${[0,1,2,3,4,5,6,7,8,9,10].map(n=>`<button type="button" class="sv-opt" data-v="${n}" onclick="pickOpt(this)">${n}</button>`).join('')}
+    <span class="hint" style="margin-left:6px">${q.type==='rating'?'0 = poor · 10 = excellent':'0 = strongly disagree · 10 = strongly agree'} (shown as a %)</span></div>`;
 }
 function pickOpt(btn){
   btn.parentNode.querySelectorAll('.sv-opt').forEach(b=>b.classList.remove('on'));
@@ -4802,19 +4804,19 @@ async function showSurveyResults(id){
     } else if(q.type==='yesno'){
       html += `<div class="sq res"><div class="sq-q">${esc(q.text)}</div><div class="res-val">${q.yesPct!=null?q.yesPct+'% yes <span class="hint">('+q.count+')</span>':'<span class="hint">no responses</span>'}</div></div>`;
     } else {
-      const low = q.avg!=null && q.avg<3.5;
-      const pct = q.avg!=null ? Math.round(q.avg/5*100) : 0;
+      const pct = pct10(q.avg);
+      const low = pct!=null && pct<SURVEY_TARGET;
       html += `<div class="sq res"><div class="sq-q">${esc(q.text)}</div>
-        <div class="res-bar"><div class="res-track"><div class="res-fill ${low?'low':''}" style="width:${pct}%"></div></div>
-        <div class="res-num ${low?'low':''}">${q.avg!=null?q.avg+'/5':'—'} <span class="hint">(${q.count})</span></div></div></div>`;
+        <div class="res-bar"><div class="res-track"><div class="res-fill ${low?'low':''}" style="width:${pct||0}%"></div></div>
+        <div class="res-num ${low?'low':''}">${pct!=null?pct+'%':'—'} <span class="hint">(${q.count})</span></div></div></div>`;
     }
   });
   $('surveyArea').innerHTML = `<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(survey.title)} — results</h3>
-    <p class="sub sans">${responses} response${responses===1?'':'s'}. Scores under 3.5 are flagged. Low "feel cared for" scores are an early AMA signal.</p></div>
+    <p class="sub sans">${responses} response${responses===1?'':'s'}. Scores under ${SURVEY_TARGET}% are flagged. Low "feel cared for" scores are an early AMA signal.</p></div>
     ${responses?`<button class="btn btn-ghost btn-sm sans" onclick="clearSurveyResponses(${survey.id}, ${responses})" title="Erase all responses (e.g. trial data)">🗑 Clear ${responses} response${responses===1?'':'s'}</button>`:''}</div>${html}</div>
     ${submissions&&submissions.length?`<div class="card"><h3>Who responded</h3>
       <p class="sub sans">Named when the client chose their name; otherwise Anonymous. Tap a named one to read their answers.</p>
-      ${submissions.map(r=>`<div class="todo"><div class="txt"><strong>${esc(r.who)}</strong> ${r.avg!=null?`<span class="risk ${r.avg<3.5?'risk-high':'risk-low'}">${r.avg}/5</span>`:''} <span class="hint">· ${esc(r.at)}${r.by?' · entered by '+esc(r.by):''}</span></div>${r.named?`<button class="btn btn-ghost btn-sm sans" onclick="viewResponse(${r.id})">View</button>`:''}</div>`).join('')}</div>`:''}`;
+      ${submissions.map(r=>{const sp=pct10(r.avg);return `<div class="todo"><div class="txt"><strong>${esc(r.who)}</strong> ${sp!=null?`<span class="risk ${sp<SURVEY_TARGET?'risk-high':'risk-low'}">${sp}%</span>`:''} <span class="hint">· ${esc(r.at)}${r.by?' · entered by '+esc(r.by):''}</span></div>${r.named?`<button class="btn btn-ghost btn-sm sans" onclick="viewResponse(${r.id})">View</button>`:''}</div>`;}).join('')}</div>`:''}`;
   $('surveyArea').scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function viewResponse(rid){

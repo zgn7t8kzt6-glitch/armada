@@ -228,7 +228,7 @@ function surveyView(id){
     let inp;
     if(q.type==='text') inp=`<textarea class="sq-text"></textarea>`;
     else if(q.type==='yesno') inp=`<div class="sv-opts"><button type="button" class="sv-opt" data-v="1" onclick="kpick(this)">Yes</button><button type="button" class="sv-opt" data-v="0" onclick="kpick(this)">No</button></div>`;
-    else inp=`<div class="sv-opts">${[1,2,3,4,5].map(i=>`<button type="button" class="sv-opt" data-v="${i}" onclick="kpick(this)">${i}</button>`).join('')}</div>`;
+    else inp=`<div class="sv-opts">${[0,1,2,3,4,5,6,7,8,9,10].map(i=>`<button type="button" class="sv-opt" data-v="${i}" onclick="kpick(this)">${i}</button>`).join('')}</div><div class="ksub" style="margin-top:4px">0 = not at all · 10 = absolutely</div>`;
     html+=`<div class="sq" data-qid="${q.id}" data-type="${q.type}"><div class="sq-q">${esc(q.text)}</div>${inp}</div>`;
   });
   $('kview').innerHTML=`<h1>${esc(s.title)}</h1><p class="ksub">${esc(s.description||'')}</p>${html}

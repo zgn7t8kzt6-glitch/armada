@@ -6190,24 +6190,25 @@ async function notifySurveyResult(surveyId, clientId, answers) {
   if (qids.length) db.prepare(`SELECT id, text, type FROM survey_questions WHERE id IN (${qids.map(() => '?').join(',')})`).all(...qids).forEach((q) => { qmap[q.id] = q; });
   const nums = answers.filter((a) => (a.num === 0 || a.num) && !Number.isNaN(Number(a.num))).map((a) => Number(a.num));
   const avg = nums.length ? Math.round(nums.reduce((s, n) => s + n, 0) / nums.length * 10) / 10 : null;
-  const lowAreas = answers.filter((a) => (a.num === 0 || a.num) && Number(a.num) <= 3 && qmap[a.question_id])
+  const lowAreas = answers.filter((a) => (a.num === 0 || a.num) && Number(a.num) <= 6 && qmap[a.question_id])
     .map((a) => ({ q: qmap[a.question_id].text, n: Number(a.num) })).sort((x, y) => x.n - y.n);
   const comments = answers.filter((a) => a.text && String(a.text).trim() && qmap[a.question_id])
     .map((a) => ({ q: qmap[a.question_id].text, t: String(a.text).trim() }));
   const c = clientId ? db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(clientId) : null;
   const who = c ? ((c.pref || c.name) + (c.room ? ' · Room ' + c.room : '')) : 'Anonymous';
   const e = htmlEsc;
-  const ratingColor = avg == null ? '#666' : avg < 3.5 ? '#b00' : avg < 4.2 ? '#a60' : '#2d7a4f';
+  const pct = avg == null ? null : Math.round(avg * 10);   // 0-10 → %
+  const ratingColor = pct == null ? '#666' : pct < 75 ? '#b00' : pct < 92 ? '#a60' : '#2d7a4f';
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a">
     <h2 style="margin:0 0 2px">${e(survey.title)} — completed</h2>
     <p style="color:#666;margin:0 0 12px">${e(who)}</p>
-    ${avg != null ? `<div style="font-size:34px;font-weight:700;color:${ratingColor};line-height:1">${avg} / 5</div><p style="color:#888;margin:2px 0 14px">overall rating</p>` : ''}
+    ${pct != null ? `<div style="font-size:34px;font-weight:700;color:${ratingColor};line-height:1">${pct}%</div><p style="color:#888;margin:2px 0 14px">overall rating (target 92%)</p>` : ''}
     <h3 style="margin:14px 0 4px">Focus — what to improve</h3>
-    ${lowAreas.length ? `<div>${lowAreas.map((a) => `<div style="margin:3px 0"><b style="color:#b00">${a.n}/5</b> — ${e(a.q)}</div>`).join('')}</div>` : '<div style="color:#2d7a4f">No low-scored areas — nothing flagged.</div>'}
+    ${lowAreas.length ? `<div>${lowAreas.map((a) => `<div style="margin:3px 0"><b style="color:#b00">${a.n * 10}%</b> — ${e(a.q)}</div>`).join('')}</div>` : '<div style="color:#2d7a4f">No low-scored areas — nothing flagged.</div>'}
     ${comments.length ? `<h3 style="margin:14px 0 4px">In their words</h3>${comments.map((cm) => `<div style="margin:3px 0;color:#444">• <span style="color:#888">${e(cm.q)}</span> — ${e(cm.t)}</div>`).join('')}` : ''}
     <p style="color:#888;margin-top:16px;font-size:12px">Sent automatically by Armada Care Standards each time a survey is submitted.</p>
   </div>`;
-  const subj = `Survey: ${survey.title} — ${avg != null ? avg + '/5' : 'completed'}${lowAreas.length ? ' · ' + lowAreas.length + ' area(s) to improve' : ''}`;
+  const subj = `Survey: ${survey.title} — ${pct != null ? pct + '%' : 'completed'}${lowAreas.length ? ' · ' + lowAreas.length + ' area(s) to improve' : ''}`;
   sendEmail({ to, subject: subj, html }).catch((err) => console.error('survey alert email:', err.message));
 }
 function surveyRecovery(clientId, answers) {
@@ -6215,8 +6216,8 @@ function surveyRecovery(clientId, answers) {
   const nums = answers.map((a) => ((a.num === 0 || a.num) ? Number(a.num) : null)).filter((n) => n != null && !Number.isNaN(n));
   if (!nums.length) return;
   const avg = nums.reduce((s, n) => s + n, 0) / nums.length;
-  const low = nums.some((n) => n <= 2);
-  if (avg > +autoCfg('recovery_max', 3) && !low) return;
+  const low = nums.some((n) => n <= 4);   // 0-10 scale: a 0-4 on any item is a red flag
+  if (avg > +autoCfg('recovery_max', 6) && !low) return;
   const c = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(clientId);
   const nm = c ? (c.pref || c.name) : ('client ' + clientId);
   createAlert(clientId, 'recovery', (avg <= 2 || low) ? 'High' : 'Elevated', `${nm} — low experience score (${avg.toFixed(1)}/5). Service recovery: a leader should check in now.`);

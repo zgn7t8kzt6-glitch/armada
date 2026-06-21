@@ -110,9 +110,9 @@ export function renderReportHtml(d) {
 
       ${h('Voice of the client — survey scores (30 days)')}
       <table style="width:100%;border-collapse:separate;border-spacing:8px"><tr>
-        ${kpi(d.surveys.feltCared.avg != null ? d.surveys.feltCared.avg + '/5' : '—', 'Feel cared for')}
-        ${kpi(d.surveys.recommend.avg != null ? d.surveys.recommend.avg + '/5' : '—', 'Would recommend')}
-        ${kpi(d.surveys.food.avg != null ? d.surveys.food.avg + '/5' : '—', 'Food rating')}
+        ${kpi(d.surveys.feltCared.avg != null ? Math.round(d.surveys.feltCared.avg * 10) + '%' : '—', 'Feel cared for')}
+        ${kpi(d.surveys.recommend.avg != null ? Math.round(d.surveys.recommend.avg * 10) + '%' : '—', 'Would recommend')}
+        ${kpi(d.surveys.food.avg != null ? Math.round(d.surveys.food.avg * 10) + '%' : '—', 'Food rating')}
         ${kpi(d.trainingPct != null ? d.trainingPct + '%' : '—', 'Training current')}
       </tr></table>
 

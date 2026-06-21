@@ -779,7 +779,12 @@ export function buildDailyMovement(date) {
   const byProgram = {};
   for (const h of houses) { const o = occ[h.id] || {}; byProgram[h.program || 'Other'] = (byProgram[h.program || 'Other'] || 0) + (o.occupied || 0); }
   const occPct = capacity ? Math.round(occupied / capacity * 100) : 0;
-  const kpis = { date, intakes: intakes.length, discharges: discharges.length, census, occupied, capacity, open, occPct };
+  // Operational signals leadership/clinical want alongside the census.
+  const incidents = db.prepare(`SELECT i.type, i.severity, i.summary, h.name house FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id WHERE i.date=? ORDER BY i.id DESC`).all(date);
+  const openWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done'`).get().c;
+  const urgentWO = db.prepare(`SELECT m.title, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id WHERE m.status!='done' AND m.priority='Urgent' ORDER BY m.id DESC`).all();
+  const lowStock = db.prepare(`SELECT COUNT(*) c FROM housing_inventory WHERE qty<=par`).get().c;
+  const kpis = { date, intakes: intakes.length, discharges: discharges.length, census, occupied, capacity, open, occPct, openWO, lowStock, incidents: incidents.length };
 
   const pretty = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const li = (a, fmt) => a.length ? '<ul style="margin:6px 0 0;padding-left:18px">' + a.map(fmt).join('') + '</ul>' : '<p style="color:#888;margin:6px 0 0">None.</p>';
@@ -794,6 +799,11 @@ export function buildDailyMovement(date) {
     ${li(intakes, i => `<li>${i.name} — ${i.house || 'unassigned'}${i.loc ? ' · ' + i.loc : ''}</li>`)}
     <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Discharges (${discharges.length})</h3>
     ${li(discharges, d => `<li>${d.name} — ${d.discharge_type || 'discharged'}${d.house ? ' · ' + d.house : ''}</li>`)}
+    <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Incidents today (${incidents.length})</h3>
+    ${li(incidents, i => `<li>${i.type || 'Incident'}${i.severity ? ' (' + i.severity + ')' : ''} — ${i.house || ''}${i.summary ? ': ' + i.summary : ''}</li>`)}
+    <h3 style="color:#235056;margin:14px 0 0;font-size:15px">Maintenance</h3>
+    <p style="margin:6px 0 0">${openWO} open work order${openWO === 1 ? '' : 's'}${urgentWO.length ? ` · <b style="color:#b3382f">${urgentWO.length} urgent</b>` : ''}${lowStock ? ` · ${lowStock} supply item(s) low` : ''}.</p>
+    ${urgentWO.length ? li(urgentWO, w => `<li><b style="color:#b3382f">Urgent:</b> ${w.title}${w.house ? ' — ' + w.house : ''}</li>`) : ''}
     <h3 style="color:#235056;margin:16px 0 4px;font-size:15px">Census by house</h3>
     <table width="100%" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px">
       <tr style="background:#235056;color:#fff"><th align="left">House</th><th align="left">Program</th><th align="right">Filled</th><th align="right">Open</th></tr>
@@ -802,7 +812,7 @@ export function buildDailyMovement(date) {
     </table>
     <p style="color:#9aa7a4;font-size:12px;margin-top:18px">Armada Recovery Housing · automated daily movement report</p>
   </div>`;
-  return { ...kpis, intakes, discharges, byHouse, byProgram, subject: `Sober Living Daily Movement — ${pretty} · census ${census}, +${intakes.length}/-${discharges.length}`, html };
+  return { ...kpis, intakes, discharges, byHouse, byProgram, incidentList: incidents, urgentWO, subject: `Sober Living Daily Movement — ${pretty} · census ${census}, +${intakes.length}/-${discharges.length}`, html };
 }
 function movementRecipients() {
   const a = (getState('housing_movement_clinical') || '').split(',');
@@ -929,6 +939,19 @@ export function mountHousing(app) {
   });
   app.post('/api/housing/voice/checkin/:id/seen', requireAuth, (req, res) => {
     db.prepare(`UPDATE housing_checkins SET seen=1 WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  });
+  // Convert a resident kiosk request into a tracked maintenance work order.
+  app.post('/api/housing/voice/request/:id/to-work-order', requireAuth, (req, res) => {
+    const rq = db.prepare(`SELECT * FROM housing_requests WHERE id=?`).get(req.params.id);
+    if (!rq) return res.status(404).json({ error: 'Not found' });
+    const resi = rq.resident_id ? db.prepare(`SELECT name, house_id FROM housing_residents WHERE id=?`).get(rq.resident_id) : null;
+    const priority = rq.priority === 'Urgent' ? 'Urgent' : 'Normal';
+    const title = (rq.text || 'Resident maintenance request').slice(0, 120);
+    db.prepare(`INSERT INTO housing_maintenance (house_id,area,title,detail,priority,reported_by) VALUES (?,?,?,?,?,?)`)
+      .run(resi?.house_id || null, 'Other', title, resi ? `From ${resi.name} (kiosk request)` : 'From resident kiosk request', priority, req.user.name);
+    db.prepare(`UPDATE housing_requests SET status='done', handled_by=?, handled_at=datetime('now') WHERE id=?`).run(req.user.name, rq.id);
+    audit({ user: req.user, action: 'HOUSING_REQ_TO_WO', detail: title, ip: req.ip });
     res.json({ ok: true });
   });
 

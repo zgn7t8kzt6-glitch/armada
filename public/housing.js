@@ -1004,7 +1004,7 @@ async function loadVoice(){
   const reqRow=r=>`<div class="cmd-row ${r.priority==='Urgent'&&r.status==='open'?'cmd-row-flag':''}"><div class="cmd-row-main">
     ${r.priority==='Urgent'?'🔴 ':'🛎 '}<b>${esc(r.name||'A resident')}</b> <span class="hint">· ${esc(r.category||'request')} · ${esc((r.created||'').slice(0,16).replace('T',' '))}</span><br>${esc(r.text)}
     ${r.status!=='open'?`<span class="chip" style="margin-left:6px">done · ${esc(r.handled_by||'')}</span>`:''}</div>
-    ${r.status==='open'?`<button class="btn btn-ghost btn-sm sans" onclick="voiceRequestDone(${r.id})">Mark done</button>`:''}</div>`;
+    ${r.status==='open'?`<div class="toolbar" style="margin:0;gap:6px"><button class="btn btn-ghost btn-sm sans" onclick="voiceToWorkOrder(${r.id})">→ Work order</button><button class="btn btn-ghost btn-sm sans" onclick="voiceRequestDone(${r.id})">Mark done</button></div>`:''}</div>`;
   const ci=c=>{ const flag=(c.cravings!=null&&c.cravings>=6)||(c.mood!=null&&c.mood<=3);
     return `<div class="cmd-row ${flag?'cmd-row-flag':''}"><div class="cmd-row-main">
       ${flag?'⚠️ ':'🌅 '}<b>${esc(c.name||'A resident')}</b> <span class="hint">· ${esc(c.date)}</span><br>
@@ -1022,6 +1022,7 @@ async function loadVoice(){
     </div>`;
 }
 async function voiceRequestDone(id){ try{ await api('/housing/voice/request/'+id,{method:'POST',body:'{}'}); loadVoice(); }catch(e){ alert(e.message); } }
+async function voiceToWorkOrder(id){ if(!confirm('Create a maintenance work order from this request and mark it handled?')) return; try{ await api('/housing/voice/request/'+id+'/to-work-order',{method:'POST',body:'{}'}); alert('Work order created — see Maintenance & Supplies.'); loadVoice(); }catch(e){ alert(e.message); } }
 async function openSlKioskCode(){
   let d; try{ d=await api('/housing/kiosk-code'); }catch(e){ alert(e.message); return; }
   const url = location.origin+'/sl-kiosk.html';
@@ -1139,7 +1140,7 @@ let MOVE=null;
 async function loadDailyMovement(){
   let d; try{ d=await api('/housing/daily-movement'); }catch(e){ $('movementBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   MOVE=d;
-  const k=[['Census',d.census],['Intakes',d.intakes.length],['Discharges',d.discharges.length],['Open beds',d.open],['Occupancy',d.occPct+'%']];
+  const k=[['Census',d.census],['Intakes',d.intakes.length],['Discharges',d.discharges.length],['Open beds',d.open],['Occupancy',d.occPct+'%'],['Incidents',d.incidents],['Open work orders',d.openWO]];
   const status = !d.emailReady ? '<span class="chip" style="background:#fdeaea;color:#b3382f;border-color:#f3c4c0">Email not connected</span>'
     : (d.recipients.length ? `<span class="hint">Sends to ${d.recipients.length} recipient(s)${d.auto?` · auto at ${d.hour}:00`:' · auto off'}${d.lastSent?` · last sent ${esc(d.lastSent)}`:''}</span>` : '<span class="chip" style="background:#fbe9d8;color:#a35a23;border-color:#f0c9a3">No recipients set</span>');
   const lst=(a,f)=>a.length?'<ul style="margin:6px 0 0;padding-left:18px">'+a.map(f).join('')+'</ul>':'<div class="hint">None today.</div>';
@@ -1149,6 +1150,8 @@ async function loadDailyMovement(){
     <div class="r360-grid">
       <div class="card"><h3>Intakes today (${d.intakes.length})</h3>${lst(d.intakes,i=>`<li>${esc(i.name)} — ${esc(i.house||'unassigned')}${i.loc?' · '+esc(i.loc):''}</li>`)}</div>
       <div class="card"><h3>Discharges today (${d.discharges.length})</h3>${lst(d.discharges,x=>`<li>${esc(x.name)} — ${esc(x.discharge_type||'discharged')}${x.house?' · '+esc(x.house):''}</li>`)}</div>
+      <div class="card"><h3>Incidents today (${d.incidents})</h3>${lst(d.incidentList||[],i=>`<li>${esc(i.type||'Incident')}${i.severity?' ('+esc(i.severity)+')':''} — ${esc(i.house||'')}${i.summary?': '+esc(i.summary):''}</li>`)}</div>
+      <div class="card"><h3>Maintenance</h3><p style="margin:6px 0 0">${d.openWO} open work order(s)${(d.urgentWO&&d.urgentWO.length)?` · <b style="color:var(--danger)">${d.urgentWO.length} urgent</b>`:''}${d.lowStock?` · ${d.lowStock} supply item(s) low`:''}.</p>${(d.urgentWO&&d.urgentWO.length)?lst(d.urgentWO,w=>`<li><b style="color:var(--danger)">Urgent:</b> ${esc(w.title)}${w.house?' — '+esc(w.house):''}</li>`):''}</div>
     </div>
     <div class="card" style="margin-top:16px"><h3>Census by house</h3>
       <table class="tbl"><thead><tr><th>House</th><th>Program</th><th style="text-align:right">Filled</th><th style="text-align:right">Open</th></tr></thead>
@@ -1175,4 +1178,4 @@ async function openMovementSettings(){
   save.onclick=async()=>{ try{ await api('/housing/daily-movement/settings',{method:'POST',body:JSON.stringify({clinical:$('mv_clin').value,leadership:$('mv_lead').value,auto:$('mv_auto').checked,hour:+$('mv_hour').value})}); closeHModal(); loadDailyMovement(); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,openSlKioskCode,loadMaintenance,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadInventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadMaintenance,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadInventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

@@ -1152,7 +1152,9 @@ async function loadActSchedule(){
   if(!HOUSING.actWeek) HOUSING.actWeek=weekStart();
   const from=HOUSING.actWeek; const toD=new Date(from); toD.setDate(toD.getDate()+6); const to=toD.toISOString().slice(0,10);
   let d; try{ d=await api(`/housing/activities/schedule?from=${from}&to=${to}`); }catch(e){ $('actBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
-  $('actKpis').innerHTML=`<div class="ret-card"><div class="n">${d.kpis.thisWeek}</div><div class="l">Scheduled this week</div></div>
+  const planMet=(d.kpis.plannedThisWeek||0)>=(d.kpis.weeklyMin||0);
+  $('actKpis').innerHTML=`<div class="ret-card ${planMet?'':'rc-warn'}"><div class="n">${d.kpis.plannedThisWeek||0}/${d.kpis.weeklyMin||0}</div><div class="l">Planned vs. weekly minimum ${planMet?'✅':'⚠'}</div></div>
+    <div class="ret-card"><div class="n">${d.kpis.completedThisWeek||0}</div><div class="l">Completed this week</div></div>
     <div class="ret-card ${d.kpis.needsCompletion?'rc-warn':''}"><div class="n">${d.kpis.needsCompletion}</div><div class="l">Past — mark complete</div></div>`;
   // group by day across the 7-day week
   const days=[]; for(let i=0;i<7;i++){ const dd=new Date(from); dd.setDate(dd.getDate()+i); days.push(dd.toISOString().slice(0,10)); }
@@ -1179,6 +1181,12 @@ async function loadActSchedule(){
     <div style="margin-top:12px">${body}</div>`;
 }
 function actWeekShift(n){ const d=new Date(HOUSING.actWeek); d.setDate(d.getDate()+n); HOUSING.actWeek=d.toISOString().slice(0,10); loadActSchedule(); }
+function editActMin(cur){
+  const save=hmodal(`<h3>Weekly activity minimum</h3>
+    <p class="sub sans" style="margin:.2em 0 1em">The floor each house must hit every week. Success is measured by never dropping below it. The auto-schedule plans well above this; the minimum is the line you don't miss.</p>
+    <label>Minimum activities per week</label><input id="am_min" type="number" min="1" max="50" value="${cur||7}"/>`);
+  save.onclick=async()=>{ try{ await api('/housing/activities/settings',{method:'POST',body:JSON.stringify({weekly_min:+$('am_min').value})}); closeHModal(); loadActEngagement(); }catch(e){ alert(e.message); } };
+}
 async function generateWeek(){
   if(!confirm('Build a full suggested program for this week? It adds a balanced set of activities (morning check-ins, exercise, meetings, life-skills, fun nights, service & an outing). You can edit or delete any of them, and it won’t duplicate ones already scheduled.')) return;
   try{ const r=await api('/housing/activities/schedule/generate',{method:'POST',body:JSON.stringify({weekStart:HOUSING.actWeek||weekStart()})}); HOUSING.actWeek=r.weekStart; alert(`Added ${r.made} activities to the week${r.skipped?` (skipped ${r.skipped} already scheduled)`:''}. Tweak anything you like, then print the flyer.`); loadActSchedule(); }
@@ -1290,14 +1298,28 @@ async function loadActCatalog(){
 async function loadActEngagement(){
   let d; try{ d=await api('/housing/activities/engagement?days=30'); }catch(e){ $('actBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   const k=d.kpis;
-  $('actKpis').innerHTML=`<div class="ret-card"><div class="n">${k.held}</div><div class="l">Activities held (30d)</div></div>
-    <div class="ret-card"><div class="n">${k.avgAttendance}</div><div class="l">Avg attendance</div></div>
+  $('actKpis').innerHTML=`<div class="ret-card ${k.successRate>=80?'':'rc-warn'}"><div class="n">${k.successRate}%</div><div class="l">Weeks hitting the minimum</div></div>
+    <div class="ret-card"><div class="n">${k.streak}</div><div class="l">Week streak ✅</div></div>
+    <div class="ret-card"><div class="n">${k.totalAttendance}</div><div class="l">Total attendances (30d)</div></div>
     <div class="ret-card"><div class="n">${k.avgEnjoyed??'—'}</div><div class="l">Avg enjoyment /10</div></div>
-    <div class="ret-card"><div class="n">${k.avgEngaged??'—'}</div><div class="l">Avg engagement /10</div></div>
     <div class="ret-card ${k.lowEngaged?'rc-high':''}"><div class="n">${k.lowEngaged}</div><div class="l">Isolating residents</div></div>`;
   const top=d.topActivities.map((t,i)=>`<tr><td>${i+1}. <b>${esc(t.name)}</b> ${actDimChip(t.dimension)}</td><td style="text-align:right">${t.held}</td><td style="text-align:right">${t.avgAttendance}</td><td style="text-align:right">${t.enjoyed??'—'}</td><td style="text-align:right">${t.engaged??'—'}</td></tr>`).join('');
   const low=d.lowEngaged.map(r=>`<div class="cmd-row cmd-row-flag"><div class="cmd-row-main">⚠️ <b>${esc(r.name)}</b> <span class="hint">· ${r.count} activit${r.count===1?'y':'ies'} in 30d · ${r.los}d in house</span></div><button class="btn btn-ghost btn-sm sans" onclick="openResident(${r.id})">Open</button></div>`).join('');
+  const wkBars=(d.weekly||[]).map(w=>{ const cur=w.weekStart===(d.weekly[d.weekly.length-1].weekStart); const col=w.met?'#2f7a4f':(cur?'#c89b3c':'#b3382f');
+    const lbl=new Date(w.weekStart+'T00:00:00').toLocaleDateString('en-US',{month:'numeric',day:'numeric'});
+    return `<div style="flex:1;text-align:center"><div title="${w.completed}/${w.min} · ${w.attendance} attended" style="height:64px;display:flex;align-items:flex-end;justify-content:center"><div style="width:60%;background:${col};border-radius:4px 4px 0 0;height:${Math.max(6,Math.min(100,Math.round(w.completed/Math.max(w.min,1)*100)))}%"></div></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">${lbl}${cur?'*':''}</div><div style="font-size:11px;font-weight:700;color:${col}">${w.met?'✓':w.completed}</div></div>`; }).join('');
+  const thisWeek=`<b style="color:${k.thisWeekMet?'#2f7a4f':'#a35a23'}">${k.thisWeekDone}/${k.weeklyMin} done this week ${k.thisWeekMet?'— minimum met ✅':'— keep going'}</b> · ${k.thisWeekAttendance} attendances`;
   $('actBody').innerHTML=`
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">Weekly success — minimum ${k.weeklyMin} activities/week</h3>
+        <button class="btn btn-ghost btn-sm sans" onclick="editActMin(${k.weeklyMin})">Edit minimum</button>
+      </div>
+      <p class="sub sans" style="margin:.3em 0 .6em">Success = the house never drops below the minimum. ${thisWeek}</p>
+      <div style="display:flex;gap:6px;align-items:flex-end">${wkBars}</div>
+      <div class="hint" style="margin-top:6px">Green = minimum met · amber = current week in progress · red = missed. * = this week.</div>
+    </div>
     <div class="r360-grid">
       <div class="card"><h3>Most effective activities</h3>
         <table class="tbl"><thead><tr><th>Activity</th><th style="text-align:right">Held</th><th style="text-align:right">Avg att.</th><th style="text-align:right">Enjoy</th><th style="text-align:right">Engage</th></tr></thead>
@@ -1354,4 +1376,4 @@ async function openMovementSettings(){
   save.onclick=async()=>{ try{ await api('/housing/daily-movement/settings',{method:'POST',body:JSON.stringify({clinical:$('mv_clin').value,leadership:$('mv_lead').value,auto:$('mv_auto').checked,hour:+$('mv_hour').value,alerts:$('mv_alerts').checked})}); closeHModal(); loadDailyMovement(); }catch(e){ alert(e.message); } };
 }
 
-Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+Object.assign(window,{loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});

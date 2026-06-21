@@ -1630,6 +1630,9 @@ export function mountHousing(app) {
         upcoming: rows.filter(e => e.status === 'planned' && e.date >= today).length,
         thisWeek: rows.filter(e => e.date >= today && e.date <= (() => { const d = new Date(today); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })()).length,
         needsCompletion: rows.filter(e => e.status === 'planned' && e.date < today).length,
+        weeklyMin: Math.max(1, num(getState('activity_weekly_min') || 7)),
+        plannedThisWeek: rows.length,
+        completedThisWeek: rows.filter(e => e.status === 'completed').length,
       },
     });
   });
@@ -1719,6 +1722,22 @@ export function mountHousing(app) {
     const residents = active.map(r => ({ id: r.id, name: r.name, count: part[r.id] || 0, los: losDays(r.move_in) }))
       .sort((a, b) => a.count - b.count);
     const lowEngaged = residents.filter(r => r.count <= 1 && r.los >= 7); // isolating despite a week+ in house
+    // Weekly success: did we hit the minimum number of activities each week, and
+    // how many attended. This is the core "is the house succeeding" measure.
+    const min = Math.max(1, num(getState('activity_weekly_min') || 7));
+    const wk = (ds) => { const d = new Date(ds + 'T00:00:00'); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10); };
+    const curSun = wk(todayStr());
+    const weeksMap = {};
+    for (let i = 7; i >= 0; i--) { const d = new Date(curSun + 'T00:00:00'); d.setDate(d.getDate() - 7 * i); const k = d.toISOString().slice(0, 10); weeksMap[k] = { weekStart: k, completed: 0, attendance: 0 }; }
+    const eightAgo = (() => { const d = new Date(curSun + 'T00:00:00'); d.setDate(d.getDate() - 56); return d.toISOString().slice(0, 10); })();
+    for (const e of db.prepare(`SELECT date, attendance FROM housing_activity_events WHERE status='completed' AND date>=?`).all(eightAgo)) {
+      const k = wk(e.date); if (weeksMap[k]) { weeksMap[k].completed++; weeksMap[k].attendance += (e.attendance || 0); }
+    }
+    const weekly = Object.values(weeksMap).map(w => ({ ...w, min, met: w.completed >= min, avgAttendance: w.completed ? +(w.attendance / w.completed).toFixed(1) : 0 }));
+    const current = weekly[weekly.length - 1];
+    const pastWeeks = weekly.slice(0, -1);                       // completed weeks only
+    const successRate = pastWeeks.length ? Math.round(pastWeeks.filter(w => w.met).length / pastWeeks.length * 100) : 0;
+    let streak = 0; for (let i = pastWeeks.length - 1; i >= 0; i--) { if (pastWeeks[i].met) streak++; else break; }
     res.json({
       days,
       kpis: {
@@ -1727,9 +1746,18 @@ export function mountHousing(app) {
         avgEnjoyed: avg(fb, 'enjoyed'), avgEngaged: avg(fb, 'engaged'),
         repeatRate: fb.length ? Math.round(fb.filter(f => f.repeat === 1).length / fb.filter(f => f.repeat != null).length * 100) || 0 : 0,
         lowEngaged: lowEngaged.length,
+        weeklyMin: min, successRate, streak,
+        thisWeekDone: current.completed, thisWeekMet: current.met, thisWeekAttendance: current.attendance,
       },
-      topActivities: top.slice(0, 12), residents, lowEngaged,
+      weekly, weeklyMin: min, topActivities: top.slice(0, 12), residents, lowEngaged,
     });
+  });
+  app.post('/api/housing/activities/settings', requireAuth, (req, res) => {
+    if (!(req.user.role === 'admin' || req.user.job_role === 'Executive Director' || req.user.job_role === 'Housing Director')) return res.status(403).json({ error: 'Leadership only.' });
+    const b = req.body || {};
+    if (b.weekly_min != null) setState('activity_weekly_min', String(Math.max(1, num(b.weekly_min))));
+    audit({ user: req.user, action: 'HOUSING_ACTIVITY_SETTINGS', detail: `min ${b.weekly_min}`, ip: req.ip });
+    res.json({ ok: true });
   });
 
   // ---- Recovery capital ----

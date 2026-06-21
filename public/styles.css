@@ -593,3 +593,55 @@ footer{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px sol
 .hmodal-card{background:var(--paper);border-radius:var(--r);max-width:560px;width:100%;padding:26px 28px;box-shadow:var(--shadow-lg);animation:fadeIn .18s ease}
 .hmodal-card h3{margin:0 0 4px}
 [data-theme="dark"] .hmodal-card{background:#16202a}
+
+/* ====================================================================== */
+/* ===============  10/10 facelift — premium polish layer  =============== */
+/* Refined depth + light tokens (dark-mode selectors keep their overrides) */
+:root{
+  --line:#e8e3d7;
+  --shadow:0 1px 2px rgba(28,42,38,.04), 0 6px 20px rgba(28,42,38,.055);
+  --shadow-lg:0 14px 30px rgba(28,42,38,.10), 0 34px 70px rgba(28,42,38,.12);
+}
+/* Cards — softer edges, gentle hover lift */
+.card{border-radius:var(--r);box-shadow:0 1px 2px rgba(28,42,38,.04),0 6px 22px rgba(28,42,38,.06)}
+.card:hover{box-shadow:0 2px 8px rgba(28,42,38,.05),0 16px 38px rgba(28,42,38,.09);border-color:#e2dccd}
+.card h3{font-size:16px;font-weight:680}
+/* Stat cards — the dashboard centerpiece: accent bar + subtle wash */
+.ret-cards{gap:14px}
+.ret-card{position:relative;overflow:hidden;border-radius:16px;padding:22px 16px 18px;
+  background:linear-gradient(180deg,#ffffff,#fcfbf6);border-color:#ece6d9}
+.ret-card::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--grad);opacity:.9}
+.ret-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
+.ret-card .n{font-size:36px;font-weight:600;letter-spacing:-.022em}
+.ret-card .l{font-size:10px;letter-spacing:.7px;margin-top:9px}
+.ret-card.rc-high::before{background:linear-gradient(90deg,#c0593f,#d98a6e)}
+.ret-card.rc-elev::before{background:linear-gradient(90deg,#b9852f,#e3b56a)}
+.ret-card.rc-warn::before{background:linear-gradient(90deg,#4f7fb0,#7fb0c2)}
+/* Buttons — crisper press + lift */
+.btn{border-radius:12px;letter-spacing:-.005em}
+.btn-primary:hover,.btn-gold:hover{transform:translateY(-1px)}
+.btn:active{transform:translateY(0) scale(.99)}
+.btn-primary{background:linear-gradient(180deg,#27585e,#214c52)}
+/* Tables — lighter header, row hover, comfy rows */
+.tbl th{font-size:10.5px;letter-spacing:.7px;color:#8b938e;font-weight:700;padding-top:10px;padding-bottom:10px}
+.tbl td{padding-top:11px;padding-bottom:11px}
+.tbl tbody tr{transition:background .12s}
+.tbl tbody tr:hover{background:rgba(35,80,86,.035)}
+[data-theme="dark"] .tbl tbody tr:hover{background:rgba(127,176,194,.08)}
+/* Chips — softer pill */
+.chip{font-size:11px;padding:3px 10px;border-radius:999px;font-weight:600;font-family:var(--sans)}
+/* Sidebar — clearer active state + hover */
+.side-groups button{font-size:13.5px;border-radius:12px;padding:11px 14px}
+.side-groups button.active{box-shadow:0 1px 2px rgba(28,42,38,.06),0 6px 16px rgba(28,42,38,.08)}
+.side-nav button{border-radius:9px}
+/* Heroes — rounder, richer */
+.hq-hero,.cmd-hero{border-radius:22px}
+.hq-hero{box-shadow:0 10px 30px rgba(28,64,71,.18)}
+.topbar-title{letter-spacing:-.025em}
+/* Segmented controls — pill */
+.seg{border-radius:12px}
+.seg button{transition:background .14s,color .14s}
+/* Subtle entrance for views */
+.view.active{animation:fadeUp .26s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.view.active{animation:none}.ret-card:hover,.btn-primary:hover,.btn-gold:hover{transform:none}}

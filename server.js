@@ -5964,7 +5964,14 @@ app.get('/api/beds', requireAuth, (req, res) => {
 });
 app.post('/api/beds', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.room?.trim()) return res.status(400).json({ error: 'Missing room' });
-  db.prepare(`INSERT INTO beds (room, label, unit) VALUES (?, ?, ?)`).run(b.room.trim(), b.label || null, b.unit || null);
+  const gender = ['Male', 'Female', 'Any'].includes(b.gender) ? b.gender : 'Any';
+  db.prepare(`INSERT INTO beds (room, label, unit, gender) VALUES (?, ?, ?, ?)`).run(b.room.trim(), b.label || null, b.unit || null, gender);
+  res.json({ ok: true });
+});
+// Designate a bed as Male / Female / Any.
+app.post('/api/beds/:id/gender', requireAuth, (req, res) => {
+  const gender = ['Male', 'Female', 'Any'].includes(req.body?.gender) ? req.body.gender : 'Any';
+  db.prepare(`UPDATE beds SET gender = ? WHERE id = ?`).run(gender, req.params.id);
   res.json({ ok: true });
 });
 app.post('/api/beds/:id', requireAuth, (req, res) => {
@@ -5980,18 +5987,21 @@ function bedKey(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, 
 app.get('/api/bedboard', requireAuth, (req, res) => {
   const total = +(getState('detox_bed_count') || 40);
   const active = db.prepare(`SELECT id, pref, name, room, loc, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
-  const beds = db.prepare(`SELECT id, room, label, unit FROM beds ORDER BY unit, room, label`).all();
+  const beds = db.prepare(`SELECT id, room, label, unit, gender FROM beds ORDER BY unit, room, label`).all();
   // index clients by their Kipu bed string
   const byKey = {}; active.forEach((c) => { if (c.room) (byKey[bedKey(c.room)] = byKey[bedKey(c.room)] || []).push(c); });
   const used = new Set();
   const rows = beds.map((b) => {
     let occ = byKey[bedKey((b.room || '') + (b.label || ''))]?.find((c) => !used.has(c.id)) || byKey[bedKey(b.room || '')]?.find((c) => !used.has(c.id)) || null;
     if (occ) used.add(occ.id);
-    return { id: b.id, room: b.room, label: b.label, unit: b.unit || 'Detox', client: occ ? { id: occ.id, name: occ.pref || occ.name, loc: occ.loc && occ.loc !== 'Unspecified' ? occ.loc : '', admit: (occ.admit || '').slice(0, 10) } : null };
+    return { id: b.id, room: b.room, label: b.label, unit: b.unit || 'Detox', gender: b.gender || 'Any', client: occ ? { id: occ.id, name: occ.pref || occ.name, loc: occ.loc && occ.loc !== 'Unspecified' ? occ.loc : '', admit: (occ.admit || '').slice(0, 10) } : null };
   });
   const unplaced = active.filter((c) => c.room && !used.has(c.id)).map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room, loc: c.loc && c.loc !== 'Unspecified' ? c.loc : '' }));
   const occupied = active.filter((c) => c.room && String(c.room).trim()).length;
-  res.json({ total, beds: rows, unplaced, occupied, open: Math.max(0, total - occupied), inventoryCount: beds.length, noRoom: active.filter((c) => !c.room || !String(c.room).trim()).length });
+  // Open beds split by the bed's gender designation (from the inventory rows).
+  const byGender = { Male: { total: 0, open: 0 }, Female: { total: 0, open: 0 }, Any: { total: 0, open: 0 } };
+  rows.forEach((b) => { const g = byGender[b.gender] ? b.gender : 'Any'; byGender[g].total += 1; if (!b.client) byGender[g].open += 1; });
+  res.json({ total, beds: rows, unplaced, occupied, open: Math.max(0, total - occupied), inventoryCount: beds.length, byGender, noRoom: active.filter((c) => !c.room || !String(c.room).trim()).length });
 });
 // One click: create a bed-inventory row for every distinct room/bed Kipu shows occupied.
 app.post('/api/bedboard/sync', requireAuth, (req, res) => {

@@ -1243,6 +1243,7 @@ addColumn('users', 'invite_token', 'TEXT');       // sha256 of the emailed invit
 addColumn('users', 'invite_expires', 'TEXT');
 addColumn('users', 'invited_at', 'TEXT');
 addColumn('users', 'invited_by', 'TEXT');
+addColumn('beds', 'gender', 'TEXT');   // detox bed designation: Male | Female | Any
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');

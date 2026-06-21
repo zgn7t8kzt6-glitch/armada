@@ -3094,9 +3094,12 @@ function schShift(n){ const d=new Date($('sc_date').value||today()); d.setDate(d
 async function loadBedMap(){
   let d; try{ d=await api('/bedboard'); }catch(e){ if($('bmBoard'))$('bmBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   if($('bm_total') && document.activeElement!==$('bm_total')) $('bm_total').value=d.total;
+  const bg=d.byGender||{Male:{open:0},Female:{open:0}};
   $('bmKpis').innerHTML=`
     <div class="ret-card"><div class="n">${d.occupied}</div><div class="l">Occupied</div></div>
-    <div class="ret-card ${d.open>0?'rc-warn':''}"><div class="n">${d.open}</div><div class="l">Open beds</div></div>
+    <div class="ret-card ${d.open>0?'rc-warn':''}"><div class="n">${d.open}</div><div class="l">Open beds total</div></div>
+    <div class="ret-card"><div class="n">${(bg.Male&&bg.Male.open)||0}</div><div class="l">♂ Male beds open</div></div>
+    <div class="ret-card"><div class="n">${(bg.Female&&bg.Female.open)||0}</div><div class="l">♀ Female beds open</div></div>
     <div class="ret-card"><div class="n">${d.total}</div><div class="l">Total beds</div></div>
     <div class="ret-card ${d.noRoom?'rc-high':''}"><div class="n">${d.noRoom}</div><div class="l">No bed in Kipu</div></div>`;
   // unplaced: clients whose Kipu room isn't an inventory bed yet
@@ -3106,17 +3109,25 @@ async function loadBedMap(){
   const byUnit={}; d.beds.forEach(b=>{ (byUnit[b.unit||'Detox']=byUnit[b.unit||'Detox']||[]).push(b); });
   $('bmBoard').innerHTML = Object.keys(byUnit).sort().map(unit=>`<div class="card"><h3>${esc(unit)} <span class="hint">(${byUnit[unit].filter(b=>b.client).length}/${byUnit[unit].length})</span></h3>
     <div class="bed-grid" style="display:flex;flex-wrap:wrap;gap:10px">${byUnit[unit].map(b=>{
-      const occ=!!b.client; const loc=b.client&&b.client.loc?b.client.loc:'';
+      const occ=!!b.client; const loc=b.client&&b.client.loc?b.client.loc:''; const gen=b.gender||'Any';
+      const genTag = gen==='Male'?'<span class="badge" style="background:#e6eefb;color:#2b5; color:#2456a6">♂ Male</span>':gen==='Female'?'<span class="badge" style="background:#fbe9f3;color:#a6246e">♀ Female</span>':'<span class="badge">Any</span>';
       return `<div style="flex:1 1 150px;min-width:140px;border:1px solid var(--line);border-radius:10px;padding:12px;background:${occ?'#fbf3ea':'#eef7f0'}">
-        <div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">${esc(b.room)}${b.label?' · '+esc(b.label):''}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">${esc(b.room)}${b.label?' · '+esc(b.label):''}</div>${genTag}</div>
         ${occ?`<div style="font-weight:600;margin-top:3px">${esc(b.client.name)}</div>${loc?`<div class="hint">${esc(loc)}</div>`:''}${b.client.admit?`<div class="hint">since ${esc(b.client.admit)}</div>`:''}`
-          :`<div style="font-weight:600;color:#2f6b44;margin-top:3px">Open</div><button class="btn btn-ghost btn-sm sans no-print" style="margin-top:4px" onclick="removeBed(${b.id})">remove</button>`}
+          :`<div style="font-weight:600;color:#2f6b44;margin-top:3px">Open</div>`}
+        <select class="sans no-print" onchange="setBedGender(${b.id},this.value)" style="margin-top:6px;width:100%;font-size:12px;padding:5px">
+          <option value="Male" ${gen==='Male'?'selected':''}>♂ Male</option>
+          <option value="Female" ${gen==='Female'?'selected':''}>♀ Female</option>
+          <option value="Any" ${gen==='Any'?'selected':''}>Any / unset</option>
+        </select>
+        ${occ?'':`<button class="btn btn-ghost btn-sm sans no-print" style="margin-top:4px" onclick="removeBed(${b.id})">remove</button>`}
       </div>`;
     }).join('')}</div></div>`).join('');
 }
 async function syncBeds(){ if($('bm_msg'))$('bm_msg').textContent='Building…'; try{ const r=await api('/bedboard/sync',{method:'POST'}); if($('bm_msg'))$('bm_msg').textContent='✓ Added '+r.added+' bed(s) from Kipu'; loadBedMap(); }catch(e){ if($('bm_msg'))$('bm_msg').textContent=e.message; } }
-async function bmAddBed(){ const room=($('bm_room')||{}).value||''; if(!room.trim()){ if($('bm_msg'))$('bm_msg').textContent='Room?'; return; } try{ await api('/beds',{method:'POST',body:JSON.stringify({room,label:($('bm_label')||{}).value||'',unit:'Detox'})}); $('bm_room').value='';$('bm_label').value=''; loadBedMap(); }catch(e){ if($('bm_msg'))$('bm_msg').textContent=e.message; } }
+async function bmAddBed(){ const room=($('bm_room')||{}).value||''; if(!room.trim()){ if($('bm_msg'))$('bm_msg').textContent='Room?'; return; } try{ await api('/beds',{method:'POST',body:JSON.stringify({room,label:($('bm_label')||{}).value||'',unit:'Detox',gender:($('bm_gender')||{}).value||'Any'})}); $('bm_room').value='';$('bm_label').value=''; loadBedMap(); }catch(e){ if($('bm_msg'))$('bm_msg').textContent=e.message; } }
 async function removeBed(id){ try{ await api('/beds/'+id,{method:'DELETE'}); loadBedMap(); }catch(e){ alert(e.message); } }
+async function setBedGender(id,gender){ try{ await api('/beds/'+id+'/gender',{method:'POST',body:JSON.stringify({gender})}); loadBedMap(); }catch(e){ alert(e.message); } }
 async function setBedTotal(){ const total=($('bm_total')||{}).value||40; try{ await api('/bedboard/total',{method:'POST',body:JSON.stringify({total})}); loadBedMap(); }catch(e){ alert(e.message); } }
 async function loadBedBoard(){
   let d; try{ d=await api('/turnovers'); }catch(e){ if($('tovDirty'))$('tovDirty').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }

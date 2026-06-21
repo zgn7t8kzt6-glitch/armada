@@ -164,7 +164,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',plan:'command',excellence:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',plan:'command',excellence:'command',onboarding:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -194,6 +194,7 @@ const VIEW_ROLES = {
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
   excellence:  ['Executive Director','Director of Operations','Clinical Director'],
+  onboarding:  ['Executive Director','Director of Operations','Clinical Director'],
   dignity:     ['BHT / Tech','Nurse','Clinical Director'],
   engagement:  ['BHT / Tech','Therapist','Clinical Director'],
   program:     ['BHT / Tech','Therapist','Clinical Director'],
@@ -304,6 +305,7 @@ function show(v){
   if(v==='command') loadCommand();
   if(v==='plan') loadPlan();
   if(v==='excellence') loadExcellence();
+  if(v==='onboarding') loadOnboarding();
   if(v==='leadership') loadLeadership();
   if(v==='compliance') loadCompliance();
   if(v==='askai') loadAskAI();
@@ -2457,7 +2459,8 @@ async function loadExcellence(){
     <div class="ret-card ${m.ratio!=null&&m.ratio>1.5?'rc-high':''}"><div class="n">${m.ratio==null?'—':m.ratio+'×'}</div><div class="l">Weekend ÷ weekday AMA now</div></div>
     <div class="ret-card ${hit?'rc-warn':''}"><div class="n">${tgt?tgt+'×':'—'}</div><div class="l">Target ${hit?'✓ hit':''}</div></div>
     <div class="ret-card"><div class="n">${m.weekendRate==null?'—':m.weekendRate+'%'}</div><div class="l">Weekend AMA rate</div></div>
-    <div class="ret-card"><div class="n">${m.weekdayRate==null?'—':m.weekdayRate+'%'}</div><div class="l">Weekday AMA rate</div></div>`;
+    <div class="ret-card"><div class="n">${m.weekdayRate==null?'—':m.weekdayRate+'%'}</div><div class="l">Weekday AMA rate</div></div>
+    <div class="ret-card ${(d.comfort&&d.comfort.avgMin>15)?'rc-high':''}"><div class="n">${d.comfort&&d.comfort.avgMin!=null?d.comfort.avgMin+'m':'—'}</div><div class="l">Avg time to comfort</div></div>`;
   // AMA defect log
   const wkEnd=d.defects.filter(x=>x.weekend).length, wkDay=d.defects.length-wkEnd;
   $('exDefectStats').innerHTML=`
@@ -2484,6 +2487,48 @@ async function addNearMiss(){
   const cause=($('ex_nmcause')||{}).value||''; if(!cause.trim()){ return; }
   try{ await api('/excellence/defect',{method:'POST',body:JSON.stringify({client_name:($('ex_nmname')||{}).value||'',root_cause:cause})}); $('ex_nmname').value='';$('ex_nmcause').value=''; loadExcellence(); }catch(e){ alert(e.message); }
 }
+/* ---- Comfort med response timer ---- */
+async function loadComfortMeds(){
+  const box=$('cmOpen'); if(!box) return;
+  if($('cm_client')&&$('cm_client').options.length<=1) fillClientSelect($('cm_client'),'Pick patient');
+  let d; try{ d=await api('/comfort-meds'); }catch(e){ return; }
+  const s=d.stats||{};
+  if($('cmStats')) $('cmStats').innerHTML=`
+    <div class="ret-card ${s.avgMin!=null&&s.avgMin>15?'rc-high':''}"><div class="n">${s.avgMin==null?'—':s.avgMin+'m'}</div><div class="l">Avg time to comfort</div></div>
+    <div class="ret-card ${s.within15Pct!=null&&s.within15Pct<80?'rc-warn':''}"><div class="n">${s.within15Pct==null?'—':s.within15Pct+'%'}</div><div class="l">Within 15 min</div></div>
+    <div class="ret-card ${s.open?'rc-warn':''}"><div class="n">${s.open||0}</div><div class="l">Waiting now</div></div>`;
+  box.innerHTML = (d.open.length?d.open.map(o=>`<div class="pc-note" style="display:flex;gap:8px;align-items:center;justify-content:space-between;${o.waiting>=15?'border-left:3px solid var(--danger)':''}">
+      <span><strong>${esc(o.client_name)}</strong>${o.note?' — '+esc(o.note):''} <span class="hint">· ⏱ ${o.waiting}m${o.waiting>=15?' — overdue':''} · ${esc(o.requested_by||'')}</span></span>
+      <button class="btn btn-gold btn-sm sans" onclick="giveComfortMed(${o.id})">Given ✓</button></div>`).join(''):'<div class="hint">No comfort meds waiting.</div>')
+    + (d.recent.length?'<div class="cmd-sub">Recent</div>'+d.recent.map(r=>`<div class="pc-note">✓ <strong>${esc(r.client_name)}</strong> — ${r.mins}m <span class="hint">· ${esc(r.given_by||'')} ${esc(r.at||'')}</span></div>`).join(''):'');
+}
+async function logComfortMed(){
+  const sel=$('cm_client'); const client_id=sel&&sel.value?sel.value:null;
+  try{ await api('/comfort-meds',{method:'POST',body:JSON.stringify({client_id,note:($('cm_note')||{}).value||''})}); if($('cm_note'))$('cm_note').value=''; loadComfortMeds(); }catch(e){ alert(e.message); }
+}
+async function giveComfortMed(id){ try{ await api('/comfort-meds/'+id+'/given',{method:'POST'}); loadComfortMeds(); }catch(e){ alert(e.message); } }
+/* ---- Sacred onboarding ---- */
+async function loadOnboarding(){
+  if(!$('ob_start').value) $('ob_start').value=today();
+  let d; try{ d=await api('/onboarding'); }catch(e){ if($('obList'))$('obList').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  $('obList').innerHTML = d.hires.length ? d.hires.map(h=>{
+    const byDay={1:[],21:[]}; h.tasks.forEach(t=>byDay[t.day].push(t));
+    const grp=(day,label)=>`<div class="cmd-sub">${label}</div>`+byDay[day].map(t=>`<div class="pc-note" style="display:flex;gap:8px;align-items:flex-start;${t.done?'opacity:.6':''}">
+        <input type="checkbox" ${t.done?'checked':''} onchange="toggleOnboard(${h.id},'${t.id}',this.checked)" style="margin-top:3px"/>
+        <div><strong>${esc(t.title)}</strong><div class="hint">${esc(t.detail)}</div></div></div>`).join('');
+    return `<div class="card" style="${h.day21Due?'border-left:4px solid var(--danger)':''}">
+      <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(h.name)}${h.role?' · '+esc(h.role):''}</h3>
+        <p class="sub sans" style="margin:2px 0 0">Day ${h.day} · ${h.doneCount}/${h.total} done${h.day21Due?' · <strong style="color:var(--danger)">Day 21 check-in due</strong>':''}</p></div>
+        <button class="btn btn-ghost btn-sm sans" onclick="removeOnboarding(${h.id},'${esc(h.name).replace(/'/g,"\\'")}')">Remove</button></div>
+      ${grp(1,'Day 1 — immersion')}${grp(21,'Day 21 — reorientation')}</div>`;
+  }).join('') : '<div class="card"><div class="empty">No one in onboarding yet. Add a new hire above.</div></div>';
+}
+async function addOnboarding(){
+  const name=($('ob_name')||{}).value||''; if(!name.trim()){ if($('ob_msg'))$('ob_msg').textContent='Name?'; return; }
+  try{ await api('/onboarding',{method:'POST',body:JSON.stringify({name,role:($('ob_role')||{}).value||'',start_date:($('ob_start')||{}).value||''})}); $('ob_name').value='';$('ob_role').value=''; loadOnboarding(); }catch(e){ if($('ob_msg'))$('ob_msg').textContent=e.message; }
+}
+async function toggleOnboard(id,task_id,done){ try{ await api('/onboarding/'+id+'/task',{method:'POST',body:JSON.stringify({task_id,done})}); loadOnboarding(); }catch(e){ alert(e.message); } }
+async function removeOnboarding(id,name){ if(!confirm('Remove '+name+' from onboarding?'))return; try{ await api('/onboarding/'+id,{method:'DELETE'}); loadOnboarding(); }catch(e){ alert(e.message); } }
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
@@ -3289,6 +3334,7 @@ async function loadConcierge(){
     </div>`).join('')}</div>`).join('');
   $('rqBoard').innerHTML = board || '<div class="empty">No requests. Anticipate a wish and log it.</div>';
   loadConciergeStats();
+  loadComfortMeds();
 }
 async function assignRequest(id,uid){ try{ await api('/requests/'+id+'/assign',{method:'POST',body:JSON.stringify({user_id:uid||null})}); loadConcierge(); pollReqBadge(); }catch(e){ alert(e.message); } }
 async function loadConciergeStats(){

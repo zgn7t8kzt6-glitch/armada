@@ -285,6 +285,29 @@ CREATE TABLE IF NOT EXISTS ama_defects (
   by_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Comfort-med response timer (Schulze "timely"): requested → given, so
+-- time-to-comfort is measurable. A 40-min wait at hour 18 is when people leave.
+CREATE TABLE IF NOT EXISTS comfort_meds (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER, client_name TEXT,
+  note TEXT,
+  requested_by TEXT,
+  requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+  given_by TEXT,
+  given_at TEXT
+);
+-- Sacred onboarding (Day 1 immersion / Day 21 reorientation). Per-hire records;
+-- the task curriculum lives in code, completion here.
+CREATE TABLE IF NOT EXISTS onboardings (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL, role TEXT, start_date TEXT NOT NULL,
+  by_name TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS onboarding_progress (
+  onboarding_id INTEGER, task_id TEXT,
+  done INTEGER NOT NULL DEFAULT 1, done_at TEXT, done_by TEXT,
+  PRIMARY KEY (onboarding_id, task_id)
+);
 
 -- Staff wellbeing pulse ("Ladies and Gentlemen serving Ladies and Gentlemen").
 CREATE TABLE IF NOT EXISTS staff_pulses (

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260616CP" />
+<link rel="stylesheet" href="/styles.css?v=20260616CQ" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -57,6 +57,7 @@
     <button data-view="command" data-admin>Command Center</button>
     <button data-view="plan" data-admin data-subview>90-Day Plan</button>
     <button data-view="excellence" data-admin data-subview>Excellence Standards</button>
+    <button data-view="onboarding" data-admin data-subview>Onboarding</button>
     <button data-view="leadership" data-admin>Leadership</button>
     <button data-view="compliance" data-admin>Documentation</button>
     <button data-view="report" class="active">Shift Playbook</button>
@@ -389,6 +390,21 @@
         <div class="handoff-add"><input id="ex_nmname" class="sans" style="max-width:150px" placeholder="Near-miss: who (optional)"/><input id="ex_nmcause" class="sans" style="flex:1" placeholder="Talked back into bed — what was the real root cause?"/><button class="btn btn-gold sans" onclick="addNearMiss()">Log near-miss</button></div>
         <div id="exDefects" style="margin-top:10px"></div>
       </div>
+    </section>
+
+    <!-- ONBOARDING -->
+    <section id="onboarding" class="view">
+      <div class="card cmd-hero">
+        <h3>🌱 Sacred Onboarding</h3>
+        <p class="sub sans">Day 1 is immersion in the purpose &amp; credo — not paperwork. Day 21 is a reorientation check-in. The first impression on a new hire mirrors the patient's first impression of us.</p>
+        <div class="grid3">
+          <div><label>New hire</label><input id="ob_name" placeholder="Name"/></div>
+          <div><label>Role</label><input id="ob_role" placeholder="e.g. Resident Tech"/></div>
+          <div><label>Start date</label><input id="ob_start" type="date"/></div>
+        </div>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="addOnboarding()">Add new hire</button><span class="hint" id="ob_msg"></span></div>
+      </div>
+      <div id="obList"></div>
     </section>
 
     <!-- ENGAGEMENT & REWARDS -->
@@ -1333,6 +1349,12 @@
         <div class="handoff-add"><input id="rq_text" placeholder="e.g. extra blanket for room 204 · ride to court Thursday · vegetarian dinner"/><button class="btn btn-gold sans" onclick="addRequest()">Log request</button></div>
         <span class="hint" id="rq_msg"></span>
       </div>
+      <div class="card" style="border-left:4px solid #5fb0c2">
+        <h3>💊 Comfort med response <span class="hint" style="font-weight:400">— a 40-min wait at hour 18 is when people leave</span></h3>
+        <div id="cmStats" class="ret-cards" style="margin:8px 0"></div>
+        <div class="handoff-add"><select id="cm_client" style="max-width:200px"></select><input id="cm_note" class="sans" style="flex:1" placeholder="what was requested (optional)"/><button class="btn btn-gold sans" onclick="logComfortMed()">Comfort med requested</button></div>
+        <div id="cmOpen" style="margin-top:10px"></div>
+      </div>
       <div class="card no-print">
         <div class="controls">
           <div class="field"><label>Department</label><select id="rq_filter_dept"><option value="">All departments</option></select></div>
@@ -2018,6 +2040,6 @@
 </div>
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260616CP"></script>
+<script src="/app.js?v=20260616CQ"></script>
 </body>
 </html>

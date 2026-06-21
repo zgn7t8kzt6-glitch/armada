@@ -2363,7 +2363,7 @@ app.get('/api/excellence', requireAuth, (req, res) => {
   const isWknd = (d) => [0, 6].includes(new Date((d || '').slice(0, 10) + 'T12:00:00Z').getUTCDay());
   const defectList = amas.map((c) => ({ client_id: c.id, name: c.pref || c.name, date: (c.discharge_date || '').slice(0, 10), weekend: isWknd(c.discharge_date), reason: c.discharge_reason || '', root_cause: logged[c.id] || '' }));
   const nearMisses = db.prepare(`SELECT id, client_name, root_cause, weekend, by_name, substr(created_at,1,10) at FROM ama_defects WHERE kind = 'near_miss' ORDER BY id DESC LIMIT 20`).all();
-  res.json({ cfg: excellenceCfg(), metrics: { ...split, ratio }, defects: defectList, nearMisses });
+  res.json({ cfg: excellenceCfg(), metrics: { ...split, ratio }, comfort: comfortStats(30), defects: defectList, nearMisses });
 });
 app.post('/api/excellence/config', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
@@ -2388,6 +2388,81 @@ app.post('/api/excellence/defect', requireAuth, (req, res) => {
     db.prepare(`INSERT INTO ama_defects (client_name, kind, root_cause, weekend, by_name) VALUES (?, 'near_miss', ?, ?, ?)`)
       .run(name.slice(0, 80), rc.slice(0, 300), [0, 6].includes(new Date().getDay()) ? 1 : 0, req.user.name);
   }
+  res.json({ ok: true });
+});
+
+// ── Comfort-med response timer (#17 "timely") ────────────────────────────────
+function comfortStats(days = 30) {
+  const r = db.prepare(`SELECT COUNT(*) n,
+      AVG((julianday(given_at) - julianday(requested_at)) * 1440) avg,
+      SUM(CASE WHEN (julianday(given_at) - julianday(requested_at)) * 1440 <= 15 THEN 1 ELSE 0 END) within15
+    FROM comfort_meds WHERE given_at IS NOT NULL AND requested_at >= datetime('now', ?)`).get(`-${days} day`);
+  return { n: r.n || 0, avgMin: r.avg == null ? null : Math.round(r.avg), within15Pct: r.n ? Math.round(r.within15 / r.n * 100) : null,
+    open: db.prepare(`SELECT COUNT(*) n FROM comfort_meds WHERE given_at IS NULL`).get().n };
+}
+app.get('/api/comfort-meds', requireAuth, (req, res) => {
+  const open = db.prepare(`SELECT cm.id, cm.client_name, cm.note, cm.requested_by, substr(cm.requested_at,1,16) at,
+      ROUND((julianday('now') - julianday(cm.requested_at)) * 1440) waiting FROM comfort_meds cm WHERE given_at IS NULL ORDER BY cm.id`).all();
+  const recent = db.prepare(`SELECT client_name, ROUND((julianday(given_at)-julianday(requested_at))*1440) mins, given_by, substr(given_at,1,16) at
+    FROM comfort_meds WHERE given_at IS NOT NULL ORDER BY id DESC LIMIT 8`).all();
+  res.json({ open, recent, stats: comfortStats(30) });
+});
+app.post('/api/comfort-meds', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const c = b.client_id ? db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(b.client_id) : null;
+  db.prepare(`INSERT INTO comfort_meds (client_id, client_name, note, requested_by) VALUES (?,?,?,?)`)
+    .run(b.client_id || null, c ? (c.pref || c.name) : (b.client_name || '').slice(0, 80) || 'A patient', (b.note || '').slice(0, 200) || null, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/comfort-meds/:id/given', requireAuth, (req, res) => {
+  db.prepare(`UPDATE comfort_meds SET given_at = datetime('now'), given_by = ? WHERE id = ? AND given_at IS NULL`).run(req.user.name, req.params.id);
+  res.json({ ok: true });
+});
+
+// ── Sacred onboarding: Day 1 immersion / Day 21 reorientation (#13) ───────────
+const ONBOARD_TASKS = [
+  { id: 'd1-purpose', day: 1, title: 'Open with the purpose & credo — before any paperwork', detail: 'A leader personally welcomes them and tells the "why" story in their own words: one human interaction at someone\'s lowest moment changes everything.' },
+  { id: 'd1-tour', day: 1, title: 'Walk the floor, introduce the team by name', detail: 'They should feel they joined something excellent, not filled a slot.' },
+  { id: 'd1-goldstandards', day: 1, title: 'Hand them the Gold Standards pocket card', detail: 'The credo, the motto, the Three Steps of Service — what we live, said out loud.' },
+  { id: 'd1-shadow', day: 1, title: 'Pair them with an anchor for the first shift', detail: 'A respected teammate models the warm welcome, the dignity kit, anticipation.' },
+  { id: 'd1-empower', day: 1, title: 'Tell them they\'re trusted to solve problems on the spot', detail: 'Walk through the empowerment envelope — "you are trusted" from day one.' },
+  { id: 'd21-checkin', day: 21, title: 'Day 21 reorientation check-in', detail: 'Sit down: How\'s it going? Do you feel part of this? What\'s unclear? Re-anchor them.' },
+  { id: 'd21-belonging', day: 21, title: 'Confirm they feel they belong', detail: 'First-impression-of-the-company mirrors the patient\'s first impression of us. Catch drift early.' },
+  { id: 'd21-growth', day: 21, title: 'Name a growth path', detail: 'Tech → counselor, LPN → charge. People stay when they see a future here.' },
+];
+app.get('/api/onboarding', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const today = appToday();
+  const prog = {}; db.prepare(`SELECT onboarding_id, task_id FROM onboarding_progress WHERE done = 1`).all().forEach((r) => { (prog[r.onboarding_id] = prog[r.onboarding_id] || new Set()).add(r.task_id); });
+  const hires = db.prepare(`SELECT id, name, role, start_date FROM onboardings ORDER BY start_date DESC, id DESC`).all().map((h) => {
+    const done = prog[h.id] || new Set();
+    const day = Math.max(1, Math.floor((Date.parse(today) - Date.parse(h.start_date)) / 864e5) + 1);
+    const tasks = ONBOARD_TASKS.map((t) => ({ ...t, done: done.has(t.id), active: day >= t.day }));
+    const d21 = tasks.filter((t) => t.day === 21);
+    const day21Due = day >= 21 && d21.some((t) => !t.done);
+    return { ...h, day, tasks, doneCount: tasks.filter((t) => t.done).length, total: tasks.length, day21Due };
+  });
+  res.json({ hires });
+});
+app.post('/api/onboarding', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const name = (req.body?.name || '').trim(); if (!name) return res.status(400).json({ error: 'Name?' });
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.start_date || '') ? req.body.start_date : appToday();
+  db.prepare(`INSERT INTO onboardings (name, role, start_date, by_name) VALUES (?,?,?,?)`).run(name.slice(0, 80), (req.body?.role || '').slice(0, 60) || null, start, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/onboarding/:id/task', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const tid = String(req.body?.task_id || ''); if (!ONBOARD_TASKS.some((t) => t.id === tid)) return res.status(400).json({ error: 'Unknown task' });
+  if (req.body?.done) db.prepare(`INSERT INTO onboarding_progress (onboarding_id, task_id, done, done_at, done_by) VALUES (?,?,1,datetime('now'),?)
+    ON CONFLICT(onboarding_id, task_id) DO UPDATE SET done=1, done_at=datetime('now'), done_by=excluded.done_by`).run(req.params.id, tid, req.user.name);
+  else db.prepare(`DELETE FROM onboarding_progress WHERE onboarding_id = ? AND task_id = ?`).run(req.params.id, tid);
+  res.json({ ok: true });
+});
+app.delete('/api/onboarding/:id', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  db.prepare(`DELETE FROM onboarding_progress WHERE onboarding_id = ?`).run(req.params.id);
+  db.prepare(`DELETE FROM onboardings WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
 });
 app.post('/api/plan/task', requireAuth, (req, res) => {

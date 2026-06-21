@@ -675,7 +675,7 @@ const HOUSING_ACCESS_ROLES = ['Housing Director', 'House Manager', 'Recovery Coa
 function requireHousing(req, res, next) {
   const u = req.user;
   if (u && (u.role === 'admin' || u.job_role === 'Executive Director' || HOUSING_ACCESS_ROLES.includes(u.job_role))) return next();
-  return res.status(403).json({ error: 'Recovery Housing is restricted to housing staff.' });
+  return res.status(403).json({ error: 'Hilltop Recovery Home is restricted to housing staff.' });
 }
 
 /* ───────────────── Sober Living resident kiosk (its own code) ───────────────── */

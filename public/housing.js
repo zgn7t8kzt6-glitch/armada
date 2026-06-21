@@ -328,7 +328,7 @@ function pickResidentPhoto(id, file){
   const r=HOUSING.current||{};
   if(r.photo_consent){ uploadResidentPhoto(id, file, false); return; } // consent already on file
   const save=hmodal(`<h3>Photo consent</h3>
-    <p class="sub sans" style="margin:.2em 0 1em">A photo on file helps staff recognize and warmly welcome each resident. Please confirm the resident has given permission to store their picture in Armada Recovery Housing.</p>
+    <p class="sub sans" style="margin:.2em 0 1em">A photo on file helps staff recognize and warmly welcome each resident. Please confirm the resident has given permission to store their picture in Hilltop Recovery Home.</p>
     <label style="display:flex;gap:8px;align-items:flex-start;font-weight:500"><input id="pc_ok" type="checkbox"/><span>The resident consented to having their photo kept on file.</span></label>`);
   save.textContent='Save photo';
   save.onclick=async()=>{ if(!$('pc_ok').checked){ alert('Please confirm consent, or cancel.'); return; } closeHModal(); await uploadResidentPhoto(id, file, true); };

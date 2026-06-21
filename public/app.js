@@ -144,7 +144,7 @@ const GROUPS=[
   {g:'arrival',label:'Arrival',first:'arrivals'},
   {g:'stay',label:'Stay',first:'clients'},
   {g:'handoff',label:'Handoff',first:'dischargepage'},
-  {g:'housing',label:'Housing',first:'housing'},
+  {g:'housing',label:'Hilltop',first:'housing'},
   {g:'team',label:'Team',first:'mytasks'},
   {g:'facility',label:'Facility',first:'inventory'},
   {g:'command',label:'Command',first:'command',admin:true},
@@ -321,7 +321,7 @@ function show(v){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',housing:'Recovery Housing HQ',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',maintenance:'Maintenance & Supplies',movement:'Daily Movement'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',housing:'Hilltop Recovery Home — HQ',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',maintenance:'Maintenance & Supplies',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();

@@ -1244,6 +1244,9 @@ addColumn('users', 'invite_expires', 'TEXT');
 addColumn('users', 'invited_at', 'TEXT');
 addColumn('users', 'invited_by', 'TEXT');
 addColumn('beds', 'gender', 'TEXT');   // detox bed designation: Male | Female | Any
+// Per-diem revenue rates by ASAM level of care (admin-editable). Seed the four
+// Armada bills today; other levels default to 0 until a rate is set.
+if (!getState('loc_rates')) setState('loc_rates', JSON.stringify({ '3.7-WM': 442, '3.7': 342, '3.2-WM': 289, '3.5': 240 }));
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS role_profiles (
@@ -1502,7 +1505,15 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
   ama INTEGER NOT NULL DEFAULT 0,
   census INTEGER,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);`);
+);
+CREATE TABLE IF NOT EXISTS revenue_days (
+  date TEXT NOT NULL,                     -- YYYY-MM-DD billed
+  client_id INTEGER NOT NULL,
+  loc TEXT,                               -- the ASAM level the client was at that day
+  rate INTEGER NOT NULL DEFAULT 0,        -- per-diem billed for that day
+  UNIQUE(date, client_id)
+);
+CREATE INDEX IF NOT EXISTS idx_revenue_days_date ON revenue_days(date);`);
 // The facility's local day boundary. Daily flow is cut off at LOCAL midnight
 // (default US Eastern) so the daily report matches what staff see on the floor,
 // not UTC. Set APP_TZ to override (e.g. America/Chicago).

@@ -1755,6 +1755,8 @@ function rolesForAlert(kind, message = '') {
   // Director for oversight. Safety items (rounds, risk, concerns, note red flags,
   // incidents) reach the hands-on care roles (BHT + Nurse); paperwork goes to
   // whoever owns it. None of these are operational — the DO does not see them.
+  // New admit arrived / intake complete — the care team that picks them up.
+  if (k === 'new_admit' || k === 'new_admit_arrived') return wrap(['BHT / Tech', 'Nurse', 'Case Manager', CLIN]);
   if (k === 'risk' || k === 'concern' || k === 'rounds' || k === 'note') return wrap(['BHT / Tech', 'Nurse', CLIN]);
   if (k === 'carecard') return wrap(['BHT / Tech', CLIN]);
   if (k === 'dignity') return wrap(['BHT / Tech', CLIN]);
@@ -5268,8 +5270,21 @@ app.get('/api/arrival/checklist/:id', requireAuth, (req, res) => {
 app.post('/api/arrival/check', requireAuth, (req, res) => {
   const b = req.body || {};
   if (!b.client_id || !b.item_id) return res.status(400).json({ error: 'client_id + item_id required' });
-  if (b.done === false) db.prepare(`DELETE FROM arrival_checks WHERE client_id = ? AND item_id = ?`).run(b.client_id, b.item_id);
-  else db.prepare(`INSERT OR IGNORE INTO arrival_checks (client_id, item_id, by_id, by_name) VALUES (?,?,?,?)`).run(b.client_id, b.item_id, req.user.id, req.user.name);
+  if (b.done === false) { db.prepare(`DELETE FROM arrival_checks WHERE client_id = ? AND item_id = ?`).run(b.client_id, b.item_id); return res.json({ ok: true }); }
+  db.prepare(`INSERT OR IGNORE INTO arrival_checks (client_id, item_id, by_id, by_name) VALUES (?,?,?,?)`).run(b.client_id, b.item_id, req.user.id, req.user.name);
+  // Auto-notify the care team on the two key front-desk milestones.
+  try {
+    const item = db.prepare(`SELECT label FROM arrival_items WHERE id = ?`).get(b.item_id);
+    if (item) {
+      const c = db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(b.client_id);
+      const who = c ? (c.pref || c.name) : 'A new client';
+      const room = c && c.room ? ` (room ${c.room})` : '';
+      if (/intake complete|notify (the )?team|ready for assessment/i.test(item.label))
+        createAlert(b.client_id, 'new_admit', null, `${who}${room} — intake complete, ready for nurse assessment.`);
+      else if (/scheduled arrival|mark .*arriv|arrived on the board/i.test(item.label))
+        createAlert(b.client_id, 'new_admit_arrived', null, `New admit ${who}${room} has arrived at the front desk.`);
+    }
+  } catch (e) { /* never block the checkmark on a notification */ }
   res.json({ ok: true });
 });
 // Admin: manage the arrival template (add / rename / remove items).

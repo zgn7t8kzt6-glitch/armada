@@ -1248,6 +1248,8 @@ addColumn('beds', 'gender', 'TEXT');   // detox bed designation: Male | Female |
 try { db.prepare(`UPDATE users SET job_role='Catering / Dietary' WHERE job_role='Kitchen'`).run(); } catch { /* ok */ }
 // One-time: drop the default "Issue ID band / wristband" front-desk arrival step (not used).
 try { if (getState('migr_drop_idband') !== 'done') { db.prepare(`UPDATE arrival_items SET active=0 WHERE role='Front Desk' AND label='Issue ID band / wristband'`).run(); setState('migr_drop_idband', 'done'); } } catch { /* ok */ }
+// One-time: relabel the front-desk "notify team" step — it now auto-alerts the care team.
+try { if (getState('migr_intake_notify') !== 'done') { db.prepare(`UPDATE arrival_items SET label='Intake complete — notify nurse, techs & CM for assessment (auto-alerts the team)' WHERE label='Notify the team a new admit is here (nurse + tech + CM)'`).run(); setState('migr_intake_notify', 'done'); } } catch { /* ok */ }
 // Per-diem revenue rates by ASAM level of care (admin-editable). Seed the four
 // Armada bills today; other levels default to 0 until a rate is set.
 if (!getState('loc_rates')) setState('loc_rates', JSON.stringify({ '3.7-WM': 442, '3.7': 342, '3.2-WM': 289, '3.5': 240 }));

@@ -352,7 +352,7 @@ const ARRIVAL_ITEMS = [
   ['Front Desk', 'Collect / confirm emergency contact & next of kin'],
   ['Front Desk', 'Secure phone/valuables per policy with a signed receipt'],
   ['Front Desk', 'Give the welcome packet / what-to-expect'],
-  ['Front Desk', 'Notify the team a new admit is here (nurse + tech + CM)'],
+  ['Front Desk', 'Intake complete — notify nurse, techs & CM for assessment (auto-alerts the team)'],
   ['Front Desk', 'Update the welcome board / room assignment'],
   // ── HOUSEKEEPING — room ready before they arrive ───────────────────
   ['Housekeeping', 'Room cleaned, sanitized, and inspected before arrival'],

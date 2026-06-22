@@ -2114,13 +2114,16 @@ async function renderArrivalChecklist(){
                    : `<button class="btn btn-ghost btn-sm sans no-print" onclick="ARR_SHOWALL=true;renderArrivalChecklist()">Show all roles</button>`) : '';
   $('arrDetail').innerHTML = `<div class="card">
     <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3>
-      <p class="sub sans" style="margin:2px 0 0">Arrival checklist · admitted ${esc(d.client.admit)} · <strong>${overall}% complete</strong></p></div>${toggleBtn}</div>
+      <p class="sub sans" style="margin:2px 0 0">Arrival checklist · admitted ${esc(d.client.admit)} · <strong>${overall}% complete</strong></p></div>
+      <div class="toolbar" style="margin:0;gap:8px">${toggleBtn}<button class="btn btn-primary btn-sm sans no-print" onclick="closeArrival()">${overall===100?'✓ Done':'Done — back to arrivals'}</button></div></div>
     <div class="res-track" style="height:7px;margin:8px 0 2px"><div class="res-fill" style="width:${overall}%"></div></div>
     ${(!mgmt && !myRoles.length)?'<div class="pc-note" style="margin-top:8px">Nothing assigned to your role for this admit — showing the full checklist.</div>':''}
     ${roles.map(roleBlock).join('')}
+    <div class="toolbar no-print" style="margin-top:14px"><button class="btn ${overall===100?'btn-primary':'btn-ghost'} sans" onclick="closeArrival()">${overall===100?'✓ Done — back to arrivals':'← Back to arrivals'}</button></div>
   </div>`;
   $('arrDetail').scrollIntoView({behavior:'smooth',block:'start'});
 }
+function closeArrival(){ ARR_CID=null; const el=$('arrDetail'); if(el) el.innerHTML=''; const b=$('arrBoard'); if(b) b.scrollIntoView({behavior:'smooth',block:'start'}); }
 async function toggleArrival(cid,iid,done){ try{ await api('/arrival/check',{method:'POST',body:JSON.stringify({client_id:cid,item_id:iid,done})}); renderArrivalChecklist(); loadArrivalTasks(); }catch(e){ alert(e.message); } }
 async function loadArrivalTemplate(){
   let d; try{ d=await api('/arrival/template'); }catch(e){ return; }

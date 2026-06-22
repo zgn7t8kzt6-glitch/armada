@@ -270,7 +270,7 @@ const UNIVERSAL_VIEWS = ['mytasks','messages','team','training','library','stand
 const ROLE_MENU = {
   'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedmap','bedboard','clients','dignity','mytasks','messages','team','training','library'],
   'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','bedmap','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
-  'Front Desk': ['dashboard','admissions','referrals','partners','clients','concierge','family','bedmap','inventory','mytasks','messages','team','training','library'],
+  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','inventory','mytasks','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
   'Housing Director': ['housing','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],

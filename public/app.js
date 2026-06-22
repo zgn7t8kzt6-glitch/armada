@@ -193,7 +193,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',finance:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -385,6 +385,7 @@ function show(v){
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
   if(v==='finance') loadFinance();
+  if(v==='expenses') loadExpenses();
   if(v==='plan') loadPlan();
   if(v==='excellence') loadExcellence();
   if(v==='onboarding') loadOnboarding();
@@ -2694,6 +2695,76 @@ async function recomputeRevenue(){
   if(!confirm('Re-bill the entire revenue history at the current rates and known level-of-care history? This replaces the accumulated ledger.')) return;
   if($('fin_msg'))$('fin_msg').textContent='Recomputing…';
   try{ await api('/finance/recompute',{method:'POST'}); if($('fin_msg'))$('fin_msg').textContent='✓ Rebuilt'; loadFinance(); }catch(e){ if($('fin_msg'))$('fin_msg').textContent=e.message; }
+}
+async function loadExpenses(){
+  let d; try{ d=await api('/finance/expenses'); }catch(e){ if($('expBody'))$('expBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const sub='font-size:12px;margin-top:5px;color:#5a6671;font-weight:600';
+  const pct = d.budgetTotal ? Math.round(d.actualTotal/d.budgetTotal*100) : null;
+  $('expKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${usd(d.budgetTotal)}</div><div class="l">Budget · ${esc(d.month)}</div><div class="hint" style="${sub}">monthly</div></div>
+    <div class="ret-card"><div class="n">${usd(d.actualTotal)}</div><div class="l">Actual so far</div><div class="hint" style="${sub}">${pct!=null?pct+'% of budget':''}</div></div>
+    <div class="ret-card ${d.variance<0?'rc-high':'rc-elev'}"><div class="n">${usd(Math.abs(d.variance))}</div><div class="l">${d.variance<0?'Over budget':'Under budget'}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.payroll.cost)}</div><div class="l">Payroll actual</div><div class="hint" style="${sub}">${d.payroll.shiftsCovered} shifts · ${d.payroll.hours.toLocaleString()} hrs</div></div>
+    <div class="ret-card ${d.payroll.otHours?'rc-warn':''}"><div class="n">${d.payroll.otHours.toLocaleString()}</div><div class="l">Overtime hrs</div><div class="hint" style="${sub}">+${usd(d.payroll.otCost)} premium</div></div>`;
+  const vcell=(v)=>v==null?'<span class="hint">—</span>':`<span style="color:${v<0?'var(--danger)':'#2f6b44'};font-weight:600">${v<0?'-':'+'}${usd(Math.abs(v))}</span>`;
+  $('expBody').innerHTML=`<div class="card"><h3>Budget vs actual — ${esc(d.month)}</h3>
+    <table class="tbl"><thead><tr><th>Expense</th><th style="text-align:right">Budget</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th></tr></thead>
+    <tbody>${d.rows.map(r=>`<tr><td>${esc(r.cat)}${r.note?` <span class="hint">· ${esc(r.note)}</span>`:''}</td><td style="text-align:right">${usd(r.budget)}</td><td style="text-align:right">${r.actual==null?'<span class="hint">—</span>':usd(r.actual)}</td><td style="text-align:right">${vcell(r.variance)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${usd(d.budgetTotal)}</td><td style="text-align:right">${usd(d.actualTotal)}</td><td style="text-align:right">${vcell(d.variance)}</td></tr></tfoot></table>
+    <p class="hint" style="margin-top:8px">Payroll is live from covered shifts (scheduled, not called off) × shift hours × pay rate, overtime over 40 hrs/week at 1.5×. As of ${esc(d.asOf)}.</p></div>
+    <div class="card"><h3>Payroll by role — ${esc(d.month)}</h3>
+    <table class="tbl"><thead><tr><th>Role</th><th style="text-align:right">Shifts</th><th style="text-align:right">Hours</th><th style="text-align:right">Cost</th></tr></thead>
+    <tbody>${(d.payroll.byRole||[]).map(r=>`<tr><td>${esc(r.role)}</td><td style="text-align:right">${r.shifts}</td><td style="text-align:right">${r.hours.toLocaleString()}</td><td style="text-align:right;font-weight:600">${usd(r.cost)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No covered shifts this month.</td></tr>'}</tbody></table>
+    <p class="hint" style="margin-top:8px">Role cost shown at base rate; the overtime premium (${usd(d.payroll.otCost)}) is added into the totals above.</p></div>`;
+  // Config — monthly budget, rent actual, shift hours, role rates, staff rates
+  const b=d.budget||{};
+  const rr=d.roleRates||{}; const sh=d.shiftHours||{};
+  $('expConfig').innerHTML=`
+    <div class="card"><h3>Monthly budget</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">
+        <div class="field" style="margin:0"><label>Rent / month</label><div style="display:flex;align-items:center;gap:4px"><span class="hint">$</span><input id="bg_rent" type="number" min="0" value="${b.rent||''}" style="width:130px"/></div></div>
+        <div class="field" style="margin:0"><label>Payroll / month</label><div style="display:flex;align-items:center;gap:4px"><span class="hint">$</span><input id="bg_payroll" type="number" min="0" value="${b.payroll||''}" style="width:130px"/></div></div>
+        <div class="field" style="margin:0"><label>Rent actual · ${esc(d.month)}</label><div style="display:flex;align-items:center;gap:4px"><span class="hint">$</span><input id="bg_rentact" type="number" min="0" value="${d.rentActual!=null?d.rentActual:''}" placeholder="enter" style="width:130px"/></div></div>
+      </div>
+      <div style="margin-top:10px"><button class="btn btn-gold sans" onclick="saveBudget()">Save budget</button> <span class="hint" id="bg_msg"></span></div>
+    </div>
+    <div class="card"><h3>Shift length (hours)</h3>
+      <p class="sub sans" style="margin-top:0">How many hours each covered shift counts as — drives the payroll math.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">${['Morning','Day','Evening','Night'].map(p=>`
+        <div class="field" style="margin:0"><label>${p}</label><input data-sh="${p}" type="number" min="0" step="0.5" value="${sh[p]!=null?sh[p]:''}" style="width:80px"/></div>`).join('')}</div>
+      <div style="margin-top:10px"><button class="btn btn-ghost sans" onclick="saveShiftHours()">Save hours</button></div>
+    </div>
+    <div class="card"><h3>Pay rates</h3>
+      <p class="sub sans" style="margin-top:0">Per-person rate is used when set; otherwise the role default applies. Overtime over 40 hrs/week pays 1.5×.</p>
+      <h4 style="margin:8px 0 4px">Role defaults ($/hr)</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">${(d.roles||[]).map(role=>`
+        <div class="field" style="margin:0;min-width:150px"><label>${esc(role)}</label><div style="display:flex;align-items:center;gap:4px"><span class="hint">$</span><input data-rr="${esc(role)}" type="number" min="0" step="0.5" value="${rr[role]||''}" placeholder="0" style="width:90px"/></div></div>`).join('')}</div>
+      <div style="margin-top:8px"><button class="btn btn-ghost sans" onclick="saveRoleRates()">Save role rates</button></div>
+      <h4 style="margin:14px 0 4px">Per-person ($/hr) <span class="hint" style="font-weight:400">— blank = use role default</span></h4>
+      <table class="tbl"><thead><tr><th>Staff</th><th>Role</th><th style="text-align:right">$/hr</th></tr></thead>
+        <tbody>${(d.staff||[]).map(s=>`<tr><td>${esc(s.name)}</td><td><span class="hint">${esc(s.job_role||'')}</span></td><td style="text-align:right"><input data-sr="${s.id}" type="number" min="0" step="0.5" value="${s.hourly_rate!=null?s.hourly_rate:''}" placeholder="${rr[s.job_role]||'0'}" style="width:80px;text-align:right"/></td></tr>`).join('')}</tbody></table>
+      <div style="margin-top:10px"><button class="btn btn-gold sans" onclick="saveStaffRates()">Save staff rates</button> <span class="hint" id="rate_msg"></span></div>
+    </div>`;
+}
+async function saveBudget(){
+  try{
+    await api('/finance/budget',{method:'POST',body:JSON.stringify({rent:($('bg_rent')||{}).value||0,payroll:($('bg_payroll')||{}).value||0})});
+    await api('/finance/rent-actual',{method:'POST',body:JSON.stringify({month:'',amount:($('bg_rentact')||{}).value})});
+    if($('bg_msg'))$('bg_msg').textContent='✓ Saved'; loadExpenses();
+  }catch(e){ if($('bg_msg'))$('bg_msg').textContent=e.message; }
+}
+async function saveShiftHours(){
+  const hours={}; document.querySelectorAll('#expConfig input[data-sh]').forEach(i=>{ if(i.value!=='') hours[i.dataset.sh]=+i.value; });
+  try{ await api('/finance/shift-hours',{method:'POST',body:JSON.stringify(hours)}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveRoleRates(){
+  const rates={}; document.querySelectorAll('#expConfig input[data-rr]').forEach(i=>{ rates[i.dataset.rr]=+i.value||0; });
+  try{ await api('/finance/role-rates',{method:'POST',body:JSON.stringify({rates})}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveStaffRates(){
+  const rates={}; document.querySelectorAll('#expConfig input[data-sr]').forEach(i=>{ rates[i.dataset.sr]=i.value; });
+  if($('rate_msg'))$('rate_msg').textContent='Saving…';
+  try{ await api('/finance/staff-rates',{method:'POST',body:JSON.stringify({rates})}); if($('rate_msg'))$('rate_msg').textContent='✓ Saved'; loadExpenses(); }catch(e){ if($('rate_msg'))$('rate_msg').textContent=e.message; }
 }
 // Command Center revenue strip — admin only (the API is admin-gated too).
 async function loadCmdRevenue(){

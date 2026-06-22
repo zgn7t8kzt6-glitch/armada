@@ -1247,6 +1247,13 @@ addColumn('beds', 'gender', 'TEXT');   // detox bed designation: Male | Female |
 // Per-diem revenue rates by ASAM level of care (admin-editable). Seed the four
 // Armada bills today; other levels default to 0 until a rate is set.
 if (!getState('loc_rates')) setState('loc_rates', JSON.stringify({ '3.7-WM': 442, '3.7': 342, '3.2-WM': 289, '3.5': 240 }));
+// Expenses / budget. Payroll actual is derived from covered shifts × hours × pay
+// rate (per-person, role fallback), with weekly overtime > 40h at 1.5×.
+addColumn('users', 'hourly_rate', 'REAL');   // per-person hourly wage (admin-set)
+if (!getState('shift_hours')) setState('shift_hours', JSON.stringify({ Morning: 8, Day: 8, Evening: 8, Night: 8 }));
+if (!getState('role_rates')) setState('role_rates', JSON.stringify({}));        // { 'BHT / Tech': 18, 'Nurse': 35, ... }
+if (!getState('budget_monthly')) setState('budget_monthly', JSON.stringify({ rent: 0, payroll: 0 }));
+if (!getState('rent_actual')) setState('rent_actual', JSON.stringify({}));      // { 'YYYY-MM': amount } until QuickBooks P&L is wired
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS role_profiles (

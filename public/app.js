@@ -2696,29 +2696,43 @@ async function recomputeRevenue(){
   if($('fin_msg'))$('fin_msg').textContent='Recomputing…';
   try{ await api('/finance/recompute',{method:'POST'}); if($('fin_msg'))$('fin_msg').textContent='✓ Rebuilt'; loadFinance(); }catch(e){ if($('fin_msg'))$('fin_msg').textContent=e.message; }
 }
-async function loadExpenses(){
-  let d; try{ d=await api('/finance/expenses'); }catch(e){ if($('expBody'))$('expBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+let EXP_MONTH=null;
+async function loadExpenses(month){
+  if(month!=null) EXP_MONTH=month;
+  const q = EXP_MONTH ? ('?month='+encodeURIComponent(EXP_MONTH)) : '';
+  let d; try{ d=await api('/finance/expenses'+q); }catch(e){ if($('expBody'))$('expBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  EXP_MONTH=d.month;
   const sub='font-size:12px;margin-top:5px;color:#5a6671;font-weight:600';
   const pct = d.budgetTotal ? Math.round(d.actualTotal/d.budgetTotal*100) : null;
+  // biggest overage line — "where we went wrong"
+  const overs = d.rows.filter(r=>r.variance!=null && r.variance<0).sort((a,b)=>a.variance-b.variance);
+  const worst = overs[0];
   $('expKpis').innerHTML=`
-    <div class="ret-card"><div class="n">${usd(d.budgetTotal)}</div><div class="l">Budget · ${esc(d.month)}</div><div class="hint" style="${sub}">monthly</div></div>
-    <div class="ret-card"><div class="n">${usd(d.actualTotal)}</div><div class="l">Actual so far</div><div class="hint" style="${sub}">${pct!=null?pct+'% of budget':''}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.budgetTotal)}</div><div class="l">Budget · ${esc(d.month)}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.actualTotal)}</div><div class="l">Actual</div><div class="hint" style="${sub}">${pct!=null?pct+'% of budget':''}</div></div>
     <div class="ret-card ${d.variance<0?'rc-high':'rc-elev'}"><div class="n">${usd(Math.abs(d.variance))}</div><div class="l">${d.variance<0?'Over budget':'Under budget'}</div></div>
-    <div class="ret-card"><div class="n">${usd(d.payroll.cost)}</div><div class="l">Payroll actual</div><div class="hint" style="${sub}">${d.payroll.shiftsCovered} shifts · ${d.payroll.hours.toLocaleString()} hrs</div></div>
-    <div class="ret-card ${d.payroll.otHours?'rc-warn':''}"><div class="n">${d.payroll.otHours.toLocaleString()}</div><div class="l">Overtime hrs</div><div class="hint" style="${sub}">+${usd(d.payroll.otCost)} premium</div></div>`;
+    ${worst?`<div class="ret-card rc-high"><div class="n">${usd(-worst.variance)}</div><div class="l">Worst line</div><div class="hint" style="${sub}">${esc(worst.cat)}</div></div>`:''}
+    <div class="ret-card"><div class="n">${overs.length}</div><div class="l">Lines over budget</div></div>`;
   const vcell=(v)=>v==null?'<span class="hint">—</span>':`<span style="color:${v<0?'var(--danger)':'#2f6b44'};font-weight:600">${v<0?'-':'+'}${usd(Math.abs(v))}</span>`;
   const money=(id,cat,val,ph='')=>`<div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-${id}="${esc(cat)}" type="number" min="0" value="${val!=null?val:''}" placeholder="${ph}" style="width:100px;text-align:right"/></div>`;
-  $('expBody').innerHTML=`<div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Budget vs actual — ${esc(d.month)}</h3><button class="btn btn-gold sans" onclick="saveExpenses()">Save</button></div>
-    <table class="tbl" style="margin-top:8px"><thead><tr><th>Expense</th><th style="text-align:right">Budget / mo</th><th style="text-align:right">PPD $/day</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th></th></tr></thead>
-    <tbody>${d.rows.map(r=>`<tr><td>${esc(r.cat)}${r.computed?' <span class="hint">· auto</span>':''}</td>
+  const rowHtml=(r)=>`<tr><td>${esc(r.cat)}${r.computed?' <span class="hint">· auto</span>':''}</td>
         <td style="text-align:right">${r.budgetComputed?`<strong>${usd(r.budget)}</strong> <span class="hint">· ${r.type==='ppd'?'PPD':'model'}</span>`:money('bud',r.cat,r.budget||'')}</td>
-        <td style="text-align:right">${r.computed?'<span class="hint">—</span>':`<div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-ppd="${esc(r.cat)}" type="number" min="0" step="0.5" value="${r.ppd||''}" placeholder="—" title="Set a per-patient-per-day rate to drive this line off census" style="width:70px;text-align:right"/></div>`}</td>
+        <td style="text-align:right">${r.computed?'<span class="hint">—</span>':`<div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-ppd="${esc(r.cat)}" type="number" min="0" step="0.5" value="${r.ppd||''}" placeholder="—" title="Set a per-patient-per-day rate to drive this line off census" style="width:64px;text-align:right"/></div>`}</td>
         <td style="text-align:right">${r.computed?`<strong>${usd(r.actual)}</strong>`:money('act',r.cat,r.actual)}</td>
         <td style="text-align:right">${vcell(r.variance)}</td>
-        <td style="text-align:right">${r.computed?'':`<button class="btn btn-ghost btn-sm sans no-print" onclick="removeExpenseLine('${esc(r.cat)}')" title="Remove line">×</button>`}</td></tr>`).join('')}</tbody>
-    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${usd(d.budgetTotal)}</td><td></td><td style="text-align:right">${usd(d.actualTotal)}</td><td style="text-align:right">${vcell(d.variance)}</td><td></td></tr></tfoot></table>
-    <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="exp_newcat" placeholder="New expense line (e.g. Utilities)" style="width:220px"/><button class="btn btn-ghost btn-sm sans" onclick="addExpenseLine()">+ Add line</button><span class="hint" id="exp_msg"></span></div>
-    <p class="hint" style="margin-top:8px">Set a <strong>PPD</strong> ($/patient/day) on any line — e.g. Food — to budget it off census (${d.census} patients × ${d.payrollBudget.daysInMonth} days). Payroll is live from covered shifts + salaried, overtime over 40 hrs/week at 1.5×. As of ${esc(d.asOf)}.</p></div>
+        <td style="text-align:right">${r.computed?'':`<button class="btn btn-ghost btn-sm sans no-print" onclick="removeExpenseLine('${esc(r.cat)}')" title="Remove line">×</button>`}</td></tr>`;
+  // group rows by P&L group, with a subtotal per group
+  let body='', cg=null, gb=0, ga=0;
+  const subtotal=()=>{ if(cg){ body+=`<tr style="background:#faf7f0;font-weight:600"><td>Subtotal — ${esc(cg)}</td><td style="text-align:right">${usd(gb)}</td><td></td><td style="text-align:right">${usd(ga)}</td><td style="text-align:right">${vcell(gb-ga)}</td><td></td></tr>`; } };
+  for(const r of d.rows){ const g=r.group||''; if(g!==cg){ subtotal(); cg=g; gb=0; ga=0; if(g) body+=`<tr><td colspan="6" style="font-weight:700;padding-top:12px;color:var(--navy)">${esc(g)}</td></tr>`; } gb+=r.budget; ga+=(r.actual||0); body+=rowHtml(r); }
+  subtotal();
+  const monthSel=`<select onchange="loadExpenses(this.value)" class="sans" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px">${(d.months||[d.month]).map(m=>`<option value="${m}"${m===d.month?' selected':''}>${m}${m===d.curMonth?' (current)':''}</option>`).join('')}</select>`;
+  $('expBody').innerHTML=`<div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Budget vs actual</h3><div style="display:flex;gap:8px;align-items:center">${monthSel}<button class="btn btn-gold sans" onclick="saveExpenses()">Save</button></div></div>
+    <table class="tbl" style="margin-top:8px"><thead><tr><th>Line</th><th style="text-align:right">Budget / mo</th><th style="text-align:right">PPD</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th></th></tr></thead>
+    <tbody>${body}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total expenses</td><td style="text-align:right">${usd(d.budgetTotal)}</td><td></td><td style="text-align:right">${usd(d.actualTotal)}</td><td style="text-align:right">${vcell(d.variance)}</td><td></td></tr></tfoot></table>
+    <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="exp_newcat" placeholder="New expense line" style="width:220px"/><button class="btn btn-ghost btn-sm sans" onclick="addExpenseLine()">+ Add line</button><span class="hint" id="exp_msg"></span></div>
+    <p class="hint" style="margin-top:8px">Variance = budget − actual; <span style="color:var(--danger)">red is over budget</span>. Set a <strong>PPD</strong> ($/patient/day) on a line (e.g. Client Meals) to budget it off census (${d.census} patients). ${d.payrollItemized?'Payroll is itemized below (Salaries, Taxes, Benefits…).':'Payroll is live from covered shifts + salaried.'} As of ${esc(d.asOf)}.</p></div>
     <div class="card"><h3>Payroll by role — ${esc(d.month)}</h3>
     <table class="tbl"><thead><tr><th>Role</th><th style="text-align:right">Shifts</th><th style="text-align:right">Hours</th><th style="text-align:right">Cost</th></tr></thead>
     <tbody>${(d.payroll.byRole||[]).map(r=>`<tr><td>${esc(r.role)}</td><td style="text-align:right">${r.shifts}</td><td style="text-align:right">${r.hours.toLocaleString()}</td><td style="text-align:right;font-weight:600">${usd(r.cost)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No covered shifts this month.</td></tr>'}</tbody></table>
@@ -2772,7 +2786,7 @@ function gatherExpenses(extraCat){
   const ppd={}; document.querySelectorAll('#expBody input[data-ppd]').forEach(i=>{ ppd[i.dataset.ppd]=i.value; });
   const cats=[...document.querySelectorAll('#expBody input[data-ppd]')].map(i=>i.dataset.ppd);
   if(extraCat) cats.push(extraCat);
-  return { cats, budgets, actuals, ppd };
+  return { cats, budgets, actuals, ppd, month: EXP_MONTH };
 }
 function gatherSalaried(){
   const roles=[]; document.querySelectorAll('#salRows tr').forEach(tr=>{ const t=tr.querySelector('[data-sal-title]'), m=tr.querySelector('[data-sal-monthly]'); if(t&&t.value.trim()) roles.push({title:t.value.trim(), monthly:+(m&&m.value)||0}); });

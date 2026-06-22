@@ -6371,48 +6371,56 @@ function payrollBudget() {
     burden: { tax, benefits }, baseMonthly, taxesMonthly, benefitsMonthly, burdenMult: 1 + (tax + benefits) / 100,
     monthly: baseMonthly + taxesMonthly + benefitsMonthly, daysInMonth, lines, missingRate: [...missing] };
 }
-function expenseSnapshot() {
+function expenseSnapshot(reqMonth) {
   const today = appToday();
-  const month = today.slice(0, 7);
+  const curMonth = today.slice(0, 7);
+  const month = /^\d{4}-\d{2}$/.test(reqMonth || '') ? reqMonth : curMonth;
   const monthStart = month + '-01';
+  const daysInMonth = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 0)).getUTCDate();
+  const monthEnd = month + '-' + String(daysInMonth).padStart(2, '0');
+  // elapsed days: full month if it's already past, day-of-month if current, 0 if future.
+  const elapsed = month < curMonth ? daysInMonth : (month === curMonth ? +today.slice(8, 10) : 0);
   const budget = jsonState('budget_monthly', {});
   const actualsAll = jsonState('expense_actuals', {});
   const actuals = actualsAll[month] || {};
   const cats = expenseCats();
   const ppdLines = jsonState('ppd_lines', {});
-  const daysInMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 0)).getUTCDate();
-  const elapsed = +today.slice(8, 10);
+  const groups = jsonState('pl_groups', {});
   const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n;
-  const payroll = payrollActual(monthStart, today);
   const payBudget = payrollBudget();
-  // Salaried staff are paid regardless of shifts → prorate to date for the actual.
-  const salariedActual = Math.round(payBudget.salariedMonthly * elapsed / daysInMonth);
-  // Actual is loaded with the same taxes + benefits burden as the budget.
-  const actualBase = payroll.cost + salariedActual;
-  const payrollActualTotal = Math.round(actualBase * payBudget.burdenMult);
-  // Payroll: budget from the staffing model (+ salaried), actual from covered shifts (+ salaried prorated), both loaded with taxes + benefits.
-  const rows = [{ cat: 'Payroll', budget: payBudget.monthly, actual: payrollActualTotal, computed: true, budgetComputed: true,
-    variance: payBudget.monthly - payrollActualTotal, note: `${payroll.shiftsCovered} shifts + salaried, +${payBudget.burden.tax + payBudget.burden.benefits}% taxes & benefits` }];
+  // Payroll is "itemized" once the real P&L payroll accounts exist as lines — then
+  // we don't add a separate computed Payroll row (it would double-count).
+  const payrollItemized = cats.some((c) => /salaries\s*&?\s*wages|payroll taxes/i.test(c));
+  const rows = [];
+  if (!payrollItemized) {
+    const payroll = payrollActual(monthStart, month === curMonth ? today : monthEnd);
+    const salariedActual = Math.round(payBudget.salariedMonthly * elapsed / daysInMonth);
+    const payrollActualTotal = Math.round((payroll.cost + salariedActual) * payBudget.burdenMult);
+    rows.push({ cat: 'Payroll', group: 'Payroll & Benefits', budget: payBudget.monthly, actual: payrollActualTotal, computed: true, budgetComputed: true,
+      variance: payBudget.monthly - payrollActualTotal, note: `${payroll.shiftsCovered} shifts + salaried, +${payBudget.burden.tax + payBudget.burden.benefits}% taxes & benefits` });
+  }
   for (const cat of cats) {
     const a = actuals[cat] != null ? +actuals[cat] : null;
     const ppd = +ppdLines[cat] || 0;
+    const group = groups[cat] || '';
     if (ppd > 0) {   // census-driven line: budget = $/patient/day × census × days
       const b = Math.round(ppd * census * daysInMonth);
-      rows.push({ cat, budget: b, actual: a, computed: false, budgetComputed: true, type: 'ppd', ppd,
+      rows.push({ cat, group, budget: b, actual: a, computed: false, budgetComputed: true, type: 'ppd', ppd,
         variance: (a == null ? null : b - a), note: `PPD $${ppd} × ${census} census × ${daysInMonth}d` });
     } else {
-      rows.push({ cat, budget: +budget[cat] || 0, actual: a, computed: false, type: 'fixed',
-        variance: (a == null ? null : (+budget[cat] || 0) - a), note: a == null ? 'enter actual' : '' });
+      rows.push({ cat, group, budget: +budget[cat] || 0, actual: a, computed: false, type: 'fixed',
+        variance: (a == null ? null : (+budget[cat] || 0) - a), note: '' });
     }
   }
   const budgetTotal = rows.reduce((s, r) => s + r.budget, 0);
   const actualTotal = rows.reduce((s, r) => s + (r.actual || 0), 0);
   const staff = db.prepare(`SELECT id, name, job_role, hourly_rate FROM users WHERE active = 1 ORDER BY job_role, name`).all();
-  return { month, asOf: today, rows, cats, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
-    payroll, payrollBudget: payBudget, salariedActual, census, ppdLines, budget, actuals,
+  const months = [...new Set([...Object.keys(actualsAll), curMonth])].sort().reverse();
+  return { month, curMonth, months, asOf: today, rows, cats, payrollItemized, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
+    payroll: payrollActual(monthStart, month === curMonth ? today : monthEnd), payrollBudget: payBudget, census, ppdLines, budget, actuals,
     shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}), roles: JOB_ROLES, staff };
 }
-app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot()));
+app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot(req.query.month)));
 // Unified save: categories, budgets (per category incl. Payroll), and this
 // month's manual actuals (Payroll actual is always computed, never stored).
 app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => {
@@ -6434,15 +6442,15 @@ app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => 
     const prev = jsonState('budget_monthly', {});
     setState('budget_monthly', JSON.stringify({ ...prev, ...bud }));
   }
+  const tgtMonth = /^\d{4}-\d{2}$/.test(b.month || '') ? b.month : appToday().slice(0, 7);
   if (b.actuals && typeof b.actuals === 'object') {
-    const month = appToday().slice(0, 7);
     const all = jsonState('expense_actuals', {});
-    const m = { ...(all[month] || {}) };
+    const m = { ...(all[tgtMonth] || {}) };
     for (const cat of cats) { const v = b.actuals[cat]; if (v === '' || v == null) delete m[cat]; else m[cat] = Math.max(0, Math.round(+v || 0)); }
-    all[month] = m; setState('expense_actuals', JSON.stringify(all));
+    all[tgtMonth] = m; setState('expense_actuals', JSON.stringify(all));
   }
   audit({ user: req.user, action: 'FINANCE_EXPENSES', ip: req.ip });
-  res.json(expenseSnapshot());
+  res.json(expenseSnapshot(tgtMonth));
 });
 // Labor burden — employer payroll taxes + benefits as % of wages.
 app.post('/api/finance/burden', requireAuth, requireAdmin, (req, res) => {

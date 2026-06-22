@@ -1299,6 +1299,31 @@ if (getState('expense_corp_alloc_v1') !== 'done') {
   } catch (e) { /* ignore */ }
   setState('expense_corp_alloc_v1', 'done');
 }
+// Import the real P&L chart of accounts + May 2026 actuals (from the uploaded
+// QuickBooks P&L) so every line is budget-vs-actual. One-time; budgets/edits made
+// after this are preserved. pl_groups gives each line its P&L grouping.
+if (getState('pl_import_may2026_v1') !== 'done') {
+  const CHART = [
+    ['Marketing', 'Advertising & Marketing', 4134.81], ['SEO', 'Advertising & Marketing', 255.32],
+    ['Business Development-Operations', '', 884.04],
+    ['Client Meals', 'Client Service Costs', 22040.12], ['Client Supplies', 'Client Service Costs', 2414.03], ['Client Transportation', 'Client Service Costs', 3680.75],
+    ['Bank fees & Service charges', 'Dues, Fees & Subscriptions', 417.12], ['Billing Charges', 'Dues, Fees & Subscriptions', 574.17], ['Late Fees', 'Dues, Fees & Subscriptions', 81.79],
+    ['HR & Personnel', '', 266.29],
+    ['Liability Insurance', 'Insurance', 4179.37],
+    ['Licensing & Credentialing Consulting', '', 510.0],
+    ['Management Fee', '', 20000.0],
+    ['Equipment rental', 'Office & Administrative', 358.4], ['Office Supplies', 'Office & Administrative', 711.7],
+    ['Rent', 'Operating Occupancy Costs', 38457.0], ['Repairs & Maintenance', 'Operating Occupancy Costs', 688.54], ['Utilities', 'Operating Occupancy Costs', 3490.7], ['Internet, Wifi & TV Services', 'Operating Occupancy Costs', 90.0],
+    ['Employee Benefits', 'Payroll & Benefits', 4816.01], ['Payroll Processing Fees', 'Payroll & Benefits', 1624.9], ['Payroll Taxes', 'Payroll & Benefits', 11954.38], ['Salaries & Wages', 'Payroll & Benefits', 150273.77], ['Workers Compensation', 'Payroll & Benefits', 1530.57],
+    ['Software Expense', '', 6874.76], ['Travel', '', 2118.79],
+  ];
+  setState('expense_cats', JSON.stringify(CHART.map((r) => r[0])));
+  const groups = {}; CHART.forEach((r) => { groups[r[0]] = r[1]; }); setState('pl_groups', JSON.stringify(groups));
+  let ea = {}; try { ea = JSON.parse(getState('expense_actuals') || '{}'); } catch (e) { ea = {}; }
+  const may = ea['2026-05'] || {}; CHART.forEach((r) => { if (may[r[0]] == null) may[r[0]] = r[2]; }); ea['2026-05'] = may;
+  setState('expense_actuals', JSON.stringify(ea));
+  setState('pl_import_may2026_v1', 'done');
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS role_profiles (

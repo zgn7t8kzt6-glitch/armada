@@ -1252,8 +1252,28 @@ if (!getState('loc_rates')) setState('loc_rates', JSON.stringify({ '3.7-WM': 442
 addColumn('users', 'hourly_rate', 'REAL');   // per-person hourly wage (admin-set)
 if (!getState('shift_hours')) setState('shift_hours', JSON.stringify({ Morning: 8, Day: 8, Evening: 8, Night: 8 }));
 if (!getState('role_rates')) setState('role_rates', JSON.stringify({}));        // { 'BHT / Tech': 18, 'Nurse': 35, ... }
-if (!getState('budget_monthly')) setState('budget_monthly', JSON.stringify({ rent: 0, payroll: 0 }));
-if (!getState('rent_actual')) setState('rent_actual', JSON.stringify({}));      // { 'YYYY-MM': amount } until QuickBooks P&L is wired
+// Manual expense categories (Payroll is separate — its actual is auto-computed).
+if (!getState('expense_cats')) setState('expense_cats', JSON.stringify(['Rent', 'Utilities', 'Food', 'Insurance', 'Supplies']));
+if (!getState('budget_monthly')) setState('budget_monthly', JSON.stringify({ Payroll: 0, Rent: 0 }));   // budget per category name
+if (!getState('expense_actuals')) setState('expense_actuals', JSON.stringify({}));   // { 'YYYY-MM': { Rent: 0, ... } } until QuickBooks P&L
+// One-time migration from the first cut (lowercase rent/payroll budget + rent_actual).
+if (getState('expense_migrate_v1') !== 'done') {
+  try {
+    const b = JSON.parse(getState('budget_monthly') || '{}');
+    if (b.rent != null || b.payroll != null) {
+      const nb = {}; if (b.payroll != null) nb.Payroll = b.payroll; if (b.rent != null) nb.Rent = b.rent;
+      for (const k in b) if (k !== 'rent' && k !== 'payroll') nb[k] = b[k];
+      setState('budget_monthly', JSON.stringify(nb));
+    }
+    const ra = JSON.parse(getState('rent_actual') || '{}');
+    if (Object.keys(ra).length) {
+      const ea = JSON.parse(getState('expense_actuals') || '{}');
+      for (const m in ra) { ea[m] = ea[m] || {}; ea[m].Rent = ra[m]; }
+      setState('expense_actuals', JSON.stringify(ea));
+    }
+  } catch (e) { /* fresh install */ }
+  setState('expense_migrate_v1', 'done');
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS role_profiles (

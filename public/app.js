@@ -2662,13 +2662,14 @@ const usd=(n)=>'$'+Math.round(n||0).toLocaleString();
 async function loadFinance(){
   let d; try{ d=await api('/finance/revenue'); }catch(e){ if($('finBreakdown'))$('finBreakdown').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
   const since = d.ledgerStart ? ' since '+esc(d.ledgerStart) : '';
+  const sub='font-size:12px;margin-top:5px;color:#5a6671;font-weight:600';
   $('finKpis').innerHTML=`
-    <div class="ret-card rc-high"><div class="n">${usd(d.cumulative)}</div><div class="l">Revenue to date</div><div class="hint" style="font-size:10px;margin-top:2px">${d.cumulativeDays.toLocaleString()} billed days${since}</div></div>
-    <div class="ret-card"><div class="n">${usd(d.mtd)}</div><div class="l">This month</div><div class="hint" style="font-size:10px;margin-top:2px">${d.mtdDays.toLocaleString()} days · ${esc(d.monthLabel)}</div></div>
-    <div class="ret-card"><div class="n">${usd(d.todayBilled)}</div><div class="l">Billed today</div><div class="hint" style="font-size:10px;margin-top:2px">${d.censusCount} in service</div></div>
-    <div class="ret-card"><div class="n">${usd(d.monthProjection)}</div><div class="l">Projected this month</div><div class="hint" style="font-size:10px;margin-top:2px">at today's census · ${d.daysInMonth} days</div></div>
-    <div class="ret-card"><div class="n">${usd(d.annualRunRate)}</div><div class="l">Annual run-rate</div><div class="hint" style="font-size:10px;margin-top:2px">today × 365</div></div>
-    ${d.unrated?`<div class="ret-card rc-warn"><div class="n">${d.unrated}</div><div class="l">No rate set</div><div class="hint" style="font-size:10px;margin-top:2px">not counted — set below</div></div>`:''}`;
+    <div class="ret-card rc-elev"><div class="n">${usd(d.cumulative)}</div><div class="l">Revenue to date</div><div class="hint" style="${sub}">${d.cumulativeDays.toLocaleString()} billed days${since}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.mtd)}</div><div class="l">This month</div><div class="hint" style="${sub}">${d.mtdDays.toLocaleString()} days · ${esc(d.monthLabel)}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.todayBilled)}</div><div class="l">Billed today</div><div class="hint" style="${sub}">${d.censusCount} in service</div></div>
+    <div class="ret-card"><div class="n">${usd(d.monthProjection)}</div><div class="l">Projected this month</div><div class="hint" style="${sub}">at today's census · ${d.daysInMonth} days</div></div>
+    <div class="ret-card"><div class="n">${usd(d.annualRunRate)}</div><div class="l">Annual run-rate</div><div class="hint" style="${sub}">today × 365</div></div>
+    ${d.unrated?`<div class="ret-card rc-warn"><div class="n">${d.unrated}</div><div class="l">No rate set</div><div class="hint" style="${sub}">not counted — set below</div></div>`:''}`;
   const mtdRows = (d.mtdByLoc||[]).filter(r=>r.total>0 || r.days>0);
   $('finBreakdown').innerHTML = `<div class="card"><h3>Today's census by level of care</h3>
     <table class="tbl"><thead><tr><th>Level of care</th><th style="text-align:right">Clients</th><th style="text-align:right">Daily rate</th><th style="text-align:right">Revenue / day</th></tr></thead>
@@ -2705,9 +2706,9 @@ async function loadCmdRevenue(){
       <button class="btn btn-ghost btn-sm sans" onclick="show('finance')">Open Revenue ›</button>
     </div>
     <div class="ret-cards" style="margin-top:10px">
-      <div class="ret-card rc-high"><div class="n">${usd(d.cumulative)}</div><div class="l">Revenue to date</div></div>
+      <div class="ret-card rc-elev"><div class="n">${usd(d.cumulative)}</div><div class="l">Revenue to date</div></div>
       <div class="ret-card"><div class="n">${usd(d.mtd)}</div><div class="l">This month</div></div>
-      <div class="ret-card"><div class="n">${usd(d.todayBilled)}</div><div class="l">Billed today</div><div class="hint" style="font-size:10px;margin-top:2px">${d.censusCount} in service</div></div>
+      <div class="ret-card"><div class="n">${usd(d.todayBilled)}</div><div class="l">Billed today</div><div class="hint" style="font-size:12px;margin-top:5px;color:#5a6671;font-weight:600">${d.censusCount} in service</div></div>
       <div class="ret-card"><div class="n">${usd(d.monthProjection)}</div><div class="l">Projected ${esc(d.monthLabel)}</div></div>
       ${d.unrated?`<div class="ret-card rc-warn"><div class="n">${d.unrated}</div><div class="l">No rate set</div></div>`:''}
     </div></div>`;

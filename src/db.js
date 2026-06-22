@@ -1254,7 +1254,7 @@ addColumn('staffing_standard', 'rate', 'REAL');   // budgeted hourly rate for th
 if (!getState('shift_hours')) setState('shift_hours', JSON.stringify({ Morning: 8, Day: 8, Evening: 8, Night: 8 }));
 if (!getState('role_rates')) setState('role_rates', JSON.stringify({}));        // { 'BHT / Tech': 18, 'Nurse': 35, ... }
 // Manual expense categories (Payroll is separate — its actual is auto-computed).
-if (!getState('expense_cats')) setState('expense_cats', JSON.stringify(['Rent', 'Utilities', 'Food', 'Insurance', 'Supplies']));
+if (!getState('expense_cats')) setState('expense_cats', JSON.stringify(['Rent', 'Utilities', 'Food', 'Insurance', 'Supplies', 'Corporate Allocation']));
 if (!getState('budget_monthly')) setState('budget_monthly', JSON.stringify({ Payroll: 0, Rent: 0 }));   // budget per category name
 if (!getState('expense_actuals')) setState('expense_actuals', JSON.stringify({}));   // { 'YYYY-MM': { Rent: 0, ... } } until QuickBooks P&L
 // One-time migration from the first cut (lowercase rent/payroll budget + rent_actual).
@@ -1274,6 +1274,27 @@ if (getState('expense_migrate_v1') !== 'done') {
     }
   } catch (e) { /* fresh install */ }
   setState('expense_migrate_v1', 'done');
+}
+// Census-driven (per-patient-per-day) expense lines: { Food: 12, ... }. A line
+// with a PPD rate budgets as ppd × census × days instead of a flat amount.
+if (!getState('ppd_lines')) setState('ppd_lines', JSON.stringify({}));
+// Salaried roles not on the shift schedule — added to the payroll budget.
+if (!getState('salaried_roles')) setState('salaried_roles', JSON.stringify([
+  { title: 'Executive Director', monthly: 0 },
+  { title: 'BD Rep', monthly: 0 },
+  { title: 'Director of Operations', monthly: 0 },
+  { title: 'Medical Director', monthly: 0 },
+  { title: 'Nurse Practitioner', monthly: 0 },
+]));
+// Add Corporate Allocation as a standing expense line (one-time, idempotent).
+if (getState('expense_corp_alloc_v1') !== 'done') {
+  try {
+    const cats = JSON.parse(getState('expense_cats') || '[]');
+    if (Array.isArray(cats) && !cats.some((c) => String(c).toLowerCase() === 'corporate allocation')) {
+      cats.push('Corporate Allocation'); setState('expense_cats', JSON.stringify(cats));
+    }
+  } catch (e) { /* ignore */ }
+  setState('expense_corp_alloc_v1', 'done');
 }
 
 db.exec(`

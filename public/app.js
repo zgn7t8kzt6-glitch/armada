@@ -2709,15 +2709,16 @@ async function loadExpenses(){
   const vcell=(v)=>v==null?'<span class="hint">—</span>':`<span style="color:${v<0?'var(--danger)':'#2f6b44'};font-weight:600">${v<0?'-':'+'}${usd(Math.abs(v))}</span>`;
   const money=(id,cat,val,ph='')=>`<div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-${id}="${esc(cat)}" type="number" min="0" value="${val!=null?val:''}" placeholder="${ph}" style="width:100px;text-align:right"/></div>`;
   $('expBody').innerHTML=`<div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Budget vs actual — ${esc(d.month)}</h3><button class="btn btn-gold sans" onclick="saveExpenses()">Save</button></div>
-    <table class="tbl" style="margin-top:8px"><thead><tr><th>Expense</th><th style="text-align:right">Budget / mo</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th></th></tr></thead>
+    <table class="tbl" style="margin-top:8px"><thead><tr><th>Expense</th><th style="text-align:right">Budget / mo</th><th style="text-align:right">PPD $/day</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th></th></tr></thead>
     <tbody>${d.rows.map(r=>`<tr><td>${esc(r.cat)}${r.computed?' <span class="hint">· auto</span>':''}</td>
-        <td style="text-align:right">${r.budgetComputed?`<strong>${usd(r.budget)}</strong> <span class="hint">· model</span>`:money('bud',r.cat,r.budget||'')}</td>
+        <td style="text-align:right">${r.budgetComputed?`<strong>${usd(r.budget)}</strong> <span class="hint">· ${r.type==='ppd'?'PPD':'model'}</span>`:money('bud',r.cat,r.budget||'')}</td>
+        <td style="text-align:right">${r.computed?'<span class="hint">—</span>':`<div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-ppd="${esc(r.cat)}" type="number" min="0" step="0.5" value="${r.ppd||''}" placeholder="—" title="Set a per-patient-per-day rate to drive this line off census" style="width:70px;text-align:right"/></div>`}</td>
         <td style="text-align:right">${r.computed?`<strong>${usd(r.actual)}</strong>`:money('act',r.cat,r.actual)}</td>
         <td style="text-align:right">${vcell(r.variance)}</td>
         <td style="text-align:right">${r.computed?'':`<button class="btn btn-ghost btn-sm sans no-print" onclick="removeExpenseLine('${esc(r.cat)}')" title="Remove line">×</button>`}</td></tr>`).join('')}</tbody>
-    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${usd(d.budgetTotal)}</td><td style="text-align:right">${usd(d.actualTotal)}</td><td style="text-align:right">${vcell(d.variance)}</td><td></td></tr></tfoot></table>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${usd(d.budgetTotal)}</td><td></td><td style="text-align:right">${usd(d.actualTotal)}</td><td style="text-align:right">${vcell(d.variance)}</td><td></td></tr></tfoot></table>
     <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="exp_newcat" placeholder="New expense line (e.g. Utilities)" style="width:220px"/><button class="btn btn-ghost btn-sm sans" onclick="addExpenseLine()">+ Add line</button><span class="hint" id="exp_msg"></span></div>
-    <p class="hint" style="margin-top:8px">Payroll is live from covered shifts (scheduled, not called off) × shift hours × pay rate, overtime over 40 hrs/week at 1.5×. Other actuals are entered here until the QuickBooks P&amp;L is wired in. As of ${esc(d.asOf)}.</p></div>
+    <p class="hint" style="margin-top:8px">Set a <strong>PPD</strong> ($/patient/day) on any line — e.g. Food — to budget it off census (${d.census} patients × ${d.payrollBudget.daysInMonth} days). Payroll is live from covered shifts + salaried, overtime over 40 hrs/week at 1.5×. As of ${esc(d.asOf)}.</p></div>
     <div class="card"><h3>Payroll by role — ${esc(d.month)}</h3>
     <table class="tbl"><thead><tr><th>Role</th><th style="text-align:right">Shifts</th><th style="text-align:right">Hours</th><th style="text-align:right">Cost</th></tr></thead>
     <tbody>${(d.payroll.byRole||[]).map(r=>`<tr><td>${esc(r.role)}</td><td style="text-align:right">${r.shifts}</td><td style="text-align:right">${r.hours.toLocaleString()}</td><td style="text-align:right;font-weight:600">${usd(r.cost)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No covered shifts this month.</td></tr>'}</tbody></table>
@@ -2727,7 +2728,14 @@ async function loadExpenses(){
       ${(d.payrollBudget.missingRate||[]).length?`<div class="pc-note" style="border-left:3px solid var(--gold)">⚠ Set a rate for: ${d.payrollBudget.missingRate.map(esc).join(', ')}</div>`:''}
       <table class="tbl"><thead><tr><th>Block</th><th>Role · shift</th><th style="text-align:right">Needed</th><th style="text-align:right">Hrs</th><th style="text-align:right">$/hr</th><th style="text-align:right">Cost/day</th></tr></thead>
       <tbody>${(d.payrollBudget.lines||[]).map(l=>`<tr><td><span class="hint">${esc(l.block)}</span></td><td>${esc(l.role)} <span class="hint">· ${esc(l.shift)}</span></td><td style="text-align:right">${l.needed}</td><td style="text-align:right">${l.hours}</td><td style="text-align:right"><input data-sb="${l.id}" type="number" min="0" step="0.5" value="${l.rate||''}" placeholder="0" style="width:80px;text-align:right"/></td><td style="text-align:right;font-weight:600">${usd(l.perDay)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td colspan="5">Per day</td><td style="text-align:right">${usd(d.payrollBudget.perDay)}</td></tr></tfoot></table></div>`;
+      <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td colspan="5">Per day</td><td style="text-align:right">${usd(d.payrollBudget.perDay)}</td></tr></tfoot></table>
+      <p class="hint" style="margin-top:8px">Hourly (model): <strong>${usd(d.payrollBudget.hourlyMonthly)}/mo</strong> + Salaried: <strong>${usd(d.payrollBudget.salariedMonthly)}/mo</strong> = Payroll budget <strong>${usd(d.payrollBudget.monthly)}/mo</strong>.</p></div>
+    <div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Salaried roles <span class="hint" style="font-weight:400">— not on the shift schedule</span></h3><button class="btn btn-gold sans" onclick="saveSalaried()">Save salaried</button></div>
+      <p class="sub sans" style="margin-top:4px">Executive Director, BD reps, Director of Operations, Medical Director, NP, etc. Their monthly cost is added to the payroll budget (and prorated into actual: ${usd(d.salariedActual)} so far this month).</p>
+      <table class="tbl"><thead><tr><th>Title</th><th style="text-align:right">$ / month</th><th></th></tr></thead>
+      <tbody id="salRows">${(d.payrollBudget.salaried||[]).map(s=>`<tr><td><input data-sal-title type="text" value="${esc(s.title)}" style="width:220px"/></td><td style="text-align:right"><div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-sal-monthly type="number" min="0" value="${s.monthly||''}" placeholder="0" style="width:110px;text-align:right"/></div></td><td style="text-align:right"><button class="btn btn-ghost btn-sm sans no-print" onclick="this.closest('tr').remove()" title="Remove">×</button></td></tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${usd(d.payrollBudget.salariedMonthly)}/mo</td><td></td></tr></tfoot></table>
+      <div style="margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="addSalariedRow()">+ Add role</button></div></div>`;
   // Config — shift hours, role rates, staff rates
   const rr=d.roleRates||{}; const sh=d.shiftHours||{};
   $('expConfig').innerHTML=`
@@ -2752,9 +2760,23 @@ async function loadExpenses(){
 function gatherExpenses(extraCat){
   const budgets={}; document.querySelectorAll('#expBody input[data-bud]').forEach(i=>{ budgets[i.dataset.bud]=+i.value||0; });
   const actuals={}; document.querySelectorAll('#expBody input[data-act]').forEach(i=>{ actuals[i.dataset.act]=i.value; });
-  const cats=[...document.querySelectorAll('#expBody input[data-act]')].map(i=>i.dataset.act);
+  const ppd={}; document.querySelectorAll('#expBody input[data-ppd]').forEach(i=>{ ppd[i.dataset.ppd]=i.value; });
+  const cats=[...document.querySelectorAll('#expBody input[data-ppd]')].map(i=>i.dataset.ppd);
   if(extraCat) cats.push(extraCat);
-  return { cats, budgets, actuals };
+  return { cats, budgets, actuals, ppd };
+}
+function gatherSalaried(){
+  const roles=[]; document.querySelectorAll('#salRows tr').forEach(tr=>{ const t=tr.querySelector('[data-sal-title]'), m=tr.querySelector('[data-sal-monthly]'); if(t&&t.value.trim()) roles.push({title:t.value.trim(), monthly:+(m&&m.value)||0}); });
+  return roles;
+}
+function addSalariedRow(){
+  const tb=$('salRows'); if(!tb) return;
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input data-sal-title type="text" placeholder="Title" style="width:220px"/></td><td style="text-align:right"><div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-sal-monthly type="number" min="0" placeholder="0" style="width:110px;text-align:right"/></div></td><td style="text-align:right"><button class="btn btn-ghost btn-sm sans no-print" onclick="this.closest('tr').remove()">×</button></td>`;
+  tb.appendChild(tr);
+}
+async function saveSalaried(){
+  try{ await api('/finance/salaried',{method:'POST',body:JSON.stringify({roles:gatherSalaried()})}); loadExpenses(); }catch(e){ alert(e.message); }
 }
 async function saveExpenses(){
   if($('exp_msg'))$('exp_msg').textContent='Saving…';
@@ -2768,7 +2790,7 @@ async function addExpenseLine(){
 }
 async function removeExpenseLine(cat){
   if(!confirm('Remove the "'+cat+'" line? Its budget and entered actuals are cleared.')) return;
-  const g=gatherExpenses(); g.cats=g.cats.filter(c=>c!==cat); delete g.budgets[cat]; delete g.actuals[cat];
+  const g=gatherExpenses(); g.cats=g.cats.filter(c=>c!==cat); delete g.budgets[cat]; delete g.actuals[cat]; delete g.ppd[cat];
   try{ await api('/finance/expenses-save',{method:'POST',body:JSON.stringify(g)}); loadExpenses(); }catch(e){ alert(e.message); }
 }
 async function saveStaffingRates(){

@@ -6357,7 +6357,12 @@ function payrollBudget() {
     if (!rate && s.needed) missing.add(s.role);
     lines.push({ id: s.id, block: s.block, role: s.role, shift: s.shift_label, needed: s.needed, hours, rate, perDay: Math.round(cost) });
   }
-  return { perDay: Math.round(perDay), monthly: Math.round(perDay * daysInMonth), daysInMonth, lines, missingRate: [...missing] };
+  const hourlyMonthly = Math.round(perDay * daysInMonth);
+  // Salaried roles not on the shift schedule (ED, DoO, Medical Director, NP, BD reps).
+  const salaried = jsonState('salaried_roles', []).map((r) => ({ title: String(r.title || ''), monthly: Math.max(0, +r.monthly || 0) }));
+  const salariedMonthly = salaried.reduce((s, r) => s + r.monthly, 0);
+  return { perDay: Math.round(perDay), hourlyMonthly, salaried, salariedMonthly,
+    monthly: hourlyMonthly + salariedMonthly, daysInMonth, lines, missingRate: [...missing] };
 }
 function expenseSnapshot() {
   const today = appToday();
@@ -6367,22 +6372,36 @@ function expenseSnapshot() {
   const actualsAll = jsonState('expense_actuals', {});
   const actuals = actualsAll[month] || {};
   const cats = expenseCats();
+  const ppdLines = jsonState('ppd_lines', {});
+  const daysInMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 0)).getUTCDate();
+  const elapsed = +today.slice(8, 10);
+  const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n;
   const payroll = payrollActual(monthStart, today);
   const payBudget = payrollBudget();
-  const mk = (cat, b, a, computed, note) => ({ cat, budget: +b || 0, actual: a, computed, variance: (a == null ? null : (+b || 0) - a), note });
-  // Payroll: budget pulled from the staffing model, actual from covered shifts.
-  const rows = [{ cat: 'Payroll', budget: payBudget.monthly, actual: payroll.cost, computed: true, budgetComputed: true,
-    variance: payBudget.monthly - payroll.cost, note: payroll.shiftsCovered + ' shifts covered · budget from staffing model' }];
+  // Salaried staff are paid regardless of shifts → prorate to date for the actual.
+  const salariedActual = Math.round(payBudget.salariedMonthly * elapsed / daysInMonth);
+  const payrollActualTotal = payroll.cost + salariedActual;
+  // Payroll: budget from the staffing model (+ salaried), actual from covered shifts (+ salaried prorated).
+  const rows = [{ cat: 'Payroll', budget: payBudget.monthly, actual: payrollActualTotal, computed: true, budgetComputed: true,
+    variance: payBudget.monthly - payrollActualTotal, note: payroll.shiftsCovered + ' shifts + salaried · budget from staffing model' }];
   for (const cat of cats) {
     const a = actuals[cat] != null ? +actuals[cat] : null;
-    rows.push(mk(cat, budget[cat], a, false, a == null ? 'enter actual' : ''));
+    const ppd = +ppdLines[cat] || 0;
+    if (ppd > 0) {   // census-driven line: budget = $/patient/day × census × days
+      const b = Math.round(ppd * census * daysInMonth);
+      rows.push({ cat, budget: b, actual: a, computed: false, budgetComputed: true, type: 'ppd', ppd,
+        variance: (a == null ? null : b - a), note: `PPD $${ppd} × ${census} census × ${daysInMonth}d` });
+    } else {
+      rows.push({ cat, budget: +budget[cat] || 0, actual: a, computed: false, type: 'fixed',
+        variance: (a == null ? null : (+budget[cat] || 0) - a), note: a == null ? 'enter actual' : '' });
+    }
   }
   const budgetTotal = rows.reduce((s, r) => s + r.budget, 0);
   const actualTotal = rows.reduce((s, r) => s + (r.actual || 0), 0);
   const staff = db.prepare(`SELECT id, name, job_role, hourly_rate FROM users WHERE active = 1 ORDER BY job_role, name`).all();
   return { month, asOf: today, rows, cats, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
-    payroll, payrollBudget: payBudget, budget, actuals, shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}),
-    roles: JOB_ROLES, staff };
+    payroll, payrollBudget: payBudget, salariedActual, census, ppdLines, budget, actuals,
+    shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}), roles: JOB_ROLES, staff };
 }
 app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot()));
 // Unified save: categories, budgets (per category incl. Payroll), and this
@@ -6395,6 +6414,11 @@ app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => 
     setState('expense_cats', JSON.stringify(clean));
   }
   const cats = expenseCats();
+  if (b.ppd && typeof b.ppd === 'object') {   // census-driven lines: { cat: $/patient/day }
+    const cur = {};
+    for (const cat of cats) { const n = Math.max(0, +b.ppd[cat] || 0); if (n) cur[cat] = n; }
+    setState('ppd_lines', JSON.stringify(cur));
+  }
   if (b.budgets && typeof b.budgets === 'object') {
     const bud = {};   // Payroll budget is computed from the staffing model — never stored here.
     for (const key of cats) if (b.budgets[key] != null) bud[key] = Math.max(0, Math.round(+b.budgets[key] || 0));
@@ -6409,6 +6433,14 @@ app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => 
     all[month] = m; setState('expense_actuals', JSON.stringify(all));
   }
   audit({ user: req.user, action: 'FINANCE_EXPENSES', ip: req.ip });
+  res.json(expenseSnapshot());
+});
+// Salaried roles (not on the shift schedule) — replace the list.
+app.post('/api/finance/salaried', requireAuth, requireAdmin, (req, res) => {
+  const list = Array.isArray(req.body?.roles) ? req.body.roles : [];
+  const clean = list.map((r) => ({ title: String(r.title || '').trim(), monthly: Math.max(0, Math.round(+r.monthly || 0)) })).filter((r) => r.title);
+  setState('salaried_roles', JSON.stringify(clean));
+  audit({ user: req.user, action: 'FINANCE_SALARIED', ip: req.ip });
   res.json(expenseSnapshot());
 });
 // Set the budgeted hourly rate on staffing-model lines → drives the payroll budget.

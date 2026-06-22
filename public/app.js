@@ -193,7 +193,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',finance:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -384,6 +384,7 @@ function show(v){
   if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
+  if(v==='finance') loadFinance();
   if(v==='plan') loadPlan();
   if(v==='excellence') loadExcellence();
   if(v==='onboarding') loadOnboarding();
@@ -2657,10 +2658,64 @@ async function loadPlaybookScore(){
         <div class="cmd-row-main"><strong>${i.n}. ${esc(i.title)}</strong><div class="hint">${esc(i.value||'')}</div></div>
         ${dot(i.status)}${i.view?'<span class="hint" style="margin-left:6px">›</span>':''}</div>`).join('')}</div>`).join('');
 }
+const usd=(n)=>'$'+Math.round(n||0).toLocaleString();
+async function loadFinance(){
+  let d; try{ d=await api('/finance/revenue'); }catch(e){ if($('finBreakdown'))$('finBreakdown').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const since = d.ledgerStart ? ' since '+esc(d.ledgerStart) : '';
+  $('finKpis').innerHTML=`
+    <div class="ret-card rc-high"><div class="n">${usd(d.cumulative)}</div><div class="l">Revenue to date</div><div class="hint" style="font-size:10px;margin-top:2px">${d.cumulativeDays.toLocaleString()} billed days${since}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.mtd)}</div><div class="l">This month</div><div class="hint" style="font-size:10px;margin-top:2px">${d.mtdDays.toLocaleString()} days · ${esc(d.monthLabel)}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.todayBilled)}</div><div class="l">Billed today</div><div class="hint" style="font-size:10px;margin-top:2px">${d.censusCount} in service</div></div>
+    <div class="ret-card"><div class="n">${usd(d.monthProjection)}</div><div class="l">Projected this month</div><div class="hint" style="font-size:10px;margin-top:2px">at today's census · ${d.daysInMonth} days</div></div>
+    <div class="ret-card"><div class="n">${usd(d.annualRunRate)}</div><div class="l">Annual run-rate</div><div class="hint" style="font-size:10px;margin-top:2px">today × 365</div></div>
+    ${d.unrated?`<div class="ret-card rc-warn"><div class="n">${d.unrated}</div><div class="l">No rate set</div><div class="hint" style="font-size:10px;margin-top:2px">not counted — set below</div></div>`:''}`;
+  const mtdRows = (d.mtdByLoc||[]).filter(r=>r.total>0 || r.days>0);
+  $('finBreakdown').innerHTML = `<div class="card"><h3>Today's census by level of care</h3>
+    <table class="tbl"><thead><tr><th>Level of care</th><th style="text-align:right">Clients</th><th style="text-align:right">Daily rate</th><th style="text-align:right">Revenue / day</th></tr></thead>
+    <tbody>${d.census.map(r=>`<tr${r.rate?'':' style="color:var(--muted)"'}><td>${esc(r.label)}</td><td style="text-align:right">${r.count}</td><td style="text-align:right">${r.rate?usd(r.rate):'<span class="hint">— set rate</span>'}</td><td style="text-align:right;font-weight:600">${r.rate?usd(r.daily):'—'}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No one in service.</td></tr>'}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${d.censusCount}</td><td></td><td style="text-align:right">${usd(d.dailyTotal)}/day</td></tr></tfoot></table>
+    <p class="hint" style="margin-top:8px">Each day is billed at the level of care the client was actually at that day, accumulated since ${esc(d.ledgerStart||d.asOf)}. As of ${esc(d.asOf)}.</p></div>
+    <div class="card"><h3>This month so far (${esc(d.monthLabel)}) — billed by level</h3>
+    <table class="tbl"><thead><tr><th>Level of care</th><th style="text-align:right">Billed days</th><th style="text-align:right">Revenue</th></tr></thead>
+    <tbody>${mtdRows.map(r=>`<tr><td>${esc(r.label)}</td><td style="text-align:right">${r.days.toLocaleString()}</td><td style="text-align:right;font-weight:600">${usd(r.total)}</td></tr>`).join('')||'<tr><td colspan="3" class="empty">Nothing billed yet this month.</td></tr>'}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${d.mtdDays.toLocaleString()}</td><td style="text-align:right">${usd(d.mtd)}</td></tr></tfoot></table></div>`;
+  const rates=d.rates||{};
+  $('finRates').innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:10px">${d.levels.map(l=>`
+    <div class="field" style="margin:0;min-width:200px"><label>${esc(l.label)}</label>
+      <div style="display:flex;align-items:center;gap:4px"><span class="hint">$</span><input type="number" min="0" step="1" data-loc="${esc(l.code)}" value="${rates[l.code]||''}" placeholder="0" style="width:110px"/><span class="hint">/day</span></div></div>`).join('')}</div>`;
+}
+async function saveRates(){
+  const rates={}; document.querySelectorAll('#finRates input[data-loc]').forEach(i=>{ rates[i.dataset.loc]=+i.value||0; });
+  if($('fin_msg'))$('fin_msg').textContent='Saving…';
+  try{ await api('/finance/rates',{method:'POST',body:JSON.stringify({rates})}); if($('fin_msg'))$('fin_msg').textContent='✓ Saved'; loadFinance(); }catch(e){ if($('fin_msg'))$('fin_msg').textContent=e.message; }
+}
+async function recomputeRevenue(){
+  if(!confirm('Re-bill the entire revenue history at the current rates and known level-of-care history? This replaces the accumulated ledger.')) return;
+  if($('fin_msg'))$('fin_msg').textContent='Recomputing…';
+  try{ await api('/finance/recompute',{method:'POST'}); if($('fin_msg'))$('fin_msg').textContent='✓ Rebuilt'; loadFinance(); }catch(e){ if($('fin_msg'))$('fin_msg').textContent=e.message; }
+}
+// Command Center revenue strip — admin only (the API is admin-gated too).
+async function loadCmdRevenue(){
+  const el=$('cmdRevenue'); if(!el) return;
+  if(!(ME && ME.role==='admin')){ el.innerHTML=''; return; }
+  let d; try{ d=await api('/finance/revenue'); }catch(e){ el.innerHTML=''; return; }
+  el.innerHTML=`<div class="card" style="border-left:4px solid #c8a44d;background:#fbf7ee">
+    <div class="cmd-hero-row">
+      <div><h3 style="margin:0">💰 Revenue <span class="hint" style="font-weight:400">· admin only · private</span></h3></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="show('finance')">Open Revenue ›</button>
+    </div>
+    <div class="ret-cards" style="margin-top:10px">
+      <div class="ret-card rc-high"><div class="n">${usd(d.cumulative)}</div><div class="l">Revenue to date</div></div>
+      <div class="ret-card"><div class="n">${usd(d.mtd)}</div><div class="l">This month</div></div>
+      <div class="ret-card"><div class="n">${usd(d.todayBilled)}</div><div class="l">Billed today</div><div class="hint" style="font-size:10px;margin-top:2px">${d.censusCount} in service</div></div>
+      <div class="ret-card"><div class="n">${usd(d.monthProjection)}</div><div class="l">Projected ${esc(d.monthLabel)}</div></div>
+      ${d.unrated?`<div class="ret-card rc-warn"><div class="n">${d.unrated}</div><div class="l">No rate set</div></div>`:''}
+    </div></div>`;
+}
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
-  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning();
+  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning(); loadCmdRevenue();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});

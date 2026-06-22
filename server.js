@@ -6188,6 +6188,98 @@ app.post('/api/bedboard/total', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- Finance: per-diem revenue (admin only) ----------------
+   Revenue accrues one ledger row per client per day, billed at the ASAM level
+   the client was actually at that day (reconstructed from flow_events). Past
+   days are locked once accrued; today re-accrues on every view so the running
+   total stays live. Rates are admin-editable (state 'loc_rates'). */
+function locRates() { try { return JSON.parse(getState('loc_rates') || '{}'); } catch (e) { return {}; } }
+// The level a client was billable at on a given day: the latest admit/loc_change
+// on or before that day, falling back to their current level if we have no events.
+function billableLocOnDay(client, events, date) {
+  let loc = null;
+  for (const e of events) { if (e.date > date) break; if (e.to_loc) loc = e.to_loc; }
+  return loc || client.loc || null;
+}
+function accrueRevenueForDay(date, clients, eventsByClient, rates, del, ins) {
+  del.run(date);
+  for (const c of clients) {
+    const admit = String(c.admit).slice(0, 10);
+    if (admit > date) continue;                         // not yet admitted
+    const dc = c.discharge_date ? String(c.discharge_date).slice(0, 10) : null;
+    if (dc && date >= dc) continue;                     // discharge day not billed
+    const loc = billableLocOnDay(c, eventsByClient[c.id] || [], date);
+    ins.run(date, c.id, loc, +rates[loc] || 0);
+  }
+}
+// Roll the ledger forward: backfill any never-accrued days (locked once done),
+// then always re-accrue today since the census/level can still change.
+function accrueRevenueThrough(today) {
+  const rates = locRates();
+  const clients = db.prepare(`SELECT id, loc, admit, discharge_date FROM clients WHERE admit IS NOT NULL AND admit != ''`).all();
+  if (!clients.length) return;
+  const first = clients.reduce((m, c) => { const a = String(c.admit).slice(0, 10); return (!m || a < m) ? a : m; }, null);
+  const evRows = db.prepare(`SELECT client_id, to_loc, substr(date,1,10) date FROM flow_events WHERE kind IN ('admit','loc_change') AND to_loc IS NOT NULL ORDER BY date ASC, id ASC`).all();
+  const eventsByClient = {}; for (const e of evRows) (eventsByClient[e.client_id] = eventsByClient[e.client_id] || []).push(e);
+  const del = db.prepare(`DELETE FROM revenue_days WHERE date = ?`);
+  const ins = db.prepare(`INSERT INTO revenue_days (date, client_id, loc, rate) VALUES (?,?,?,?)`);
+  const through = getState('revenue_accrued_through');
+  const start = through && through >= first ? addDays(through, 1) : first;
+  db.transaction(() => {
+    let day = start, i = 0;
+    for (; day < today && i < 4000; i++) { accrueRevenueForDay(day, clients, eventsByClient, rates, del, ins); day = addDays(day, 1); }
+    if (today > first) setState('revenue_accrued_through', addDays(today, -1));   // lock through yesterday
+    accrueRevenueForDay(today, clients, eventsByClient, rates, del, ins);          // today stays live
+  })();
+}
+function revenueSnapshot() {
+  const rates = locRates();
+  const today = appToday();
+  const monthStart = today.slice(0, 7) + '-01';
+  const daysInMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 0)).getUTCDate();
+  accrueRevenueThrough(today);
+  // Forward run-rate from the live census, grouped by level of care.
+  const active = db.prepare(`SELECT loc FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const byLoc = {};
+  for (const c of active) { const k = c.loc || 'Unspecified'; (byLoc[k] = byLoc[k] || { loc: k, count: 0 }).count++; }
+  const census = Object.values(byLoc).map((g) => {
+    const rate = +rates[g.loc] || 0;
+    return { loc: g.loc, label: LOC_LABEL[g.loc] || g.loc, count: g.count, rate, daily: rate * g.count };
+  }).sort((a, b) => b.daily - a.daily || b.count - a.count);
+  const dailyTotal = census.reduce((s, r) => s + r.daily, 0);
+  const unrated = census.filter((r) => !r.rate).reduce((s, r) => s + r.count, 0);
+  // Accumulated actuals from the ledger (level-accurate, day by day).
+  const sum = (where, ...p) => db.prepare(`SELECT COALESCE(SUM(rate),0) v, COUNT(*) n FROM revenue_days ${where}`).get(...p);
+  const todayL = sum(`WHERE date = ?`, today);
+  const mtdL = sum(`WHERE date >= ? AND date <= ?`, monthStart, today);
+  const allL = sum(``);
+  const ledgerStart = db.prepare(`SELECT MIN(date) m FROM revenue_days`).get().m;
+  const mtdByLoc = db.prepare(`SELECT loc, COUNT(*) days, COALESCE(SUM(rate),0) total FROM revenue_days WHERE date >= ? AND date <= ? GROUP BY loc ORDER BY total DESC`).all(monthStart, today)
+    .map((r) => ({ loc: r.loc, label: LOC_LABEL[r.loc] || r.loc || 'Unspecified', days: r.days, total: r.total }));
+  return { rates, levels: ASAM_LEVELS.map((l) => ({ code: l.code, label: l.label })), census, dailyTotal,
+    censusCount: active.length, unrated, monthProjection: dailyTotal * daysInMonth, annualRunRate: dailyTotal * 365,
+    todayBilled: todayL.v, mtd: mtdL.v, mtdDays: mtdL.n, cumulative: allL.v, cumulativeDays: allL.n, ledgerStart,
+    mtdByLoc, daysInMonth, monthLabel: today.slice(0, 7), asOf: today };
+}
+app.get('/api/finance/revenue', requireAuth, requireAdmin, (req, res) => res.json(revenueSnapshot()));
+app.post('/api/finance/rates', requireAuth, requireAdmin, (req, res) => {
+  const cur = locRates();
+  const incoming = req.body?.rates || {};
+  for (const [k, v] of Object.entries(incoming)) { const n = Math.max(0, Math.round(+v || 0)); if (n) cur[k] = n; else delete cur[k]; }
+  setState('loc_rates', JSON.stringify(cur));
+  audit({ user: req.user, action: 'FINANCE_RATES', detail: JSON.stringify(cur), ip: req.ip });
+  res.json({ ok: true, rates: cur });
+});
+// Rebuild the whole ledger from scratch (e.g. after correcting historical rates
+// or levels) — re-bills every day at today's rates and the known level history.
+app.post('/api/finance/recompute', requireAuth, requireAdmin, (req, res) => {
+  db.prepare(`DELETE FROM revenue_days`).run();
+  setState('revenue_accrued_through', '');
+  accrueRevenueThrough(appToday());
+  audit({ user: req.user, action: 'FINANCE_RECOMPUTE', ip: req.ip });
+  res.json(revenueSnapshot());
+});
+
 /* ---------------- Team: kudos + training ---------------- */
 app.get('/api/staff', requireAuth, (req, res) => {
   res.json({ staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all() });

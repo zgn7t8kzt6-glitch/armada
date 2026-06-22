@@ -1250,6 +1250,7 @@ if (!getState('loc_rates')) setState('loc_rates', JSON.stringify({ '3.7-WM': 442
 // Expenses / budget. Payroll actual is derived from covered shifts × hours × pay
 // rate (per-person, role fallback), with weekly overtime > 40h at 1.5×.
 addColumn('users', 'hourly_rate', 'REAL');   // per-person hourly wage (admin-set)
+addColumn('staffing_standard', 'rate', 'REAL');   // budgeted hourly rate for this model line → payroll budget
 if (!getState('shift_hours')) setState('shift_hours', JSON.stringify({ Morning: 8, Day: 8, Evening: 8, Night: 8 }));
 if (!getState('role_rates')) setState('role_rates', JSON.stringify({}));        // { 'BHT / Tech': 18, 'Nurse': 35, ... }
 // Manual expense categories (Payroll is separate — its actual is auto-computed).

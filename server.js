@@ -6330,6 +6330,35 @@ function payrollActual(startDate, endDate) {
     byRole: Object.values(byRole).map((b) => ({ ...b, cost: Math.round(b.cost) })).sort((a, b) => b.cost - a.cost) };
 }
 function expenseCats() { const c = jsonState('expense_cats', []); return Array.isArray(c) ? c.filter((x) => x && x !== 'Payroll') : []; }
+// Hours implied by a shift label like "7a–7p" (12), "7a–3p" (8), "11p–7a" (8).
+// Plain labels with no time range (e.g. "Day") default to 8h.
+function shiftLabelHours(label) {
+  const s = String(label || '').toLowerCase().replace(/\s/g, '');
+  const m = s.match(/(\d{1,2})(?::(\d{2}))?(a|p)?[–-](\d{1,2})(?::(\d{2}))?(a|p)?/);
+  if (!m) return 8;
+  const to24 = (h, ap) => { h = (+h) % 12; if (ap === 'p') h += 12; return h; };
+  const start = to24(m[1], m[3] || 'a') + (+(m[2] || 0)) / 60;
+  let end = to24(m[4], m[6] || 'p') + (+(m[5] || 0)) / 60;
+  let dur = end - start; if (dur <= 0) dur += 24;
+  return Math.round(dur * 100) / 100;
+}
+// Payroll BUDGET, pulled from the staffing model: every standard line is
+// needed-headcount × the shift's hours × that line's budgeted hourly rate, summed
+// to a daily cost and projected across the month. (Actual payroll comes from the
+// shifts actually covered — see payrollActual.)
+function payrollBudget() {
+  const today = appToday();
+  const daysInMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 0)).getUTCDate();
+  const std = db.prepare(`SELECT id, block, role, shift_label, needed, rate FROM staffing_standard ORDER BY sort, id`).all();
+  const lines = []; let perDay = 0; const missing = new Set();
+  for (const s of std) {
+    const hours = shiftLabelHours(s.shift_label); const rate = +s.rate || 0;
+    const cost = (s.needed || 0) * hours * rate; perDay += cost;
+    if (!rate && s.needed) missing.add(s.role);
+    lines.push({ id: s.id, block: s.block, role: s.role, shift: s.shift_label, needed: s.needed, hours, rate, perDay: Math.round(cost) });
+  }
+  return { perDay: Math.round(perDay), monthly: Math.round(perDay * daysInMonth), daysInMonth, lines, missingRate: [...missing] };
+}
 function expenseSnapshot() {
   const today = appToday();
   const month = today.slice(0, 7);
@@ -6339,9 +6368,11 @@ function expenseSnapshot() {
   const actuals = actualsAll[month] || {};
   const cats = expenseCats();
   const payroll = payrollActual(monthStart, today);
+  const payBudget = payrollBudget();
   const mk = (cat, b, a, computed, note) => ({ cat, budget: +b || 0, actual: a, computed, variance: (a == null ? null : (+b || 0) - a), note });
-  // Payroll first (actual auto-computed from covered shifts), then each manual line.
-  const rows = [mk('Payroll', budget.Payroll, payroll.cost, true, payroll.shiftsCovered + ' shifts covered')];
+  // Payroll: budget pulled from the staffing model, actual from covered shifts.
+  const rows = [{ cat: 'Payroll', budget: payBudget.monthly, actual: payroll.cost, computed: true, budgetComputed: true,
+    variance: payBudget.monthly - payroll.cost, note: payroll.shiftsCovered + ' shifts covered · budget from staffing model' }];
   for (const cat of cats) {
     const a = actuals[cat] != null ? +actuals[cat] : null;
     rows.push(mk(cat, budget[cat], a, false, a == null ? 'enter actual' : ''));
@@ -6350,7 +6381,7 @@ function expenseSnapshot() {
   const actualTotal = rows.reduce((s, r) => s + (r.actual || 0), 0);
   const staff = db.prepare(`SELECT id, name, job_role, hourly_rate FROM users WHERE active = 1 ORDER BY job_role, name`).all();
   return { month, asOf: today, rows, cats, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
-    payroll, budget, actuals, shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}),
+    payroll, payrollBudget: payBudget, budget, actuals, shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}),
     roles: JOB_ROLES, staff };
 }
 app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot()));
@@ -6365,9 +6396,8 @@ app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => 
   }
   const cats = expenseCats();
   if (b.budgets && typeof b.budgets === 'object') {
-    const bud = {};
-    for (const key of ['Payroll', ...cats]) if (b.budgets[key] != null) bud[key] = Math.max(0, Math.round(+b.budgets[key] || 0));
-    // keep any budget values for keys not in the form this round
+    const bud = {};   // Payroll budget is computed from the staffing model — never stored here.
+    for (const key of cats) if (b.budgets[key] != null) bud[key] = Math.max(0, Math.round(+b.budgets[key] || 0));
     const prev = jsonState('budget_monthly', {});
     setState('budget_monthly', JSON.stringify({ ...prev, ...bud }));
   }
@@ -6379,6 +6409,13 @@ app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => 
     all[month] = m; setState('expense_actuals', JSON.stringify(all));
   }
   audit({ user: req.user, action: 'FINANCE_EXPENSES', ip: req.ip });
+  res.json(expenseSnapshot());
+});
+// Set the budgeted hourly rate on staffing-model lines → drives the payroll budget.
+app.post('/api/finance/staffing-rate', requireAuth, requireAdmin, (req, res) => {
+  const upd = db.prepare(`UPDATE staffing_standard SET rate = ? WHERE id = ?`);
+  for (const [id, v] of Object.entries(req.body?.rates || {})) { const n = v === '' || v == null ? null : Math.max(0, +v || 0); upd.run(n, +id); }
+  audit({ user: req.user, action: 'FINANCE_STAFFING_RATE', ip: req.ip });
   res.json(expenseSnapshot());
 });
 app.post('/api/finance/shift-hours', requireAuth, requireAdmin, (req, res) => {

@@ -210,7 +210,7 @@ const VIEW_ROLES = {
   assign:      ['Director of Operations'],
   staffmodel:  ['Director of Operations'],
   maintenance: ['Director of Operations','Housekeeping'],
-  inventory:   ['Director of Operations','Kitchen','Housekeeping','Nurse'],
+  inventory:   ['Director of Operations','Kitchen','Housekeeping','Nurse','Front Desk'],
   meals:       ['Director of Operations','Kitchen','BHT / Tech'],
   // Clinical / care pages — the care team (+ Clinical Director)
   clients:     [...CARE,'Front Desk'],
@@ -220,7 +220,7 @@ const VIEW_ROLES = {
   rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
-  bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
+  bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director','Front Desk'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
   hiring:      ['Executive Director','Director of Operations','Clinical Director'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
@@ -270,6 +270,7 @@ const UNIVERSAL_VIEWS = ['mytasks','messages','team','training','library','stand
 const ROLE_MENU = {
   'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedmap','bedboard','clients','dignity','mytasks','messages','team','training','library'],
   'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','bedmap','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
+  'Front Desk': ['dashboard','admissions','referrals','partners','clients','concierge','family','bedmap','inventory','mytasks','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
   'Housing Director': ['housing','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],

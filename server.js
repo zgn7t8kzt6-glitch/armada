@@ -6329,33 +6329,57 @@ function payrollActual(startDate, endDate) {
   return { cost: Math.round(cost), hours: totalHours, otHours, otCost: Math.round(otCost), shiftsCovered,
     byRole: Object.values(byRole).map((b) => ({ ...b, cost: Math.round(b.cost) })).sort((a, b) => b.cost - a.cost) };
 }
+function expenseCats() { const c = jsonState('expense_cats', []); return Array.isArray(c) ? c.filter((x) => x && x !== 'Payroll') : []; }
 function expenseSnapshot() {
   const today = appToday();
   const month = today.slice(0, 7);
   const monthStart = month + '-01';
-  const budget = jsonState('budget_monthly', { rent: 0, payroll: 0 });
-  const rentActuals = jsonState('rent_actual', {});
+  const budget = jsonState('budget_monthly', {});
+  const actualsAll = jsonState('expense_actuals', {});
+  const actuals = actualsAll[month] || {};
+  const cats = expenseCats();
   const payroll = payrollActual(monthStart, today);
-  const rentActual = rentActuals[month] != null ? +rentActuals[month] : null;
-  const row = (cat, b, a, note) => ({ cat, budget: +b || 0, actual: a, variance: (a == null ? null : (+b || 0) - a), note });
-  const rows = [
-    row('Rent', budget.rent, rentActual, rentActual == null ? 'enter actual below (until P&L)' : ''),
-    row('Payroll', budget.payroll, payroll.cost, payroll.shiftsCovered + ' shifts covered'),
-  ];
+  const mk = (cat, b, a, computed, note) => ({ cat, budget: +b || 0, actual: a, computed, variance: (a == null ? null : (+b || 0) - a), note });
+  // Payroll first (actual auto-computed from covered shifts), then each manual line.
+  const rows = [mk('Payroll', budget.Payroll, payroll.cost, true, payroll.shiftsCovered + ' shifts covered')];
+  for (const cat of cats) {
+    const a = actuals[cat] != null ? +actuals[cat] : null;
+    rows.push(mk(cat, budget[cat], a, false, a == null ? 'enter actual' : ''));
+  }
   const budgetTotal = rows.reduce((s, r) => s + r.budget, 0);
   const actualTotal = rows.reduce((s, r) => s + (r.actual || 0), 0);
   const staff = db.prepare(`SELECT id, name, job_role, hourly_rate FROM users WHERE active = 1 ORDER BY job_role, name`).all();
-  return { month, asOf: today, rows, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
-    payroll, budget, shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}),
-    roles: JOB_ROLES, staff, rentActual };
+  return { month, asOf: today, rows, cats, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
+    payroll, budget, actuals, shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}),
+    roles: JOB_ROLES, staff };
 }
 app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot()));
-app.post('/api/finance/budget', requireAuth, requireAdmin, (req, res) => {
-  const cur = jsonState('budget_monthly', { rent: 0, payroll: 0 });
-  for (const k of ['rent', 'payroll']) if (req.body?.[k] != null) cur[k] = Math.max(0, Math.round(+req.body[k] || 0));
-  setState('budget_monthly', JSON.stringify(cur));
-  audit({ user: req.user, action: 'FINANCE_BUDGET', detail: JSON.stringify(cur), ip: req.ip });
-  res.json({ ok: true, budget: cur });
+// Unified save: categories, budgets (per category incl. Payroll), and this
+// month's manual actuals (Payroll actual is always computed, never stored).
+app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (Array.isArray(b.cats)) {
+    const seen = new Set(), clean = [];
+    for (const c of b.cats) { const n = String(c || '').trim(); if (n && n !== 'Payroll' && !seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); clean.push(n); } }
+    setState('expense_cats', JSON.stringify(clean));
+  }
+  const cats = expenseCats();
+  if (b.budgets && typeof b.budgets === 'object') {
+    const bud = {};
+    for (const key of ['Payroll', ...cats]) if (b.budgets[key] != null) bud[key] = Math.max(0, Math.round(+b.budgets[key] || 0));
+    // keep any budget values for keys not in the form this round
+    const prev = jsonState('budget_monthly', {});
+    setState('budget_monthly', JSON.stringify({ ...prev, ...bud }));
+  }
+  if (b.actuals && typeof b.actuals === 'object') {
+    const month = appToday().slice(0, 7);
+    const all = jsonState('expense_actuals', {});
+    const m = { ...(all[month] || {}) };
+    for (const cat of cats) { const v = b.actuals[cat]; if (v === '' || v == null) delete m[cat]; else m[cat] = Math.max(0, Math.round(+v || 0)); }
+    all[month] = m; setState('expense_actuals', JSON.stringify(all));
+  }
+  audit({ user: req.user, action: 'FINANCE_EXPENSES', ip: req.ip });
+  res.json(expenseSnapshot());
 });
 app.post('/api/finance/shift-hours', requireAuth, requireAdmin, (req, res) => {
   const cur = jsonState('shift_hours', {});
@@ -6373,13 +6397,6 @@ app.post('/api/finance/staff-rates', requireAuth, requireAdmin, (req, res) => {
   const upd = db.prepare(`UPDATE users SET hourly_rate = ? WHERE id = ?`);
   for (const [id, v] of Object.entries(req.body?.rates || {})) { const n = v === '' || v == null ? null : Math.max(0, +v || 0); upd.run(n, +id); }
   res.json({ ok: true });
-});
-app.post('/api/finance/rent-actual', requireAuth, requireAdmin, (req, res) => {
-  const cur = jsonState('rent_actual', {});
-  const m = String(req.body?.month || appToday().slice(0, 7));
-  if (req.body?.amount === '' || req.body?.amount == null) delete cur[m]; else cur[m] = Math.max(0, Math.round(+req.body.amount || 0));
-  setState('rent_actual', JSON.stringify(cur));
-  res.json({ ok: true, rentActual: cur });
 });
 
 /* ---------------- Team: kudos + training ---------------- */

@@ -6399,11 +6399,22 @@ function expenseSnapshot(reqMonth) {
     rows.push({ cat: 'Payroll', group: 'Payroll & Benefits', budget: payBudget.monthly, actual: payrollActualTotal, computed: true, budgetComputed: true,
       variance: payBudget.monthly - payrollActualTotal, note: `${payroll.shiftsCovered} shifts + salaried, +${payBudget.burden.tax + payBudget.burden.benefits}% taxes & benefits` });
   }
+  // When payroll is itemized, the staffing-model budget flows into the real P&L
+  // payroll lines: wages ← model + salaried, taxes ← tax %, benefits ← benefits %.
+  const payMap = {
+    'salaries & wages': { val: payBudget.baseMonthly, note: 'staffing model + salaried' },
+    'payroll taxes': { val: payBudget.taxesMonthly, note: `${payBudget.burden.tax}% of wages` },
+    'employee benefits': { val: payBudget.benefitsMonthly, note: `${payBudget.burden.benefits}% of wages` },
+  };
   for (const cat of cats) {
     const a = actuals[cat] != null ? +actuals[cat] : null;
     const ppd = +ppdLines[cat] || 0;
     const group = groups[cat] || '';
-    if (ppd > 0) {   // census-driven line: budget = $/patient/day × census × days
+    const pm = payrollItemized ? payMap[cat.toLowerCase()] : null;
+    if (pm) {   // payroll line driven by the staffing model
+      rows.push({ cat, group, budget: pm.val, actual: a, computed: false, budgetComputed: true, type: 'payroll',
+        variance: (a == null ? null : pm.val - a), note: pm.note });
+    } else if (ppd > 0) {   // census-driven line: budget = $/patient/day × census × days
       const b = Math.round(ppd * census * daysInMonth);
       rows.push({ cat, group, budget: b, actual: a, computed: false, budgetComputed: true, type: 'ppd', ppd,
         variance: (a == null ? null : b - a), note: `PPD $${ppd} × ${census} census × ${daysInMonth}d` });

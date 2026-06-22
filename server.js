@@ -6427,8 +6427,20 @@ function expenseSnapshot(reqMonth) {
   const actualTotal = rows.reduce((s, r) => s + (r.actual || 0), 0);
   const staff = db.prepare(`SELECT id, name, job_role, hourly_rate FROM users WHERE active = 1 ORDER BY job_role, name`).all();
   const months = [...new Set([...Object.keys(actualsAll), curMonth])].sort().reverse();
+  // Break-even census: costs are largely fixed, so the lever is the top line.
+  // cost base ÷ days = revenue/day needed; ÷ blended per-diem = patients needed.
+  const rates = locRates();
+  const activeLocs = db.prepare(`SELECT loc FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  let dailyRevenue = 0; for (const c of activeLocs) dailyRevenue += +rates[c.loc] || 0;
+  let avgPerDiem = census ? dailyRevenue / census : 0;
+  if (!avgPerDiem) { const rs = Object.values(rates).map(Number).filter((x) => x > 0); avgPerDiem = rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0; }
+  const costBase = actualTotal > 0 ? actualTotal : budgetTotal;
+  const costPerDay = Math.round(costBase / daysInMonth);
+  const breakevenCensus = avgPerDiem ? Math.ceil(costPerDay / avgPerDiem) : null;
+  const breakeven = { costBase: Math.round(costBase), costPerDay, dailyRevenue: Math.round(dailyRevenue), avgPerDiem: Math.round(avgPerDiem),
+    census, breakevenCensus, gap: breakevenCensus != null ? breakevenCensus - census : null, daysInMonth };
   return { month, curMonth, months, asOf: today, rows, cats, payrollItemized, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
-    payroll: payrollActual(monthStart, month === curMonth ? today : monthEnd), payrollBudget: payBudget, census, ppdLines, budget, actuals,
+    payroll: payrollActual(monthStart, month === curMonth ? today : monthEnd), payrollBudget: payBudget, census, breakeven, ppdLines, budget, actuals,
     shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}), roles: JOB_ROLES, staff };
 }
 app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot(req.query.month)));

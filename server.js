@@ -6361,8 +6361,15 @@ function payrollBudget() {
   // Salaried roles not on the shift schedule (ED, DoO, Medical Director, NP, BD reps).
   const salaried = jsonState('salaried_roles', []).map((r) => ({ title: String(r.title || ''), monthly: Math.max(0, +r.monthly || 0) }));
   const salariedMonthly = salaried.reduce((s, r) => s + r.monthly, 0);
+  // Labor burden — employer taxes + benefits as % of gross wages — loads every line.
+  const bd = jsonState('payroll_burden', { tax: 7.65, benefits: 0 });
+  const tax = Math.max(0, +bd.tax || 0), benefits = Math.max(0, +bd.benefits || 0);
+  const baseMonthly = hourlyMonthly + salariedMonthly;
+  const taxesMonthly = Math.round(baseMonthly * tax / 100);
+  const benefitsMonthly = Math.round(baseMonthly * benefits / 100);
   return { perDay: Math.round(perDay), hourlyMonthly, salaried, salariedMonthly,
-    monthly: hourlyMonthly + salariedMonthly, daysInMonth, lines, missingRate: [...missing] };
+    burden: { tax, benefits }, baseMonthly, taxesMonthly, benefitsMonthly, burdenMult: 1 + (tax + benefits) / 100,
+    monthly: baseMonthly + taxesMonthly + benefitsMonthly, daysInMonth, lines, missingRate: [...missing] };
 }
 function expenseSnapshot() {
   const today = appToday();
@@ -6380,10 +6387,12 @@ function expenseSnapshot() {
   const payBudget = payrollBudget();
   // Salaried staff are paid regardless of shifts → prorate to date for the actual.
   const salariedActual = Math.round(payBudget.salariedMonthly * elapsed / daysInMonth);
-  const payrollActualTotal = payroll.cost + salariedActual;
-  // Payroll: budget from the staffing model (+ salaried), actual from covered shifts (+ salaried prorated).
+  // Actual is loaded with the same taxes + benefits burden as the budget.
+  const actualBase = payroll.cost + salariedActual;
+  const payrollActualTotal = Math.round(actualBase * payBudget.burdenMult);
+  // Payroll: budget from the staffing model (+ salaried), actual from covered shifts (+ salaried prorated), both loaded with taxes + benefits.
   const rows = [{ cat: 'Payroll', budget: payBudget.monthly, actual: payrollActualTotal, computed: true, budgetComputed: true,
-    variance: payBudget.monthly - payrollActualTotal, note: payroll.shiftsCovered + ' shifts + salaried · budget from staffing model' }];
+    variance: payBudget.monthly - payrollActualTotal, note: `${payroll.shiftsCovered} shifts + salaried, +${payBudget.burden.tax + payBudget.burden.benefits}% taxes & benefits` }];
   for (const cat of cats) {
     const a = actuals[cat] != null ? +actuals[cat] : null;
     const ppd = +ppdLines[cat] || 0;
@@ -6433,6 +6442,14 @@ app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => 
     all[month] = m; setState('expense_actuals', JSON.stringify(all));
   }
   audit({ user: req.user, action: 'FINANCE_EXPENSES', ip: req.ip });
+  res.json(expenseSnapshot());
+});
+// Labor burden — employer payroll taxes + benefits as % of wages.
+app.post('/api/finance/burden', requireAuth, requireAdmin, (req, res) => {
+  const tax = Math.max(0, Math.min(200, +req.body?.tax || 0));
+  const benefits = Math.max(0, Math.min(200, +req.body?.benefits || 0));
+  setState('payroll_burden', JSON.stringify({ tax, benefits }));
+  audit({ user: req.user, action: 'FINANCE_BURDEN', detail: `tax ${tax}% benefits ${benefits}%`, ip: req.ip });
   res.json(expenseSnapshot());
 });
 // Salaried roles (not on the shift schedule) — replace the list.

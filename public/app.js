@@ -2729,7 +2729,16 @@ async function loadExpenses(){
       <table class="tbl"><thead><tr><th>Block</th><th>Role · shift</th><th style="text-align:right">Needed</th><th style="text-align:right">Hrs</th><th style="text-align:right">$/hr</th><th style="text-align:right">Cost/day</th></tr></thead>
       <tbody>${(d.payrollBudget.lines||[]).map(l=>`<tr><td><span class="hint">${esc(l.block)}</span></td><td>${esc(l.role)} <span class="hint">· ${esc(l.shift)}</span></td><td style="text-align:right">${l.needed}</td><td style="text-align:right">${l.hours}</td><td style="text-align:right"><input data-sb="${l.id}" type="number" min="0" step="0.5" value="${l.rate||''}" placeholder="0" style="width:80px;text-align:right"/></td><td style="text-align:right;font-weight:600">${usd(l.perDay)}</td></tr>`).join('')}</tbody>
       <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td colspan="5">Per day</td><td style="text-align:right">${usd(d.payrollBudget.perDay)}</td></tr></tfoot></table>
-      <p class="hint" style="margin-top:8px">Hourly (model): <strong>${usd(d.payrollBudget.hourlyMonthly)}/mo</strong> + Salaried: <strong>${usd(d.payrollBudget.salariedMonthly)}/mo</strong> = Payroll budget <strong>${usd(d.payrollBudget.monthly)}/mo</strong>.</p></div>
+      <div class="pc-note" style="margin-top:8px;border-left:3px solid var(--gold)">
+        Hourly (model) ${usd(d.payrollBudget.hourlyMonthly)} + Salaried ${usd(d.payrollBudget.salariedMonthly)} = <strong>base ${usd(d.payrollBudget.baseMonthly)}/mo</strong><br>
+        + Taxes (${d.payrollBudget.burden.tax}%) ${usd(d.payrollBudget.taxesMonthly)} + Benefits (${d.payrollBudget.burden.benefits}%) ${usd(d.payrollBudget.benefitsMonthly)} = <strong>loaded ${usd(d.payrollBudget.monthly)}/mo</strong>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+        <div class="field" style="margin:0"><label>Employer taxes %</label><input id="bd_tax" type="number" min="0" step="0.01" value="${d.payrollBudget.burden.tax}" style="width:100px"/></div>
+        <div class="field" style="margin:0"><label>Benefits %</label><input id="bd_ben" type="number" min="0" step="0.01" value="${d.payrollBudget.burden.benefits}" style="width:100px"/></div>
+        <button class="btn btn-ghost sans" onclick="saveBurden()">Save taxes & benefits</button>
+        <span class="hint">Applied to all payroll — budget and actual.</span>
+      </div></div>
     <div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Salaried roles <span class="hint" style="font-weight:400">— not on the shift schedule</span></h3><button class="btn btn-gold sans" onclick="saveSalaried()">Save salaried</button></div>
       <p class="sub sans" style="margin-top:4px">Executive Director, BD reps, Director of Operations, Medical Director, NP, etc. Their monthly cost is added to the payroll budget (and prorated into actual: ${usd(d.salariedActual)} so far this month).</p>
       <table class="tbl"><thead><tr><th>Title</th><th style="text-align:right">$ / month</th><th></th></tr></thead>
@@ -2777,6 +2786,9 @@ function addSalariedRow(){
 }
 async function saveSalaried(){
   try{ await api('/finance/salaried',{method:'POST',body:JSON.stringify({roles:gatherSalaried()})}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveBurden(){
+  try{ await api('/finance/burden',{method:'POST',body:JSON.stringify({tax:($('bd_tax')||{}).value||0,benefits:($('bd_ben')||{}).value||0})}); loadExpenses(); }catch(e){ alert(e.message); }
 }
 async function saveExpenses(){
   if($('exp_msg'))$('exp_msg').textContent='Saving…';

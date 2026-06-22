@@ -1286,6 +1286,9 @@ if (!getState('salaried_roles')) setState('salaried_roles', JSON.stringify([
   { title: 'Medical Director', monthly: 0 },
   { title: 'Nurse Practitioner', monthly: 0 },
 ]));
+// Labor burden applied on top of all gross payroll (hourly + salaried): employer
+// payroll taxes (FICA/FUTA/SUTA/workers' comp) and benefits, as % of wages.
+if (!getState('payroll_burden')) setState('payroll_burden', JSON.stringify({ tax: 7.65, benefits: 0 }));
 // Add Corporate Allocation as a standing expense line (one-time, idempotent).
 if (getState('expense_corp_alloc_v1') !== 'done') {
   try {

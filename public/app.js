@@ -1,5 +1,5 @@
 /* Armada Care Standards — front-end (talks to the API) */
-let ME = null, META = { shifts: ['Morning','Day','Evening','Night'], jobRoles: ['BHT / Tech','Nurse','Therapist','Kitchen'] };
+let ME = null, META = { shifts: ['Morning','Day','Evening','Night'], jobRoles: ['BHT / Tech','Nurse','Therapist','Catering / Dietary'] };
 let currentId = null;
 let PB = {};   // last playbook clients, keyed by id (for print/share)
 
@@ -210,8 +210,8 @@ const VIEW_ROLES = {
   assign:      ['Director of Operations'],
   staffmodel:  ['Director of Operations'],
   maintenance: ['Director of Operations','Housekeeping'],
-  inventory:   ['Director of Operations','Kitchen','Housekeeping','Nurse','Front Desk'],
-  meals:       ['Director of Operations','Kitchen','BHT / Tech'],
+  inventory:   ['Director of Operations','Catering / Dietary','Housekeeping','Nurse','Front Desk'],
+  meals:       ['Director of Operations','Catering / Dietary','BHT / Tech'],
   // Clinical / care pages — the care team (+ Clinical Director)
   clients:     [...CARE,'Front Desk'],
   journey:     [...CARE,'Front Desk'],   // Front Desk can open a client's 360 from the Clients grid
@@ -3261,7 +3261,7 @@ async function loadSchedule(){
   if(!$('sc_date').value) $('sc_date').value=today();
   await ensureReferralMeta().catch(()=>{});
   fillSelect($('sc_part'), META.shifts||['Morning','Day','Evening','Night']);
-  fillSelect($('sc_role'), META.jobRoles||['BHT / Tech','Nurse','Therapist','Kitchen']);
+  fillSelect($('sc_role'), META.jobRoles||['BHT / Tech','Nurse','Therapist','Catering / Dietary']);
   if(!SCHED_STAFF){ try{ const {staff}=await api('/staff'); SCHED_STAFF=staff; }catch(e){ SCHED_STAFF=[]; } }
   const { slots } = await api('/staffing?date='+$('sc_date').value);
   $('scBoard').innerHTML = slots.length ? slots.map(s=>{
@@ -3426,7 +3426,7 @@ function weekShift(n){ const d=new Date(($('wg_start').value||today())+'T00:00')
 function startOfWeek(){ const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); }
 async function loadWeekGrid(){
   await ensureReferralMeta().catch(()=>{});
-  if($('wg_role')) fillSelect($('wg_role'), META.jobRoles||['Nurse','BHT / Tech','Therapist','Case Manager','Front Desk','Kitchen','Housekeeping']);
+  if($('wg_role')) fillSelect($('wg_role'), META.jobRoles||['Nurse','BHT / Tech','Therapist','Case Manager','Front Desk','Catering / Dietary','Housekeeping']);
   if($('wg_start')&&!$('wg_start').value) $('wg_start').value=startOfWeek();
   const start=$('wg_start')?$('wg_start').value:startOfWeek();
   let d; try{ d=await api('/schedule/week?start='+start); }catch(e){ $('weekGridBoard').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }

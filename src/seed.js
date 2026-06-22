@@ -350,7 +350,6 @@ const ARRIVAL_ITEMS = [
   ['Front Desk', 'Confirm the scheduled arrival / mark "arrived" on the board'],
   ['Front Desk', 'Verify identity; copy photo ID & insurance card'],
   ['Front Desk', 'Collect / confirm emergency contact & next of kin'],
-  ['Front Desk', 'Issue ID band / wristband'],
   ['Front Desk', 'Secure phone/valuables per policy with a signed receipt'],
   ['Front Desk', 'Give the welcome packet / what-to-expect'],
   ['Front Desk', 'Notify the team a new admit is here (nurse + tech + CM)'],

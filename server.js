@@ -120,7 +120,7 @@ function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
 setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Kitchen', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach'];
 
 /* ───────── Selection over hiring (Horst Schulze): role profiles + structured interview ───────── */
 const HIRING_STAGES = ['Applied', 'Phone screen', 'Interview', 'References', 'Offer', 'Hired', 'Passed'];
@@ -175,7 +175,7 @@ const ROLE_SPECIFICS = {
   'Executive Director': { purpose: 'Cast the vision, protect the culture, and lead both companies to be the best.',
     qualities: [{ name: 'Vision & culture', desc: 'Defines excellence and lives it.' }, { name: 'People development', desc: 'Grows leaders.' }],
     responsibilities: ['Vision, standards & culture', 'Develop leaders', 'Outcomes & growth', 'Steward the mission'] },
-  'Kitchen': { purpose: 'Nourish recovery with safe, comforting, dignified meals.',
+  'Catering / Dietary': { purpose: 'Coordinate the caterer and dietary needs so every client is nourished and intakes are fed.',
     qualities: [{ name: 'Care through food', desc: 'Treats meals as hospitality, not output.' }, { name: 'Food-safety discipline', desc: 'Clean, safe, consistent.' }],
     responsibilities: ['Plan & prepare meals', 'Food safety & sanitation', 'Accommodate dietary needs', 'Keep the kitchen stocked & clean'] },
   'Housekeeping': { purpose: 'Make the environment clean, safe, and welcoming — order signals dignity.',
@@ -1746,7 +1746,7 @@ function rolesForAlert(kind, message = '') {
   const OPS = 'Director of Operations';   // operational lane oversight
   const CLIN = 'Clinical Director';        // clinical lane oversight
   const byDept = () => {
-    if (/kitchen|dietary|meal|food/i.test(message)) return ['Kitchen'];
+    if (/kitchen|dietary|meal|food/i.test(message)) return ['Catering / Dietary'];
     if (/housekeep|laundry|linen/i.test(message)) return ['Housekeeping'];
     if (/front desk|concierge|transport/i.test(message)) return ['Front Desk'];
     return null;   // department unclear
@@ -1768,7 +1768,7 @@ function rolesForAlert(kind, message = '') {
   if (k === 'coverage' || k.startsWith('understaffed_')) return wrap([OPS]);
   if (k === 'unscheduled') return wrap(['Front Desk', OPS]);
   if (k === 'request' || k.startsWith('request_')) { const d = byDept(); return d ? wrap([...d, OPS]) : wrap(['Front Desk', OPS]); }
-  if (k.startsWith('meal_')) return wrap(['Kitchen', OPS]);
+  if (k.startsWith('meal_')) return wrap(['Catering / Dietary', OPS]);
   if (k.startsWith('maint')) return wrap([OPS]);   // no dedicated Maintenance role
   if (k.startsWith('supply_out_') || k.startsWith('inv_check_')) return wrap([...(byDept() || []), OPS]);
   if (k.startsWith('bed_overdue')) return wrap([OPS]);                       // bed turnover not done in time
@@ -4713,7 +4713,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       { name: 'Touch', sub: 'Fresh linens, stocked supplies, nothing broken or sticky.' },
       { name: 'Calm', sub: 'Quiet, ordered, dignified — a place that says “you matter.”' },
     ] });
-  } else if (jr === 'Kitchen') {
+  } else if (jr === 'Catering / Dietary') {
     subtitle = 'The Table — no one here is ever hungry. Honor every diet.';
     const diets = active.filter((c) => (c.allergies && c.allergies.trim()) || /diabet|allerg|gluten|vegan|vegetarian|kosher|halal|renal|puree/i.test((c.diagnosis || '') + ' ' + (c.prefs || '')));
     northStar = { label: 'Clients on the unit', value: active.length, sev: 'ok' };
@@ -4813,7 +4813,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   }
   // Meal service — for the roles that serve/stock food (techs + kitchen): prompt
   // to inspect the current meal delivery if it hasn't been checked yet.
-  if (jr === 'BHT / Tech' || jr === 'Kitchen') {
+  if (jr === 'BHT / Tech' || jr === 'Catering / Dietary') {
     const meal = currentMeal();
     const chk = db.prepare(`SELECT complete, received, expected FROM meal_checks WHERE date = ? AND meal = ?`).get(today, meal);
     const needsCheck = !chk;

@@ -2727,7 +2727,18 @@ async function loadExpenses(month){
   for(const r of d.rows){ const g=r.group||''; if(g!==cg){ subtotal(); cg=g; gb=0; ga=0; if(g) body+=`<tr><td colspan="6" style="font-weight:700;padding-top:12px;color:var(--navy)">${esc(g)}</td></tr>`; } gb+=r.budget; ga+=(r.actual||0); body+=rowHtml(r); }
   subtotal();
   const monthSel=`<select onchange="loadExpenses(this.value)" class="sans" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px">${(d.months||[d.month]).map(m=>`<option value="${m}"${m===d.month?' selected':''}>${m}${m===d.curMonth?' (current)':''}</option>`).join('')}</select>`;
-  $('expBody').innerHTML=`<div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Budget vs actual</h3><div style="display:flex;gap:8px;align-items:center">${monthSel}<button class="btn btn-gold sans" onclick="saveExpenses()">Save</button></div></div>
+  const be=d.breakeven||{};
+  const beCard = `<div class="card" style="border-left:4px solid #c8a44d;background:#fbf7ee">
+    <h3 style="margin:0">Break-even census</h3>
+    <p class="sub sans" style="margin-top:2px">Most costs are fixed — the lever is census. Covering ${esc(d.month)}'s <strong>${usd(be.costBase)}</strong> cost base needs about <strong>${usd(be.costPerDay)}/day</strong> of revenue.</p>
+    <div class="ret-cards" style="margin-top:8px">
+      <div class="ret-card rc-elev"><div class="n">${be.breakevenCensus!=null?be.breakevenCensus:'—'}</div><div class="l">Break-even census</div><div class="hint" style="font-size:11px;margin-top:4px;color:#5a6671;font-weight:600">avg patients/day</div></div>
+      <div class="ret-card"><div class="n">${be.census}</div><div class="l">Census now</div></div>
+      <div class="ret-card ${be.gap>0?'rc-high':'rc-elev'}"><div class="n">${be.gap>0?'+'+be.gap:(be.gap||0)}</div><div class="l">${be.gap>0?'Patients short':'Cushion'}</div></div>
+      <div class="ret-card"><div class="n">${usd(be.avgPerDiem)}</div><div class="l">Blended per-diem</div></div>
+      <div class="ret-card"><div class="n">${usd(be.dailyRevenue)}</div><div class="l">Revenue / day now</div></div>
+    </div></div>`;
+  $('expBody').innerHTML=beCard+`<div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Budget vs actual</h3><div style="display:flex;gap:8px;align-items:center">${monthSel}<button class="btn btn-gold sans" onclick="saveExpenses()">Save</button></div></div>
     <table class="tbl" style="margin-top:8px"><thead><tr><th>Line</th><th style="text-align:right">Budget / mo</th><th style="text-align:right">PPD</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th></th></tr></thead>
     <tbody>${body}</tbody>
     <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total expenses</td><td style="text-align:right">${usd(d.budgetTotal)}</td><td></td><td style="text-align:right">${usd(d.actualTotal)}</td><td style="text-align:right">${vcell(d.variance)}</td><td></td></tr></tfoot></table>

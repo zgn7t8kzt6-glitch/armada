@@ -6225,12 +6225,14 @@ function accrueRevenueThrough(today) {
   const ins = db.prepare(`INSERT INTO revenue_days (date, client_id, loc, rate) VALUES (?,?,?,?)`);
   const through = getState('revenue_accrued_through');
   const start = through && through >= first ? addDays(through, 1) : first;
-  db.transaction(() => {
+  db.exec('BEGIN');
+  try {
     let day = start, i = 0;
     for (; day < today && i < 4000; i++) { accrueRevenueForDay(day, clients, eventsByClient, rates, del, ins); day = addDays(day, 1); }
     if (today > first) setState('revenue_accrued_through', addDays(today, -1));   // lock through yesterday
     accrueRevenueForDay(today, clients, eventsByClient, rates, del, ins);          // today stays live
-  })();
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 function revenueSnapshot() {
   const rates = locRates();

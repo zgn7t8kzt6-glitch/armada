@@ -2701,7 +2701,7 @@ async function loadCmdRevenue(){
   let d; try{ d=await api('/finance/revenue'); }catch(e){ el.innerHTML=''; return; }
   el.innerHTML=`<div class="card" style="border-left:4px solid #c8a44d;background:#fbf7ee">
     <div class="cmd-hero-row">
-      <div><h3 style="margin:0">💰 Revenue <span class="hint" style="font-weight:400">· admin only · private</span></h3></div>
+      <div><h3 style="margin:0">Revenue <span class="hint" style="font-weight:400">· admin only · private</span></h3></div>
       <button class="btn btn-ghost btn-sm sans" onclick="show('finance')">Open Revenue ›</button>
     </div>
     <div class="ret-cards" style="margin-top:10px">

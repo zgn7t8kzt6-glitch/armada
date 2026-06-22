@@ -193,7 +193,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -385,6 +385,8 @@ function show(v){
   if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
   if(v==='command') loadCommand();
+  if(v==='finance') loadFinance();
+  if(v==='expenses') loadExpenses();
   if(v==='plan') loadPlan();
   if(v==='excellence') loadExcellence();
   if(v==='onboarding') loadOnboarding();
@@ -2658,10 +2660,216 @@ async function loadPlaybookScore(){
         <div class="cmd-row-main"><strong>${i.n}. ${esc(i.title)}</strong><div class="hint">${esc(i.value||'')}</div></div>
         ${dot(i.status)}${i.view?'<span class="hint" style="margin-left:6px">›</span>':''}</div>`).join('')}</div>`).join('');
 }
+const usd=(n)=>'$'+Math.round(n||0).toLocaleString();
+async function loadFinance(){
+  let d; try{ d=await api('/finance/revenue'); }catch(e){ if($('finBreakdown'))$('finBreakdown').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const since = d.ledgerStart ? ' since '+esc(d.ledgerStart) : '';
+  const sub='font-size:12px;margin-top:5px;color:#5a6671;font-weight:600';
+  $('finKpis').innerHTML=`
+    <div class="ret-card rc-elev"><div class="n">${usd(d.cumulative)}</div><div class="l">Revenue to date</div><div class="hint" style="${sub}">${d.cumulativeDays.toLocaleString()} billed days${since}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.mtd)}</div><div class="l">This month</div><div class="hint" style="${sub}">${d.mtdDays.toLocaleString()} days · ${esc(d.monthLabel)}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.todayBilled)}</div><div class="l">Billed today</div><div class="hint" style="${sub}">${d.censusCount} in service</div></div>
+    <div class="ret-card"><div class="n">${usd(d.monthProjection)}</div><div class="l">Projected this month</div><div class="hint" style="${sub}">at today's census · ${d.daysInMonth} days</div></div>
+    <div class="ret-card"><div class="n">${usd(d.annualRunRate)}</div><div class="l">Annual run-rate</div><div class="hint" style="${sub}">today × 365</div></div>
+    ${d.unrated?`<div class="ret-card rc-warn"><div class="n">${d.unrated}</div><div class="l">No rate set</div><div class="hint" style="${sub}">not counted — set below</div></div>`:''}`;
+  const mtdRows = (d.mtdByLoc||[]).filter(r=>r.total>0 || r.days>0);
+  $('finBreakdown').innerHTML = `<div class="card"><h3>Today's census by level of care</h3>
+    <table class="tbl"><thead><tr><th>Level of care</th><th style="text-align:right">Clients</th><th style="text-align:right">Daily rate</th><th style="text-align:right">Revenue / day</th></tr></thead>
+    <tbody>${d.census.map(r=>`<tr${r.rate?'':' style="color:var(--muted)"'}><td>${esc(r.label)}</td><td style="text-align:right">${r.count}</td><td style="text-align:right">${r.rate?usd(r.rate):'<span class="hint">— set rate</span>'}</td><td style="text-align:right;font-weight:600">${r.rate?usd(r.daily):'—'}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No one in service.</td></tr>'}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${d.censusCount}</td><td></td><td style="text-align:right">${usd(d.dailyTotal)}/day</td></tr></tfoot></table>
+    <p class="hint" style="margin-top:8px">Each day is billed at the level of care the client was actually at that day, accumulated since ${esc(d.ledgerStart||d.asOf)}. As of ${esc(d.asOf)}.</p></div>
+    <div class="card"><h3>This month so far (${esc(d.monthLabel)}) — billed by level</h3>
+    <table class="tbl"><thead><tr><th>Level of care</th><th style="text-align:right">Billed days</th><th style="text-align:right">Revenue</th></tr></thead>
+    <tbody>${mtdRows.map(r=>`<tr><td>${esc(r.label)}</td><td style="text-align:right">${r.days.toLocaleString()}</td><td style="text-align:right;font-weight:600">${usd(r.total)}</td></tr>`).join('')||'<tr><td colspan="3" class="empty">Nothing billed yet this month.</td></tr>'}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${d.mtdDays.toLocaleString()}</td><td style="text-align:right">${usd(d.mtd)}</td></tr></tfoot></table></div>`;
+  const rates=d.rates||{};
+  $('finRates').innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:10px">${d.levels.map(l=>`
+    <div class="field" style="margin:0;min-width:200px"><label>${esc(l.label)}</label>
+      <div style="display:flex;align-items:center;gap:4px"><span class="hint">$</span><input type="number" min="0" step="1" data-loc="${esc(l.code)}" value="${rates[l.code]||''}" placeholder="0" style="width:110px"/><span class="hint">/day</span></div></div>`).join('')}</div>`;
+}
+async function saveRates(){
+  const rates={}; document.querySelectorAll('#finRates input[data-loc]').forEach(i=>{ rates[i.dataset.loc]=+i.value||0; });
+  if($('fin_msg'))$('fin_msg').textContent='Saving…';
+  try{ await api('/finance/rates',{method:'POST',body:JSON.stringify({rates})}); if($('fin_msg'))$('fin_msg').textContent='✓ Saved'; loadFinance(); }catch(e){ if($('fin_msg'))$('fin_msg').textContent=e.message; }
+}
+async function recomputeRevenue(){
+  if(!confirm('Re-bill the entire revenue history at the current rates and known level-of-care history? This replaces the accumulated ledger.')) return;
+  if($('fin_msg'))$('fin_msg').textContent='Recomputing…';
+  try{ await api('/finance/recompute',{method:'POST'}); if($('fin_msg'))$('fin_msg').textContent='✓ Rebuilt'; loadFinance(); }catch(e){ if($('fin_msg'))$('fin_msg').textContent=e.message; }
+}
+let EXP_MONTH=null;
+async function loadExpenses(month){
+  if(month!=null) EXP_MONTH=month;
+  const q = EXP_MONTH ? ('?month='+encodeURIComponent(EXP_MONTH)) : '';
+  let d; try{ d=await api('/finance/expenses'+q); }catch(e){ if($('expBody'))$('expBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  EXP_MONTH=d.month;
+  const sub='font-size:12px;margin-top:5px;color:#5a6671;font-weight:600';
+  const pct = d.budgetTotal ? Math.round(d.actualTotal/d.budgetTotal*100) : null;
+  // biggest overage line — "where we went wrong"
+  const overs = d.rows.filter(r=>r.variance!=null && r.variance<0).sort((a,b)=>a.variance-b.variance);
+  const worst = overs[0];
+  $('expKpis').innerHTML=`
+    <div class="ret-card"><div class="n">${usd(d.budgetTotal)}</div><div class="l">Budget · ${esc(d.month)}</div></div>
+    <div class="ret-card"><div class="n">${usd(d.actualTotal)}</div><div class="l">Actual</div><div class="hint" style="${sub}">${pct!=null?pct+'% of budget':''}</div></div>
+    <div class="ret-card ${d.variance<0?'rc-high':'rc-elev'}"><div class="n">${usd(Math.abs(d.variance))}</div><div class="l">${d.variance<0?'Over budget':'Under budget'}</div></div>
+    ${worst?`<div class="ret-card rc-high"><div class="n">${usd(-worst.variance)}</div><div class="l">Worst line</div><div class="hint" style="${sub}">${esc(worst.cat)}</div></div>`:''}
+    <div class="ret-card"><div class="n">${overs.length}</div><div class="l">Lines over budget</div></div>`;
+  const vcell=(v)=>v==null?'<span class="hint">—</span>':`<span style="color:${v<0?'var(--danger)':'#2f6b44'};font-weight:600">${v<0?'-':'+'}${usd(Math.abs(v))}</span>`;
+  const money=(id,cat,val,ph='')=>`<div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-${id}="${esc(cat)}" type="number" min="0" value="${val!=null?val:''}" placeholder="${ph}" style="width:100px;text-align:right"/></div>`;
+  const rowHtml=(r)=>`<tr><td>${esc(r.cat)}${r.computed?' <span class="hint">· auto</span>':''}</td>
+        <td style="text-align:right">${r.budgetComputed?`<strong>${usd(r.budget)}</strong> <span class="hint">· ${r.type==='ppd'?'PPD':'model'}</span>`:money('bud',r.cat,r.budget||'')}</td>
+        <td style="text-align:right">${(r.computed||r.type==='payroll')?'<span class="hint">—</span>':`<div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-ppd="${esc(r.cat)}" type="number" min="0" step="0.5" value="${r.ppd||''}" placeholder="—" title="Set a per-patient-per-day rate to drive this line off census" style="width:64px;text-align:right"/></div>`}</td>
+        <td style="text-align:right">${r.computed?`<strong>${usd(r.actual)}</strong>`:money('act',r.cat,r.actual)}</td>
+        <td style="text-align:right">${vcell(r.variance)}</td>
+        <td style="text-align:right">${r.computed?'':`<button class="btn btn-ghost btn-sm sans no-print" onclick="removeExpenseLine('${esc(r.cat)}')" title="Remove line">×</button>`}</td></tr>`;
+  // group rows by P&L group, with a subtotal per group
+  let body='', cg=null, gb=0, ga=0;
+  const subtotal=()=>{ if(cg){ body+=`<tr style="background:#faf7f0;font-weight:600"><td>Subtotal — ${esc(cg)}</td><td style="text-align:right">${usd(gb)}</td><td></td><td style="text-align:right">${usd(ga)}</td><td style="text-align:right">${vcell(gb-ga)}</td><td></td></tr>`; } };
+  for(const r of d.rows){ const g=r.group||''; if(g!==cg){ subtotal(); cg=g; gb=0; ga=0; if(g) body+=`<tr><td colspan="6" style="font-weight:700;padding-top:12px;color:var(--navy)">${esc(g)}</td></tr>`; } gb+=r.budget; ga+=(r.actual||0); body+=rowHtml(r); }
+  subtotal();
+  const monthSel=`<select onchange="loadExpenses(this.value)" class="sans" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px">${(d.months||[d.month]).map(m=>`<option value="${m}"${m===d.month?' selected':''}>${m}${m===d.curMonth?' (current)':''}</option>`).join('')}</select>`;
+  const be=d.breakeven||{};
+  const beCard = `<div class="card" style="border-left:4px solid #c8a44d;background:#fbf7ee">
+    <h3 style="margin:0">Break-even census</h3>
+    <p class="sub sans" style="margin-top:2px">Most costs are fixed — the lever is census. Covering ${esc(d.month)}'s <strong>${usd(be.costBase)}</strong> cost base needs about <strong>${usd(be.costPerDay)}/day</strong> of revenue.</p>
+    <div class="ret-cards" style="margin-top:8px">
+      <div class="ret-card rc-elev"><div class="n">${be.breakevenCensus!=null?be.breakevenCensus:'—'}</div><div class="l">Break-even census</div><div class="hint" style="font-size:11px;margin-top:4px;color:#5a6671;font-weight:600">avg patients/day</div></div>
+      <div class="ret-card"><div class="n">${be.census}</div><div class="l">Census now</div></div>
+      <div class="ret-card ${be.gap>0?'rc-high':'rc-elev'}"><div class="n">${be.gap>0?'+'+be.gap:(be.gap||0)}</div><div class="l">${be.gap>0?'Patients short':'Cushion'}</div></div>
+      <div class="ret-card"><div class="n">${usd(be.avgPerDiem)}</div><div class="l">Blended per-diem</div></div>
+      <div class="ret-card"><div class="n">${usd(be.dailyRevenue)}</div><div class="l">Revenue / day now</div></div>
+    </div></div>`;
+  $('expBody').innerHTML=beCard+`<div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Budget vs actual</h3><div style="display:flex;gap:8px;align-items:center">${monthSel}<button class="btn btn-gold sans" onclick="saveExpenses()">Save</button></div></div>
+    <table class="tbl" style="margin-top:8px"><thead><tr><th>Line</th><th style="text-align:right">Budget / mo</th><th style="text-align:right">PPD</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th></th></tr></thead>
+    <tbody>${body}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total expenses</td><td style="text-align:right">${usd(d.budgetTotal)}</td><td></td><td style="text-align:right">${usd(d.actualTotal)}</td><td style="text-align:right">${vcell(d.variance)}</td><td></td></tr></tfoot></table>
+    <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="exp_newcat" placeholder="New expense line" style="width:220px"/><button class="btn btn-ghost btn-sm sans" onclick="addExpenseLine()">+ Add line</button><span class="hint" id="exp_msg"></span></div>
+    <p class="hint" style="margin-top:8px">Variance = budget − actual; <span style="color:var(--danger)">red is over budget</span>. Set a <strong>PPD</strong> ($/patient/day) on a line (e.g. Client Meals) to budget it off census (${d.census} patients). ${d.payrollItemized?'Payroll is itemized below (Salaries, Taxes, Benefits…).':'Payroll is live from covered shifts + salaried.'} As of ${esc(d.asOf)}.</p></div>
+    <div class="card"><h3>Payroll by role — ${esc(d.month)}</h3>
+    <table class="tbl"><thead><tr><th>Role</th><th style="text-align:right">Shifts</th><th style="text-align:right">Hours</th><th style="text-align:right">Cost</th></tr></thead>
+    <tbody>${(d.payroll.byRole||[]).map(r=>`<tr><td>${esc(r.role)}</td><td style="text-align:right">${r.shifts}</td><td style="text-align:right">${r.hours.toLocaleString()}</td><td style="text-align:right;font-weight:600">${usd(r.cost)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No covered shifts this month.</td></tr>'}</tbody></table>
+    <p class="hint" style="margin-top:8px">Role cost shown at base rate; the overtime premium (${usd(d.payroll.otCost)}) is added into the totals above.</p></div>
+    <div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Payroll budget — from the staffing model</h3><button class="btn btn-gold sans" onclick="saveStaffingRates()">Save rates</button></div>
+      <p class="sub sans" style="margin-top:4px">Budget = needed headcount × shift hours × rate, every day × ${d.payrollBudget.daysInMonth} days = <strong>${usd(d.payrollBudget.monthly)}/mo</strong> (${usd(d.payrollBudget.perDay)}/day). Edit a line's rate to update the budget.</p>
+      ${(d.payrollBudget.missingRate||[]).length?`<div class="pc-note" style="border-left:3px solid var(--gold)">⚠ Set a rate for: ${d.payrollBudget.missingRate.map(esc).join(', ')}</div>`:''}
+      <table class="tbl"><thead><tr><th>Block</th><th>Role · shift</th><th style="text-align:right">Needed</th><th style="text-align:right">Hrs</th><th style="text-align:right">$/hr</th><th style="text-align:right">Cost/day</th></tr></thead>
+      <tbody>${(d.payrollBudget.lines||[]).map(l=>`<tr><td><span class="hint">${esc(l.block)}</span></td><td>${esc(l.role)} <span class="hint">· ${esc(l.shift)}</span></td><td style="text-align:right">${l.needed}</td><td style="text-align:right">${l.hours}</td><td style="text-align:right"><input data-sb="${l.id}" type="number" min="0" step="0.5" value="${l.rate||''}" placeholder="0" style="width:80px;text-align:right"/></td><td style="text-align:right;font-weight:600">${usd(l.perDay)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td colspan="5">Per day</td><td style="text-align:right">${usd(d.payrollBudget.perDay)}</td></tr></tfoot></table>
+      <div class="pc-note" style="margin-top:8px;border-left:3px solid var(--gold)">
+        Hourly (model) ${usd(d.payrollBudget.hourlyMonthly)} + Salaried ${usd(d.payrollBudget.salariedMonthly)} = <strong>base ${usd(d.payrollBudget.baseMonthly)}/mo</strong><br>
+        + Taxes (${d.payrollBudget.burden.tax}%) ${usd(d.payrollBudget.taxesMonthly)} + Benefits (${d.payrollBudget.burden.benefits}%) ${usd(d.payrollBudget.benefitsMonthly)} = <strong>loaded ${usd(d.payrollBudget.monthly)}/mo</strong>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+        <div class="field" style="margin:0"><label>Employer taxes %</label><input id="bd_tax" type="number" min="0" step="0.01" value="${d.payrollBudget.burden.tax}" style="width:100px"/></div>
+        <div class="field" style="margin:0"><label>Benefits %</label><input id="bd_ben" type="number" min="0" step="0.01" value="${d.payrollBudget.burden.benefits}" style="width:100px"/></div>
+        <button class="btn btn-ghost sans" onclick="saveBurden()">Save taxes & benefits</button>
+        <span class="hint">Applied to all payroll — budget and actual.</span>
+      </div></div>
+    <div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Salaried roles <span class="hint" style="font-weight:400">— not on the shift schedule</span></h3><button class="btn btn-gold sans" onclick="saveSalaried()">Save salaried</button></div>
+      <p class="sub sans" style="margin-top:4px">Executive Director, BD reps, Director of Operations, Medical Director, NP, etc. Their monthly cost is added to the payroll budget (and prorated into actual: ${usd(d.salariedActual)} so far this month).</p>
+      <table class="tbl"><thead><tr><th>Title</th><th style="text-align:right">$ / month</th><th></th></tr></thead>
+      <tbody id="salRows">${(d.payrollBudget.salaried||[]).map(s=>`<tr><td><input data-sal-title type="text" value="${esc(s.title)}" style="width:220px"/></td><td style="text-align:right"><div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-sal-monthly type="number" min="0" value="${s.monthly||''}" placeholder="0" style="width:110px;text-align:right"/></div></td><td style="text-align:right"><button class="btn btn-ghost btn-sm sans no-print" onclick="this.closest('tr').remove()" title="Remove">×</button></td></tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td>Total</td><td style="text-align:right">${usd(d.payrollBudget.salariedMonthly)}/mo</td><td></td></tr></tfoot></table>
+      <div style="margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="addSalariedRow()">+ Add role</button></div></div>`;
+  // Config — shift hours, role rates, staff rates
+  const rr=d.roleRates||{}; const sh=d.shiftHours||{};
+  $('expConfig').innerHTML=`
+    <div class="card"><h3>Shift length (hours)</h3>
+      <p class="sub sans" style="margin-top:0">How many hours each covered shift counts as — drives the payroll math.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">${['Morning','Day','Evening','Night'].map(p=>`
+        <div class="field" style="margin:0"><label>${p}</label><input data-sh="${p}" type="number" min="0" step="0.5" value="${sh[p]!=null?sh[p]:''}" style="width:80px"/></div>`).join('')}</div>
+      <div style="margin-top:10px"><button class="btn btn-ghost sans" onclick="saveShiftHours()">Save hours</button></div>
+    </div>
+    <div class="card"><h3>Pay rates</h3>
+      <p class="sub sans" style="margin-top:0">Per-person rate is used when set; otherwise the role default applies. Overtime over 40 hrs/week pays 1.5×.</p>
+      <h4 style="margin:8px 0 4px">Role defaults ($/hr)</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">${(d.roles||[]).map(role=>`
+        <div class="field" style="margin:0;min-width:150px"><label>${esc(role)}</label><div style="display:flex;align-items:center;gap:4px"><span class="hint">$</span><input data-rr="${esc(role)}" type="number" min="0" step="0.5" value="${rr[role]||''}" placeholder="0" style="width:90px"/></div></div>`).join('')}</div>
+      <div style="margin-top:8px"><button class="btn btn-ghost sans" onclick="saveRoleRates()">Save role rates</button></div>
+      <h4 style="margin:14px 0 4px">Per-person ($/hr) <span class="hint" style="font-weight:400">— blank = use role default</span></h4>
+      <table class="tbl"><thead><tr><th>Staff</th><th>Role</th><th style="text-align:right">$/hr</th></tr></thead>
+        <tbody>${(d.staff||[]).map(s=>`<tr><td>${esc(s.name)}</td><td><span class="hint">${esc(s.job_role||'')}</span></td><td style="text-align:right"><input data-sr="${s.id}" type="number" min="0" step="0.5" value="${s.hourly_rate!=null?s.hourly_rate:''}" placeholder="${rr[s.job_role]||'0'}" style="width:80px;text-align:right"/></td></tr>`).join('')}</tbody></table>
+      <div style="margin-top:10px"><button class="btn btn-gold sans" onclick="saveStaffRates()">Save staff rates</button> <span class="hint" id="rate_msg"></span></div>
+    </div>`;
+}
+function gatherExpenses(extraCat){
+  const budgets={}; document.querySelectorAll('#expBody input[data-bud]').forEach(i=>{ budgets[i.dataset.bud]=+i.value||0; });
+  const actuals={}; document.querySelectorAll('#expBody input[data-act]').forEach(i=>{ actuals[i.dataset.act]=i.value; });
+  const ppd={}; document.querySelectorAll('#expBody input[data-ppd]').forEach(i=>{ ppd[i.dataset.ppd]=i.value; });
+  const cats=[...document.querySelectorAll('#expBody input[data-ppd]')].map(i=>i.dataset.ppd);
+  if(extraCat) cats.push(extraCat);
+  return { cats, budgets, actuals, ppd, month: EXP_MONTH };
+}
+function gatherSalaried(){
+  const roles=[]; document.querySelectorAll('#salRows tr').forEach(tr=>{ const t=tr.querySelector('[data-sal-title]'), m=tr.querySelector('[data-sal-monthly]'); if(t&&t.value.trim()) roles.push({title:t.value.trim(), monthly:+(m&&m.value)||0}); });
+  return roles;
+}
+function addSalariedRow(){
+  const tb=$('salRows'); if(!tb) return;
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input data-sal-title type="text" placeholder="Title" style="width:220px"/></td><td style="text-align:right"><div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-sal-monthly type="number" min="0" placeholder="0" style="width:110px;text-align:right"/></div></td><td style="text-align:right"><button class="btn btn-ghost btn-sm sans no-print" onclick="this.closest('tr').remove()">×</button></td>`;
+  tb.appendChild(tr);
+}
+async function saveSalaried(){
+  try{ await api('/finance/salaried',{method:'POST',body:JSON.stringify({roles:gatherSalaried()})}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveBurden(){
+  try{ await api('/finance/burden',{method:'POST',body:JSON.stringify({tax:($('bd_tax')||{}).value||0,benefits:($('bd_ben')||{}).value||0})}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveExpenses(){
+  if($('exp_msg'))$('exp_msg').textContent='Saving…';
+  try{ await api('/finance/expenses-save',{method:'POST',body:JSON.stringify(gatherExpenses())}); if($('exp_msg'))$('exp_msg').textContent='✓ Saved'; loadExpenses(); }
+  catch(e){ if($('exp_msg'))$('exp_msg').textContent=e.message; }
+}
+async function addExpenseLine(){
+  const name=($('exp_newcat')||{}).value||''; if(!name.trim()){ if($('exp_msg'))$('exp_msg').textContent='Name the line first'; return; }
+  try{ await api('/finance/expenses-save',{method:'POST',body:JSON.stringify(gatherExpenses(name.trim()))}); loadExpenses(); }
+  catch(e){ if($('exp_msg'))$('exp_msg').textContent=e.message; }
+}
+async function removeExpenseLine(cat){
+  if(!confirm('Remove the "'+cat+'" line? Its budget and entered actuals are cleared.')) return;
+  const g=gatherExpenses(); g.cats=g.cats.filter(c=>c!==cat); delete g.budgets[cat]; delete g.actuals[cat]; delete g.ppd[cat];
+  try{ await api('/finance/expenses-save',{method:'POST',body:JSON.stringify(g)}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveStaffingRates(){
+  const rates={}; document.querySelectorAll('#expBody input[data-sb]').forEach(i=>{ rates[i.dataset.sb]=i.value; });
+  try{ await api('/finance/staffing-rate',{method:'POST',body:JSON.stringify({rates})}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveShiftHours(){
+  const hours={}; document.querySelectorAll('#expConfig input[data-sh]').forEach(i=>{ if(i.value!=='') hours[i.dataset.sh]=+i.value; });
+  try{ await api('/finance/shift-hours',{method:'POST',body:JSON.stringify(hours)}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveRoleRates(){
+  const rates={}; document.querySelectorAll('#expConfig input[data-rr]').forEach(i=>{ rates[i.dataset.rr]=+i.value||0; });
+  try{ await api('/finance/role-rates',{method:'POST',body:JSON.stringify({rates})}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveStaffRates(){
+  const rates={}; document.querySelectorAll('#expConfig input[data-sr]').forEach(i=>{ rates[i.dataset.sr]=i.value; });
+  if($('rate_msg'))$('rate_msg').textContent='Saving…';
+  try{ await api('/finance/staff-rates',{method:'POST',body:JSON.stringify({rates})}); if($('rate_msg'))$('rate_msg').textContent='✓ Saved'; loadExpenses(); }catch(e){ if($('rate_msg'))$('rate_msg').textContent=e.message; }
+}
+// Command Center revenue strip — admin only (the API is admin-gated too).
+async function loadCmdRevenue(){
+  const el=$('cmdRevenue'); if(!el) return;
+  if(!(ME && ME.role==='admin')){ el.innerHTML=''; return; }
+  let d; try{ d=await api('/finance/revenue'); }catch(e){ el.innerHTML=''; return; }
+  el.innerHTML=`<div class="card" style="border-left:4px solid #c8a44d;background:#fbf7ee">
+    <div class="cmd-hero-row">
+      <div><h3 style="margin:0">Revenue <span class="hint" style="font-weight:400">· admin only · private</span></h3></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="show('finance')">Open Revenue ›</button>
+    </div>
+    <div class="ret-cards" style="margin-top:10px">
+      <div class="ret-card rc-elev"><div class="n">${usd(d.cumulative)}</div><div class="l">Revenue to date</div></div>
+      <div class="ret-card"><div class="n">${usd(d.mtd)}</div><div class="l">This month</div></div>
+      <div class="ret-card"><div class="n">${usd(d.todayBilled)}</div><div class="l">Billed today</div><div class="hint" style="font-size:12px;margin-top:5px;color:#5a6671;font-weight:600">${d.censusCount} in service</div></div>
+      <div class="ret-card"><div class="n">${usd(d.monthProjection)}</div><div class="l">Projected ${esc(d.monthLabel)}</div></div>
+      ${d.unrated?`<div class="ret-card rc-warn"><div class="n">${d.unrated}</div><div class="l">No rate set</div></div>`:''}
+    </div></div>`;
+}
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
-  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning();
+  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning(); loadCmdRevenue();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});

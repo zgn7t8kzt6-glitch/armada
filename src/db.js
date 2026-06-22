@@ -1244,6 +1244,86 @@ addColumn('users', 'invite_expires', 'TEXT');
 addColumn('users', 'invited_at', 'TEXT');
 addColumn('users', 'invited_by', 'TEXT');
 addColumn('beds', 'gender', 'TEXT');   // detox bed designation: Male | Female | Any
+// Per-diem revenue rates by ASAM level of care (admin-editable). Seed the four
+// Armada bills today; other levels default to 0 until a rate is set.
+if (!getState('loc_rates')) setState('loc_rates', JSON.stringify({ '3.7-WM': 442, '3.7': 342, '3.2-WM': 289, '3.5': 240 }));
+// Expenses / budget. Payroll actual is derived from covered shifts × hours × pay
+// rate (per-person, role fallback), with weekly overtime > 40h at 1.5×.
+addColumn('users', 'hourly_rate', 'REAL');   // per-person hourly wage (admin-set)
+addColumn('staffing_standard', 'rate', 'REAL');   // budgeted hourly rate for this model line → payroll budget
+if (!getState('shift_hours')) setState('shift_hours', JSON.stringify({ Morning: 8, Day: 8, Evening: 8, Night: 8 }));
+if (!getState('role_rates')) setState('role_rates', JSON.stringify({}));        // { 'BHT / Tech': 18, 'Nurse': 35, ... }
+// Manual expense categories (Payroll is separate — its actual is auto-computed).
+if (!getState('expense_cats')) setState('expense_cats', JSON.stringify(['Rent', 'Utilities', 'Food', 'Insurance', 'Supplies', 'Corporate Allocation']));
+if (!getState('budget_monthly')) setState('budget_monthly', JSON.stringify({ Payroll: 0, Rent: 0 }));   // budget per category name
+if (!getState('expense_actuals')) setState('expense_actuals', JSON.stringify({}));   // { 'YYYY-MM': { Rent: 0, ... } } until QuickBooks P&L
+// One-time migration from the first cut (lowercase rent/payroll budget + rent_actual).
+if (getState('expense_migrate_v1') !== 'done') {
+  try {
+    const b = JSON.parse(getState('budget_monthly') || '{}');
+    if (b.rent != null || b.payroll != null) {
+      const nb = {}; if (b.payroll != null) nb.Payroll = b.payroll; if (b.rent != null) nb.Rent = b.rent;
+      for (const k in b) if (k !== 'rent' && k !== 'payroll') nb[k] = b[k];
+      setState('budget_monthly', JSON.stringify(nb));
+    }
+    const ra = JSON.parse(getState('rent_actual') || '{}');
+    if (Object.keys(ra).length) {
+      const ea = JSON.parse(getState('expense_actuals') || '{}');
+      for (const m in ra) { ea[m] = ea[m] || {}; ea[m].Rent = ra[m]; }
+      setState('expense_actuals', JSON.stringify(ea));
+    }
+  } catch (e) { /* fresh install */ }
+  setState('expense_migrate_v1', 'done');
+}
+// Census-driven (per-patient-per-day) expense lines: { Food: 12, ... }. A line
+// with a PPD rate budgets as ppd × census × days instead of a flat amount.
+if (!getState('ppd_lines')) setState('ppd_lines', JSON.stringify({}));
+// Salaried roles not on the shift schedule — added to the payroll budget.
+if (!getState('salaried_roles')) setState('salaried_roles', JSON.stringify([
+  { title: 'Executive Director', monthly: 0 },
+  { title: 'BD Rep', monthly: 0 },
+  { title: 'Director of Operations', monthly: 0 },
+  { title: 'Medical Director', monthly: 0 },
+  { title: 'Nurse Practitioner', monthly: 0 },
+]));
+// Labor burden applied on top of all gross payroll (hourly + salaried): employer
+// payroll taxes (FICA/FUTA/SUTA/workers' comp) and benefits, as % of wages.
+if (!getState('payroll_burden')) setState('payroll_burden', JSON.stringify({ tax: 7.65, benefits: 0 }));
+// Add Corporate Allocation as a standing expense line (one-time, idempotent).
+if (getState('expense_corp_alloc_v1') !== 'done') {
+  try {
+    const cats = JSON.parse(getState('expense_cats') || '[]');
+    if (Array.isArray(cats) && !cats.some((c) => String(c).toLowerCase() === 'corporate allocation')) {
+      cats.push('Corporate Allocation'); setState('expense_cats', JSON.stringify(cats));
+    }
+  } catch (e) { /* ignore */ }
+  setState('expense_corp_alloc_v1', 'done');
+}
+// Import the real P&L chart of accounts + May 2026 actuals (from the uploaded
+// QuickBooks P&L) so every line is budget-vs-actual. One-time; budgets/edits made
+// after this are preserved. pl_groups gives each line its P&L grouping.
+if (getState('pl_import_may2026_v1') !== 'done') {
+  const CHART = [
+    ['Marketing', 'Advertising & Marketing', 4134.81], ['SEO', 'Advertising & Marketing', 255.32],
+    ['Business Development-Operations', '', 884.04],
+    ['Client Meals', 'Client Service Costs', 22040.12], ['Client Supplies', 'Client Service Costs', 2414.03], ['Client Transportation', 'Client Service Costs', 3680.75],
+    ['Bank fees & Service charges', 'Dues, Fees & Subscriptions', 417.12], ['Billing Charges', 'Dues, Fees & Subscriptions', 574.17], ['Late Fees', 'Dues, Fees & Subscriptions', 81.79],
+    ['HR & Personnel', '', 266.29],
+    ['Liability Insurance', 'Insurance', 4179.37],
+    ['Licensing & Credentialing Consulting', '', 510.0],
+    ['Management Fee', '', 20000.0],
+    ['Equipment rental', 'Office & Administrative', 358.4], ['Office Supplies', 'Office & Administrative', 711.7],
+    ['Rent', 'Operating Occupancy Costs', 38457.0], ['Repairs & Maintenance', 'Operating Occupancy Costs', 688.54], ['Utilities', 'Operating Occupancy Costs', 3490.7], ['Internet, Wifi & TV Services', 'Operating Occupancy Costs', 90.0],
+    ['Employee Benefits', 'Payroll & Benefits', 4816.01], ['Payroll Processing Fees', 'Payroll & Benefits', 1624.9], ['Payroll Taxes', 'Payroll & Benefits', 11954.38], ['Salaries & Wages', 'Payroll & Benefits', 150273.77], ['Workers Compensation', 'Payroll & Benefits', 1530.57],
+    ['Software Expense', '', 6874.76], ['Travel', '', 2118.79],
+  ];
+  setState('expense_cats', JSON.stringify(CHART.map((r) => r[0])));
+  const groups = {}; CHART.forEach((r) => { groups[r[0]] = r[1]; }); setState('pl_groups', JSON.stringify(groups));
+  let ea = {}; try { ea = JSON.parse(getState('expense_actuals') || '{}'); } catch (e) { ea = {}; }
+  const may = ea['2026-05'] || {}; CHART.forEach((r) => { if (may[r[0]] == null) may[r[0]] = r[2]; }); ea['2026-05'] = may;
+  setState('expense_actuals', JSON.stringify(ea));
+  setState('pl_import_may2026_v1', 'done');
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS role_profiles (
@@ -1502,7 +1582,15 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
   ama INTEGER NOT NULL DEFAULT 0,
   census INTEGER,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);`);
+);
+CREATE TABLE IF NOT EXISTS revenue_days (
+  date TEXT NOT NULL,                     -- YYYY-MM-DD billed
+  client_id INTEGER NOT NULL,
+  loc TEXT,                               -- the ASAM level the client was at that day
+  rate INTEGER NOT NULL DEFAULT 0,        -- per-diem billed for that day
+  UNIQUE(date, client_id)
+);
+CREATE INDEX IF NOT EXISTS idx_revenue_days_date ON revenue_days(date);`);
 // The facility's local day boundary. Daily flow is cut off at LOCAL midnight
 // (default US Eastern) so the daily report matches what staff see on the floor,
 // not UTC. Set APP_TZ to override (e.g. America/Chicago).

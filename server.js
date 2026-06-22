@@ -6188,6 +6188,334 @@ app.post('/api/bedboard/total', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- Finance: per-diem revenue (admin only) ----------------
+   Revenue accrues one ledger row per client per day, billed at the ASAM level
+   the client was actually at that day (reconstructed from flow_events). Past
+   days are locked once accrued; today re-accrues on every view so the running
+   total stays live. Rates are admin-editable (state 'loc_rates'). */
+function locRates() { try { return JSON.parse(getState('loc_rates') || '{}'); } catch (e) { return {}; } }
+// The level a client was billable at on a given day: the latest admit/loc_change
+// on or before that day, falling back to their current level if we have no events.
+function billableLocOnDay(client, events, date) {
+  let loc = null;
+  for (const e of events) { if (e.date > date) break; if (e.to_loc) loc = e.to_loc; }
+  return loc || client.loc || null;
+}
+function accrueRevenueForDay(date, clients, eventsByClient, rates, del, ins) {
+  del.run(date);
+  for (const c of clients) {
+    const admit = String(c.admit).slice(0, 10);
+    if (admit > date) continue;                         // not yet admitted
+    const dc = c.discharge_date ? String(c.discharge_date).slice(0, 10) : null;
+    if (dc && date >= dc) continue;                     // discharge day not billed
+    const loc = billableLocOnDay(c, eventsByClient[c.id] || [], date);
+    ins.run(date, c.id, loc, +rates[loc] || 0);
+  }
+}
+// Roll the ledger forward: backfill any never-accrued days (locked once done),
+// then always re-accrue today since the census/level can still change.
+function accrueRevenueThrough(today) {
+  const rates = locRates();
+  const clients = db.prepare(`SELECT id, loc, admit, discharge_date FROM clients WHERE admit IS NOT NULL AND admit != ''`).all();
+  if (!clients.length) return;
+  const first = clients.reduce((m, c) => { const a = String(c.admit).slice(0, 10); return (!m || a < m) ? a : m; }, null);
+  const evRows = db.prepare(`SELECT client_id, to_loc, substr(date,1,10) date FROM flow_events WHERE kind IN ('admit','loc_change') AND to_loc IS NOT NULL ORDER BY date ASC, id ASC`).all();
+  const eventsByClient = {}; for (const e of evRows) (eventsByClient[e.client_id] = eventsByClient[e.client_id] || []).push(e);
+  const del = db.prepare(`DELETE FROM revenue_days WHERE date = ?`);
+  const ins = db.prepare(`INSERT INTO revenue_days (date, client_id, loc, rate) VALUES (?,?,?,?)`);
+  const through = getState('revenue_accrued_through');
+  const start = through && through >= first ? addDays(through, 1) : first;
+  db.exec('BEGIN');
+  try {
+    let day = start, i = 0;
+    for (; day < today && i < 4000; i++) { accrueRevenueForDay(day, clients, eventsByClient, rates, del, ins); day = addDays(day, 1); }
+    if (today > first) setState('revenue_accrued_through', addDays(today, -1));   // lock through yesterday
+    accrueRevenueForDay(today, clients, eventsByClient, rates, del, ins);          // today stays live
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+function revenueSnapshot() {
+  const rates = locRates();
+  const today = appToday();
+  const monthStart = today.slice(0, 7) + '-01';
+  const daysInMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 0)).getUTCDate();
+  accrueRevenueThrough(today);
+  // Forward run-rate from the live census, grouped by level of care.
+  const active = db.prepare(`SELECT loc FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const byLoc = {};
+  for (const c of active) { const k = c.loc || 'Unspecified'; (byLoc[k] = byLoc[k] || { loc: k, count: 0 }).count++; }
+  const census = Object.values(byLoc).map((g) => {
+    const rate = +rates[g.loc] || 0;
+    return { loc: g.loc, label: LOC_LABEL[g.loc] || g.loc, count: g.count, rate, daily: rate * g.count };
+  }).sort((a, b) => b.daily - a.daily || b.count - a.count);
+  const dailyTotal = census.reduce((s, r) => s + r.daily, 0);
+  const unrated = census.filter((r) => !r.rate).reduce((s, r) => s + r.count, 0);
+  // Accumulated actuals from the ledger (level-accurate, day by day).
+  const sum = (where, ...p) => db.prepare(`SELECT COALESCE(SUM(rate),0) v, COUNT(*) n FROM revenue_days ${where}`).get(...p);
+  const todayL = sum(`WHERE date = ?`, today);
+  const mtdL = sum(`WHERE date >= ? AND date <= ?`, monthStart, today);
+  const allL = sum(``);
+  const ledgerStart = db.prepare(`SELECT MIN(date) m FROM revenue_days`).get().m;
+  const mtdByLoc = db.prepare(`SELECT loc, COUNT(*) days, COALESCE(SUM(rate),0) total FROM revenue_days WHERE date >= ? AND date <= ? GROUP BY loc ORDER BY total DESC`).all(monthStart, today)
+    .map((r) => ({ loc: r.loc, label: LOC_LABEL[r.loc] || r.loc || 'Unspecified', days: r.days, total: r.total }));
+  return { rates, levels: ASAM_LEVELS.map((l) => ({ code: l.code, label: l.label })), census, dailyTotal,
+    censusCount: active.length, unrated, monthProjection: dailyTotal * daysInMonth, annualRunRate: dailyTotal * 365,
+    todayBilled: todayL.v, mtd: mtdL.v, mtdDays: mtdL.n, cumulative: allL.v, cumulativeDays: allL.n, ledgerStart,
+    mtdByLoc, daysInMonth, monthLabel: today.slice(0, 7), asOf: today };
+}
+app.get('/api/finance/revenue', requireAuth, requireAdmin, (req, res) => res.json(revenueSnapshot()));
+app.post('/api/finance/rates', requireAuth, requireAdmin, (req, res) => {
+  const cur = locRates();
+  const incoming = req.body?.rates || {};
+  for (const [k, v] of Object.entries(incoming)) { const n = Math.max(0, Math.round(+v || 0)); if (n) cur[k] = n; else delete cur[k]; }
+  setState('loc_rates', JSON.stringify(cur));
+  audit({ user: req.user, action: 'FINANCE_RATES', detail: JSON.stringify(cur), ip: req.ip });
+  res.json({ ok: true, rates: cur });
+});
+// Rebuild the whole ledger from scratch (e.g. after correcting historical rates
+// or levels) — re-bills every day at today's rates and the known level history.
+app.post('/api/finance/recompute', requireAuth, requireAdmin, (req, res) => {
+  db.prepare(`DELETE FROM revenue_days`).run();
+  setState('revenue_accrued_through', '');
+  accrueRevenueThrough(appToday());
+  audit({ user: req.user, action: 'FINANCE_RECOMPUTE', ip: req.ip });
+  res.json(revenueSnapshot());
+});
+
+/* ---------------- Expenses / Budget vs Actual (admin only) ----------------
+   Budget the big lines (rent, payroll) and compare to actuals. Payroll actual
+   is derived live from covered shifts: each scheduled (not called-off) shift ×
+   the hours for that shift type × the staffer's pay rate, with weekly overtime
+   over 40h paid at 1.5×. Rent actual is entered monthly until QuickBooks P&L is
+   wired in. */
+function jsonState(key, dflt) { try { return JSON.parse(getState(key) || '') || dflt; } catch (e) { return dflt; } }
+// Monday-anchored week key, so overtime is tallied per workweek.
+function weekStart(date) { const d = new Date(date + 'T12:00:00Z'); const dow = (d.getUTCDay() + 6) % 7; return addDays(date, -dow); }
+function payrollActual(startDate, endDate) {
+  const shiftHours = jsonState('shift_hours', { Morning: 8, Day: 8, Evening: 8, Night: 8 });
+  const roleRates = jsonState('role_rates', {});
+  const users = {}; db.prepare(`SELECT id, name, job_role, hourly_rate FROM users`).all().forEach((u) => { users[u.id] = u; });
+  const rows = db.prepare(`SELECT a.user_id, a.user_name, s.date, s.part, s.role
+      FROM schedule_assignments a JOIN schedule_slots s ON a.slot_id = s.id
+      WHERE a.status = 'scheduled' AND s.date >= ? AND s.date <= ?`).all(startDate, endDate);
+  const rateFor = (u, slotRole) => {
+    const usr = u.user_id ? users[u.user_id] : null;
+    if (usr && usr.hourly_rate != null && usr.hourly_rate !== '') return +usr.hourly_rate;
+    const jr = usr ? usr.job_role : null;
+    return +(roleRates[jr] ?? roleRates[slotRole] ?? 0) || 0;
+  };
+  // Aggregate hours per person per week (for OT), and track each person's rate + role.
+  const perWeek = {};            // key: uid|name + '@' + weekStart  → { hours, rate, role }
+  const byRole = {};             // role → { shifts, hours, cost }
+  let shiftsCovered = 0, totalHours = 0;
+  for (const r of rows) {
+    const h = +shiftHours[r.part] || 0;
+    const rate = rateFor(r, r.role);
+    const who = r.user_id ? 'u' + r.user_id : 'n:' + (r.user_name || '?');
+    const wk = who + '@' + weekStart(r.date);
+    const slot = (perWeek[wk] = perWeek[wk] || { hours: 0, rate, role: r.role });
+    slot.hours += h;
+    shiftsCovered++; totalHours += h;
+    const br = (byRole[r.role] = byRole[r.role] || { role: r.role, shifts: 0, hours: 0, cost: 0 });
+    br.shifts++; br.hours += h; br.cost += h * rate;   // base cost; OT premium added below at the week level
+  }
+  let cost = 0, otHours = 0, otCost = 0;
+  for (const k in perWeek) {
+    const { hours, rate } = perWeek[k];
+    const reg = Math.min(40, hours), ot = Math.max(0, hours - 40);
+    cost += reg * rate + ot * rate * 1.5;
+    otHours += ot; otCost += ot * rate * 0.5;   // the half-time premium portion
+  }
+  return { cost: Math.round(cost), hours: totalHours, otHours, otCost: Math.round(otCost), shiftsCovered,
+    byRole: Object.values(byRole).map((b) => ({ ...b, cost: Math.round(b.cost) })).sort((a, b) => b.cost - a.cost) };
+}
+function expenseCats() { const c = jsonState('expense_cats', []); return Array.isArray(c) ? c.filter((x) => x && x !== 'Payroll') : []; }
+// Hours implied by a shift label like "7a–7p" (12), "7a–3p" (8), "11p–7a" (8).
+// Plain labels with no time range (e.g. "Day") default to 8h.
+function shiftLabelHours(label) {
+  const s = String(label || '').toLowerCase().replace(/\s/g, '');
+  const m = s.match(/(\d{1,2})(?::(\d{2}))?(a|p)?[–-](\d{1,2})(?::(\d{2}))?(a|p)?/);
+  if (!m) return 8;
+  const to24 = (h, ap) => { h = (+h) % 12; if (ap === 'p') h += 12; return h; };
+  const start = to24(m[1], m[3] || 'a') + (+(m[2] || 0)) / 60;
+  let end = to24(m[4], m[6] || 'p') + (+(m[5] || 0)) / 60;
+  let dur = end - start; if (dur <= 0) dur += 24;
+  return Math.round(dur * 100) / 100;
+}
+// Payroll BUDGET, pulled from the staffing model: every standard line is
+// needed-headcount × the shift's hours × that line's budgeted hourly rate, summed
+// to a daily cost and projected across the month. (Actual payroll comes from the
+// shifts actually covered — see payrollActual.)
+function payrollBudget() {
+  const today = appToday();
+  const daysInMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 0)).getUTCDate();
+  const std = db.prepare(`SELECT id, block, role, shift_label, needed, rate FROM staffing_standard ORDER BY sort, id`).all();
+  const lines = []; let perDay = 0; const missing = new Set();
+  for (const s of std) {
+    const hours = shiftLabelHours(s.shift_label); const rate = +s.rate || 0;
+    const cost = (s.needed || 0) * hours * rate; perDay += cost;
+    if (!rate && s.needed) missing.add(s.role);
+    lines.push({ id: s.id, block: s.block, role: s.role, shift: s.shift_label, needed: s.needed, hours, rate, perDay: Math.round(cost) });
+  }
+  const hourlyMonthly = Math.round(perDay * daysInMonth);
+  // Salaried roles not on the shift schedule (ED, DoO, Medical Director, NP, BD reps).
+  const salaried = jsonState('salaried_roles', []).map((r) => ({ title: String(r.title || ''), monthly: Math.max(0, +r.monthly || 0) }));
+  const salariedMonthly = salaried.reduce((s, r) => s + r.monthly, 0);
+  // Labor burden — employer taxes + benefits as % of gross wages — loads every line.
+  const bd = jsonState('payroll_burden', { tax: 7.65, benefits: 0 });
+  const tax = Math.max(0, +bd.tax || 0), benefits = Math.max(0, +bd.benefits || 0);
+  const baseMonthly = hourlyMonthly + salariedMonthly;
+  const taxesMonthly = Math.round(baseMonthly * tax / 100);
+  const benefitsMonthly = Math.round(baseMonthly * benefits / 100);
+  return { perDay: Math.round(perDay), hourlyMonthly, salaried, salariedMonthly,
+    burden: { tax, benefits }, baseMonthly, taxesMonthly, benefitsMonthly, burdenMult: 1 + (tax + benefits) / 100,
+    monthly: baseMonthly + taxesMonthly + benefitsMonthly, daysInMonth, lines, missingRate: [...missing] };
+}
+function expenseSnapshot(reqMonth) {
+  const today = appToday();
+  const curMonth = today.slice(0, 7);
+  const month = /^\d{4}-\d{2}$/.test(reqMonth || '') ? reqMonth : curMonth;
+  const monthStart = month + '-01';
+  const daysInMonth = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 0)).getUTCDate();
+  const monthEnd = month + '-' + String(daysInMonth).padStart(2, '0');
+  // elapsed days: full month if it's already past, day-of-month if current, 0 if future.
+  const elapsed = month < curMonth ? daysInMonth : (month === curMonth ? +today.slice(8, 10) : 0);
+  const budget = jsonState('budget_monthly', {});
+  const actualsAll = jsonState('expense_actuals', {});
+  const actuals = actualsAll[month] || {};
+  const cats = expenseCats();
+  const ppdLines = jsonState('ppd_lines', {});
+  const groups = jsonState('pl_groups', {});
+  const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n;
+  const payBudget = payrollBudget();
+  // Payroll is "itemized" once the real P&L payroll accounts exist as lines — then
+  // we don't add a separate computed Payroll row (it would double-count).
+  const payrollItemized = cats.some((c) => /salaries\s*&?\s*wages|payroll taxes/i.test(c));
+  const rows = [];
+  if (!payrollItemized) {
+    const payroll = payrollActual(monthStart, month === curMonth ? today : monthEnd);
+    const salariedActual = Math.round(payBudget.salariedMonthly * elapsed / daysInMonth);
+    const payrollActualTotal = Math.round((payroll.cost + salariedActual) * payBudget.burdenMult);
+    rows.push({ cat: 'Payroll', group: 'Payroll & Benefits', budget: payBudget.monthly, actual: payrollActualTotal, computed: true, budgetComputed: true,
+      variance: payBudget.monthly - payrollActualTotal, note: `${payroll.shiftsCovered} shifts + salaried, +${payBudget.burden.tax + payBudget.burden.benefits}% taxes & benefits` });
+  }
+  // When payroll is itemized, the staffing-model budget flows into the real P&L
+  // payroll lines: wages ← model + salaried, taxes ← tax %, benefits ← benefits %.
+  const payMap = {
+    'salaries & wages': { val: payBudget.baseMonthly, note: 'staffing model + salaried' },
+    'payroll taxes': { val: payBudget.taxesMonthly, note: `${payBudget.burden.tax}% of wages` },
+    'employee benefits': { val: payBudget.benefitsMonthly, note: `${payBudget.burden.benefits}% of wages` },
+  };
+  for (const cat of cats) {
+    const a = actuals[cat] != null ? +actuals[cat] : null;
+    const ppd = +ppdLines[cat] || 0;
+    const group = groups[cat] || '';
+    const pm = payrollItemized ? payMap[cat.toLowerCase()] : null;
+    if (pm) {   // payroll line driven by the staffing model
+      rows.push({ cat, group, budget: pm.val, actual: a, computed: false, budgetComputed: true, type: 'payroll',
+        variance: (a == null ? null : pm.val - a), note: pm.note });
+    } else if (ppd > 0) {   // census-driven line: budget = $/patient/day × census × days
+      const b = Math.round(ppd * census * daysInMonth);
+      rows.push({ cat, group, budget: b, actual: a, computed: false, budgetComputed: true, type: 'ppd', ppd,
+        variance: (a == null ? null : b - a), note: `PPD $${ppd} × ${census} census × ${daysInMonth}d` });
+    } else {
+      rows.push({ cat, group, budget: +budget[cat] || 0, actual: a, computed: false, type: 'fixed',
+        variance: (a == null ? null : (+budget[cat] || 0) - a), note: '' });
+    }
+  }
+  const budgetTotal = rows.reduce((s, r) => s + r.budget, 0);
+  const actualTotal = rows.reduce((s, r) => s + (r.actual || 0), 0);
+  const staff = db.prepare(`SELECT id, name, job_role, hourly_rate FROM users WHERE active = 1 ORDER BY job_role, name`).all();
+  const months = [...new Set([...Object.keys(actualsAll), curMonth])].sort().reverse();
+  // Break-even census: costs are largely fixed, so the lever is the top line.
+  // cost base ÷ days = revenue/day needed; ÷ blended per-diem = patients needed.
+  const rates = locRates();
+  const activeLocs = db.prepare(`SELECT loc FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  let dailyRevenue = 0; for (const c of activeLocs) dailyRevenue += +rates[c.loc] || 0;
+  let avgPerDiem = census ? dailyRevenue / census : 0;
+  if (!avgPerDiem) { const rs = Object.values(rates).map(Number).filter((x) => x > 0); avgPerDiem = rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0; }
+  const costBase = actualTotal > 0 ? actualTotal : budgetTotal;
+  const costPerDay = Math.round(costBase / daysInMonth);
+  const breakevenCensus = avgPerDiem ? Math.ceil(costPerDay / avgPerDiem) : null;
+  const breakeven = { costBase: Math.round(costBase), costPerDay, dailyRevenue: Math.round(dailyRevenue), avgPerDiem: Math.round(avgPerDiem),
+    census, breakevenCensus, gap: breakevenCensus != null ? breakevenCensus - census : null, daysInMonth };
+  return { month, curMonth, months, asOf: today, rows, cats, payrollItemized, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
+    payroll: payrollActual(monthStart, month === curMonth ? today : monthEnd), payrollBudget: payBudget, census, breakeven, ppdLines, budget, actuals,
+    shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}), roles: JOB_ROLES, staff };
+}
+app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot(req.query.month)));
+// Unified save: categories, budgets (per category incl. Payroll), and this
+// month's manual actuals (Payroll actual is always computed, never stored).
+app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (Array.isArray(b.cats)) {
+    const seen = new Set(), clean = [];
+    for (const c of b.cats) { const n = String(c || '').trim(); if (n && n !== 'Payroll' && !seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); clean.push(n); } }
+    setState('expense_cats', JSON.stringify(clean));
+  }
+  const cats = expenseCats();
+  if (b.ppd && typeof b.ppd === 'object') {   // census-driven lines: { cat: $/patient/day }
+    const cur = {};
+    for (const cat of cats) { const n = Math.max(0, +b.ppd[cat] || 0); if (n) cur[cat] = n; }
+    setState('ppd_lines', JSON.stringify(cur));
+  }
+  if (b.budgets && typeof b.budgets === 'object') {
+    const bud = {};   // Payroll budget is computed from the staffing model — never stored here.
+    for (const key of cats) if (b.budgets[key] != null) bud[key] = Math.max(0, Math.round(+b.budgets[key] || 0));
+    const prev = jsonState('budget_monthly', {});
+    setState('budget_monthly', JSON.stringify({ ...prev, ...bud }));
+  }
+  const tgtMonth = /^\d{4}-\d{2}$/.test(b.month || '') ? b.month : appToday().slice(0, 7);
+  if (b.actuals && typeof b.actuals === 'object') {
+    const all = jsonState('expense_actuals', {});
+    const m = { ...(all[tgtMonth] || {}) };
+    for (const cat of cats) { const v = b.actuals[cat]; if (v === '' || v == null) delete m[cat]; else m[cat] = Math.max(0, Math.round(+v || 0)); }
+    all[tgtMonth] = m; setState('expense_actuals', JSON.stringify(all));
+  }
+  audit({ user: req.user, action: 'FINANCE_EXPENSES', ip: req.ip });
+  res.json(expenseSnapshot(tgtMonth));
+});
+// Labor burden — employer payroll taxes + benefits as % of wages.
+app.post('/api/finance/burden', requireAuth, requireAdmin, (req, res) => {
+  const tax = Math.max(0, Math.min(200, +req.body?.tax || 0));
+  const benefits = Math.max(0, Math.min(200, +req.body?.benefits || 0));
+  setState('payroll_burden', JSON.stringify({ tax, benefits }));
+  audit({ user: req.user, action: 'FINANCE_BURDEN', detail: `tax ${tax}% benefits ${benefits}%`, ip: req.ip });
+  res.json(expenseSnapshot());
+});
+// Salaried roles (not on the shift schedule) — replace the list.
+app.post('/api/finance/salaried', requireAuth, requireAdmin, (req, res) => {
+  const list = Array.isArray(req.body?.roles) ? req.body.roles : [];
+  const clean = list.map((r) => ({ title: String(r.title || '').trim(), monthly: Math.max(0, Math.round(+r.monthly || 0)) })).filter((r) => r.title);
+  setState('salaried_roles', JSON.stringify(clean));
+  audit({ user: req.user, action: 'FINANCE_SALARIED', ip: req.ip });
+  res.json(expenseSnapshot());
+});
+// Set the budgeted hourly rate on staffing-model lines → drives the payroll budget.
+app.post('/api/finance/staffing-rate', requireAuth, requireAdmin, (req, res) => {
+  const upd = db.prepare(`UPDATE staffing_standard SET rate = ? WHERE id = ?`);
+  for (const [id, v] of Object.entries(req.body?.rates || {})) { const n = v === '' || v == null ? null : Math.max(0, +v || 0); upd.run(n, +id); }
+  audit({ user: req.user, action: 'FINANCE_STAFFING_RATE', ip: req.ip });
+  res.json(expenseSnapshot());
+});
+app.post('/api/finance/shift-hours', requireAuth, requireAdmin, (req, res) => {
+  const cur = jsonState('shift_hours', {});
+  for (const p of ['Morning', 'Day', 'Evening', 'Night']) if (req.body?.[p] != null) cur[p] = Math.max(0, +req.body[p] || 0);
+  setState('shift_hours', JSON.stringify(cur));
+  res.json({ ok: true, shiftHours: cur });
+});
+app.post('/api/finance/role-rates', requireAuth, requireAdmin, (req, res) => {
+  const cur = {};
+  for (const [k, v] of Object.entries(req.body?.rates || {})) { const n = Math.max(0, +v || 0); if (n) cur[k] = n; }
+  setState('role_rates', JSON.stringify(cur));
+  res.json({ ok: true, roleRates: cur });
+});
+app.post('/api/finance/staff-rates', requireAuth, requireAdmin, (req, res) => {
+  const upd = db.prepare(`UPDATE users SET hourly_rate = ? WHERE id = ?`);
+  for (const [id, v] of Object.entries(req.body?.rates || {})) { const n = v === '' || v == null ? null : Math.max(0, +v || 0); upd.run(n, +id); }
+  res.json({ ok: true });
+});
+
 /* ---------------- Team: kudos + training ---------------- */
 app.get('/api/staff', requireAuth, (req, res) => {
   res.json({ staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all() });

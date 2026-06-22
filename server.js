@@ -6282,6 +6282,106 @@ app.post('/api/finance/recompute', requireAuth, requireAdmin, (req, res) => {
   res.json(revenueSnapshot());
 });
 
+/* ---------------- Expenses / Budget vs Actual (admin only) ----------------
+   Budget the big lines (rent, payroll) and compare to actuals. Payroll actual
+   is derived live from covered shifts: each scheduled (not called-off) shift ×
+   the hours for that shift type × the staffer's pay rate, with weekly overtime
+   over 40h paid at 1.5×. Rent actual is entered monthly until QuickBooks P&L is
+   wired in. */
+function jsonState(key, dflt) { try { return JSON.parse(getState(key) || '') || dflt; } catch (e) { return dflt; } }
+// Monday-anchored week key, so overtime is tallied per workweek.
+function weekStart(date) { const d = new Date(date + 'T12:00:00Z'); const dow = (d.getUTCDay() + 6) % 7; return addDays(date, -dow); }
+function payrollActual(startDate, endDate) {
+  const shiftHours = jsonState('shift_hours', { Morning: 8, Day: 8, Evening: 8, Night: 8 });
+  const roleRates = jsonState('role_rates', {});
+  const users = {}; db.prepare(`SELECT id, name, job_role, hourly_rate FROM users`).all().forEach((u) => { users[u.id] = u; });
+  const rows = db.prepare(`SELECT a.user_id, a.user_name, s.date, s.part, s.role
+      FROM schedule_assignments a JOIN schedule_slots s ON a.slot_id = s.id
+      WHERE a.status = 'scheduled' AND s.date >= ? AND s.date <= ?`).all(startDate, endDate);
+  const rateFor = (u, slotRole) => {
+    const usr = u.user_id ? users[u.user_id] : null;
+    if (usr && usr.hourly_rate != null && usr.hourly_rate !== '') return +usr.hourly_rate;
+    const jr = usr ? usr.job_role : null;
+    return +(roleRates[jr] ?? roleRates[slotRole] ?? 0) || 0;
+  };
+  // Aggregate hours per person per week (for OT), and track each person's rate + role.
+  const perWeek = {};            // key: uid|name + '@' + weekStart  → { hours, rate, role }
+  const byRole = {};             // role → { shifts, hours, cost }
+  let shiftsCovered = 0, totalHours = 0;
+  for (const r of rows) {
+    const h = +shiftHours[r.part] || 0;
+    const rate = rateFor(r, r.role);
+    const who = r.user_id ? 'u' + r.user_id : 'n:' + (r.user_name || '?');
+    const wk = who + '@' + weekStart(r.date);
+    const slot = (perWeek[wk] = perWeek[wk] || { hours: 0, rate, role: r.role });
+    slot.hours += h;
+    shiftsCovered++; totalHours += h;
+    const br = (byRole[r.role] = byRole[r.role] || { role: r.role, shifts: 0, hours: 0, cost: 0 });
+    br.shifts++; br.hours += h; br.cost += h * rate;   // base cost; OT premium added below at the week level
+  }
+  let cost = 0, otHours = 0, otCost = 0;
+  for (const k in perWeek) {
+    const { hours, rate } = perWeek[k];
+    const reg = Math.min(40, hours), ot = Math.max(0, hours - 40);
+    cost += reg * rate + ot * rate * 1.5;
+    otHours += ot; otCost += ot * rate * 0.5;   // the half-time premium portion
+  }
+  return { cost: Math.round(cost), hours: totalHours, otHours, otCost: Math.round(otCost), shiftsCovered,
+    byRole: Object.values(byRole).map((b) => ({ ...b, cost: Math.round(b.cost) })).sort((a, b) => b.cost - a.cost) };
+}
+function expenseSnapshot() {
+  const today = appToday();
+  const month = today.slice(0, 7);
+  const monthStart = month + '-01';
+  const budget = jsonState('budget_monthly', { rent: 0, payroll: 0 });
+  const rentActuals = jsonState('rent_actual', {});
+  const payroll = payrollActual(monthStart, today);
+  const rentActual = rentActuals[month] != null ? +rentActuals[month] : null;
+  const row = (cat, b, a, note) => ({ cat, budget: +b || 0, actual: a, variance: (a == null ? null : (+b || 0) - a), note });
+  const rows = [
+    row('Rent', budget.rent, rentActual, rentActual == null ? 'enter actual below (until P&L)' : ''),
+    row('Payroll', budget.payroll, payroll.cost, payroll.shiftsCovered + ' shifts covered'),
+  ];
+  const budgetTotal = rows.reduce((s, r) => s + r.budget, 0);
+  const actualTotal = rows.reduce((s, r) => s + (r.actual || 0), 0);
+  const staff = db.prepare(`SELECT id, name, job_role, hourly_rate FROM users WHERE active = 1 ORDER BY job_role, name`).all();
+  return { month, asOf: today, rows, budgetTotal, actualTotal, variance: budgetTotal - actualTotal,
+    payroll, budget, shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}),
+    roles: JOB_ROLES, staff, rentActual };
+}
+app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot()));
+app.post('/api/finance/budget', requireAuth, requireAdmin, (req, res) => {
+  const cur = jsonState('budget_monthly', { rent: 0, payroll: 0 });
+  for (const k of ['rent', 'payroll']) if (req.body?.[k] != null) cur[k] = Math.max(0, Math.round(+req.body[k] || 0));
+  setState('budget_monthly', JSON.stringify(cur));
+  audit({ user: req.user, action: 'FINANCE_BUDGET', detail: JSON.stringify(cur), ip: req.ip });
+  res.json({ ok: true, budget: cur });
+});
+app.post('/api/finance/shift-hours', requireAuth, requireAdmin, (req, res) => {
+  const cur = jsonState('shift_hours', {});
+  for (const p of ['Morning', 'Day', 'Evening', 'Night']) if (req.body?.[p] != null) cur[p] = Math.max(0, +req.body[p] || 0);
+  setState('shift_hours', JSON.stringify(cur));
+  res.json({ ok: true, shiftHours: cur });
+});
+app.post('/api/finance/role-rates', requireAuth, requireAdmin, (req, res) => {
+  const cur = {};
+  for (const [k, v] of Object.entries(req.body?.rates || {})) { const n = Math.max(0, +v || 0); if (n) cur[k] = n; }
+  setState('role_rates', JSON.stringify(cur));
+  res.json({ ok: true, roleRates: cur });
+});
+app.post('/api/finance/staff-rates', requireAuth, requireAdmin, (req, res) => {
+  const upd = db.prepare(`UPDATE users SET hourly_rate = ? WHERE id = ?`);
+  for (const [id, v] of Object.entries(req.body?.rates || {})) { const n = v === '' || v == null ? null : Math.max(0, +v || 0); upd.run(n, +id); }
+  res.json({ ok: true });
+});
+app.post('/api/finance/rent-actual', requireAuth, requireAdmin, (req, res) => {
+  const cur = jsonState('rent_actual', {});
+  const m = String(req.body?.month || appToday().slice(0, 7));
+  if (req.body?.amount === '' || req.body?.amount == null) delete cur[m]; else cur[m] = Math.max(0, Math.round(+req.body.amount || 0));
+  setState('rent_actual', JSON.stringify(cur));
+  res.json({ ok: true, rentActual: cur });
+});
+
 /* ---------------- Team: kudos + training ---------------- */
 app.get('/api/staff', requireAuth, (req, res) => {
   res.json({ staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all() });

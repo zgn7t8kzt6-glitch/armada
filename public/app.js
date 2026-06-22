@@ -2710,8 +2710,8 @@ async function loadExpenses(){
   const money=(id,cat,val,ph='')=>`<div style="display:inline-flex;align-items:center;gap:2px"><span class="hint">$</span><input data-${id}="${esc(cat)}" type="number" min="0" value="${val!=null?val:''}" placeholder="${ph}" style="width:100px;text-align:right"/></div>`;
   $('expBody').innerHTML=`<div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Budget vs actual — ${esc(d.month)}</h3><button class="btn btn-gold sans" onclick="saveExpenses()">Save</button></div>
     <table class="tbl" style="margin-top:8px"><thead><tr><th>Expense</th><th style="text-align:right">Budget / mo</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th></th></tr></thead>
-    <tbody>${d.rows.map(r=>`<tr><td>${esc(r.cat)}${r.computed?' <span class="hint">· auto from shifts</span>':''}</td>
-        <td style="text-align:right">${money('bud',r.cat,r.budget||'')}</td>
+    <tbody>${d.rows.map(r=>`<tr><td>${esc(r.cat)}${r.computed?' <span class="hint">· auto</span>':''}</td>
+        <td style="text-align:right">${r.budgetComputed?`<strong>${usd(r.budget)}</strong> <span class="hint">· model</span>`:money('bud',r.cat,r.budget||'')}</td>
         <td style="text-align:right">${r.computed?`<strong>${usd(r.actual)}</strong>`:money('act',r.cat,r.actual)}</td>
         <td style="text-align:right">${vcell(r.variance)}</td>
         <td style="text-align:right">${r.computed?'':`<button class="btn btn-ghost btn-sm sans no-print" onclick="removeExpenseLine('${esc(r.cat)}')" title="Remove line">×</button>`}</td></tr>`).join('')}</tbody>
@@ -2721,7 +2721,13 @@ async function loadExpenses(){
     <div class="card"><h3>Payroll by role — ${esc(d.month)}</h3>
     <table class="tbl"><thead><tr><th>Role</th><th style="text-align:right">Shifts</th><th style="text-align:right">Hours</th><th style="text-align:right">Cost</th></tr></thead>
     <tbody>${(d.payroll.byRole||[]).map(r=>`<tr><td>${esc(r.role)}</td><td style="text-align:right">${r.shifts}</td><td style="text-align:right">${r.hours.toLocaleString()}</td><td style="text-align:right;font-weight:600">${usd(r.cost)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No covered shifts this month.</td></tr>'}</tbody></table>
-    <p class="hint" style="margin-top:8px">Role cost shown at base rate; the overtime premium (${usd(d.payroll.otCost)}) is added into the totals above.</p></div>`;
+    <p class="hint" style="margin-top:8px">Role cost shown at base rate; the overtime premium (${usd(d.payroll.otCost)}) is added into the totals above.</p></div>
+    <div class="card"><div class="cmd-hero-row"><h3 style="margin:0">Payroll budget — from the staffing model</h3><button class="btn btn-gold sans" onclick="saveStaffingRates()">Save rates</button></div>
+      <p class="sub sans" style="margin-top:4px">Budget = needed headcount × shift hours × rate, every day × ${d.payrollBudget.daysInMonth} days = <strong>${usd(d.payrollBudget.monthly)}/mo</strong> (${usd(d.payrollBudget.perDay)}/day). Edit a line's rate to update the budget.</p>
+      ${(d.payrollBudget.missingRate||[]).length?`<div class="pc-note" style="border-left:3px solid var(--gold)">⚠ Set a rate for: ${d.payrollBudget.missingRate.map(esc).join(', ')}</div>`:''}
+      <table class="tbl"><thead><tr><th>Block</th><th>Role · shift</th><th style="text-align:right">Needed</th><th style="text-align:right">Hrs</th><th style="text-align:right">$/hr</th><th style="text-align:right">Cost/day</th></tr></thead>
+      <tbody>${(d.payrollBudget.lines||[]).map(l=>`<tr><td><span class="hint">${esc(l.block)}</span></td><td>${esc(l.role)} <span class="hint">· ${esc(l.shift)}</span></td><td style="text-align:right">${l.needed}</td><td style="text-align:right">${l.hours}</td><td style="text-align:right"><input data-sb="${l.id}" type="number" min="0" step="0.5" value="${l.rate||''}" placeholder="0" style="width:80px;text-align:right"/></td><td style="text-align:right;font-weight:600">${usd(l.perDay)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--line);font-weight:700"><td colspan="5">Per day</td><td style="text-align:right">${usd(d.payrollBudget.perDay)}</td></tr></tfoot></table></div>`;
   // Config — shift hours, role rates, staff rates
   const rr=d.roleRates||{}; const sh=d.shiftHours||{};
   $('expConfig').innerHTML=`
@@ -2764,6 +2770,10 @@ async function removeExpenseLine(cat){
   if(!confirm('Remove the "'+cat+'" line? Its budget and entered actuals are cleared.')) return;
   const g=gatherExpenses(); g.cats=g.cats.filter(c=>c!==cat); delete g.budgets[cat]; delete g.actuals[cat];
   try{ await api('/finance/expenses-save',{method:'POST',body:JSON.stringify(g)}); loadExpenses(); }catch(e){ alert(e.message); }
+}
+async function saveStaffingRates(){
+  const rates={}; document.querySelectorAll('#expBody input[data-sb]').forEach(i=>{ rates[i.dataset.sb]=i.value; });
+  try{ await api('/finance/staffing-rate',{method:'POST',body:JSON.stringify({rates})}); loadExpenses(); }catch(e){ alert(e.message); }
 }
 async function saveShiftHours(){
   const hours={}; document.querySelectorAll('#expConfig input[data-sh]').forEach(i=>{ if(i.value!=='') hours[i.dataset.sh]=+i.value; });

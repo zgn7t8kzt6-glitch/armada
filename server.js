@@ -5817,11 +5817,11 @@ app.post('/api/property/:cid/cash', requireAuth, (req, res) => {
   if (!(amt > 0)) return res.status(400).json({ error: 'Enter an amount.' });
   const w = checkWitness(req); if (w.error) return res.status(400).json({ error: w.error });
   const isOut = b.type === 'withdrawal';
-  if (isOut) {
-    if (amt > cashBalance(cid)) return res.status(400).json({ error: 'Amount exceeds the client’s balance.' });
-    if (!validSig(b.client_sig)) return res.status(400).json({ error: 'The client must sign on the screen to receive cash.' });
-  }
-  logPropertyEvent(cid, isOut ? 'cash_withdrawal' : 'cash_deposit', { amount: isOut ? -amt : amt, note: b.note || null, staff: req.user.name, witness: w.name, client_ack: b.client_ack ? String(b.client_ack).trim() : null, client_sig: isOut ? b.client_sig : null });
+  if (isOut && amt > cashBalance(cid)) return res.status(400).json({ error: 'Amount exceeds the client’s balance.' });
+  // Both directions require the client's signature — confirming the amount put in,
+  // or that they received it on the way out. (Witness is already required above.)
+  if (!validSig(b.client_sig)) return res.status(400).json({ error: isOut ? 'The client must sign on the screen to receive cash.' : 'The client must sign on the screen to confirm the amount put in.' });
+  logPropertyEvent(cid, isOut ? 'cash_withdrawal' : 'cash_deposit', { amount: isOut ? -amt : amt, note: b.note || null, staff: req.user.name, witness: w.name, client_ack: b.client_ack ? String(b.client_ack).trim() : null, client_sig: b.client_sig });
   audit({ user: req.user, action: isOut ? 'PROPERTY_CASH_OUT' : 'PROPERTY_CASH_IN', entity: 'client', entity_id: cid, detail: `$${amt} · witness ${w.name}`, ip: req.ip });
   // Flag big cash-outs to leadership (anti-skim). Threshold is admin-configurable.
   const flagAmt = +(getState('property_flag_amount') || 100);

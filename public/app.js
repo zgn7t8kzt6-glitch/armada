@@ -2399,13 +2399,14 @@ function addPropItem(cid){
 function propCash(cid,type){
   const out=type==='withdrawal';
   const save=hmodal(`<h3>${out?'Cash out — return to client':'Cash in — count into trust'}</h3>
-    <p class="sub sans">${out?'The client receives cash from their balance. Requires a witness sign-in and the client’s signature.':'Count the cash to the dollar with a witness present, then store it securely. No loose cash left unlogged.'}</p>
+    <p class="sub sans">${out?'The client receives cash from their balance. Requires a witness sign-in and the client’s signature.':'Count the cash to the dollar with a second staff witness present. The client signs to confirm the amount put in — no loose cash left unlogged.'}</p>
     <label>Amount ($)</label><input id="pp_amt" type="number" step="0.01" min="0"/>
     <label>Note (denominations, reason)</label><input id="pp_note" placeholder="${out?'what it’s for':'e.g. 2×$20, 1×$5'}"/>
-    ${sigFields({clientAck:out})}`);
-  if(out) initSigPad();
-  save.onclick=async()=>{ if(out){ const sig=clientSig(); if(!sig){ alert('Please have the client sign on the screen.'); return; } }
-    try{ await api('/property/'+cid+'/cash',{method:'POST',body:JSON.stringify({type,amount:$('pp_amt').value,note:$('pp_note').value,...witnessBody(),client_ack:out?$('pp_client').value:null,client_sig:out?clientSig():null})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+    ${sigFields({clientAck:true})}`);
+  initSigPad();
+  save.onclick=async()=>{ const sig=clientSig(); if(!sig){ alert(out?'Please have the client sign to confirm they received the cash.':'Please have the client sign to confirm the amount put in.'); return; }
+    if(!$('pp_witness').value){ alert('A second staff witness must sign in.'); return; }
+    try{ await api('/property/'+cid+'/cash',{method:'POST',body:JSON.stringify({type,amount:$('pp_amt').value,note:$('pp_note').value,...witnessBody(),client_ack:$('pp_client').value,client_sig:sig})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
 }
 function propAudit(cid){
   const save=hmodal(`<h3>Audit cash count</h3>

@@ -5715,10 +5715,10 @@ function checkWitness(req) {
   if (w.id === req.user.id) return { error: 'The witness must be a different staff member than you.' };
   return { name: w.name };
 }
-function logPropertyEvent(clientId, type, { amount = null, note = null, staff, witness = null, client_ack = null, client_sig = null }) {
+function logPropertyEvent(clientId, type, { amount = null, note = null, staff, witness = null, client_ack = null, client_sig = null, photo = null }) {
   const bal = cashBalance(clientId);
-  db.prepare(`INSERT INTO property_events (client_id, type, amount, balance_after, note, staff, witness, client_ack, client_sig) VALUES (?,?,?,?,?,?,?,?,?)`)
-    .run(clientId, type, amount, bal, note, staff, witness, client_ack, client_sig);
+  db.prepare(`INSERT INTO property_events (client_id, type, amount, balance_after, note, staff, witness, client_ack, client_sig, photo) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(clientId, type, amount, bal, note, staff, witness, client_ack, client_sig, photo);
 }
 function validSig(s) { return typeof s === 'string' && /^data:image\/(png|jpeg);base64,/.test(s) && s.length < 600000; }
 function serveSig(res, dataurl) {
@@ -5748,6 +5748,7 @@ app.post('/api/property/settings', requireAuth, (req, res) => {
 // Serve drawn client signatures as image bytes.
 app.get('/api/property/:cid/intake-sig', requireAuth, (req, res) => { const r = db.prepare(`SELECT intake_client_sig FROM property_meta WHERE client_id = ?`).get(req.params.cid); serveSig(res, r && r.intake_client_sig); });
 app.get('/api/property/event/:id/sig', requireAuth, (req, res) => { const r = db.prepare(`SELECT client_sig FROM property_events WHERE id = ?`).get(req.params.id); serveSig(res, r && r.client_sig); });
+app.get('/api/property/event/:id/photo', requireAuth, (req, res) => { const r = db.prepare(`SELECT photo FROM property_events WHERE id = ?`).get(req.params.id); serveSig(res, r && r.photo); });
 // Quick belongings status for a client (used by the discharge guard).
 app.get('/api/clients/:id/property-status', requireAuth, (req, res) => {
   const cid = +req.params.id;
@@ -5763,7 +5764,7 @@ app.get('/api/property/:cid', requireAuth, (req, res) => {
     client: { id: c.id, name: c.pref || c.name, room: c.room || '', discharged: !!c.discharge_status },
     meta: (() => { const mm = db.prepare(`SELECT * FROM property_meta WHERE client_id = ?`).get(cid); if (!mm) return null; const { intake_client_sig, ...rest } = mm; return { ...rest, search: jparse(mm.search, null), hasIntakeSig: !!intake_client_sig }; })(),
     items: db.prepare(`SELECT * FROM property_items WHERE client_id = ? ORDER BY status, id`).all(cid).map(({ photo, ...r }) => ({ ...r, hasPhoto: !!photo })),
-    events: db.prepare(`SELECT * FROM property_events WHERE client_id = ? ORDER BY id DESC LIMIT 100`).all(cid).map(({ client_sig, ...e }) => ({ ...e, hasSig: !!client_sig })),
+    events: db.prepare(`SELECT * FROM property_events WHERE client_id = ? ORDER BY id DESC LIMIT 100`).all(cid).map(({ client_sig, photo, ...e }) => ({ ...e, hasSig: !!client_sig, hasPhoto: !!photo })),
     balance: cashBalance(cid), categories: PROPERTY_CATEGORIES,
     lists: { prohibited: PROHIBITED_ITEMS, disposed: DISPOSED_ITEMS, meds: MEDS_HANDLING },
     staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all(),
@@ -5821,7 +5822,10 @@ app.post('/api/property/:cid/cash', requireAuth, (req, res) => {
   // Both directions require the client's signature — confirming the amount put in,
   // or that they received it on the way out. (Witness is already required above.)
   if (!validSig(b.client_sig)) return res.status(400).json({ error: isOut ? 'The client must sign on the screen to receive cash.' : 'The client must sign on the screen to confirm the amount put in.' });
-  logPropertyEvent(cid, isOut ? 'cash_withdrawal' : 'cash_deposit', { amount: isOut ? -amt : amt, note: b.note || null, staff: req.user.name, witness: w.name, client_ack: b.client_ack ? String(b.client_ack).trim() : null, client_sig: b.client_sig });
+  const ack = b.client_ack ? String(b.client_ack).trim() : '';
+  if (!ack) return res.status(400).json({ error: 'Print the client’s name with the signature.' });
+  let photo = null; if (b.photo) { try { photo = validPhoto(b.photo); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  logPropertyEvent(cid, isOut ? 'cash_withdrawal' : 'cash_deposit', { amount: isOut ? -amt : amt, note: b.note || null, staff: req.user.name, witness: w.name, client_ack: ack, client_sig: b.client_sig, photo });
   audit({ user: req.user, action: isOut ? 'PROPERTY_CASH_OUT' : 'PROPERTY_CASH_IN', entity: 'client', entity_id: cid, detail: `$${amt} · witness ${w.name}`, ip: req.ip });
   // Flag big cash-outs to leadership (anti-skim). Threshold is admin-configurable.
   const flagAmt = +(getState('property_flag_amount') || 100);

@@ -2254,7 +2254,7 @@ async function openProperty(cid){
   const itemRow=i=>`<div class="cmd-row">${i.hasPhoto?`<img src="/api/property/item/${i.id}/photo" onclick="window.open('/api/property/item/${i.id}/photo','_blank')" style="width:46px;height:46px;border-radius:8px;object-fit:cover;border:1px solid var(--line);cursor:pointer;flex:none" alt="photo"/>`:''}<div class="cmd-row-main">${i.status==='returned'?'↩︎ ':'📦 '}<b>${esc(i.category||'Item')}</b> — ${esc(i.description)}${i.qty&&i.qty!==1?' ×'+i.qty:''}${i.est_value!=null?' <span class="hint">· est '+money(i.est_value)+'</span>':''}${i.condition?' <span class="hint">· '+esc(i.condition)+'</span>':''}${i.status==='returned'?' <span class="hint">· returned '+esc(String(i.returned_at||'').slice(0,10))+'</span>':''}</div>${i.status==='stored'?`<button class="btn btn-ghost btn-sm sans" onclick="returnPropItem(${i.id},${cid})">Return</button>`:''}</div>`;
   const evIcon={intake_count:'📝',cash_deposit:'➕',cash_withdrawal:'➖',return:'↩︎',return_all:'✅',audit:'🔍',discrepancy:'⚠️',access:'🔓'};
   const evRow=e=>`<div class="cmd-row ${e.type==='discrepancy'?'cmd-row-flag':''}"><div class="cmd-row-main">${evIcon[e.type]||'•'} ${esc((e.type||'').replace(/_/g,' '))}${e.amount!=null?` <b>${e.amount<0?'−':''}${money(Math.abs(e.amount))}</b>`:''}${e.balance_after!=null&&/cash|return/.test(e.type)?` <span class="hint">→ bal ${money(e.balance_after)}</span>`:''}
-    <div class="hint">${esc(String(e.created_at||'').slice(0,16).replace('T',' '))} · by ${esc(e.staff||'')}${e.witness?' · witness '+esc(e.witness):''}${e.client_ack&&e.client_ack!=='signed'?' · client '+esc(e.client_ack):''}${e.hasSig?` · <a onclick="window.open('/api/property/event/${e.id}/sig','_blank')" style="cursor:pointer;color:var(--gold);font-weight:600">✍ signature</a>`:''}${e.note?'<br>'+esc(e.note):''}</div></div></div>`;
+    <div class="hint">${esc(String(e.created_at||'').slice(0,16).replace('T',' '))} · by ${esc(e.staff||'')}${e.witness?' · witness '+esc(e.witness):''}${e.client_ack&&e.client_ack!=='signed'?' · client '+esc(e.client_ack):''}${e.hasSig?` · <a onclick="window.open('/api/property/event/${e.id}/sig','_blank')" style="cursor:pointer;color:var(--gold);font-weight:600">✍ signature</a>`:''}${e.hasPhoto?` · <a onclick="window.open('/api/property/event/${e.id}/photo','_blank')" style="cursor:pointer;color:var(--gold);font-weight:600">📷 cash photo</a>`:''}${e.note?'<br>'+esc(e.note):''}</div></div></div>`;
   const s=m&&m.search;
   const searchBlock = s ? `<div style="margin-top:8px;border-top:1px dashed var(--line);padding-top:8px">
       <div class="kv"><span class="k">Search</span><span class="v">${s.consent?'consent ✓':'consent ?'} · ${s.none_found?'none found':((s.found||[]).length+' item(s) found')}</span></div>
@@ -2291,7 +2291,7 @@ function sigFields(opts={}){
     <div class="grid2"><div><select id="pp_witness"><option value="">— select staff —</option>${staff}</select></div>
     <div><input id="pp_witnesspw" type="password" placeholder="Their password" autocomplete="off"/></div></div>
     <p class="hint">The witness selects their name and enters their own password — a real second signature.</p>
-    ${opts.clientAck?`<label>Client — print name (optional)</label><input id="pp_client" placeholder="Client full name"/>
+    ${opts.clientAck?`<label>Client — print name</label><input id="pp_client" placeholder="Client full name"/>
       <label>Client signature ✍️ — have the client sign below</label>
       <div style="border:1px solid var(--line);border-radius:10px;background:#fff"><canvas id="pp_sigpad" style="width:100%;height:150px;display:block;touch-action:none;border-radius:10px"></canvas></div>
       <div class="toolbar" style="margin:5px 0 0;justify-content:space-between;align-items:center"><span class="hint">Hand the device to the client to sign with their finger.</span><button type="button" class="btn btn-ghost btn-sm sans" onclick="window._sigpad&&window._sigpad.clear()">Clear</button></div>`:''}`;
@@ -2402,11 +2402,14 @@ function propCash(cid,type){
     <p class="sub sans">${out?'The client receives cash from their balance. Requires a witness sign-in and the client’s signature.':'Count the cash to the dollar with a second staff witness present. The client signs to confirm the amount put in — no loose cash left unlogged.'}</p>
     <label>Amount ($)</label><input id="pp_amt" type="number" step="0.01" min="0"/>
     <label>Note (denominations, reason)</label><input id="pp_note" placeholder="${out?'what it’s for':'e.g. 2×$20, 1×$5'}"/>
+    <label>📷 Photo of the counted cash ${out?'(recommended)':'(recommended — snap the bills laid out)'}</label><input id="pp_cashphoto" type="file" accept="image/*" capture="environment"/>
     ${sigFields({clientAck:true})}`);
   initSigPad();
   save.onclick=async()=>{ const sig=clientSig(); if(!sig){ alert(out?'Please have the client sign to confirm they received the cash.':'Please have the client sign to confirm the amount put in.'); return; }
+    if(!($('pp_client').value||'').trim()){ alert('Print the client’s name with the signature.'); return; }
     if(!$('pp_witness').value){ alert('A second staff witness must sign in.'); return; }
-    try{ await api('/property/'+cid+'/cash',{method:'POST',body:JSON.stringify({type,amount:$('pp_amt').value,note:$('pp_note').value,...witnessBody(),client_ack:$('pp_client').value,client_sig:sig})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+    let photo=null; const f=$('pp_cashphoto')&&$('pp_cashphoto').files[0]; if(f){ try{ photo=await resizeImage(f,900,0.6); }catch(e){} }
+    try{ await api('/property/'+cid+'/cash',{method:'POST',body:JSON.stringify({type,amount:$('pp_amt').value,note:$('pp_note').value,...witnessBody(),client_ack:$('pp_client').value,client_sig:sig,photo})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
 }
 function propAudit(cid){
   const save=hmodal(`<h3>Audit cash count</h3>

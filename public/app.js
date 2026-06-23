@@ -5013,6 +5013,7 @@ async function loadDashboard(){
   renderFacility(d.facility);
   renderCrew();
   renderShiftReport();
+  renderShiftChecklist();
   renderDashTasks();
   if(d.lean){ renderLeanDashboard(d); return; }
   if($('dashActions')) $('dashActions').style.display='';
@@ -5200,6 +5201,23 @@ async function loadAlertScore(){
       <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
     </div>`;
 }
+// Simple per-shift walk-around checklist — tap to confirm, resets each shift.
+async function renderShiftChecklist(){
+  const host=$('dashChecklist'); if(!host) return;
+  let d; try{ d=await api('/shift-checklist'); }catch(e){ host.innerHTML=''; return; }
+  const rows=(d.items||[]).map(i=>`<label style="display:flex;gap:11px;align-items:center;padding:11px 12px;border:1px solid var(--line);border-radius:11px;margin:7px 0;cursor:pointer;background:${i.done?'#f3f8f4':'#fff'}">
+      <input type="checkbox" ${i.done?'checked':''} onchange="toggleShiftTask(${i.id},this.checked)" style="width:21px;height:21px;flex:none;accent-color:var(--gold)"/>
+      <span style="font-size:15px;${i.done?'color:#2d7a4f':''}">${esc(i.label)}${i.done&&i.by?` <span class="hint">✓ ${esc(i.by)}</span>`:''}</span>
+      ${d.canEdit?`<button class="btn btn-ghost btn-sm sans no-print" style="margin-left:auto" onclick="event.preventDefault();delShiftTask(${i.id})" title="Remove">✕</button>`:''}</label>`).join('');
+  host.innerHTML=`<div class="card">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">✅ Shift checklist <span class="hint" style="font-weight:400">— ${d.done}/${d.total} done this ${esc((d.shift||'').toLowerCase())} shift</span></h3></div>
+      ${d.canEdit?`<button class="btn btn-ghost btn-sm sans" onclick="addShiftTask()">+ Add</button>`:''}</div>
+    <div class="res-track" style="height:6px;margin:8px 0 4px"><div class="res-fill" style="width:${d.pct}%"></div></div>
+    ${rows||'<div class="pc-note">No checklist items.</div>'}</div>`;
+}
+async function toggleShiftTask(id,done){ try{ await api('/shift-checklist/'+id,{method:'POST',body:JSON.stringify({done})}); renderShiftChecklist(); }catch(e){ alert(e.message); renderShiftChecklist(); } }
+async function addShiftTask(){ const label=prompt('Add a shift-checklist item:'); if(!label||!label.trim())return; try{ await api('/shift-checklist/template/edit',{method:'POST',body:JSON.stringify({add:label.trim()})}); renderShiftChecklist(); }catch(e){ alert(e.message); } }
+async function delShiftTask(id){ if(!confirm('Remove this checklist item?'))return; try{ await api('/shift-checklist/template/edit',{method:'POST',body:JSON.stringify({remove:id})}); renderShiftChecklist(); }catch(e){ alert(e.message); } }
 // Who's on shift + the lead in charge — with a one-tap Call button for emergencies.
 async function renderCrew(){
   const host=$('dashCrew'); if(!host) return;

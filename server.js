@@ -1050,6 +1050,29 @@ app.post('/api/meals/snack', requireAuth, (req, res) => {
 // Caterer scorecard — last 30 days of meal checks (held the standard?).
 app.get('/api/meals/scorecard', requireAuth, (req, res) => res.json(mealScorecard()));
 
+/* ---------------- Shift checklist (recurring walk-around duties) ---------------- */
+app.get('/api/shift-checklist', requireAuth, (req, res) => {
+  const today = appToday(), sh = currentShift();
+  const tasks = db.prepare(`SELECT id, label FROM shift_tasks WHERE active = 1 ORDER BY sort, id`).all();
+  const done = {}; db.prepare(`SELECT task_id, by_name FROM shift_task_done WHERE shift_date = ? AND shift = ?`).all(today, sh).forEach((r) => { done[r.task_id] = r.by_name || ''; });
+  const items = tasks.map((t) => ({ id: t.id, label: t.label, done: t.id in done, by: done[t.id] || '' }));
+  const d = items.filter((i) => i.done).length;
+  res.json({ shift: sh, items, done: d, total: items.length, pct: items.length ? Math.round(d / items.length * 100) : 100, canEdit: req.user.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(req.user.job_role || '') });
+});
+app.post('/api/shift-checklist/:id', requireAuth, (req, res) => {
+  const today = appToday(), sh = currentShift(), id = +req.params.id;
+  if (req.body && req.body.done === false) db.prepare(`DELETE FROM shift_task_done WHERE task_id = ? AND shift_date = ? AND shift = ?`).run(id, today, sh);
+  else db.prepare(`INSERT OR IGNORE INTO shift_task_done (task_id, shift_date, shift, by_id, by_name) VALUES (?,?,?,?,?)`).run(id, today, sh, req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/shift-checklist/template/edit', requireAuth, (req, res) => {
+  if (!(req.user.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(req.user.job_role || ''))) return res.status(403).json({ error: 'Leadership only.' });
+  const b = req.body || {};
+  if (b.add) { const label = (b.add || '').trim(); if (!label) return res.status(400).json({ error: 'Label required' }); const sort = (db.prepare(`SELECT COALESCE(MAX(sort),0) m FROM shift_tasks`).get().m) + 1; db.prepare(`INSERT INTO shift_tasks (label, sort) VALUES (?, ?)`).run(label.slice(0, 120), sort); }
+  else if (b.remove) db.prepare(`UPDATE shift_tasks SET active = 0 WHERE id = ?`).run(+b.remove);
+  res.json({ ok: true });
+});
+
 /* ---------------- Shift report (the pass-down) ---------------- */
 function shiftReportCtx() {
   const today = appToday(), sh = currentShift();

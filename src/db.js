@@ -1417,6 +1417,30 @@ db.exec(`CREATE TABLE IF NOT EXISTS shift_reports (
   UNIQUE(shift_date, shift)
 );`);
 addColumn('shift_reports', 'data', 'TEXT');   // structured pass-down answers (JSON)
+// SHIFT CHECKLIST — the simple recurring walk-around duties staff confirm each
+// shift (snacks filled, common areas tidy, eyes on every client…). Resets every
+// shift; completion is keyed to (shift_date, shift) so a new shift starts fresh.
+db.exec(`CREATE TABLE IF NOT EXISTS shift_tasks (
+  id INTEGER PRIMARY KEY, label TEXT NOT NULL, sort INTEGER DEFAULT 0, active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS shift_task_done (
+  id INTEGER PRIMARY KEY, task_id INTEGER REFERENCES shift_tasks(id) ON DELETE CASCADE,
+  shift_date TEXT NOT NULL, shift TEXT NOT NULL, by_id INTEGER, by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(task_id, shift_date, shift)
+);`);
+if (!db.prepare(`SELECT COUNT(*) n FROM shift_tasks`).get().n) {
+  const ins = db.prepare(`INSERT INTO shift_tasks (label, sort) VALUES (?, ?)`);
+  [
+    'Eyes on every client — all accounted for',
+    'Snacks, coffee & juice stocked',
+    'Common areas tidy — no clutter or trash',
+    'Bathrooms clean & stocked (paper, towels)',
+    'Laundry moving — washed / dried / folded',
+    'Fresh linens & towels available',
+    'Day room reset after groups',
+    'Smoke area clean & supplies ready',
+  ].forEach((l, i) => ins.run(l, i));
+}
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');

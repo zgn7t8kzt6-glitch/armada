@@ -554,6 +554,15 @@ async function openChartNote(b){
   catch(e){ b.textContent='Could not load this note — '+(e.message||'error'); }
 }
 function filterChartIn(listId){ const inp = listId==='jChartList'?$('jChartFilter'):$('kipuChartFilter'); const q=(inp?inp.value:'').toLowerCase(); ($(listId)||document).querySelectorAll('details').forEach(dt=>{ const el=dt.querySelector('.chart-name'); const nm=(el?el.textContent:'').toLowerCase(); dt.style.display=(!q||nm.includes(q))?'':'none'; }); }
+// Discharge guard: warn if the client's belongings/cash haven't been returned.
+async function belongingsGuard(cid){
+  try{ const s=await api('/clients/'+cid+'/property-status');
+    if(s.hasRecord && !s.returned && ((s.balance||0)>0 || (s.storedItems||0)>0)){
+      return confirm(`⚠ Belongings NOT returned for this client:\n• $${(s.balance||0).toFixed(2)} in trust\n• ${s.storedItems} item(s) still stored\n\nReturn them in Belongings first (Stay → Belongings).\n\nDischarge anyway?`);
+    }
+  }catch(e){}
+  return true;
+}
 async function dischargeClient(){
   if(!currentId) return;
   const status=$('d_status').value;
@@ -563,6 +572,7 @@ async function dischargeClient(){
   if(dest==='Approved partner' && !fid){ alert('Pick which approved partner.'); return; }
   if(!confirm(`Discharge this client as "${status}"? Next step: ${dest}${fid?' (partner)':''}. This starts the aftercare calls and removes them from the active playbook.`)) return;
   const cid = currentId;
+  if(!(await belongingsGuard(cid))) return;
   const steps = [...document.querySelectorAll('#safeDeparture .sd:checked')].map(c=>c.dataset.s);
   try{ await api('/clients/'+currentId+'/continuum',{method:'POST',body:JSON.stringify({aftercare_dest:dest, aftercare_facility_id:fid})}); }catch(e){}
   await api('/clients/'+currentId+'/discharge',{method:'POST',body:JSON.stringify({status,date:$('d_date').value,steps,reason:$('d_reason').value,followthrough:$('d_follow').value,improve:$('d_improve').value})});
@@ -604,8 +614,9 @@ async function dischargeStandalone(){
   const fid = dest==='Approved partner' ? ($('dp_partner')&&$('dp_partner').value||null) : null;
   if(dest==='Approved partner' && !fid){ $('dp_msg').textContent='Pick which approved partner.'; return; }
   if(!confirm(`Discharge as "${status}"? Next step: ${dest}${fid?' (partner)':''}. This starts the aftercare calls.`)) return;
-  const steps=[...document.querySelectorAll('#dpSafe .sd:checked')].map(c=>c.dataset.s);
   const cid=DP_ID;
+  if(!(await belongingsGuard(cid))) return;
+  const steps=[...document.querySelectorAll('#dpSafe .sd:checked')].map(c=>c.dataset.s);
   $('dp_msg').textContent='Saving…';
   try{
     try{ await api('/clients/'+cid+'/continuum',{method:'POST',body:JSON.stringify({aftercare_dest:dest, aftercare_facility_id:fid})}); }catch(e){}
@@ -2143,11 +2154,12 @@ async function delArrivalItem(id){ if(!confirm('Remove this arrival item?'))retu
 let PROP_CATS=['Cash','Phone / electronics','Wallet / ID / cards','Jewelry / watch','Keys','Clothing','Medication (to pharmacy/secure)','Documents','Other'];
 async function loadProperty(){
   let d; try{ d=await api('/property'); }catch(e){ $('propBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
-  PROP_CATS=d.categories||PROP_CATS; window.PROP_STAFF=d.staff||[];
-  $('propKpis').innerHTML=`<div class="ret-cards" style="margin:0 0 14px">
+  PROP_CATS=d.categories||PROP_CATS; window.PROP_STAFF=d.staff||[]; window.PROP_FLAG=d.flagAmount; window.PROP_CANMANAGE=d.canManage;
+  $('propKpis').innerHTML=`<div class="ret-cards" style="margin:0 0 8px">
     <div class="ret-card"><div class="n">${d.clients.filter(c=>c.hasIntake).length}</div><div class="l">Belongings on file</div></div>
     <div class="ret-card"><div class="n">${money(d.totalCash)}</div><div class="l">Cash held in trust</div></div>
-    <div class="ret-card ${d.flagged?'rc-high':''}"><div class="n">${d.flagged}</div><div class="l">Open discrepancies</div></div></div>`;
+    <div class="ret-card ${d.flagged?'rc-high':''}"><div class="n">${d.flagged}</div><div class="l">Open discrepancies</div></div></div>
+    <div class="hint" style="margin:0 0 14px">🚩 Cash-outs of <b>${money(d.flagAmount)}</b> or more alert leadership automatically.${d.canManage?` <a onclick="setPropFlag()" style="cursor:pointer;color:var(--navy);font-weight:600">Change</a>`:''}</div>`;
   const rows=d.clients.map(c=>`<tr style="cursor:pointer" onclick="openProperty(${c.id})">
     <td><b>${esc(c.name)}</b>${c.room?' · '+esc(c.room):''}</td>
     <td>${c.hasIntake?(c.status==='returned'?'<span class="risk risk-low">returned</span>':'<span class="risk risk-warn">stored</span>'):'<span class="risk risk-high">no count yet</span>'}</td>
@@ -2249,6 +2261,7 @@ function propReturnAll(cid){
   save.onclick=async()=>{ try{ await api('/property/'+cid+'/return-all',{method:'POST',body:JSON.stringify({...witnessBody(),client_ack:$('pp_client').value,note:$('pp_note').value,method:$('pp_method').value,reference:$('pp_ref').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
 }
 async function returnPropItem(id,cid){ if(!confirm('Mark this item returned to the client?'))return; try{ await api('/property/item/'+id+'/return',{method:'POST',body:'{}'}); openProperty(cid); }catch(e){ alert(e.message); } }
+function setPropFlag(){ const cur=window.PROP_FLAG||100; const v=prompt('Alert leadership when a single cash-out is at or above this amount ($):', cur); if(v===null) return; const amt=Math.max(0,+v||0); api('/property/settings',{method:'POST',body:JSON.stringify({flag_amount:amt})}).then(()=>loadProperty()).catch(e=>alert(e.message)); }
 
 async function loadArrivals(){
   try{

@@ -1759,6 +1759,8 @@ function rolesForAlert(kind, message = '') {
   if (k === 'new_admit' || k === 'new_admit_arrived') return wrap(['BHT / Tech', 'Nurse', 'Case Manager', CLIN]);
   // Belongings / valuables discrepancy — money or property doesn't reconcile. Leadership + the care team.
   if (k === 'property') return wrap(['BHT / Tech', 'Nurse', 'Case Manager', CLIN, OPS]);
+  // Large cash-out or discharge-with-belongings — leadership oversight (anti-skim).
+  if (k === 'property_cashout' || k === 'property_unreturned') return wrap([CLIN, OPS]);
   if (k === 'risk' || k === 'concern' || k === 'rounds' || k === 'note') return wrap(['BHT / Tech', 'Nurse', CLIN]);
   if (k === 'carecard') return wrap(['BHT / Tech', CLIN]);
   if (k === 'dignity') return wrap(['BHT / Tech', CLIN]);
@@ -3185,6 +3187,18 @@ app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
   // linger in any count that filters on active alone (keeps census consistent).
   db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, departure_steps = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
     .run(status, d, b.destination || null, steps, b.reason || null, b.followthrough || null, b.improve || null, req.params.id);
+  // Safety net: discharged with belongings/cash still on the books → flag leadership.
+  try {
+    const cid = +req.params.id;
+    const pmeta = db.prepare(`SELECT status FROM property_meta WHERE client_id = ?`).get(cid);
+    const pbal = cashBalance(cid);
+    const pitems = db.prepare(`SELECT COUNT(*) n FROM property_items WHERE client_id = ? AND status = 'stored'`).get(cid).n;
+    if (pmeta && pmeta.status !== 'returned' && (pbal > 0 || pitems > 0)) {
+      const pc = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(cid);
+      db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles) VALUES (?,?,?,?,?)`)
+        .run(cid, 'property_unreturned', 'High', `${(pc?.pref || pc?.name || 'A client')} was discharged with belongings not returned — $${pbal.toFixed(2)} in trust and ${pitems} item(s) still stored. Return them now.`, rolesForAlert('property_unreturned'));
+    }
+  } catch (e) { /* never block discharge on this */ }
   if (status !== 'Transferred') {
     // Aftercare calls are REQUIRED tasks, auto-assigned to the Aftercare Coordinator.
     const coordId = getState('aftercare_coordinator');
@@ -5334,7 +5348,21 @@ app.get('/api/property', requireAuth, (req, res) => {
     return { id: c.id, name: c.pref || c.name, room: c.room || '', hasIntake: !!meta, status: meta?.status || 'none', items, cash: cashBalance(c.id), flagged: !!lastDisc };
   });
   const staff = db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all();
-  res.json({ clients: rows, categories: PROPERTY_CATEGORIES, staff, totalCash: rows.reduce((a, r) => a + r.cash, 0), flagged: rows.filter((r) => r.flagged).length });
+  res.json({ clients: rows, categories: PROPERTY_CATEGORIES, staff, totalCash: rows.reduce((a, r) => a + r.cash, 0), flagged: rows.filter((r) => r.flagged).length, flagAmount: +(getState('property_flag_amount') || 100), canManage: isLeadership(req) });
+});
+// Admin/leadership: set the cash-out amount that flags leadership.
+app.post('/api/property/settings', requireAuth, (req, res) => {
+  if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const amt = Math.max(0, +req.body?.flag_amount || 0);
+  setState('property_flag_amount', String(amt));
+  res.json({ ok: true, flagAmount: amt });
+});
+// Quick belongings status for a client (used by the discharge guard).
+app.get('/api/clients/:id/property-status', requireAuth, (req, res) => {
+  const cid = +req.params.id;
+  const meta = db.prepare(`SELECT status FROM property_meta WHERE client_id = ?`).get(cid) || null;
+  const storedItems = db.prepare(`SELECT COUNT(*) n FROM property_items WHERE client_id = ? AND status = 'stored'`).get(cid).n;
+  res.json({ hasRecord: !!meta, returned: meta?.status === 'returned', balance: cashBalance(cid), storedItems });
 });
 app.get('/api/property/:cid', requireAuth, (req, res) => {
   const cid = +req.params.cid;
@@ -5401,6 +5429,13 @@ app.post('/api/property/:cid/cash', requireAuth, (req, res) => {
   }
   logPropertyEvent(cid, isOut ? 'cash_withdrawal' : 'cash_deposit', { amount: isOut ? -amt : amt, note: b.note || null, staff: req.user.name, witness: w.name, client_ack: b.client_ack ? String(b.client_ack).trim() : null });
   audit({ user: req.user, action: isOut ? 'PROPERTY_CASH_OUT' : 'PROPERTY_CASH_IN', entity: 'client', entity_id: cid, detail: `$${amt} · witness ${w.name}`, ip: req.ip });
+  // Flag big cash-outs to leadership (anti-skim). Threshold is admin-configurable.
+  const flagAmt = +(getState('property_flag_amount') || 100);
+  if (isOut && flagAmt > 0 && amt >= flagAmt) {
+    const c = db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(cid);
+    db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles) VALUES (?,?,?,?,?)`)
+      .run(cid, 'property_cashout', 'High', `Large cash-out: $${amt.toFixed(2)} to ${(c?.pref || c?.name || 'a client')}${c?.room ? ' (room ' + c.room + ')' : ''} by ${req.user.name}, witnessed by ${w.name}. Verify it's legitimate.`, rolesForAlert('property_cashout'));
+  }
   res.json({ ok: true, balance: cashBalance(cid) });
 });
 // Surprise/periodic audit: count vs. the ledger; a mismatch flags leadership.

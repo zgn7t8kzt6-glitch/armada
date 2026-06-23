@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260623F" />
+<link rel="stylesheet" href="/styles.css?v=20260623G" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -76,6 +76,7 @@
     <button data-view="roundscan">Scan Rounds</button>
     <button data-view="bedboard">Bed Turnover</button>
     <button data-view="bedmap">Bed Board</button>
+    <button data-view="property">Belongings</button>
     <button data-view="engagement">Engagement</button>
     <button data-view="program">Program</button>
     <button data-view="meals">Meals</button>
@@ -1827,6 +1828,12 @@
       <div class="card"><h3>Cleaned — open <span class="hint" style="font-weight:400">(last 24h)</span></h3><div id="tovClean"></div></div>
     </section>
 
+    <!-- BELONGINGS & VALUABLES (chain of custody) -->
+    <section id="property" class="view">
+      <div id="propKpis"></div>
+      <div id="propBody"></div>
+    </section>
+
     <!-- BED BOARD (occupancy) -->
     <section id="bedmap" class="view">
       <div class="card">
@@ -2486,7 +2493,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260623F"></script>
-<script src="/housing.js?v=20260623F"></script>
+<script src="/app.js?v=20260623G"></script>
+<script src="/housing.js?v=20260623G"></script>
 </body>
 </html>

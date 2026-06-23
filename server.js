@@ -1757,6 +1757,8 @@ function rolesForAlert(kind, message = '') {
   // whoever owns it. None of these are operational — the DO does not see them.
   // New admit arrived / intake complete — the care team that picks them up.
   if (k === 'new_admit' || k === 'new_admit_arrived') return wrap(['BHT / Tech', 'Nurse', 'Case Manager', CLIN]);
+  // Belongings / valuables discrepancy — money or property doesn't reconcile. Leadership + the care team.
+  if (k === 'property') return wrap(['BHT / Tech', 'Nurse', 'Case Manager', CLIN, OPS]);
   if (k === 'risk' || k === 'concern' || k === 'rounds' || k === 'note') return wrap(['BHT / Tech', 'Nurse', CLIN]);
   if (k === 'carecard') return wrap(['BHT / Tech', CLIN]);
   if (k === 'dignity') return wrap(['BHT / Tech', CLIN]);
@@ -5301,6 +5303,113 @@ app.post('/api/arrival/template', requireAuth, requireAdmin, (req, res) => {
     const sort = (db.prepare(`SELECT COALESCE(MAX(sort),0) m FROM arrival_items WHERE role = ?`).get(ARRIVAL_ROLES.includes(b.role) ? b.role : 'RT / BHT').m) + 1;
     db.prepare(`INSERT INTO arrival_items (role, label, sort) VALUES (?,?,?)`).run(ARRIVAL_ROLES.includes(b.role) ? b.role : 'RT / BHT', b.label.trim(), sort);
   }
+  res.json({ ok: true });
+});
+
+/* ───────── Client belongings & valuables — chain of custody (dual control) ───────── */
+const PROPERTY_CATEGORIES = ['Cash', 'Phone / electronics', 'Wallet / ID / cards', 'Jewelry / watch', 'Keys', 'Clothing', 'Medication (to pharmacy/secure)', 'Documents', 'Other'];
+function cashBalance(clientId) {
+  const r = db.prepare(`SELECT IFNULL(SUM(amount),0) b FROM property_events WHERE client_id = ? AND type IN ('cash_deposit','cash_withdrawal','return')`).get(clientId);
+  return Math.round((r.b || 0) * 100) / 100;
+}
+function logPropertyEvent(clientId, type, { amount = null, note = null, staff, witness = null, client_ack = null }) {
+  const bal = cashBalance(clientId);
+  db.prepare(`INSERT INTO property_events (client_id, type, amount, balance_after, note, staff, witness, client_ack) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(clientId, type, amount, bal, note, staff, witness, client_ack);
+}
+app.get('/api/property', requireAuth, (req, res) => {
+  const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const rows = clients.map((c) => {
+    const meta = db.prepare(`SELECT status, intake_at FROM property_meta WHERE client_id = ?`).get(c.id) || null;
+    const items = db.prepare(`SELECT COUNT(*) n FROM property_items WHERE client_id = ? AND status = 'stored'`).get(c.id).n;
+    const lastDisc = db.prepare(`SELECT 1 FROM property_events WHERE client_id = ? AND type = 'discrepancy' AND created_at >= datetime('now','-30 day') LIMIT 1`).get(c.id);
+    return { id: c.id, name: c.pref || c.name, room: c.room || '', hasIntake: !!meta, status: meta?.status || 'none', items, cash: cashBalance(c.id), flagged: !!lastDisc };
+  });
+  res.json({ clients: rows, categories: PROPERTY_CATEGORIES, totalCash: rows.reduce((a, r) => a + r.cash, 0), flagged: rows.filter((r) => r.flagged).length });
+});
+app.get('/api/property/:cid', requireAuth, (req, res) => {
+  const cid = +req.params.cid;
+  const c = db.prepare(`SELECT id, pref, name, room, discharge_status FROM clients WHERE id = ?`).get(cid);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  res.json({
+    client: { id: c.id, name: c.pref || c.name, room: c.room || '', discharged: !!c.discharge_status },
+    meta: db.prepare(`SELECT * FROM property_meta WHERE client_id = ?`).get(cid) || null,
+    items: db.prepare(`SELECT * FROM property_items WHERE client_id = ? ORDER BY status, id`).all(cid),
+    events: db.prepare(`SELECT * FROM property_events WHERE client_id = ? ORDER BY id DESC LIMIT 100`).all(cid),
+    balance: cashBalance(cid), categories: PROPERTY_CATEGORIES,
+  });
+});
+// Record the dual-witnessed intake count (opens the chain of custody).
+app.post('/api/property/:cid/intake', requireAuth, (req, res) => {
+  const cid = +req.params.cid; const b = req.body || {};
+  if (!b.witness || !String(b.witness).trim()) return res.status(400).json({ error: 'A second staff witness is required to count belongings.' });
+  if (String(b.witness).trim().toLowerCase() === req.user.name.toLowerCase()) return res.status(400).json({ error: 'The witness must be a different staff member.' });
+  if (!b.client_ack || !String(b.client_ack).trim()) return res.status(400).json({ error: 'The client must sign that the inventory is accurate.' });
+  const ex = db.prepare(`SELECT client_id FROM property_meta WHERE client_id = ?`).get(cid);
+  if (ex) db.prepare(`UPDATE property_meta SET safe_location=?, bag_number=?, sealed=?, status='open', intake_by=?, intake_witness=?, intake_client_ack=?, intake_at=datetime('now') WHERE client_id=?`)
+    .run(b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, req.user.name, String(b.witness).trim(), String(b.client_ack).trim(), cid);
+  else db.prepare(`INSERT INTO property_meta (client_id, safe_location, bag_number, sealed, status, intake_by, intake_witness, intake_client_ack, intake_at) VALUES (?,?,?,?, 'open', ?,?,?, datetime('now'))`)
+    .run(cid, b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, req.user.name, String(b.witness).trim(), String(b.client_ack).trim());
+  logPropertyEvent(cid, 'intake_count', { note: `Belongings counted & secured${b.bag_number ? ' · bag ' + b.bag_number : ''}${b.safe_location ? ' · ' + b.safe_location : ''}`, staff: req.user.name, witness: String(b.witness).trim(), client_ack: String(b.client_ack).trim() });
+  audit({ user: req.user, action: 'PROPERTY_INTAKE', entity: 'client', entity_id: cid, detail: `witness ${b.witness}`, ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/property/:cid/item', requireAuth, (req, res) => {
+  const cid = +req.params.cid; const b = req.body || {};
+  if (!String(b.description || '').trim()) return res.status(400).json({ error: 'Describe the item.' });
+  db.prepare(`INSERT INTO property_items (client_id, category, description, qty, est_value, condition, by) VALUES (?,?,?,?,?,?,?)`)
+    .run(cid, b.category || 'Other', String(b.description).trim(), b.qty != null ? +b.qty : 1, b.est_value != null && b.est_value !== '' ? +b.est_value : null, b.condition || null, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/property/item/:id/return', requireAuth, (req, res) => {
+  db.prepare(`UPDATE property_items SET status='returned', returned_at=datetime('now') WHERE id = ?`).run(req.params.id);
+  res.json({ ok: true });
+});
+app.delete('/api/property/item/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM property_items WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// Cash in/out of the client's trust balance — dual control, every move signed.
+app.post('/api/property/:cid/cash', requireAuth, (req, res) => {
+  const cid = +req.params.cid; const b = req.body || {};
+  const amt = Math.round((+b.amount || 0) * 100) / 100;
+  if (!(amt > 0)) return res.status(400).json({ error: 'Enter an amount.' });
+  if (!b.witness || !String(b.witness).trim()) return res.status(400).json({ error: 'A second staff witness is required for any cash movement.' });
+  if (String(b.witness).trim().toLowerCase() === req.user.name.toLowerCase()) return res.status(400).json({ error: 'The witness must be a different staff member.' });
+  const isOut = b.type === 'withdrawal';
+  if (isOut) {
+    if (amt > cashBalance(cid)) return res.status(400).json({ error: 'Amount exceeds the client’s balance.' });
+    if (!b.client_ack || !String(b.client_ack).trim()) return res.status(400).json({ error: 'The client must sign to receive cash.' });
+  }
+  logPropertyEvent(cid, isOut ? 'cash_withdrawal' : 'cash_deposit', { amount: isOut ? -amt : amt, note: b.note || null, staff: req.user.name, witness: String(b.witness).trim(), client_ack: b.client_ack ? String(b.client_ack).trim() : null });
+  audit({ user: req.user, action: isOut ? 'PROPERTY_CASH_OUT' : 'PROPERTY_CASH_IN', entity: 'client', entity_id: cid, detail: `$${amt} · witness ${b.witness}`, ip: req.ip });
+  res.json({ ok: true, balance: cashBalance(cid) });
+});
+// Surprise/periodic audit: count vs. the ledger; a mismatch flags leadership.
+app.post('/api/property/:cid/audit', requireAuth, (req, res) => {
+  const cid = +req.params.cid; const b = req.body || {};
+  const counted = Math.round((+b.counted || 0) * 100) / 100;
+  const bal = cashBalance(cid);
+  const diff = Math.round((counted - bal) * 100) / 100;
+  if (Math.abs(diff) >= 0.01) {
+    logPropertyEvent(cid, 'discrepancy', { amount: diff, note: `Audit found ${counted.toFixed(2)} vs. ledger ${bal.toFixed(2)} (off ${diff > 0 ? '+' : ''}${diff.toFixed(2)})${b.note ? ' · ' + b.note : ''}`, staff: req.user.name, witness: b.witness || null });
+    const c = db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(cid);
+    createAlert(cid, 'property', 'High', `Belongings discrepancy — ${(c?.pref || c?.name || 'a client')}${c?.room ? ' (room ' + c.room + ')' : ''}: cash off by ${diff > 0 ? '+' : ''}$${Math.abs(diff).toFixed(2)} (counted $${counted.toFixed(2)} vs. $${bal.toFixed(2)} on record). Investigate now.`);
+    audit({ user: req.user, action: 'PROPERTY_DISCREPANCY', entity: 'client', entity_id: cid, detail: `off ${diff}`, ip: req.ip });
+    return res.json({ ok: true, discrepancy: diff });
+  }
+  logPropertyEvent(cid, 'audit', { amount: counted, note: `Audit OK — counted $${counted.toFixed(2)} matches the ledger${b.note ? ' · ' + b.note : ''}`, staff: req.user.name, witness: b.witness || null });
+  res.json({ ok: true, discrepancy: 0 });
+});
+// Discharge return — itemized + full cash, dual-signed; client signs receipt.
+app.post('/api/property/:cid/return-all', requireAuth, (req, res) => {
+  const cid = +req.params.cid; const b = req.body || {};
+  if (!b.witness || !String(b.witness).trim()) return res.status(400).json({ error: 'A second staff witness is required to return belongings.' });
+  if (String(b.witness).trim().toLowerCase() === req.user.name.toLowerCase()) return res.status(400).json({ error: 'The witness must be a different staff member.' });
+  if (!b.client_ack || !String(b.client_ack).trim()) return res.status(400).json({ error: 'The client must sign that they received everything.' });
+  const bal = cashBalance(cid);
+  if (bal > 0) logPropertyEvent(cid, 'return', { amount: -bal, note: `Returned cash $${bal.toFixed(2)} at discharge`, staff: req.user.name, witness: String(b.witness).trim(), client_ack: String(b.client_ack).trim() });
+  db.prepare(`UPDATE property_items SET status='returned', returned_at=datetime('now') WHERE client_id = ? AND status = 'stored'`).run(cid);
+  logPropertyEvent(cid, 'return_all', { note: `All belongings returned to client at discharge${b.note ? ' · ' + b.note : ''}`, staff: req.user.name, witness: String(b.witness).trim(), client_ack: String(b.client_ack).trim() });
+  db.prepare(`UPDATE property_meta SET status='returned' WHERE client_id = ?`).run(cid);
+  audit({ user: req.user, action: 'PROPERTY_RETURN', entity: 'client', entity_id: cid, detail: `cash $${bal}`, ip: req.ip });
   res.json({ ok: true });
 });
 

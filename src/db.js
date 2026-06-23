@@ -1250,6 +1250,26 @@ try { db.prepare(`UPDATE users SET job_role='Catering / Dietary' WHERE job_role=
 try { if (getState('migr_drop_idband') !== 'done') { db.prepare(`UPDATE arrival_items SET active=0 WHERE role='Front Desk' AND label='Issue ID band / wristband'`).run(); setState('migr_drop_idband', 'done'); } } catch { /* ok */ }
 // One-time: relabel the front-desk "notify team" step — it now auto-alerts the care team.
 try { if (getState('migr_intake_notify') !== 'done') { db.prepare(`UPDATE arrival_items SET label='Intake complete — notify nurse, techs & CM for assessment (auto-alerts the team)' WHERE label='Notify the team a new admit is here (nurse + tech + CM)'`).run(); setState('migr_intake_notify', 'done'); } } catch { /* ok */ }
+
+// Client belongings / valuables — chain of custody with dual control. Money is a
+// tracked trust balance (not loose cash); every touch is signed + time-stamped.
+db.exec(`
+CREATE TABLE IF NOT EXISTS property_meta (
+  client_id INTEGER PRIMARY KEY, safe_location TEXT, bag_number TEXT, sealed INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'open', intake_by TEXT, intake_witness TEXT, intake_client_ack TEXT, intake_at TEXT
+);
+CREATE TABLE IF NOT EXISTS property_items (
+  id INTEGER PRIMARY KEY, client_id INTEGER, category TEXT, description TEXT, qty INTEGER DEFAULT 1,
+  est_value REAL, condition TEXT, status TEXT DEFAULT 'stored',
+  stored_at TEXT DEFAULT (datetime('now')), returned_at TEXT, by TEXT
+);
+CREATE TABLE IF NOT EXISTS property_events (
+  id INTEGER PRIMARY KEY, client_id INTEGER, type TEXT, amount REAL, balance_after REAL,
+  note TEXT, staff TEXT, witness TEXT, client_ack TEXT, created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_property_items_client ON property_items(client_id);
+CREATE INDEX IF NOT EXISTS idx_property_events_client ON property_events(client_id);
+`);
 // Per-diem revenue rates by ASAM level of care (admin-editable). Seed the four
 // Armada bills today; other levels default to 0 until a rate is set.
 if (!getState('loc_rates')) setState('loc_rates', JSON.stringify({ '3.7-WM': 442, '3.7': 342, '3.2-WM': 289, '3.5': 240 }));

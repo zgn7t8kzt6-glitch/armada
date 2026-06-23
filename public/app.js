@@ -182,7 +182,7 @@ const GROUP_OF={
   arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
   // Stay — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
-  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',bedmap:'stay',engagement:'stay',program:'stay',meals:'stay',
+  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',bedmap:'stay',engagement:'stay',program:'stay',meals:'stay',property:'stay',
   casemgmt:'stay',retention:'stay',surveys:'stay',incidents:'stay',compliance:'stay',
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
@@ -221,6 +221,7 @@ const VIEW_ROLES = {
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
   bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director','Front Desk'],
+  property:    ['BHT / Tech','Nurse','Case Manager','Front Desk','Clinical Director','Director of Operations'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
   hiring:      ['Executive Director','Director of Operations','Clinical Director'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
@@ -268,9 +269,9 @@ const UNIVERSAL_VIEWS = ['mytasks','messages','team','training','library','stand
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
-  'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedmap','bedboard','clients','dignity','mytasks','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedmap','bedboard','property','clients','dignity','mytasks','messages','team','training','library'],
   'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','bedmap','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
-  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','inventory','mytasks','messages','team','training','library'],
+  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','mytasks','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
   'Housing Director': ['housing','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
@@ -412,6 +413,7 @@ function show(v){
   if(v==='roster') loadRoster();
   if(v==='bedboard') loadBedBoard();
   if(v==='bedmap') loadBedMap();
+  if(v==='property') loadProperty();
   if(v==='workplace') loadWorkplace();
   if(v==='weekgrid') loadWeekGrid();
   if(v==='staffmodel') loadStaffModel();
@@ -2134,6 +2136,103 @@ async function loadArrivalTemplate(){
 }
 async function addArrivalItem(role){ const inp=$('arr_new_'+role.replace(/[^a-z]/gi,'')); const label=inp?inp.value.trim():''; if(!label)return; try{ await api('/arrival/template',{method:'POST',body:JSON.stringify({role,label})}); loadArrivalTemplate(); }catch(e){ alert(e.message); } }
 async function delArrivalItem(id){ if(!confirm('Remove this arrival item?'))return; try{ await api('/arrival/template',{method:'POST',body:JSON.stringify({id,delete:true})}); loadArrivalTemplate(); }catch(e){ alert(e.message); } }
+
+/* ---- Client belongings & valuables — chain of custody (dual control) ---- */
+let PROP_CATS=['Cash','Phone / electronics','Wallet / ID / cards','Jewelry / watch','Keys','Clothing','Medication (to pharmacy/secure)','Documents','Other'];
+async function loadProperty(){
+  let d; try{ d=await api('/property'); }catch(e){ $('propBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  PROP_CATS=d.categories||PROP_CATS;
+  $('propKpis').innerHTML=`<div class="ret-cards" style="margin:0 0 14px">
+    <div class="ret-card"><div class="n">${d.clients.filter(c=>c.hasIntake).length}</div><div class="l">Belongings on file</div></div>
+    <div class="ret-card"><div class="n">${money(d.totalCash)}</div><div class="l">Cash held in trust</div></div>
+    <div class="ret-card ${d.flagged?'rc-high':''}"><div class="n">${d.flagged}</div><div class="l">Open discrepancies</div></div></div>`;
+  const rows=d.clients.map(c=>`<tr style="cursor:pointer" onclick="openProperty(${c.id})">
+    <td><b>${esc(c.name)}</b>${c.room?' · '+esc(c.room):''}</td>
+    <td>${c.hasIntake?(c.status==='returned'?'<span class="risk risk-low">returned</span>':'<span class="risk risk-warn">stored</span>'):'<span class="risk risk-high">no count yet</span>'}</td>
+    <td>${c.items} item(s)</td>
+    <td><b>${money(c.cash)}</b></td>
+    <td>${c.flagged?'<span class="badge-danger">discrepancy</span>':''}</td>
+    <td><button class="btn btn-gold btn-sm sans" onclick="event.stopPropagation();openProperty(${c.id})">Open</button></td></tr>`).join('');
+  $('propBody').innerHTML=`<div class="card"><h3>Client belongings & valuables</h3>
+    <p class="sub sans">Every client's secured property and cash, with a full signed chain of custody. Tap a client to count, store, move cash, audit, or return at discharge.</p>
+    <table class="tbl"><tr><th>Client</th><th>Status</th><th>Items</th><th>Cash</th><th></th><th></th></tr>${rows||'<tr><td colspan="6" class="empty">No active clients.</td></tr>'}</table></div>`;
+}
+async function openProperty(cid){
+  let d; try{ d=await api('/property/'+cid); }catch(e){ alert(e.message); return; }
+  const m=d.meta; const items=d.items||[];
+  const itemRow=i=>`<div class="cmd-row"><div class="cmd-row-main">${i.status==='returned'?'↩︎ ':'📦 '}<b>${esc(i.category||'Item')}</b> — ${esc(i.description)}${i.qty&&i.qty!==1?' ×'+i.qty:''}${i.est_value!=null?' <span class="hint">· est '+money(i.est_value)+'</span>':''}${i.condition?' <span class="hint">· '+esc(i.condition)+'</span>':''}${i.status==='returned'?' <span class="hint">· returned '+esc(String(i.returned_at||'').slice(0,10))+'</span>':''}</div>${i.status==='stored'?`<button class="btn btn-ghost btn-sm sans" onclick="returnPropItem(${i.id},${cid})">Return</button>`:''}</div>`;
+  const evIcon={intake_count:'📝',cash_deposit:'➕',cash_withdrawal:'➖',return:'↩︎',return_all:'✅',audit:'🔍',discrepancy:'⚠️',access:'🔓'};
+  const evRow=e=>`<div class="cmd-row ${e.type==='discrepancy'?'cmd-row-flag':''}"><div class="cmd-row-main">${evIcon[e.type]||'•'} ${esc((e.type||'').replace(/_/g,' '))}${e.amount!=null?` <b>${e.amount<0?'−':''}${money(Math.abs(e.amount))}</b>`:''}${e.balance_after!=null&&/cash|return/.test(e.type)?` <span class="hint">→ bal ${money(e.balance_after)}</span>`:''}
+    <div class="hint">${esc(String(e.created_at||'').slice(0,16).replace('T',' '))} · by ${esc(e.staff||'')}${e.witness?' · witness '+esc(e.witness):''}${e.client_ack?' · client ✍ '+esc(e.client_ack):''}${e.note?'<br>'+esc(e.note):''}</div></div></div>`;
+  const intakeBlock = m
+    ? `<div class="kv"><span class="k">Counted by</span><span class="v">${esc(m.intake_by||'')}${m.intake_witness?' + witness '+esc(m.intake_witness):''}</span></div>
+       <div class="kv"><span class="k">Client signed</span><span class="v">${esc(m.intake_client_ack||'—')}</span></div>
+       <div class="kv"><span class="k">Stored</span><span class="v">${esc(m.safe_location||'—')}${m.bag_number?' · bag '+esc(m.bag_number):''}${m.sealed?' · sealed ✓':''}</span></div>`
+    : `<div class="pc-note" style="background:#fbecea;border-left:3px solid var(--danger)">No belongings count on file. Do the dual-witnessed intake count first.</div>`;
+  $('propBody').innerHTML=`
+    <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="loadProperty()">← All clients</button></div>
+    <div class="cmd-grid">
+      <div class="card"><div class="cmd-hero-row"><div><h3>${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3><p class="sub sans" style="margin:0">Belongings & valuables</p></div>
+        <button class="btn ${m?'btn-ghost':'btn-primary'} btn-sm sans" onclick="propIntake(${cid})">${m?'Re-count intake':'Record intake count'}</button></div>
+        ${intakeBlock}
+        <div style="margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0;font-size:14px">Cash in trust</h3><b style="font-size:20px;color:var(--navy)">${money(d.balance)}</b></div>
+        <div class="toolbar no-print" style="justify-content:flex-start;gap:6px"><button class="btn btn-primary btn-sm sans" onclick="propCash(${cid},'deposit')">＋ Cash in</button><button class="btn btn-ghost btn-sm sans" onclick="propCash(${cid},'withdrawal')">－ Cash out</button><button class="btn btn-ghost btn-sm sans" onclick="propAudit(${cid})">🔍 Audit count</button></div>
+        <div class="toolbar no-print" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="propReturnAll(${cid})">↩︎ Return all at discharge</button></div>
+      </div>
+      <div class="card"><div class="cmd-hero-row"><div><h3>Itemized belongings</h3></div><button class="btn btn-gold btn-sm sans" onclick="addPropItem(${cid})">+ Item</button></div>
+        <div style="margin-top:8px">${items.length?items.map(itemRow).join(''):'<div class="hint">No items logged yet.</div>'}</div></div>
+    </div>
+    <div class="card"><h3>Chain of custody</h3><p class="sub sans">Every count, cash move, audit, and return — who, witness, client signature, and time.</p>
+      <div style="margin-top:8px">${(d.events||[]).length?d.events.map(evRow).join(''):'<div class="hint">No activity yet.</div>'}</div></div>`;
+}
+function sigFields(opts={}){
+  return `<label>Second staff witness (full name) — required</label><input id="pp_witness" placeholder="Witnessing staff member"/>
+    ${opts.clientAck?`<label>Client signature (type full name) — they confirm/receive</label><input id="pp_client" placeholder="Client full name"/>`:''}`;
+}
+function propIntake(cid){
+  const save=hmodal(`<h3>Intake belongings count</h3>
+    <p class="sub sans">Count everything <b>with the client and a second staff witness present</b>. Add each valuable as an item; count cash with "Cash in". All three sign.</p>
+    <label>Where stored (safe / locker)</label><input id="pp_loc" placeholder="e.g. Front safe, locker 3"/>
+    <div class="grid2"><div><label>Sealed bag #</label><input id="pp_bag" placeholder="e.g. 0481"/></div>
+      <div><label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:24px"><input type="checkbox" id="pp_sealed" style="width:auto"/> Tamper-evident bag sealed</label></div></div>
+    ${sigFields({clientAck:true})}`);
+  save.onclick=async()=>{ try{ await api('/property/'+cid+'/intake',{method:'POST',body:JSON.stringify({safe_location:$('pp_loc').value,bag_number:$('pp_bag').value,sealed:$('pp_sealed').checked,witness:$('pp_witness').value,client_ack:$('pp_client').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+}
+function addPropItem(cid){
+  const save=hmodal(`<h3>Add belonging</h3>
+    <label>Category</label><select id="pp_cat">${PROP_CATS.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
+    <label>Description (be specific)</label><input id="pp_desc" placeholder="e.g. iPhone 14, black, cracked corner / silver ring"/>
+    <div class="grid2"><div><label>Qty</label><input id="pp_qty" type="number" value="1" min="1"/></div>
+      <div><label>Est. value ($)</label><input id="pp_val" type="number" step="0.01"/></div></div>
+    <label>Condition</label><input id="pp_cond" placeholder="e.g. good, scratched, new in box"/>
+    <p class="hint">For cash, use "Cash in" instead so it's tracked to the dollar with signatures.</p>`);
+  save.onclick=async()=>{ if(!$('pp_desc').value.trim()){ alert('Describe the item.'); return; } try{ await api('/property/'+cid+'/item',{method:'POST',body:JSON.stringify({category:$('pp_cat').value,description:$('pp_desc').value,qty:$('pp_qty').value,est_value:$('pp_val').value,condition:$('pp_cond').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+}
+function propCash(cid,type){
+  const out=type==='withdrawal';
+  const save=hmodal(`<h3>${out?'Cash out — return to client':'Cash in — count into trust'}</h3>
+    <p class="sub sans">${out?'The client receives cash from their balance. Requires a witness and the client’s signature.':'Count the cash to the dollar with a witness present, then store it securely. No loose cash left unlogged.'}</p>
+    <label>Amount ($)</label><input id="pp_amt" type="number" step="0.01" min="0"/>
+    <label>Note (denominations, reason)</label><input id="pp_note" placeholder="${out?'what it’s for':'e.g. 2×$20, 1×$5'}"/>
+    ${sigFields({clientAck:out})}`);
+  save.onclick=async()=>{ try{ await api('/property/'+cid+'/cash',{method:'POST',body:JSON.stringify({type,amount:$('pp_amt').value,note:$('pp_note').value,witness:$('pp_witness').value,client_ack:out?$('pp_client').value:null})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+}
+function propAudit(cid){
+  const save=hmodal(`<h3>Audit cash count</h3>
+    <p class="sub sans">Physically count the cash on hand and enter it. If it doesn't match the ledger, leadership is alerted immediately and an incident is logged.</p>
+    <label>Cash counted now ($)</label><input id="pp_amt" type="number" step="0.01" min="0"/>
+    <label>Witness (recommended)</label><input id="pp_witness" placeholder="Second staff (optional but advised)"/>
+    <label>Note</label><input id="pp_note"/>`);
+  save.onclick=async()=>{ try{ const r=await api('/property/'+cid+'/audit',{method:'POST',body:JSON.stringify({counted:$('pp_amt').value,witness:$('pp_witness').value,note:$('pp_note').value})}); closeHModal(); if(r.discrepancy) alert('⚠️ Discrepancy of '+(r.discrepancy>0?'+':'')+'$'+Math.abs(r.discrepancy).toFixed(2)+' — leadership has been alerted.'); openProperty(cid); }catch(e){ alert(e.message); } };
+}
+function propReturnAll(cid){
+  const save=hmodal(`<h3>Return all belongings (discharge)</h3>
+    <p class="sub sans">Return every stored item and the full cash balance to the client. Counted with a witness; the client signs they received everything.</p>
+    ${sigFields({clientAck:true})}
+    <label>Note</label><input id="pp_note"/>`);
+  save.onclick=async()=>{ try{ await api('/property/'+cid+'/return-all',{method:'POST',body:JSON.stringify({witness:$('pp_witness').value,client_ack:$('pp_client').value,note:$('pp_note').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+}
+async function returnPropItem(id,cid){ if(!confirm('Mark this item returned to the client?'))return; try{ await api('/property/item/'+id+'/return',{method:'POST',body:'{}'}); openProperty(cid); }catch(e){ alert(e.message); } }
 
 async function loadArrivals(){
   try{

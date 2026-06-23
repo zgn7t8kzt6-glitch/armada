@@ -7751,6 +7751,22 @@ app.get('/api/care-team/onshift', requireAuth, (req, res) => {
   const { buckets, shift, clockedInCount, scheduledCount } = computeOnShift();
   res.json({ shift, onShift: buckets, clockedInCount, scheduledCount });
 });
+// Who's on shift + the lead in charge (behavioral-contract calls, decisions,
+// emergencies). The lead is set by leadership and shown to everyone on My Shift.
+function shiftLead() { try { const v = getState('shift_lead'); return v ? JSON.parse(v) : null; } catch { return null; } }
+const canSetLead = (u) => u.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(u.job_role || '');
+app.get('/api/shift-crew', requireAuth, (req, res) => {
+  const { buckets, shift } = computeOnShift();
+  res.json({ shift, team: buckets, lead: shiftLead(), canSetLead: canSetLead(req.user) });
+});
+app.post('/api/shift-lead', requireAuth, (req, res) => {
+  if (!canSetLead(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const b = req.body || {}; const name = (b.name || '').trim();
+  if (!name) { setState('shift_lead', ''); return res.json({ ok: true, lead: null }); }
+  const lead = { name: name.slice(0, 80), role: (b.role || '').trim().slice(0, 60), phone: (b.phone || '').trim().slice(0, 30), by: req.user.name, at: new Date().toISOString() };
+  setState('shift_lead', JSON.stringify(lead));
+  res.json({ ok: true, lead });
+});
 
 app.get('/api/docs', requireAuth, (req, res) => {
   const q = (req.query.q || '').trim();

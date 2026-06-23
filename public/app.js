@@ -5011,6 +5011,7 @@ async function loadDashboard(){
   }
   $('dashSubtitle').textContent = d.subtitle||'';
   renderFacility(d.facility);
+  renderCrew();
   renderShiftReport();
   renderDashTasks();
   if(d.lean){ renderLeanDashboard(d); return; }
@@ -5198,6 +5199,35 @@ async function loadAlertScore(){
       <div><strong class="sans">Most responsive (7 days)</strong>${staff?`<table class="tbl" style="margin-top:6px">${staff}</table>`:'<div class="hint" style="margin-top:6px">No alerts handled yet.</div>'}</div>
       <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
     </div>`;
+}
+// Who's on shift + the lead in charge — with a one-tap Call button for emergencies.
+async function renderCrew(){
+  const host=$('dashCrew'); if(!host) return;
+  let d; try{ d=await api('/shift-crew'); }catch(e){ host.innerHTML=''; return; }
+  const t=d.team||{};
+  const grp=(label,arr)=> (arr&&arr.length)?`<span style="margin-right:14px"><b>${label}:</b> ${arr.map(esc).join(', ')}</span>`:'';
+  const team=[grp('Nurses',t.nurses),grp('Techs',t.rts),grp('Case mgmt',t.caseManagers),grp('Therapists',t.therapists)].filter(Boolean).join('');
+  const l=d.lead;
+  const tel=(p)=>p.replace(/[^0-9+]/g,'');
+  const leadHtml = (l&&l.name)
+    ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:20px">👤</span>
+        <div style="flex:1;min-width:160px"><div style="font-weight:700">${esc(l.name)}${l.role?` <span class="hint" style="font-weight:400">· ${esc(l.role)}</span>`:''}</div><div class="hint">Lead in charge — behavioral-contract calls & emergencies</div></div>
+        ${l.phone?`<a class="btn btn-gold btn-sm sans" href="tel:${esc(tel(l.phone))}">📞 Call lead</a>`:''}
+        ${d.canSetLead?`<button class="btn btn-ghost btn-sm sans" onclick="setShiftLead()">Change</button>`:''}</div>`
+    : `<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap"><span class="hint">No shift lead set — the person in charge for behavioral-contract calls & emergencies.</span>${d.canSetLead?`<button class="btn btn-gold btn-sm sans" onclick="setShiftLead()">Set lead</button>`:''}</div>`;
+  host.innerHTML=`<div class="card" style="border-left:4px solid var(--gold)">${leadHtml}
+    <div class="hint" style="margin-top:10px;line-height:1.7">${team?('🩺 On shift now — '+team):'No one marked on shift yet.'}</div></div>`;
+}
+function setShiftLead(){
+  api('/shift-crew').then(d=>{
+    const l=d.lead||{};
+    const save=hmodal(`<h3>Set the shift lead</h3><p class="sub sans">The person in charge right now — behavioral-contract calls, decisions, emergencies. Shown to everyone on My Shift.</p>
+      <label>Name</label><input id="sl_name" value="${esc(l.name||'')}"/>
+      <label>Role / title</label><input id="sl_role" value="${esc(l.role||'')}" placeholder="e.g. Charge Nurse, Shift Lead"/>
+      <label>Phone (for the Call button)</label><input id="sl_phone" value="${esc(l.phone||'')}" placeholder="e.g. 555-123-4567"/>`);
+    save.onclick=async()=>{ try{ await api('/shift-lead',{method:'POST',body:JSON.stringify({name:$('sl_name').value,role:$('sl_role').value,phone:$('sl_phone').value})}); closeHModal(); renderCrew(); }catch(e){ alert(e.message); } };
+  }).catch(e=>alert(e.message));
 }
 // Facility at a glance — the first thing on My Shift: who's here, coming, and going.
 function renderFacility(f){

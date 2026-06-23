@@ -4997,6 +4997,8 @@ async function loadDashboard(){
     bar.innerHTML = `<span class="hint">👁 Preview dashboard as role:</span><select id="dashAsSel" class="sans" onchange="setDashPreview(this.value)"><option value="">My role (${esc(ME.job_role||'Team')})</option>${(d.roles||[]).map(r=>`<option value="${esc(r)}" ${r===DASH_PREVIEW?'selected':''}>${esc(r)}</option>`).join('')}</select>${d.previewing?`<span class="risk risk-warn">previewing ${esc(d.previewing)}</span>`:''}`;
   }
   $('dashSubtitle').textContent = d.subtitle||'';
+  if(d.lean){ renderLeanDashboard(d); return; }
+  if($('dashActions')) $('dashActions').style.display='';
   const ns=d.northStar;
   $('dashNorthStar').innerHTML = ns ? `<div class="card" style="text-align:center;border-left:4px solid var(--gold)">
     <div class="hint" style="text-transform:uppercase;letter-spacing:.6px">${esc(ns.label)}</div>
@@ -5180,6 +5182,29 @@ async function loadAlertScore(){
       <div><strong class="sans">Most responsive (7 days)</strong>${staff?`<table class="tbl" style="margin-top:6px">${staff}</table>`:'<div class="hint" style="margin-top:6px">No alerts handled yet.</div>'}</div>
       <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
     </div>`;
+}
+// Lean shift screen (frontline roles): greeting + critical alerts + ONE ranked
+// "needs you now" list. Everything else is intentionally hidden to cut the noise.
+function renderLeanDashboard(d){
+  ['dashStandard','dashMiles','dashStats','dashNorthStar','dashNudges','dashTiles','dashWins'].forEach(id=>{ if($(id)) $(id).innerHTML=''; });
+  if($('dashActions')) $('dashActions').style.display='none';
+  const al=(d.alerts||[]);
+  $('dashAlerts').innerHTML = al.length ? `<div class="card" style="border-left:4px solid var(--danger)">
+      <h3 style="margin:0 0 6px">⚡ Needs attention now <span class="badge">${al.length}</span></h3>
+      ${al.map(a=>`<div class="todo"><div class="txt">${a.level==='High'?'🔴 ':''}${esc(a.message)}</div><button class="btn btn-ghost btn-sm sans" onclick="ackAlert(${a.id})">Got it ✓</button></div>`).join('')}
+    </div>` : '';
+  const P=d.priority||[];
+  const sevColor=s=>s==='high'?'var(--danger)':s==='warn'?'#9a6a1f':'var(--aqua)';
+  $('dashSections').innerHTML = P.length
+    ? `<div class="card"><h3 style="margin:0 0 2px">Needs you now</h3><p class="sub sans" style="margin:0 0 12px">Work the list top to bottom. Tap one, do it, come back.</p>
+        ${P.map(p=>`<div class="lean-row" onclick="show('${p.view}')" style="border-left:4px solid ${sevColor(p.sev)}">
+          <div class="lean-ic">${p.icon}</div>
+          <div class="lean-main"><div class="lean-t">${esc(p.label)}</div>${p.sub?`<div class="hint">${esc(p.sub)}</div>`:''}</div>
+          <div class="lean-go">›</div></div>`).join('')}</div>`
+    : `<div class="card" style="text-align:center;padding:34px 20px"><div style="font-size:44px;line-height:1">✅</div>
+        <h3 style="margin:8px 0 0">You're all caught up</h3>
+        <p class="sub sans" style="margin:4px 0 0">Nothing needs you this minute. Do a round, check on someone, keep the place calm.</p>
+        <button class="btn btn-gold sans" style="margin-top:12px" onclick="show('roundscan')">Start a round ›</button></div>`;
 }
 function renderAlertsList(d){
   if(!$('alertsList')) return;

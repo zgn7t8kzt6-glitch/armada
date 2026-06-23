@@ -780,3 +780,12 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 
 /* account cluster in the topbar (shown only for flat-nav roles whose sidebar is hidden) */
 .topacct{display:flex;align-items:center;gap:6px}
+
+/* ── Lean shift screen: the "needs you now" rows ── */
+.lean-row{display:flex;align-items:center;gap:13px;padding:15px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:10px;cursor:pointer;background:var(--paper,#fff);transition:box-shadow .12s,transform .12s}
+.lean-row:hover{box-shadow:0 3px 12px rgba(0,0,0,.07);transform:translateY(-1px)}
+.lean-row:active{transform:translateY(0)}
+.lean-ic{font-size:26px;flex:0 0 auto;width:30px;text-align:center}
+.lean-main{flex:1;min-width:0}
+.lean-t{font-weight:700;font-size:15.5px;color:var(--navy,#16242a);line-height:1.25}
+.lean-go{font-size:24px;color:var(--muted);flex:0 0 auto}

@@ -4629,7 +4629,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const lastObs = db.prepare(`SELECT client_id, MAX(ts) ts FROM obs_checks GROUP BY client_id`).all().reduce((a, r) => (a[r.client_id] = r.ts, a), {});
   const obsOverdue = (c) => { const iv = c.obs_interval || obsDefault; const t = lastObs[c.id] ? Date.parse(String(lastObs[c.id]).replace(' ', 'T') + 'Z') : null; const m = t ? Math.floor((Date.now() - t) / 60000) : null; return m == null || m >= iv; };
 
-  const sections = []; let tiles = []; let northStar = null; let subtitle = '';
+  const sections = []; let tiles = []; let northStar = null; let subtitle = ''; let lean = false; let priority = null;
 
   // Shared building blocks
   const newAdmits = active.filter(isNew);
@@ -4823,36 +4823,32 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'diets', title: 'Dietary needs & allergies — honor these', items: diets.map((c) => item(c, [c.allergies, c.prefs].filter(Boolean).join(' · '), c.allergies ? 'ALLERGY' : '')) });
     sections.push({ key: 'new', title: 'New today — make their first meal land', items: newAdmits.map((c) => item(c)) });
   } else if (jr === 'BHT / Tech') {
-    // BHT / Tech — the heartbeat of the house
-    subtitle = 'The heartbeat of the house — welcome, watch, and the personal touches.';
+    // BHT / Tech — the heartbeat of the house. LEAN MODE: instead of a wall of tiles
+    // and a dozen section cards, the shift screen is ONE ranked "needs you now" list.
+    lean = true;
+    subtitle = 'Top to bottom — do the next thing, then come back.';
     const overdue = active.filter(obsOverdue);
     const toWelcome = newAdmits.filter(ccIncomplete);
-    northStar = { label: 'Safety checks current', value: active.length ? Math.round((active.length - overdue.length) / active.length * 100) + '%' : '—', sev: overdue.length ? 'high' : 'ok' };
-    tiles = [
-      { key: 'welcome', label: 'New — welcome & fill card', n: toWelcome.length, sev: toWelcome.length ? 'high' : 'ok' },
-      { key: 'rounds', label: 'Safety checks due', n: overdue.length, sev: overdue.length ? 'high' : 'ok', view: 'rounds' },
-      { key: 'watch', label: 'Watch tonight (at risk)', n: atRisk.length, sev: atRisk.length ? 'high' : 'ok' },
-      { key: 'touches', label: 'Personal touches to deliver', n: personalTouches.length, sev: personalTouches.length ? 'warn' : 'ok' },
-    ];
-    sections.push({ key: 'welcome', title: 'Welcome — new arrivals (fill the Care Card, greet by name)', items: toWelcome.map((c) => item(c, c.program || '', 'NEW')) });
-    sections.push({ key: 'watch', title: 'Watch tonight — at risk of leaving (run the Save)', items: atRisk.map((x) => item(x.c, x.c.anchor_why ? 'why they came: ' + x.c.anchor_why : '', x.lvl)) });
-    sections.push({ key: 'touches', title: "Anticipate — personal touches to deliver", items: personalTouches.map((c) => item(c, c.touch || c.prefs || '')) });
-    sections.push({ key: 'rounds', title: 'Safety checks due', items: overdue.map((c) => item(c, 'overdue for a check')), cta: { label: 'Open Rounds →', view: 'rounds' } });
-    // Engagement: who hasn't done an activity today — boredom is an AMA driver.
     const engagedSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM activities WHERE substr(created_at,1,10) = ?`).all(today).map((r) => r.client_id));
     const notEngaged = active.filter((c) => !engagedSet.has(c.id));
-    tiles.push({ key: 'engage', label: 'Encourage engagement', n: notEngaged.length, sev: notEngaged.length ? 'warn' : 'ok' });
-    sections.push({ key: 'engage', title: 'Encourage engagement — no activity today (boredom is an AMA risk)', items: notEngaged.map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', sub: c.interests ? '💛 loves: ' + c.interests : 'no interests set — ask & add to their Care Card', act: true })) });
-    // Listening loop on the frontline: who's due for an experience survey this week.
-    const expS = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get();
-    if (expS) {
-      const surveyDue = db.prepare(`SELECT id, pref, name, room FROM clients c WHERE c.active = 1 AND c.discharge_status IS NULL
-        AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id = ? AND r.client_id = c.id AND r.created_at >= datetime('now','-7 day')) ORDER BY room, name`).all(expS.id);
-      if (surveyDue.length) {
-        tiles.push({ key: 'survey', label: 'Experience surveys to gather', n: surveyDue.length, sev: 'warn', view: 'surveys' });
-        sections.push({ key: 'survey', title: 'Ask how we’re doing — experience surveys due this week', items: surveyDue.map((c) => item(c, 'no survey in 7 days')), cta: { label: 'Open Surveys →', view: 'surveys' } });
-      }
-    }
+    const meal = currentMeal();
+    const mchk = db.prepare(`SELECT served_at FROM meal_checks WHERE date = ? AND meal = ?`).get(today, meal);
+    const mtime = mealTimeliness(meal, mchk ? mchk.served_at : null);
+    const flips = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
+    const sn = snackStatus();
+    const P = [];
+    const add = (cond, o) => { if (cond) P.push(o); };
+    add(mtime === 'overdue', { icon: '⏰', label: `Serve ${meal} now`, sub: 'Past serve time — their time matters', view: 'meals', sev: 'high' });
+    add(overdue.length > 0, { icon: '🔍', label: `${overdue.length} safety check${overdue.length > 1 ? 's' : ''} due`, sub: 'Scan each room — eyes on every client', view: 'roundscan', sev: 'high' });
+    add(toWelcome.length > 0, { icon: '👋', label: `Welcome ${toWelcome.length} new arrival${toWelcome.length > 1 ? 's' : ''}`, sub: 'Greet by name, start the Care Card', view: 'clients', sev: 'high' });
+    add(atRisk.length > 0, { icon: '⚠️', label: `${atRisk.length} to watch — at risk of leaving`, sub: 'Run the Save before they walk', view: 'clients', sev: 'high' });
+    add(!mchk && mtime !== 'overdue', { icon: '🍽️', label: `Inspect & log ${meal}`, sub: 'Count portions, rate it, log the time served', view: 'meals', sev: 'warn' });
+    add(flips > 0, { icon: '🛏️', label: `${flips} room${flips > 1 ? 's' : ''} to flip`, sub: 'Discharged today — refresh + laundry', view: 'bedboard', sev: 'warn' });
+    add(sn.stale, { icon: '☕', label: 'Stock the snack station', sub: 'Snacks, coffee & juice — never empty', view: 'meals', sev: 'warn' });
+    add(personalTouches.length > 0, { icon: '💛', label: `${personalTouches.length} personal touch${personalTouches.length > 1 ? 'es' : ''} to deliver`, sub: 'The little things they love', view: 'clients', sev: 'normal' });
+    add(notEngaged.length > 0, { icon: '🎲', label: `${notEngaged.length} not engaged yet`, sub: 'Boredom drives people out — get them into something', view: 'engagement', sev: 'normal' });
+    priority = P;
+    northStar = { label: 'Safety checks current', value: active.length ? Math.round((active.length - overdue.length) / active.length * 100) + '%' : '—', sev: overdue.length ? 'high' : 'ok' };
   } else {
     // Unset / unrecognized role — a clean, non-clinical landing. No safety rounds,
     // no at-risk watch, no client-level detail. Just today's Standard (added below)
@@ -4981,7 +4977,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const alerts = fullAlertView
     ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all()
     : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND (roles IS NULL OR roles LIKE ?) ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all('%|' + jr + '|%');
-  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins,
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins, lean, priority,
     canPreview: req.user.role === 'admin', roles: req.user.role === 'admin' ? JOB_ROLES : undefined, previewing: jr !== (req.user.job_role || '') ? jr : null });
 });
 

@@ -1872,10 +1872,16 @@ try {
 // completion scorecard). If the underlying condition still holds, the recurring
 // generators simply re-fire it for the new shift — so nothing real is lost, but the
 // panel starts each shift clean instead of piling up (which is what kills adoption).
+// Some alerts have a short life. A round reminder only makes sense until the next
+// round is due (~1h) — after that you can't go back and do the old one, so it
+// auto-misses (and counts against the rounds %). Minutes; absent = lives the shift.
+const ALERT_TTL_MIN = { rounds: 60 };
 function rolloverAlerts() {
   const today = appToday(), sh = currentShift();
   // Adopt any legacy/unstamped New alerts into the current shift first.
   db.prepare(`UPDATE alerts SET shift_date = ?, shift = ? WHERE status = 'New' AND (shift_date IS NULL OR shift IS NULL)`).run(today, sh);
+  // TTL'd alerts past their window → Missed (e.g. an overdue round you can't redo).
+  db.prepare(`UPDATE alerts SET status = 'Missed' WHERE status = 'New' AND expires_at IS NOT NULL AND expires_at < datetime('now')`).run();
   // Anything still New from a prior shift → Missed.
   db.prepare(`UPDATE alerts SET status = 'Missed' WHERE status = 'New' AND (shift_date != ? OR shift != ?)`).run(today, sh);
 }
@@ -1886,7 +1892,9 @@ function createAlert(client_id, kind, level, message) {
   // alerts (client_id NULL) dedup correctly — `= NULL` is never true in SQL.
   const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id IS ? AND kind = ? AND status = 'New' AND shift_date = ? AND shift = ? LIMIT 1`).get(client_id || null, kind, today, sh);
   if (dup) return;
-  db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles, shift, shift_date) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(client_id || null, kind, level || null, message, rolesForAlert(kind, message), sh, today);
+  const ttl = ALERT_TTL_MIN[kind] || null;
+  const expires = ttl ? `datetime('now','+${ttl} minutes')` : 'NULL';
+  db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles, shift, shift_date, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ${expires})`).run(client_id || null, kind, level || null, message, rolesForAlert(kind, message), sh, today);
   if (level === 'High' || level === 'Critical') {
     // How much to put in the SMS/email (an insecure channel). Default 'locator':
     // first name + room so the on-call leader knows WHO and WHERE, without the
@@ -7364,14 +7372,19 @@ maybeSendWeeklyReport();
 app.get('/api/alerts', requireAuth, (req, res) => {
   rolloverAlerts();   // clear the prior shift before showing the panel
   const status = req.query.status || 'New';
-  // De-dupe: keep only the latest alert per client + kind so the panel stays clean.
+  // The live panel is CRITICAL ONLY — High/Critical. Everything else (Elevated /
+  // Normal operational nudges) is surfaced on the relevant dashboards, not here, so
+  // the alert panel stays a true "drop everything" list and never trains people to
+  // ignore it. `?status=all` shows the full history for leadership review.
+  const crit = status === 'all' ? '' : ` AND a.level IN ('High','Critical')`;
+  const critSub = status === 'all' ? '' : ` AND level IN ('High','Critical')`;
   const sub = status === 'all'
     ? `SELECT MAX(id) FROM alerts GROUP BY client_id, kind`
-    : `SELECT MAX(id) FROM alerts WHERE status = ? GROUP BY client_id, kind`;
-  const where = status === 'all' ? `WHERE a.id IN (${sub})` : `WHERE a.status = ? AND a.id IN (${sub})`;
+    : `SELECT MAX(id) FROM alerts WHERE status = ?${critSub} GROUP BY client_id, kind`;
+  const where = status === 'all' ? `WHERE a.id IN (${sub})` : `WHERE a.status = ?${crit} AND a.id IN (${sub})`;
   const args = status === 'all' ? [] : [status, status];
   const rows = db.prepare(`SELECT a.*, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id ${where} ORDER BY a.id DESC LIMIT 100`).all(...args);
-  const newCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT MAX(id) FROM alerts WHERE status = 'New' GROUP BY client_id, kind)`).get().n;
+  const newCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT MAX(id) FROM alerts WHERE status = 'New' AND level IN ('High','Critical') GROUP BY client_id, kind)`).get().n;
   // This shift's completion: how many alerts raised this shift have been handled.
   const today = appToday(), sh = currentShift();
   const tot = db.prepare(`SELECT COUNT(*) n FROM alerts WHERE shift_date = ? AND shift = ?`).get(today, sh).n;

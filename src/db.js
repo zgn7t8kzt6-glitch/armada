@@ -1373,6 +1373,7 @@ addColumn('meal_checks', 'served_at', 'TEXT');       // HH:MM the meal was actua
 addColumn('incidents', 'needs_contract', 'INTEGER'); // 1 = this incident calls for a behavioral contract
 addColumn('alerts', 'shift', 'TEXT');        // which shift this alert belongs to (clears each shift)
 addColumn('alerts', 'shift_date', 'TEXT');   // YYYY-MM-DD the alert's shift started
+addColumn('alerts', 'expires_at', 'TEXT');   // optional TTL — past this an unacked alert auto-misses (e.g. rounds @ 1h)
 // BEHAVIORAL CONTRACTS — an agreement with a client about expectations after an
 // incident. RTs can log information/observations against an existing one; clinical
 // owns the terms. A running note log keeps the chain of who-said-what.

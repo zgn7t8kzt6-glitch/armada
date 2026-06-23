@@ -2238,10 +2238,15 @@ function propAudit(cid){
 }
 function propReturnAll(cid){
   const save=hmodal(`<h3>Return all belongings (discharge)</h3>
-    <p class="sub sans">Return every stored item and the full cash balance to the client. Counted with a witness; the client signs they received everything.</p>
+    <p class="sub sans">Return every stored item and the full cash balance. For safety, load cash onto a <b>prepaid Visa card</b> rather than handing out bills. Witnessed; the client signs they received everything.</p>
+    <label>How is the cash returned?</label>
+    <select id="pp_method"><option>Prepaid Visa card</option><option>Check</option><option>Electronic transfer</option><option>Cash</option></select>
+    <label id="pp_reflabel">Prepaid card — last 4 digits</label><input id="pp_ref" placeholder="e.g. 4821"/>
     ${sigFields({clientAck:true})}
     <label>Note</label><input id="pp_note"/>`);
-  save.onclick=async()=>{ try{ await api('/property/'+cid+'/return-all',{method:'POST',body:JSON.stringify({...witnessBody(),client_ack:$('pp_client').value,note:$('pp_note').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+  const upd=()=>{ const m=$('pp_method').value; $('pp_reflabel').textContent = m==='Check'?'Check #':m==='Electronic transfer'?'Reference / where sent':m==='Cash'?'(cash — small amounts only)':'Prepaid card — last 4 digits'; };
+  if($('pp_method')) $('pp_method').onchange=upd;
+  save.onclick=async()=>{ try{ await api('/property/'+cid+'/return-all',{method:'POST',body:JSON.stringify({...witnessBody(),client_ack:$('pp_client').value,note:$('pp_note').value,method:$('pp_method').value,reference:$('pp_ref').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
 }
 async function returnPropItem(id,cid){ if(!confirm('Mark this item returned to the client?'))return; try{ await api('/property/item/'+id+'/return',{method:'POST',body:'{}'}); openProperty(cid); }catch(e){ alert(e.message); } }
 

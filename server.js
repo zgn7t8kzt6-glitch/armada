@@ -5424,10 +5424,15 @@ app.post('/api/property/:cid/return-all', requireAuth, (req, res) => {
   const cid = +req.params.cid; const b = req.body || {};
   const w = checkWitness(req); if (w.error) return res.status(400).json({ error: w.error });
   if (!b.client_ack || !String(b.client_ack).trim()) return res.status(400).json({ error: 'The client must sign that they received everything.' });
+  const method = ['Prepaid Visa card', 'Check', 'Electronic transfer', 'Cash'].includes(b.method) ? b.method : 'Prepaid Visa card';
+  const ref = b.reference ? String(b.reference).trim() : '';
   const bal = cashBalance(cid);
-  if (bal > 0) logPropertyEvent(cid, 'return', { amount: -bal, note: `Returned cash $${bal.toFixed(2)} at discharge`, staff: req.user.name, witness: w.name, client_ack: String(b.client_ack).trim() });
+  if (bal > 0) {
+    if (method === 'Prepaid Visa card' && !ref) return res.status(400).json({ error: 'Enter the prepaid card’s last 4 digits.' });
+    logPropertyEvent(cid, 'return', { amount: -bal, note: `Returned cash $${bal.toFixed(2)} via ${method}${ref ? ' (' + ref + ')' : ''} at discharge`, staff: req.user.name, witness: w.name, client_ack: String(b.client_ack).trim() });
+  }
   db.prepare(`UPDATE property_items SET status='returned', returned_at=datetime('now') WHERE client_id = ? AND status = 'stored'`).run(cid);
-  logPropertyEvent(cid, 'return_all', { note: `All belongings returned to client at discharge${b.note ? ' · ' + b.note : ''}`, staff: req.user.name, witness: w.name, client_ack: String(b.client_ack).trim() });
+  logPropertyEvent(cid, 'return_all', { note: `All belongings returned to client at discharge${bal > 0 ? ' · cash via ' + method + (ref ? ' (' + ref + ')' : '') : ''}${b.note ? ' · ' + b.note : ''}`, staff: req.user.name, witness: w.name, client_ack: String(b.client_ack).trim() });
   db.prepare(`UPDATE property_meta SET status='returned' WHERE client_id = ?`).run(cid);
   audit({ user: req.user, action: 'PROPERTY_RETURN', entity: 'client', entity_id: cid, detail: `cash $${bal}`, ip: req.ip });
   res.json({ ok: true });

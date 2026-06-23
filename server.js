@@ -1374,13 +1374,25 @@ app.post('/api/round-scan', requireAuth, (req, res) => {
   db.prepare(`INSERT INTO round_scans (point_id, code, by_id, by_name, source, flagged, flag_reason, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(p.id, code, req.user.id, req.user.name, source, flagged, reason, photo);
   if (flagged) createAlert(null, 'scan_flag_' + req.user.id, 'Elevated', `Suspicious rounds scanning by ${req.user.name}: ${reason}. Spot-check.`);
-  let clients = 0;
+  let clients = 0, clientList = [];
   if (p.area === 'Room' && p.room) {
-    const cs = db.prepare(`SELECT id FROM clients WHERE active = 1 AND discharge_status IS NULL AND room = ?`).all(p.room);
+    const cs = db.prepare(`SELECT id, pref, name FROM clients WHERE active = 1 AND discharge_status IS NULL AND room = ?`).all(p.room);
     const ins = db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name, source) VALUES (?, 'ok', ?, ?, 'scan')`);
     for (const c of cs) { ins.run(c.id, 'Verified by scan · ' + p.label, req.user.name); clients++; }
+    clientList = cs.map((c) => ({ id: c.id, name: c.pref || c.name }));
   }
-  res.json({ ok: true, label: p.label, area: p.area, clients, by: req.user.name, flagged, reason, coverage: scanCoverage() });
+  res.json({ ok: true, label: p.label, area: p.area, clients, clientList, by: req.user.name, flagged, reason, coverage: scanCoverage() });
+});
+// On a room scan, the tech taps each client's condition — logged to the round.
+const ROUND_STATUSES = { asleep: 'Asleep', awake: 'Awake / calm', good: 'Up & doing well', distressed: 'Distressed / anxious', needs_help: 'Needs help', out: 'Out of room', refused: 'Refused check' };
+app.post('/api/rounds/status', requireAuth, (req, res) => {
+  const b = req.body || {}; const key = ROUND_STATUSES[b.status] ? b.status : null;
+  if (!b.client_id || !key) return res.status(400).json({ error: 'client_id + valid status required' });
+  const label = ROUND_STATUSES[key];
+  const obsStatus = key === 'asleep' ? 'asleep' : (key === 'needs_help' || key === 'distressed') ? 'concern' : key === 'refused' ? 'refused' : key === 'out' ? 'off-unit' : 'ok';
+  db.prepare(`INSERT INTO obs_checks (client_id, status, note, by_name, source) VALUES (?, ?, ?, ?, 'scan')`).run(+b.client_id, obsStatus, label, req.user.name);
+  if (key === 'needs_help' || key === 'distressed') { const c = db.prepare(`SELECT pref, name, room FROM clients WHERE id = ?`).get(+b.client_id) || {}; createAlert(+b.client_id, 'concern', 'High', `${c.pref || c.name || 'A client'}${c.room ? ' (' + c.room + ')' : ''} on rounds — ${label}. Go check now.`); }
+  res.json({ ok: true });
 });
 app.get('/api/rounds/coverage', requireAuth, (req, res) => res.json(scanCoverage()));
 // Per-employee accountability + facility compliance over a window.
@@ -7822,6 +7834,8 @@ app.get('/api/care-team/onshift', requireAuth, (req, res) => {
 });
 // Who's on shift + the lead in charge (behavioral-contract calls, decisions,
 // emergencies). The lead is set by leadership and shown to everyone on My Shift.
+// Seed the building's default lead (Brandon) once, so there's always a contact.
+if (!getState('default_lead')) setState('default_lead', JSON.stringify({ name: 'Brandon', role: 'On-call lead', phone: '+1 (330) 717-6514' }));
 function defaultLead() {
   try { const v = getState('default_lead'); if (v) return JSON.parse(v); } catch { /* */ }
   // Seed: if no one is assigned, the building defaults to Brandon.

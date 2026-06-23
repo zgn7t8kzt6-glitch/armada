@@ -2013,9 +2013,21 @@ async function doRoundScan(code, opts){
     if(r.flagged) scanBanner(`⚠ Logged, but FLAGGED: ${esc(r.reason||'suspicious pattern')}. A leader will review the photo.`, false);
     else scanBanner(`✓ <strong>${esc(r.label)}</strong> scanned${r.clients?` · ${r.clients} client check${r.clients>1?'s':''} logged`:''}${who}`, true);
     if(navigator.vibrate) navigator.vibrate(80);
+    renderScanStatus(r);
     if($('roundscan')&&$('roundscan').classList.contains('active')){ loadScanCoverage(); if(ME&&ME.role==='admin') loadScanReview(); }
   }catch(e){ scanBanner('✗ '+esc(e.message), false); }
 }
+// After a room scan, tap each client's condition — logged straight to the round.
+function renderScanStatus(r){
+  const sp=$('scanStatus'); if(!sp) return;
+  if(!(r.clientList&&r.clientList.length)){ sp.style.display='none'; sp.innerHTML=''; return; }
+  const opts=[['asleep','😴 Asleep'],['awake','🙂 Awake'],['good','✅ Good'],['distressed','😣 Distressed'],['needs_help','🆘 Needs help'],['out','🚪 Out'],['refused','🚫 Refused']];
+  sp.style.display='';
+  sp.innerHTML=`<div class="card" style="margin-top:10px;border-left:4px solid var(--gold)"><h3 style="margin:0 0 4px">${esc(r.label)} — how is each client?</h3><p class="sub sans" style="margin:0">Tap a status for everyone in the room.</p>
+    ${r.clientList.map(c=>`<div id="sst_${c.id}" style="padding:9px 0;border-top:1px solid var(--line)"><strong>${esc(c.name)}</strong>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${opts.map(([k,l])=>`<button class="btn btn-ghost btn-sm sans" onclick="roundStatus(${c.id},'${k}',${JSON.stringify(c.name).replace(/"/g,'&quot;')})">${l}</button>`).join('')}</div></div>`).join('')}</div>`;
+}
+async function roundStatus(cid,key,name){ try{ await api('/rounds/status',{method:'POST',body:JSON.stringify({client_id:cid,status:key})}); const row=$('sst_'+cid); if(row) row.innerHTML=`<strong>${esc(name)}</strong> <span class="risk ${key==='needs_help'||key==='distressed'?'risk-high':'risk-low'}">✓ ${esc(key.replace('_',' '))}</span>`; if(navigator.vibrate) navigator.vibrate(40); }catch(e){ alert(e.message); } }
 let SCAN_STREAM=null, SCAN_RAF=null;
 async function startScanner(){
   if(typeof jsQR!=='function'){ scanBanner('Scanner library not loaded — reload the page and try again.', false); return; }

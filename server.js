@@ -3163,6 +3163,38 @@ app.post('/api/hiring/profile/:role', requireAuth, (req, res) => {
     .run(role, side, b.purpose || '', JSON.stringify(b.qualities || []), JSON.stringify(b.responsibilities || []), JSON.stringify(b.limitations || []), JSON.stringify(b.interview || []), req.user.name);
   res.json({ ok: true });
 });
+// "How I'm doing" — every staff member sees their OWN numbers across everything we
+// track. Transparent by design: the same data leadership sees, for yourself.
+app.get('/api/my-stats', requireAuth, (req, res) => {
+  const uid = req.user.id, name = req.user.name;
+  const n7 = (sql, ...a) => { try { return db.prepare(sql).get(...a).n || 0; } catch { return 0; } };
+  // Hours + shifts worked this week (closed punches).
+  const wk = `datetime('now','-7 day')`;
+  const shifts7 = n7(`SELECT COUNT(*) n FROM time_entries WHERE user_id=? AND clock_in>=${wk}`, uid);
+  const hours = (() => { try { const r = db.prepare(`SELECT SUM((julianday(COALESCE(clock_out,datetime('now')))-julianday(clock_in))*24) h FROM time_entries WHERE user_id=? AND clock_in>=${wk}`).get(uid); return r.h ? Math.round(r.h * 10) / 10 : 0; } catch { return 0; } })();
+  // Rounds on-time: scans logged vs. flagged for review.
+  const scans7 = n7(`SELECT COUNT(*) n FROM round_scans WHERE by_id=? AND ts>=${wk}`, uid);
+  const flagged7 = n7(`SELECT COUNT(*) n FROM round_scans WHERE by_id=? AND flagged=1 AND ts>=${wk}`, uid);
+  // Standard streak (consecutive days joining the lineup).
+  const fdays = new Set(db.prepare(`SELECT DISTINCT date FROM focus_logs WHERE user_id=? AND date>=date('now','-30 day')`).all(uid).map((r) => r.date));
+  let streak = 0, cur = appToday(); while (fdays.has(cur)) { streak++; cur = addDays(cur, -1); }
+  const cards = [
+    { key: 'shifts', label: 'Shifts this week', value: shifts7, sub: hours ? hours + ' hrs' : '' },
+    { key: 'rounds', label: 'Rounds scanned (7d)', value: scans7, sub: flagged7 ? flagged7 + ' flagged for review' : 'all clean', good: !flagged7 },
+    { key: 'beds', label: 'Beds cleaned (7d)', value: n7(`SELECT COUNT(*) n FROM bed_turnovers WHERE cleaned_by=? AND status='clean' AND cleaned_at>=${wk}`, name) },
+    { key: 'alerts', label: 'Alerts handled (7d)', value: n7(`SELECT COUNT(*) n FROM alerts WHERE ack_name=? AND ack_at>=${wk}`, name) },
+    { key: 'meals', label: 'Meals inspected (7d)', value: n7(`SELECT COUNT(*) n FROM meal_checks WHERE by_name=? AND updated_at>=${wk}`, name) },
+    { key: 'snacks', label: 'Snack top-ups (7d)', value: n7(`SELECT COUNT(*) n FROM snack_checks WHERE by_name=? AND created_at>=${wk}`, name) },
+    { key: 'activities', label: 'Activities logged (7d)', value: n7(`SELECT COUNT(*) n FROM activities WHERE by_id=? AND created_at>=${wk}`, uid) },
+    { key: 'checkins', label: 'Behavior check-ins (7d)', value: n7(`SELECT COUNT(*) n FROM behavior_checkins WHERE by_id=? AND created_at>=${wk}`, uid) },
+    { key: 'touches', label: 'Personal touches (7d)', value: n7(`SELECT COUNT(*) n FROM delights WHERE by_id=? AND created_at>=${wk}`, uid) },
+    { key: 'wows', label: 'Wows given (7d)', value: n7(`SELECT COUNT(*) n FROM wows WHERE by_id=? AND created_at>=${wk}`, uid) },
+    { key: 'streak', label: 'Daily Standard streak', value: streak, sub: streak >= 3 ? '🔥 keep it up' : '', good: streak >= 3 },
+  ];
+  // Recognition you've received (someone logged a Wow naming you).
+  const wowsForMe = db.prepare(`SELECT text, by_name, substr(created_at,1,10) at FROM wows WHERE recognize=? AND created_at>=datetime('now','-30 day') ORDER BY id DESC LIMIT 8`).all(name);
+  res.json({ name, role: req.user.job_role || '', cards, wowsForMe });
+});
 // "My Role" — every staff member can always see their own job description,
 // responsibilities, and what's out of their lane.
 app.get('/api/my-role', requireAuth, (req, res) => {

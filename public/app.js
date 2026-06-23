@@ -189,7 +189,7 @@ const GROUP_OF={
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
-  myrole:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
+  myrole:'team',mystats:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
@@ -266,7 +266,7 @@ Object.entries(HUBS).forEach(([k,h])=>h.items.forEach(([v])=>{ HUB_OF[v]=k; }));
 const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // The handful of shared pages housing staff still get (their own tasks/comms/learning) —
 // everything else clinical/detox stays hidden from them.
-const UNIVERSAL_VIEWS = ['myrole','mytasks','messages','team','training','library','standard'];
+const UNIVERSAL_VIEWS = ['myrole','mystats','mytasks','messages','team','training','library','standard'];
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
@@ -274,9 +274,9 @@ const ROLE_MENU = {
   // tab), Intake (the full arrival checklist — dignity bag lives there, no standalone
   // Dignity tab), then the day's work. My Tasks lives ON My Shift, not as a tab.
   // My Role is folded into My Shift (its own collapsible at the bottom) — no tab.
-  'BHT / Tech': ['dashboard','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','library'],
-  'Nurse':      ['dashboard','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
-  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','mystats','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','library'],
+  'Nurse':      ['dashboard','mystats','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
+  'Front Desk': ['dashboard','mystats','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
   'Housing Director': ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
@@ -474,6 +474,7 @@ function show(v){
   if(v==='dignity') loadDignity();
   if(v==='laundry') loadLaundry();
   if(v==='myrole') loadMyRole();
+  if(v==='mystats') loadMyStats();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5243,6 +5244,17 @@ async function loadAlertScore(){
       <div><strong class="sans">Most responsive (7 days)</strong>${staff?`<table class="tbl" style="margin-top:6px">${staff}</table>`:'<div class="hint" style="margin-top:6px">No alerts handled yet.</div>'}</div>
       <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
     </div>`;
+}
+// "How I'm doing" — the staff member's own numbers, in the open.
+async function loadMyStats(){
+  const host=$('myStatsBody'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="empty">Loading…</div></div>';
+  let d; try{ d=await api('/my-stats'); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const cards=(d.cards||[]).map(c=>`<div class="ret-card"><div class="n" style="${c.good?'color:var(--good)':''}">${esc(String(c.value))}</div><div class="l">${esc(c.label)}${c.sub?' · '+esc(c.sub):''}</div></div>`).join('');
+  const wows=(d.wowsForMe||[]);
+  host.innerHTML=`<div class="card"><div class="ret-cards">${cards}</div>
+    <p class="hint" style="margin-top:10px">This is yours to watch — keep your rounds on time, your beds flipped, and the little things delivered. Numbers reset on a rolling 7-day window.</p></div>
+    ${wows.length?`<div class="card"><h3>👏 Recognition you've received (30 days)</h3>${wows.map(w=>`<div class="pc-note">👏 ${esc(w.text)} <span class="hint">— ${esc(w.by_name||'')}, ${esc(w.at||'')}</span></div>`).join('')}</div>`:''}`;
 }
 // My Role, folded into the bottom of My Shift (no separate tab) — collapsible so the
 // live shift stays on top: what I do, not my lane, how my shift flows, what great is.

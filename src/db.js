@@ -1371,6 +1371,8 @@ CREATE TABLE IF NOT EXISTS candidates (
 addColumn('role_profiles', 'limitations', 'TEXT');   // what's out of this role's lane (JSON array)
 addColumn('meal_checks', 'served_at', 'TEXT');       // HH:MM the meal was actually served (timeliness)
 addColumn('incidents', 'needs_contract', 'INTEGER'); // 1 = this incident calls for a behavioral contract
+addColumn('alerts', 'shift', 'TEXT');        // which shift this alert belongs to (clears each shift)
+addColumn('alerts', 'shift_date', 'TEXT');   // YYYY-MM-DD the alert's shift started
 // BEHAVIORAL CONTRACTS — an agreement with a client about expectations after an
 // incident. RTs can log information/observations against an existing one; clinical
 // owns the terms. A running note log keeps the chain of who-said-what.

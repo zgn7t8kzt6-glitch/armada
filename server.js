@@ -1848,12 +1848,26 @@ try {
     upd.run(rolesForAlert(a.kind, a.message || ''), a.id);
   }
 } catch { /* */ }
+// Alerts clear every shift: a "New" alert that wasn't acknowledged before the shift
+// ended is marked "Missed" (it leaves the active panel but is kept for the
+// completion scorecard). If the underlying condition still holds, the recurring
+// generators simply re-fire it for the new shift — so nothing real is lost, but the
+// panel starts each shift clean instead of piling up (which is what kills adoption).
+function rolloverAlerts() {
+  const today = appToday(), sh = currentShift();
+  // Adopt any legacy/unstamped New alerts into the current shift first.
+  db.prepare(`UPDATE alerts SET shift_date = ?, shift = ? WHERE status = 'New' AND (shift_date IS NULL OR shift IS NULL)`).run(today, sh);
+  // Anything still New from a prior shift → Missed.
+  db.prepare(`UPDATE alerts SET status = 'Missed' WHERE status = 'New' AND (shift_date != ? OR shift != ?)`).run(today, sh);
+}
 function createAlert(client_id, kind, level, message) {
-  // `client_id IS ?` (not `=`) so facility-wide alerts (client_id NULL, e.g.
-  // supply-out / coverage) dedup correctly — `= NULL` is never true in SQL.
-  const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id IS ? AND kind = ? AND status = 'New' AND created_at >= datetime('now','-1 day') LIMIT 1`).get(client_id || null, kind);
+  const today = appToday(), sh = currentShift();
+  // Dedup within the CURRENT shift (not a rolling day) so a persistent condition
+  // re-surfaces fresh each shift. `client_id IS ?` (not `=`) so facility-wide
+  // alerts (client_id NULL) dedup correctly — `= NULL` is never true in SQL.
+  const dup = db.prepare(`SELECT 1 FROM alerts WHERE client_id IS ? AND kind = ? AND status = 'New' AND shift_date = ? AND shift = ? LIMIT 1`).get(client_id || null, kind, today, sh);
   if (dup) return;
-  db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles) VALUES (?, ?, ?, ?, ?)`).run(client_id || null, kind, level || null, message, rolesForAlert(kind, message));
+  db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles, shift, shift_date) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(client_id || null, kind, level || null, message, rolesForAlert(kind, message), sh, today);
   if (level === 'High' || level === 'Critical') {
     // How much to put in the SMS/email (an insecure channel). Default 'locator':
     // first name + room so the on-call leader knows WHO and WHERE, without the
@@ -7333,6 +7347,7 @@ maybeSendWeeklyReport();
 
 /* ---------------- Proactive alerts ---------------- */
 app.get('/api/alerts', requireAuth, (req, res) => {
+  rolloverAlerts();   // clear the prior shift before showing the panel
   const status = req.query.status || 'New';
   // De-dupe: keep only the latest alert per client + kind so the panel stays clean.
   const sub = status === 'all'
@@ -7342,11 +7357,25 @@ app.get('/api/alerts', requireAuth, (req, res) => {
   const args = status === 'all' ? [] : [status, status];
   const rows = db.prepare(`SELECT a.*, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id ${where} ORDER BY a.id DESC LIMIT 100`).all(...args);
   const newCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT MAX(id) FROM alerts WHERE status = 'New' GROUP BY client_id, kind)`).get().n;
-  res.json({ alerts: rows, newCount });
+  // This shift's completion: how many alerts raised this shift have been handled.
+  const today = appToday(), sh = currentShift();
+  const tot = db.prepare(`SELECT COUNT(*) n FROM alerts WHERE shift_date = ? AND shift = ?`).get(today, sh).n;
+  const done = db.prepare(`SELECT COUNT(*) n FROM alerts WHERE shift_date = ? AND shift = ? AND status = 'Ack'`).get(today, sh).n;
+  res.json({ alerts: rows, newCount, shiftStats: { shift: sh, total: tot, done, pct: tot ? Math.round(done / tot * 100) : null } });
 });
 app.post('/api/alerts/:id/ack', requireAuth, (req, res) => {
   db.prepare(`UPDATE alerts SET status = 'Ack', ack_by = ?, ack_name = ?, ack_at = datetime('now') WHERE id = ?`).run(req.user.id, req.user.name, req.params.id);
   res.json({ ok: true });
+});
+// Leadership: alert-response scorecard — what % of alerts get handled each shift,
+// who's handling them, and what got missed. Honest accountability without the flood.
+app.get('/api/alerts/scorecard', requireAuth, requireAdmin, (req, res) => {
+  rolloverAlerts();
+  const today = appToday(), sh = currentShift();
+  const agg = (where, args) => { const r = db.prepare(`SELECT COUNT(*) total, SUM(status='Ack') done, SUM(status='Missed') missed FROM alerts ${where}`).get(...args); const total = r.total || 0, dn = r.done || 0, ms = r.missed || 0; return { total, done: dn, missed: ms, pct: total ? Math.round(dn / total * 100) : null }; };
+  const byStaff = db.prepare(`SELECT ack_name name, COUNT(*) done FROM alerts WHERE status = 'Ack' AND ack_name IS NOT NULL AND shift_date >= date('now','-7 day') GROUP BY ack_name ORDER BY done DESC LIMIT 10`).all();
+  const recentMissed = db.prepare(`SELECT a.message, a.shift, a.shift_date, a.level, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id WHERE a.status = 'Missed' AND a.shift_date >= date('now','-3 day') ORDER BY a.id DESC LIMIT 25`).all();
+  res.json({ shift: sh, thisShift: agg(`WHERE shift_date = ? AND shift = ?`, [today, sh]), today: agg(`WHERE shift_date = ?`, [today]), week: agg(`WHERE shift_date >= date('now','-7 day')`, []), byStaff, recentMissed });
 });
 
 /* ---------------- Employee accountability ---------------- */

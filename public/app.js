@@ -3138,7 +3138,7 @@ async function loadCmdRevenue(){
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
-  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning(); loadCmdRevenue();
+  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning(); loadCmdRevenue(); loadAlertScore();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
@@ -5167,13 +5167,29 @@ async function setFocus(){
   await api('/focus/set',{method:'POST',body:JSON.stringify({t,g})});
   loadToday();
 }
+async function loadAlertScore(){
+  const card=$('alertScoreCard'), body=$('alertScoreBody'); if(!card||!body) return;
+  let d; try{ d=await api('/alerts/scorecard'); }catch(e){ card.style.display='none'; return; }
+  card.style.display='';
+  const pc=p=>p==null?'var(--muted)':p>=90?'var(--good)':p>=70?'var(--gold)':'var(--danger)';
+  const cardFor=(lbl,s)=>`<div class="ret-card"><div class="n" style="color:${pc(s.pct)}">${s.pct!=null?s.pct+'%':'—'}</div><div class="l">${lbl} · ${s.done}/${s.total}${s.missed?' · '+s.missed+' missed':''}</div></div>`;
+  const staff=(d.byStaff||[]).map((s,i)=>`<tr><td>${['🥇','🥈','🥉'][i]||(i+1)+'.'} ${esc(s.name)}</td><td>${s.done} handled</td></tr>`).join('');
+  const missed=(d.recentMissed||[]).map(m=>`<div class="pc-note">${m.level==='High'||m.level==='Critical'?'🔴 ':''}${esc(m.message)} <span class="hint">— ${esc(m.pref||'house')} · ${esc(m.shift||'')} ${esc(m.shift_date||'')}</span></div>`).join('')||'<div class="hint">Nothing missed in the last 3 days. 👏</div>';
+  body.innerHTML=`<div class="ret-cards">${cardFor('This '+esc(d.shift)+' shift',d.thisShift)}${cardFor('Today',d.today)}${cardFor('This week',d.week)}</div>
+    <div class="grid2" style="margin-top:14px">
+      <div><strong class="sans">Most responsive (7 days)</strong>${staff?`<table class="tbl" style="margin-top:6px">${staff}</table>`:'<div class="hint" style="margin-top:6px">No alerts handled yet.</div>'}</div>
+      <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
+    </div>`;
+}
 function renderAlertsList(d){
   if(!$('alertsList')) return;
   $('alertCount').textContent = d.newCount || '';
-  $('alertsList').innerHTML = (d.alerts||[]).length ? d.alerts.map(a=>`<div class="todo">
+  const ss=d.shiftStats;
+  const head = ss&&ss.total ? `<div class="hint" style="margin-bottom:7px">${esc(ss.shift)} shift — <strong>${ss.done}/${ss.total} handled${ss.pct!=null?' ('+ss.pct+'%)':''}</strong> · alerts clear at shift change</div>` : '';
+  $('alertsList').innerHTML = head + ((d.alerts||[]).length ? d.alerts.map(a=>`<div class="todo">
       <div class="txt">⚡ ${esc(a.message)} <span class="hint">· ${esc(a.created_at)}</span></div>
       ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">Open</button>`:''}
-      <button class="btn btn-ghost btn-sm sans" onclick="ackAlert(${a.id})">Got it ✓</button></div>`).join('') : '<div class="pc-note">✓ No open alerts.</div>';
+      <button class="btn btn-ghost btn-sm sans" onclick="ackAlert(${a.id})">Got it ✓</button></div>`).join('') : '<div class="pc-note">✓ No open alerts this shift.</div>');
 }
 async function ackAlert(id){
   await api('/alerts/'+id+'/ack',{method:'POST'});

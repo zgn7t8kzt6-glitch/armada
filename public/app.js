@@ -2609,16 +2609,20 @@ async function loadRounds(){
   if($('roundsQuestion')) $('roundsQuestion').innerHTML = d.question ? `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Ask every client this ${esc((d.shift||'').toLowerCase())} shift</div><h3 style="margin:4px 0 0">“${esc(d.question)}”</h3><p class="sub sans" style="margin:4px 0 0">Ask it on rounds. Capture anything worth keeping with 📝 Note next to the client.</p></div>` : '';
   const rows=[...d.rows].sort((a,b)=>(b.overdue-a.overdue)||((b.minsSince??1e9)-(a.minsSince??1e9)));
   const scanBannerHtml = `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:220px"><strong>This is the status board — to actually do a round, scan each room.</strong> <span class="hint">A check below only clears when you scan that room's QR; there is no desk check-off. The clock reflects verified scans.</span></div><button class="btn btn-gold sans" onclick="show('roundscan')">📍 Start Rounds</button></div></div>`;
-  board.innerHTML = scanBannerHtml + rows.map(r=>{
+  const stOpts=[['asleep','😴 Asleep'],['awake','🙂 Awake'],['good','✅ Good'],['distressed','😣 Distressed'],['needs_help','🆘 Needs help'],['out','🚪 Out'],['refused','🚫 Refused']];
+  board.innerHTML = scanBannerHtml
+    + `<p class="sub sans" style="margin:4px 2px 8px">Scan each room's QR to log the round, then tap how each client is doing.</p>`
+    + rows.map(r=>{
     const when = r.minsSince==null?'never scanned':(r.minsSince+'m ago'+(r.lastBy?' · '+esc(r.lastBy):''));
     const noteHtml = r.note ? `<div class="hint" style="margin-top:2px">📝 ${esc(r.note)}${r.noteBy?' <span style="opacity:.7">— '+esc(r.noteBy)+'</span>':''}</div>` : '';
-    return `<div class="cmd-row ${r.overdue?'cmd-row-flag':''}">
+    const nm=JSON.stringify(r.name||'').replace(/"/g,'&quot;');
+    const stBtns=stOpts.map(([k,l])=>`<button class="btn btn-ghost btn-sm sans" onclick="roundStatus(${r.id},'${k}',${nm})">${l}</button>`).join('');
+    return `<div class="cmd-row ${r.overdue?'cmd-row-flag':''}" style="flex-wrap:wrap">
       ${r.photo?`<img src="${esc(r.photo)}" class="client-photo sm" alt=""/>`:''}
-      <div class="cmd-row-main"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''}
-        <div class="hint">${r.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}last verified: ${when}${r.lastStatus&&r.lastStatus!=='ok'?' · '+esc(r.lastStatus):''} · q${r.interval}</div>${noteHtml}</div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm sans" onclick="roundNote(${r.id}, ${JSON.stringify(r.note||'').replace(/"/g,'&quot;')})" title="Add or edit an optional note">📝 ${r.note?'Edit note':'Note'}</button>
-      </div></div>`;
+      <div class="cmd-row-main" style="flex:1;min-width:180px"><strong>${esc(r.name)}</strong>${r.room?' <span class="hint">· '+esc(r.room)+'</span>':''}
+        <div class="hint">${r.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}last verified: ${when}${r.lastStatus&&r.lastStatus!=='ok'?' · <b>'+esc(r.lastStatus)+'</b>':''} · q${r.interval}</div>${noteHtml}</div>
+      <button class="btn btn-ghost btn-sm sans" onclick="roundNote(${r.id}, ${JSON.stringify(r.note||'').replace(/"/g,'&quot;')})" title="Add or edit an optional note">📝 ${r.note?'Edit note':'Note'}</button>
+      <div id="sst_${r.id}" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">${stBtns}</div></div>`;
   }).join('');
   $('roundsAccount').innerHTML = (d.byPerson||[]).length ? d.byPerson.map(p=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(p.k)}</strong></div><span class="chip">${p.n} checks</span></div>`).join('') : '<div class="hint">No checks logged today yet.</div>';
   if(ME&&ME.role==='admin'){ try{ const es=await api('/rounds/escalation'); $('roundsEscalateRow').innerHTML=`<label class="trg" style="display:inline-flex"><input type="checkbox" ${es.on?'checked':''} onchange="setRoundsEscalation(this.checked)"/> Text the on-call leader when a client goes overdue ${es.smsReady?'':'<span class="hint">(connect Texting first)</span>'}</label>`; }catch(e){} }

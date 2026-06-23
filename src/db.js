@@ -1370,6 +1370,26 @@ CREATE TABLE IF NOT EXISTS candidates (
 `);
 addColumn('role_profiles', 'limitations', 'TEXT');   // what's out of this role's lane (JSON array)
 addColumn('meal_checks', 'served_at', 'TEXT');       // HH:MM the meal was actually served (timeliness)
+addColumn('incidents', 'needs_contract', 'INTEGER'); // 1 = this incident calls for a behavioral contract
+// BEHAVIORAL CONTRACTS — an agreement with a client about expectations after an
+// incident. RTs can log information/observations against an existing one; clinical
+// owns the terms. A running note log keeps the chain of who-said-what.
+db.exec(`CREATE TABLE IF NOT EXISTS behavior_contracts (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'Active',     -- Active | Closed
+  reason TEXT, terms TEXT,
+  incident_id INTEGER,
+  started_by_id INTEGER REFERENCES users(id), started_by_name TEXT,
+  closed_at TEXT, closed_by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS behavior_contract_notes (
+  id INTEGER PRIMARY KEY,
+  contract_id INTEGER REFERENCES behavior_contracts(id) ON DELETE CASCADE,
+  note TEXT NOT NULL, by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // SNACK STATION — was the snack/coffee/juice station stocked, and when? Respect = the
 // little things are always there. One row per stock-up, newest wins for "stocked now".
 db.exec(`CREATE TABLE IF NOT EXISTS snack_checks (

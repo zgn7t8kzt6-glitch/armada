@@ -5245,16 +5245,55 @@ async function loadIncidents(){
   const { incidents } = await api('/incidents');
   const sev={Low:'risk-low',Moderate:'risk-elev',High:'risk-high',Critical:'risk-high'};
   $('inList').innerHTML = incidents.length ? incidents.map(i=>`<div class="todo ${i.status==='Closed'?'done':''}">
-      <div class="txt"><span class="risk ${sev[i.severity]||''}">${esc(i.severity)}</span> <strong>${esc(i.type)}</strong>${i.pref?' · '+esc(i.pref):''} — ${esc(i.description)}
+      <div class="txt"><span class="risk ${sev[i.severity]||''}">${esc(i.severity)}</span> <strong>${esc(i.type)}</strong>${i.pref?' · '+esc(i.pref):''} ${i.needs_contract?'<span class="risk risk-high">needs behavioral contract</span>':''} — ${esc(i.description)}
         ${i.action_taken?'<div class="hint">Action: '+esc(i.action_taken)+'</div>':''}<div class="hint">${esc(i.created_at)} · ${esc(i.reported_by_name||'')} · ${esc(i.status)}</div></div>
+      ${i.needs_contract?`<button class="btn btn-gold btn-sm sans" onclick="startContract(${i.client_id||'null'},${i.id})">Start contract</button>`:''}
       ${i.status!=='Closed'?`<button class="btn btn-ghost btn-sm sans" onclick="setIncident(${i.id},'Reviewed')">Reviewed</button><button class="btn btn-ghost btn-sm sans" onclick="setIncident(${i.id},'Closed')">Close</button>`:''}</div>`).join('') : '<div class="empty">No incidents reported.</div>';
+  loadBContracts();
 }
 async function addIncident(){
   if(!$('in_desc').value.trim()) return;
-  await api('/incidents',{method:'POST',body:JSON.stringify({client_id:$('in_client').value||null,type:$('in_type').value,severity:$('in_sev').value,description:$('in_desc').value,action_taken:$('in_action').value})});
-  $('in_desc').value=''; $('in_action').value=''; loadIncidents();
+  await api('/incidents',{method:'POST',body:JSON.stringify({client_id:$('in_client').value||null,type:$('in_type').value,severity:$('in_sev').value,description:$('in_desc').value,action_taken:$('in_action').value,needs_contract:$('in_needs_contract')&&$('in_needs_contract').checked})});
+  $('in_desc').value=''; $('in_action').value=''; if($('in_needs_contract'))$('in_needs_contract').checked=false; loadIncidents();
 }
 async function setIncident(id,status){ await api('/incidents/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadIncidents(); }
+
+/* ---- Behavioral contracts ---- */
+async function loadBContracts(){
+  const el=$('bcList'); if(!el) return;
+  let d; try{ d=await api('/behavior-contracts'); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  el.innerHTML = d.contracts.length ? d.contracts.map(bc=>`<div class="todo ${bc.status==='Closed'?'done':''}">
+      <div class="txt"><strong>${esc(bc.pref||'Client')}</strong> <span class="risk ${bc.status==='Active'?'risk-elev':'risk-low'}">${esc(bc.status)}</span>
+        ${bc.reason?'<div class="hint">Reason: '+esc(bc.reason)+'</div>':''}
+        ${bc.terms?'<div class="hint">Terms: '+esc(bc.terms)+'</div>':''}
+        ${bc.lastNote?'<div class="hint">📝 '+esc(bc.lastNote)+'</div>':''}
+        <div class="hint">${bc.noteCount} note(s)${bc.started_by_name?' · started by '+esc(bc.started_by_name):''}</div></div>
+      <button class="btn btn-gold btn-sm sans" onclick="openBContract(${bc.id})">Add / view notes</button>
+      ${bc.status==='Active'?`<button class="btn btn-ghost btn-sm sans" onclick="setBContract(${bc.id},'Closed')">Close</button>`:`<button class="btn btn-ghost btn-sm sans" onclick="setBContract(${bc.id},'Active')">Reopen</button>`}
+    </div>`).join('') : '<div class="empty">No behavioral contracts yet.</div>';
+}
+function newBContract(){ startContract(null,null); }
+async function startContract(clientId, incidentId){
+  const save=hmodal(`<h3>New behavioral contract</h3>
+    <label>Client</label><select id="bc_client"></select>
+    <label>Reason — what prompted it</label><textarea id="bc_reason" rows="2" placeholder="e.g. repeated curfew/boundary issue; conflict on the unit"></textarea>
+    <label>Terms / expectations agreed</label><textarea id="bc_terms" rows="3" placeholder="What the client agrees to going forward"></textarea>`);
+  await fillClientSelect($('bc_client'),'Select client'); if(clientId) $('bc_client').value=clientId;
+  save.onclick=async()=>{ if(!$('bc_client').value){ alert('Pick a client.'); return; }
+    try{ await api('/behavior-contracts',{method:'POST',body:JSON.stringify({client_id:$('bc_client').value,reason:$('bc_reason').value,terms:$('bc_terms').value,incident_id:incidentId})}); closeHModal(); loadIncidents(); }catch(e){ alert(e.message); } };
+}
+async function openBContract(id){
+  let bc; try{ bc=await api('/behavior-contracts/'+id); }catch(e){ alert(e.message); return; }
+  const notes=(bc.notes||[]).map(n=>`<div class="pc-note">📝 ${esc(n.note)} <span class="hint">— ${esc(n.by_name||'')}, ${esc(n.created_at)}</span></div>`).join('')||'<div class="hint">No notes yet.</div>';
+  const save=hmodal(`<h3>Behavioral contract — ${esc(bc.pref||'Client')}</h3>
+    ${bc.reason?`<p class="sub sans"><b>Reason:</b> ${esc(bc.reason)}</p>`:''}
+    ${bc.terms?`<p class="sub sans"><b>Terms:</b> ${esc(bc.terms)}</p>`:''}
+    <label>Add information / observation</label><textarea id="bc_note" rows="3" placeholder="What you observed, a step taken, how the client is doing against the contract…"></textarea>
+    <div style="max-height:240px;overflow:auto;margin-top:12px">${notes}</div>`);
+  save.onclick=async()=>{ const note=$('bc_note').value.trim(); if(!note){ alert('Write a note.'); return; }
+    try{ await api('/behavior-contracts/'+id+'/note',{method:'POST',body:JSON.stringify({note})}); closeHModal(); loadIncidents(); }catch(e){ alert(e.message); } };
+}
+async function setBContract(id,status){ try{ await api('/behavior-contracts/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadIncidents(); }catch(e){ alert(e.message); } }
 
 /* ---- family ---- */
 async function loadFamily(){

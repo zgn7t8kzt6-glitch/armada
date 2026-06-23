@@ -1825,6 +1825,7 @@ function rolesForAlert(kind, message = '') {
   if (k === 'docs') return wrap(['Nurse', 'Case Manager', 'Therapist', CLIN]);
   // QA / compliance + discharge-retention monitoring — the Director of Operations owns these.
   if (k === 'incident') return wrap(['Nurse', CLIN, OPS]);                  // incidents, med errors
+  if (k === 'behavior_contract') return wrap(['BHT / Tech', 'Nurse', 'Case Manager', CLIN]);   // a contract is needed / was started
   if (k === 'dc_incomplete') return wrap(['Case Manager', CLIN, OPS]);      // discharge-form completion
   if (k === 'continuum') return wrap(['Case Manager', CLIN, OPS]);          // aftercare/continuum gaps
   if (k === 'recovery') return wrap([CLIN, OPS]);                           // grievances / low experience score
@@ -5068,15 +5069,56 @@ app.get('/api/incidents', requireAuth, (req, res) => {
 });
 app.post('/api/incidents', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.type || !b.description?.trim()) return res.status(400).json({ error: 'Missing' });
-  db.prepare(`INSERT INTO incidents (client_id, type, severity, description, action_taken, reported_by, reported_by_name) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, req.user.id, req.user.name);
+  const needsContract = b.needs_contract ? 1 : 0;
+  db.prepare(`INSERT INTO incidents (client_id, type, severity, description, action_taken, needs_contract, reported_by, reported_by_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, needsContract, req.user.id, req.user.name);
   if (b.severity === 'High' || b.severity === 'Critical') createAlert(b.client_id || null, 'incident', b.severity, `${b.severity} incident (${b.type}): ${b.description.trim().slice(0, 80)}`);
-  audit({ user: req.user, action: 'INCIDENT', entity: 'client', entity_id: b.client_id ? +b.client_id : null, detail: `${b.type}/${b.severity}`, ip: req.ip });
+  if (needsContract) createAlert(b.client_id || null, 'behavior_contract', 'Elevated', `Incident flagged as needing a behavioral contract by ${req.user.name}: ${b.description.trim().slice(0, 70)}`);
+  audit({ user: req.user, action: 'INCIDENT', entity: 'client', entity_id: b.client_id ? +b.client_id : null, detail: `${b.type}/${b.severity}${needsContract ? '/needs-contract' : ''}`, ip: req.ip });
   res.json({ ok: true });
 });
 app.post('/api/incidents/:id/status', requireAuth, (req, res) => {
   const st = ['Open', 'Reviewed', 'Closed'].includes(req.body?.status) ? req.body.status : 'Reviewed';
   db.prepare(`UPDATE incidents SET status = ? WHERE id = ?`).run(st, req.params.id);
+  res.json({ ok: true });
+});
+
+/* ---------------- Behavioral contracts ---------------- */
+app.get('/api/behavior-contracts', requireAuth, (req, res) => {
+  const contracts = db.prepare(`SELECT bc.*, c.pref,
+      (SELECT COUNT(*) FROM behavior_contract_notes n WHERE n.contract_id = bc.id) noteCount,
+      (SELECT note FROM behavior_contract_notes n WHERE n.contract_id = bc.id ORDER BY n.id DESC LIMIT 1) lastNote
+    FROM behavior_contracts bc LEFT JOIN clients c ON c.id = bc.client_id
+    ORDER BY (bc.status = 'Closed'), bc.id DESC LIMIT 100`).all();
+  res.json({ contracts });
+});
+app.get('/api/behavior-contracts/:id', requireAuth, (req, res) => {
+  const bc = db.prepare(`SELECT bc.*, c.pref FROM behavior_contracts bc LEFT JOIN clients c ON c.id = bc.client_id WHERE bc.id = ?`).get(req.params.id);
+  if (!bc) return res.status(404).json({ error: 'Not found' });
+  bc.notes = db.prepare(`SELECT * FROM behavior_contract_notes WHERE contract_id = ? ORDER BY id DESC`).all(bc.id);
+  res.json(bc);
+});
+app.post('/api/behavior-contracts', requireAuth, (req, res) => {
+  const b = req.body || {}; if (!b.client_id) return res.status(400).json({ error: 'Pick a client.' });
+  const r = db.prepare(`INSERT INTO behavior_contracts (client_id, reason, terms, incident_id, started_by_id, started_by_name) VALUES (?,?,?,?,?,?)`)
+    .run(b.client_id, (b.reason || '').trim() || null, (b.terms || '').trim() || null, b.incident_id || null, req.user.id, req.user.name);
+  if (b.incident_id) db.prepare(`UPDATE incidents SET needs_contract = 0 WHERE id = ?`).run(b.incident_id);
+  createAlert(b.client_id, 'behavior_contract', 'Elevated', `Behavioral contract started by ${req.user.name}.`);
+  audit({ user: req.user, action: 'BCONTRACT_NEW', entity: 'client', entity_id: +b.client_id, ip: req.ip });
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+app.post('/api/behavior-contracts/:id/note', requireAuth, (req, res) => {
+  const note = (req.body?.note || '').trim(); if (!note) return res.status(400).json({ error: 'Empty note.' });
+  const bc = db.prepare(`SELECT id, client_id FROM behavior_contracts WHERE id = ?`).get(req.params.id);
+  if (!bc) return res.status(404).json({ error: 'Not found' });
+  db.prepare(`INSERT INTO behavior_contract_notes (contract_id, note, by_id, by_name) VALUES (?,?,?,?)`).run(bc.id, note, req.user.id, req.user.name);
+  audit({ user: req.user, action: 'BCONTRACT_NOTE', entity: 'client', entity_id: bc.client_id, ip: req.ip });
+  res.json({ ok: true });
+});
+app.post('/api/behavior-contracts/:id/status', requireAuth, (req, res) => {
+  const st = ['Active', 'Closed'].includes(req.body?.status) ? req.body.status : 'Active';
+  if (st === 'Closed') db.prepare(`UPDATE behavior_contracts SET status = 'Closed', closed_at = datetime('now'), closed_by_name = ? WHERE id = ?`).run(req.user.name, req.params.id);
+  else db.prepare(`UPDATE behavior_contracts SET status = 'Active', closed_at = NULL WHERE id = ?`).run(req.params.id);
   res.json({ ok: true });
 });
 

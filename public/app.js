@@ -3515,8 +3515,13 @@ async function loadGeofence(){
       <span>Radius <input id="gf_radius" type="number" min="30" value="${g.radius}" style="width:80px"/> m <button class="btn btn-ghost btn-sm sans" onclick="saveGeofence({radius:$('gf_radius').value})">Save radius</button></span>
       <button class="btn btn-gold btn-sm sans" onclick="setGeofenceHere()">📍 Use my current location</button>
     </div>
-    <p class="hint" id="gf_msg" style="margin-top:6px">Currently: ${g.on?'<strong style="color:var(--good)">ON</strong>':'off'} · center ${g.lat.toFixed(5)}, ${g.lon.toFixed(5)} · ${g.radius}m</p>`;
+    <p class="hint" id="gf_msg" style="margin-top:6px">Currently: ${g.on?'<strong style="color:var(--good)">ON</strong>':'off'} · center ${g.lat.toFixed(5)}, ${g.lon.toFixed(5)} · ${g.radius}m</p>
+    <hr style="margin:12px 0">
+    <p class="sub sans" style="margin:0 0 6px">📶 <strong>Allow the Armada WiFi</strong> — staff on the building WiFi can clock in even without GPS. Stand on the office WiFi and tap below once.</p>
+    <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm sans" onclick="allowNetwork()">📶 Allow this network</button>${(g.ips&&g.ips.length)?`<button class="btn btn-ghost btn-sm sans" onclick="clearNetworks()">Clear</button>`:''}<span class="hint">${(g.ips&&g.ips.length)?'Approved: '+g.ips.map(esc).join(', '):'No network approved yet — GPS only.'}</span></div>`;
 }
+async function allowNetwork(){ try{ const r=await api('/clock/allow-network',{method:'POST'}); alert('✓ This network is approved for clock-in: '+r.ip); loadGeofence(); }catch(e){ alert(e.message); } }
+async function clearNetworks(){ if(!confirm('Remove all approved networks? Staff will need GPS at the building.'))return; try{ await api('/clock/clear-networks',{method:'POST'}); loadGeofence(); }catch(e){ alert(e.message); } }
 async function saveGeofence(patch){
   try{ const g=await api('/clock/geofence',{method:'POST',body:JSON.stringify(patch)}); if($('gf_msg'))$('gf_msg').innerHTML=`✓ Saved · ${g.on?'<strong style="color:var(--good)">ON</strong>':'off'} · center ${g.lat.toFixed(5)}, ${g.lon.toFixed(5)} · ${g.radius}m`; }
   catch(e){ if($('gf_msg'))$('gf_msg').textContent=e.message; }

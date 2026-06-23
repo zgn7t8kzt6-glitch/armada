@@ -3165,49 +3165,55 @@ app.post('/api/hiring/profile/:role', requireAuth, (req, res) => {
     .run(role, side, b.purpose || '', JSON.stringify(b.qualities || []), JSON.stringify(b.responsibilities || []), JSON.stringify(b.limitations || []), JSON.stringify(b.interview || []), req.user.name);
   res.json({ ok: true });
 });
-// "How I'm doing" — each staff member's performance as a % of what they were
-// supposed to do, per track, plus the care/extras they delivered. Targets scale
-// with shifts worked, so it's fair. Transparent: the same view leadership gets.
-function userStats(u) {
-  const uid = u.id, name = u.name, wk = `datetime('now','-7 day')`;
+// "How I'm doing" — performance as a % of what they were supposed to do, per track,
+// CLIENT-CARE first, then operations. Windowed so we can show week-over-week trend.
+function userStats(u, win) {
+  win = win || { since: 7, until: 0 };
+  const uid = u.id, name = u.name;
+  const S = `datetime('now','-${win.since} day')`, U = win.until > 0 ? `datetime('now','-${win.until} day')` : `datetime('now','+1 minute')`;
+  const dS = `date('now','-${win.since} day')`, dU = win.until > 0 ? `date('now','-${win.until} day')` : `date('now','+1 day')`;
   const g = (sql, ...a) => { try { return db.prepare(sql).get(...a).n || 0; } catch { return 0; } };
-  const shifts7 = g(`SELECT COUNT(*) n FROM time_entries WHERE user_id=? AND clock_in>=${wk}`, uid);
-  const hours = (() => { try { const r = db.prepare(`SELECT SUM((julianday(COALESCE(clock_out,datetime('now')))-julianday(clock_in))*24) h FROM time_entries WHERE user_id=? AND clock_in>=${wk}`).get(uid); return r.h ? Math.round(r.h * 10) / 10 : 0; } catch { return 0; } })();
-  const scans7 = g(`SELECT COUNT(*) n FROM round_scans WHERE by_id=? AND ts>=${wk}`, uid);
-  const flagged7 = g(`SELECT COUNT(*) n FROM round_scans WHERE by_id=? AND flagged=1 AND ts>=${wk}`, uid);
-  const snacks7 = g(`SELECT COUNT(*) n FROM snack_checks WHERE by_name=? AND created_at>=${wk}`, name);
-  const checklist7 = g(`SELECT COUNT(*) n FROM shift_task_done WHERE by_name=? AND created_at>=${wk}`, name);
-  const checkins7 = g(`SELECT COUNT(*) n FROM behavior_checkins WHERE by_id=? AND created_at>=${wk}`, uid);
-  const sched = g(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.user_id=? AND s.date>=date('now','-7 day') AND a.status!='called_off'`, uid);
-  const present = g(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.user_id=? AND s.date>=date('now','-7 day') AND a.attendance='present'`, uid);
+  const shifts = g(`SELECT COUNT(*) n FROM time_entries WHERE user_id=? AND clock_in>=${S} AND clock_in<${U}`, uid);
+  const hours = (() => { try { const r = db.prepare(`SELECT SUM((julianday(COALESCE(clock_out,datetime('now')))-julianday(clock_in))*24) h FROM time_entries WHERE user_id=? AND clock_in>=${S} AND clock_in<${U}`).get(uid); return r.h ? Math.round(r.h * 10) / 10 : 0; } catch { return 0; } })();
+  const scans = g(`SELECT COUNT(*) n FROM round_scans WHERE by_id=? AND ts>=${S} AND ts<${U}`, uid);
+  const flagged = g(`SELECT COUNT(*) n FROM round_scans WHERE by_id=? AND flagged=1 AND ts>=${S} AND ts<${U}`, uid);
+  const snacks = g(`SELECT COUNT(*) n FROM snack_checks WHERE by_name=? AND created_at>=${S} AND created_at<${U}`, name);
+  const checklist = g(`SELECT COUNT(*) n FROM shift_task_done WHERE by_name=? AND created_at>=${S} AND created_at<${U}`, name);
+  const checkins = g(`SELECT COUNT(*) n FROM behavior_checkins WHERE by_id=? AND created_at>=${S} AND created_at<${U}`, uid);
+  const sched = g(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.user_id=? AND s.date>=${dS} AND s.date<${dU} AND a.status!='called_off'`, uid);
+  const present = g(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.user_id=? AND s.date>=${dS} AND s.date<${dU} AND a.attendance='present'`, uid);
   const contracts = g(`SELECT COUNT(*) n FROM behavior_contracts WHERE status='Active'`);
   const items = g(`SELECT COUNT(*) n FROM shift_tasks WHERE active=1`);
   const ROUNDS_PER_SHIFT = +autoCfg('target_rounds_per_shift', 8);
   const SNACKS_PER_SHIFT = +autoCfg('target_snacks_per_shift', 1);
   const pct = (d, t) => (t > 0 ? Math.min(100, Math.round(d / t * 100)) : null);
+  // Client-care first (eyes on people, the agreements that keep them safe), then ops.
   const required = [];
+  if (shifts > 0) { const t = shifts * ROUNDS_PER_SHIFT; required.push({ label: 'Rounds — eyes on every client', done: scans, target: t, pct: pct(scans, t), care: true }); }
+  if (contracts > 0 && shifts > 0) { const t = contracts * shifts; required.push({ label: 'Behavior check-ins', done: checkins, target: t, pct: pct(checkins, t), care: true }); }
   if (sched > 0) required.push({ label: 'Attendance', done: present, target: sched, pct: pct(present, sched) });
-  if (shifts7 > 0) { const t = shifts7 * ROUNDS_PER_SHIFT; required.push({ label: 'Rounds on cadence', done: scans7, target: t, pct: pct(scans7, t) }); }
-  if (items > 0 && shifts7 > 0) { const t = items * shifts7; required.push({ label: 'Shift checklist', done: checklist7, target: t, pct: pct(checklist7, t) }); }
-  if (shifts7 > 0) { const t = Math.max(1, shifts7 * SNACKS_PER_SHIFT); required.push({ label: 'Snack station', done: snacks7, target: t, pct: pct(snacks7, t) }); }
-  if (contracts > 0 && shifts7 > 0) { const t = contracts * shifts7; required.push({ label: 'Behavior check-ins', done: checkins7, target: t, pct: pct(checkins7, t) }); }
+  if (items > 0 && shifts > 0) { const t = items * shifts; required.push({ label: 'Shift checklist', done: checklist, target: t, pct: pct(checklist, t) }); }
+  if (shifts > 0) { const t = Math.max(1, shifts * SNACKS_PER_SHIFT); required.push({ label: 'Snack station', done: snacks, target: t, pct: pct(snacks, t) }); }
   const pcts = required.map((r) => r.pct).filter((p) => p != null);
   const overall = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
   const extras = [
-    { label: 'Beds cleaned', value: g(`SELECT COUNT(*) n FROM bed_turnovers WHERE cleaned_by=? AND status='clean' AND cleaned_at>=${wk}`, name) },
-    { label: 'Meals inspected', value: g(`SELECT COUNT(*) n FROM meal_checks WHERE by_name=? AND updated_at>=${wk}`, name) },
-    { label: 'Alerts handled', value: g(`SELECT COUNT(*) n FROM alerts WHERE ack_name=? AND ack_at>=${wk}`, name) },
-    { label: 'Activities logged', value: g(`SELECT COUNT(*) n FROM activities WHERE by_id=? AND created_at>=${wk}`, uid) },
-    { label: 'Personal touches', value: g(`SELECT COUNT(*) n FROM delights WHERE by_id=? AND created_at>=${wk}`, uid) },
-    { label: 'Wows given', value: g(`SELECT COUNT(*) n FROM wows WHERE by_id=? AND created_at>=${wk}`, uid) },
+    { label: 'Personal touches', value: g(`SELECT COUNT(*) n FROM delights WHERE by_id=? AND created_at>=${S} AND created_at<${U}`, uid), care: true },
+    { label: 'Activities logged', value: g(`SELECT COUNT(*) n FROM activities WHERE by_id=? AND created_at>=${S} AND created_at<${U}`, uid), care: true },
+    { label: 'Alerts handled', value: g(`SELECT COUNT(*) n FROM alerts WHERE ack_name=? AND ack_at>=${S} AND ack_at<${U}`, name), care: true },
+    { label: 'Meals inspected', value: g(`SELECT COUNT(*) n FROM meal_checks WHERE by_name=? AND updated_at>=${S} AND updated_at<${U}`, name) },
+    { label: 'Beds cleaned', value: g(`SELECT COUNT(*) n FROM bed_turnovers WHERE cleaned_by=? AND status='clean' AND cleaned_at>=${S} AND cleaned_at<${U}`, name) },
+    { label: 'Wows given', value: g(`SELECT COUNT(*) n FROM wows WHERE by_id=? AND created_at>=${S} AND created_at<${U}`, uid) },
   ];
-  return { id: uid, name, role: u.job_role || '', shifts7, hours, flagged7, overall, required, extras };
+  return { id: uid, name, role: u.job_role || '', shifts7: shifts, hours, flagged7: flagged, overall, required, extras };
 }
+// Overall % a week earlier, for the trend arrow.
+function prevOverall(u) { return userStats(u, { since: 14, until: 7 }).overall; }
 app.get('/api/my-stats', requireAuth, (req, res) => {
   const s = userStats(req.user);
+  const prev = prevOverall(req.user);
   const wowsForMe = db.prepare(`SELECT text, by_name, substr(created_at,1,10) at FROM wows WHERE recognize=? AND created_at>=datetime('now','-30 day') ORDER BY id DESC LIMIT 8`).all(req.user.name);
   const canManage = req.user.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(req.user.job_role || '');
-  res.json({ ...s, wowsForMe, canManage });
+  res.json({ ...s, prevOverall: prev, trend: (s.overall != null && prev != null) ? s.overall - prev : null, wowsForMe, canManage });
 });
 const canSeeTeamStats = (u) => u.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(u.job_role || '');
 // Leadership: drill into one person's full breakdown.
@@ -3215,13 +3221,14 @@ app.get('/api/user-stats/:id', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
   const u = db.prepare(`SELECT id, name, job_role FROM users WHERE id = ?`).get(+req.params.id);
   if (!u) return res.status(404).json({ error: 'Not found' });
-  res.json(userStats(u));
+  const s = userStats(u); const prev = prevOverall(u);
+  res.json({ ...s, prevOverall: prev, trend: (s.overall != null && prev != null) ? s.overall - prev : null });
 });
 // Leadership: a summary of how everyone's doing (overall % across required duties).
 app.get('/api/team-stats', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
   const users = db.prepare(`SELECT id, name, job_role FROM users WHERE active=1 AND role!='admin' ORDER BY name`).all();
-  const team = users.map((u) => { const s = userStats(u); return { id: s.id, name: s.name, role: s.role, overall: s.overall, shifts7: s.shifts7, flagged7: s.flagged7 }; })
+  const team = users.map((u) => { const s = userStats(u); const prev = prevOverall(u); return { id: s.id, name: s.name, role: s.role, overall: s.overall, shifts7: s.shifts7, flagged7: s.flagged7, trend: (s.overall != null && prev != null) ? s.overall - prev : null }; })
     .filter((t) => t.shifts7 > 0 || t.overall != null)
     .sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1));
   res.json({ team });

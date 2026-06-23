@@ -5249,23 +5249,25 @@ async function loadAlertScore(){
 }
 // "How I'm doing" — % of what you were supposed to do, per track, with shout-outs.
 function statCol(p){ return p==null?'var(--muted)':p>=90?'var(--good)':p>=70?'#9a6a1f':'var(--danger)'; }
+function trendStr(t){ if(t==null) return ''; if(t>0) return ` · <span style="color:var(--good)">▲ +${t} vs last week</span>`; if(t<0) return ` · <span style="color:var(--danger)">▼ ${t} vs last week</span>`; return ` · <span class="hint">– even vs last week</span>`; }
 async function loadMyStats(){
   const host=$('myStatsBody'); if(!host) return;
   host.innerHTML='<div class="card"><div class="empty">Loading…</div></div>';
   let d; try{ d=await api('/my-stats'); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
-  const bar=r=>`<div style="margin:11px 0"><div style="display:flex;justify-content:space-between;font-size:14px"><span>${esc(r.label)}</span><strong style="color:${statCol(r.pct)}">${r.pct==null?'—':r.pct+'%'} <span class="hint" style="font-weight:400">${r.done}/${r.target}</span></strong></div><div class="res-track" style="height:9px;margin-top:4px"><div class="res-fill" style="width:${r.pct||0}%;background:${statCol(r.pct)}"></div></div></div>`;
+  const bar=r=>`<div style="margin:11px 0"><div style="display:flex;justify-content:space-between;font-size:14px"><span>${r.care?'💛 ':''}${esc(r.label)}</span><strong style="color:${statCol(r.pct)}">${r.pct==null?'—':r.pct+'%'} <span class="hint" style="font-weight:400">${r.done}/${r.target}</span></strong></div><div class="res-track" style="height:9px;margin-top:4px"><div class="res-fill" style="width:${r.pct||0}%;background:${statCol(r.pct)}"></div></div></div>`;
   const strong=(d.required||[]).filter(r=>r.pct!=null&&r.pct>=90).map(r=>r.label);
   const improve=(d.required||[]).filter(r=>r.pct!=null&&r.pct<70).map(r=>r.label);
-  const extras=(d.extras||[]).map(x=>`<div class="ret-card"><div class="n">${x.value}</div><div class="l">${esc(x.label)} (7d)</div></div>`).join('');
+  const extras=(d.extras||[]).map(x=>`<div class="ret-card"><div class="n">${x.value}</div><div class="l">${x.care?'💛 ':''}${esc(x.label)} (7d)</div></div>`).join('');
   const wows=(d.wowsForMe||[]);
   host.innerHTML=`
     <div class="card" style="text-align:center;border-left:4px solid var(--gold)">
       <div class="hint" style="text-transform:uppercase;letter-spacing:.6px">Overall this week</div>
       <div style="font-size:48px;font-weight:700;line-height:1.1;color:${statCol(d.overall)}">${d.overall==null?'—':d.overall+'%'}</div>
-      <div class="hint">${d.shifts7} shift${d.shifts7===1?'':'s'}${d.hours?' · '+d.hours+' hrs':''} this week${d.flagged7?' · <span style="color:var(--danger)">⚠ '+d.flagged7+' rounds flagged</span>':''}</div>
+      <div class="hint">${d.shifts7} shift${d.shifts7===1?'':'s'}${d.hours?' · '+d.hours+' hrs':''} this week${d.flagged7?' · <span style="color:var(--danger)">⚠ '+d.flagged7+' rounds flagged</span>':''}${trendStr(d.trend)}</div>
     </div>
-    <div class="card"><h3>Your duties — % of what you were supposed to do</h3>
+    <div class="card"><h3>Caring for clients comes first 💛</h3>
       ${(d.required||[]).length?(d.required||[]).map(bar).join(''):'<div class="hint">No required duties tracked yet — clock in and run a shift and this fills in.</div>'}
+      <p class="hint" style="margin-top:6px">💛 = client-care. The numbers serve the people — a 100% means nothing if a client didn’t feel seen.</p>
       ${strong.length?`<div class="pc-note" style="margin-top:10px;color:var(--good)">💪 Crushing it: ${strong.map(esc).join(', ')} — nice work!</div>`:''}
       ${improve.length?`<div class="pc-note" style="margin-top:6px;color:var(--danger)">🎯 Focus here: ${improve.map(esc).join(', ')}</div>`:''}</div>
     <div class="card"><h3>Care &amp; extras you delivered</h3><div class="ret-cards">${extras}</div></div>
@@ -5278,16 +5280,17 @@ async function loadTeamStats(){
   let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML=''; return; }
   if(!d.team.length){ host.innerHTML=''; return; }
   const medal=i=>['🥇','🥈','🥉'][i]||'';
-  host.innerHTML=`<div class="card"><h3>Team — how everyone's doing (7 days)</h3><p class="sub sans">Overall % across required duties, best to worst. Tap a person to coach with specifics.</p>
-    <table class="tbl"><tr><th>Staff</th><th>Role</th><th>Overall</th><th>Shifts</th></tr>
-    ${d.team.map((t,i)=>`<tr style="cursor:pointer" onclick="openUserStats(${t.id}, ${JSON.stringify(t.name).replace(/"/g,'&quot;')})"><td>${medal(i)} <strong>${esc(t.name)}</strong></td><td class="hint">${esc(t.role||'')}</td><td><strong style="color:${statCol(t.overall)}">${t.overall==null?'—':t.overall+'%'}</strong>${t.flagged7?' <span class="hint" title="rounds flagged">⚠'+t.flagged7+'</span>':''}</td><td>${t.shifts7} ›</td></tr>`).join('')}</table></div>`;
+  const arrow=t=> t==null?'':t>0?`<span style="color:var(--good)">▲${t}</span>`:t<0?`<span style="color:var(--danger)">▼${-t}</span>`:'<span class="hint">–</span>';
+  host.innerHTML=`<div class="card"><h3>Team — how everyone's doing (7 days)</h3><p class="sub sans">Overall % across required duties, best to worst. Tap a person to coach with specifics — this is for developing people, not punishing them.</p>
+    <table class="tbl"><tr><th>Staff</th><th>Role</th><th>Overall</th><th>Trend</th><th>Shifts</th></tr>
+    ${d.team.map((t,i)=>`<tr style="cursor:pointer" onclick="openUserStats(${t.id}, ${JSON.stringify(t.name).replace(/"/g,'&quot;')})"><td>${medal(i)} <strong>${esc(t.name)}</strong></td><td class="hint">${esc(t.role||'')}</td><td><strong style="color:${statCol(t.overall)}">${t.overall==null?'—':t.overall+'%'}</strong>${t.flagged7?' <span class="hint" title="rounds flagged">⚠'+t.flagged7+'</span>':''}</td><td>${arrow(t.trend)}</td><td>${t.shifts7} ›</td></tr>`).join('')}</table></div>`;
 }
 async function openUserStats(id, name){
   let d; try{ d=await api('/user-stats/'+id); }catch(e){ alert(e.message); return; }
-  const bar=r=>`<div style="margin:9px 0"><div style="display:flex;justify-content:space-between;font-size:14px"><span>${esc(r.label)}</span><strong style="color:${statCol(r.pct)}">${r.pct==null?'—':r.pct+'%'} <span class="hint" style="font-weight:400">${r.done}/${r.target}</span></strong></div><div class="res-track" style="height:8px;margin-top:4px"><div class="res-fill" style="width:${r.pct||0}%;background:${statCol(r.pct)}"></div></div></div>`;
-  const extras=(d.extras||[]).map(x=>`<span class="chip" style="margin:2px">${esc(x.label)}: <strong>${x.value}</strong></span>`).join('');
+  const bar=r=>`<div style="margin:9px 0"><div style="display:flex;justify-content:space-between;font-size:14px"><span>${r.care?'💛 ':''}${esc(r.label)}</span><strong style="color:${statCol(r.pct)}">${r.pct==null?'—':r.pct+'%'} <span class="hint" style="font-weight:400">${r.done}/${r.target}</span></strong></div><div class="res-track" style="height:8px;margin-top:4px"><div class="res-fill" style="width:${r.pct||0}%;background:${statCol(r.pct)}"></div></div></div>`;
+  const extras=(d.extras||[]).map(x=>`<span class="chip" style="margin:2px">${x.care?'💛 ':''}${esc(x.label)}: <strong>${x.value}</strong></span>`).join('');
   hmodalPlain(`<h3>${esc(name)} <span class="hint" style="font-weight:400">· ${esc(d.role||'')}</span></h3>
-    <div style="text-align:center;margin:6px 0 10px"><div style="font-size:36px;font-weight:700;color:${statCol(d.overall)}">${d.overall==null?'—':d.overall+'%'}</div><div class="hint">${d.shifts7} shift${d.shifts7===1?'':'s'}${d.hours?' · '+d.hours+' hrs':''} this week${d.flagged7?' · ⚠ '+d.flagged7+' rounds flagged':''}</div></div>
+    <div style="text-align:center;margin:6px 0 10px"><div style="font-size:36px;font-weight:700;color:${statCol(d.overall)}">${d.overall==null?'—':d.overall+'%'}</div><div class="hint">${d.shifts7} shift${d.shifts7===1?'':'s'}${d.hours?' · '+d.hours+' hrs':''} this week${d.flagged7?' · ⚠ '+d.flagged7+' rounds flagged':''}${trendStr(d.trend)}</div></div>
     ${(d.required||[]).length?(d.required||[]).map(bar).join(''):'<div class="hint">No required duties tracked this week.</div>'}
     <div style="margin-top:10px">${extras}</div>
     <div class="toolbar" style="margin-top:14px"><button class="btn btn-ghost sans" onclick="closeHModal()">Close</button></div>`);

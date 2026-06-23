@@ -269,13 +269,13 @@ const UNIVERSAL_VIEWS = ['myrole','mytasks','messages','team','training','librar
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
-  'BHT / Tech': ['dashboard','roundscan','rounds','property','meals','bedboard','engagement','concierge','clients','dignity','myrole','mytasks','messages','team','training','library'],
-  'Nurse':      ['dashboard','roundscan','rounds','concierge','clients','bedmap','records','incidents','inventory','compliance','myrole','mytasks','messages','team','training','library'],
-  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','myrole','mytasks','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','myrole','roundscan','rounds','property','meals','bedboard','engagement','incidents','concierge','clients','dignity','mytasks','messages','team','training','library'],
+  'Nurse':      ['dashboard','myrole','roundscan','rounds','concierge','clients','bedmap','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
+  'Front Desk': ['dashboard','myrole','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','mytasks','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
-  'Housing Director': ['housing','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
-  'House Manager':    ['housing','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
-  'Recovery Coach':   ['staffhub','housing','voice','activities','residents','houses','mytasks','messages'],
+  'Housing Director': ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
+  'House Manager':    ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
+  'Recovery Coach':   ['staffhub','myrole','housing','voice','activities','residents','houses','mytasks','messages'],
 };
 // Plain-language "how my shift flows" — the rhythm of the job in order, each step
 // linking to the tool. This is the train-a-new-hire-in-five-minutes layer.
@@ -341,11 +341,29 @@ function firstAllowedView(grp){
   const v=[...document.querySelectorAll('#nav button')].map(b=>b.dataset.view).find(v=>GROUP_OF[v]===grp.g && canSeeView(v));
   return v || grp.first;
 }
+// Frontline roles get their whole toolset as a persistent bar across the top of
+// every page — no sidebar to hunt through; their tools are always one tap away.
+function renderToolsbar(){
+  const bar=document.getElementById('toolsbar'), shell=document.getElementById('shell'); if(!bar||!shell) return;
+  const flat=flatMenu();
+  const acct=document.getElementById('topAccount');
+  if(flat){
+    shell.classList.add('flatnav');
+    bar.innerHTML = flat.filter(canSeeView).map(v=>{ const b=document.querySelector(`#nav button[data-view="${v}"]`); const label=b?(b.firstChild?b.firstChild.textContent.trim():b.textContent.trim()):v; return `<button data-tv="${v}" onclick="show('${v}')">${esc(label)}</button>`; }).join('');
+    bar.style.display='';
+    if(acct){ acct.style.display='flex'; const w=document.getElementById('whoamiTop'); if(w&&ME) w.textContent=ME.name||''; }
+  } else {
+    shell.classList.remove('flatnav');
+    bar.style.display='none'; bar.innerHTML='';
+    if(acct) acct.style.display='none';
+  }
+}
 function renderGroups(){
   document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'stay'; });
+  renderToolsbar();
   const flat = flatMenu();
   if(flat){
-    // Flat task menu: hide the group tabs, reorder the sidebar to the task flow.
+    // Flat task menu: the top tools bar is the nav; hide the sidebar group tabs.
     if($('groupbar')) $('groupbar').style.display='none';
     const nav=$('nav'); if(nav) flat.forEach(v=>{ const b=nav.querySelector(`button[data-view="${v}"]`); if(b) nav.appendChild(b); });
     return;
@@ -402,6 +420,7 @@ function show(v){
   selectGroup(GROUP_OF[v]||'stay');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
+  document.querySelectorAll('#toolsbar button').forEach(b=>b.classList.toggle('active', b.dataset.tv===v));
   renderHubTabs(v);
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);

@@ -762,3 +762,21 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 .meal-stars{display:flex;gap:4px}
 .meal-star{font-size:24px;line-height:1;background:none;border:none;cursor:pointer;color:#d8d8de;padding:0 2px;transition:color .1s}
 .meal-star.on{color:#f5b301}
+
+/* ── Persistent top tools bar (frontline roles; replaces the sidebar) ── */
+.toolsbar{display:flex;gap:7px;overflow-x:auto;padding:9px 40px;background:rgba(245,243,237,.92);
+  backdrop-filter:saturate(140%) blur(10px);-webkit-backdrop-filter:saturate(140%) blur(10px);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:9;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+.toolsbar button{flex:0 0 auto;font-family:var(--sans);font-size:13.5px;background:var(--paper,#fff);border:1px solid var(--line);
+  border-radius:20px;padding:7px 15px;color:var(--muted);cursor:pointer;white-space:nowrap;transition:.12s}
+.toolsbar button:hover{color:var(--navy);border-color:#cdb89a}
+.toolsbar button.active{background:var(--navy,#16242a);color:#fff;border-color:var(--navy,#16242a);font-weight:600}
+.shell.flatnav .sidebar{display:none}
+.shell.flatnav .hamb{display:none}
+[data-theme="dark"] .toolsbar{background:rgba(18,26,34,.92);border-bottom-color:#28323c}
+[data-theme="dark"] .toolsbar button{background:#16202a;border-color:#28323c;color:#9fb2bf}
+[data-theme="dark"] .toolsbar button.active{background:#d29a5e;color:#16242a;border-color:#d29a5e}
+@media(max-width:720px){.toolsbar{padding:8px 14px}}
+
+/* account cluster in the topbar (shown only for flat-nav roles whose sidebar is hidden) */
+.topacct{display:flex;align-items:center;gap:6px}

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260623Q" />
+<link rel="stylesheet" href="/styles.css?v=20260623R" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -166,7 +166,14 @@
       <div class="topbar-title" id="topbarTitle">Today</div>
       <button class="iconbtn" id="reqBell" onclick="show('concierge')" title="Concierge requests — tap to view" style="margin-left:auto;display:none">🔔<span id="reqBadge" class="badge-danger" style="display:none"></span></button>
       <button class="iconbtn" onclick="show('askai')" title="Ask AI" style="margin-left:8px">✦ Ask AI</button>
+      <div id="topAccount" class="topacct" style="display:none">
+        <span id="whoamiTop" class="hint" style="margin-right:2px"></span>
+        <button class="iconbtn" onclick="toggleTheme()" title="Day / night">🌙</button>
+        <button class="iconbtn" onclick="changeMyPassword()" title="Change password">⚙</button>
+        <button class="iconbtn" onclick="doLogout()" title="Sign out">⏻</button>
+      </div>
     </header>
+    <div id="toolsbar" class="toolsbar sans" style="display:none"></div>
   <main>
     <div id="hubTabs" class="hubtabs" style="display:none"></div>
     <!-- MY SHIFT — role-tailored employee dashboard -->
@@ -2504,7 +2511,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260623Q"></script>
-<script src="/housing.js?v=20260623Q"></script>
+<script src="/app.js?v=20260623R"></script>
+<script src="/housing.js?v=20260623R"></script>
 </body>
 </html>

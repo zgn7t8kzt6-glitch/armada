@@ -5245,16 +5245,40 @@ async function loadAlertScore(){
       <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
     </div>`;
 }
-// "How I'm doing" — the staff member's own numbers, in the open.
+// "How I'm doing" — % of what you were supposed to do, per track, with shout-outs.
+function statCol(p){ return p==null?'var(--muted)':p>=90?'var(--good)':p>=70?'#9a6a1f':'var(--danger)'; }
 async function loadMyStats(){
   const host=$('myStatsBody'); if(!host) return;
   host.innerHTML='<div class="card"><div class="empty">Loading…</div></div>';
   let d; try{ d=await api('/my-stats'); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
-  const cards=(d.cards||[]).map(c=>`<div class="ret-card"><div class="n" style="${c.good?'color:var(--good)':''}">${esc(String(c.value))}</div><div class="l">${esc(c.label)}${c.sub?' · '+esc(c.sub):''}</div></div>`).join('');
+  const bar=r=>`<div style="margin:11px 0"><div style="display:flex;justify-content:space-between;font-size:14px"><span>${esc(r.label)}</span><strong style="color:${statCol(r.pct)}">${r.pct==null?'—':r.pct+'%'} <span class="hint" style="font-weight:400">${r.done}/${r.target}</span></strong></div><div class="res-track" style="height:9px;margin-top:4px"><div class="res-fill" style="width:${r.pct||0}%;background:${statCol(r.pct)}"></div></div></div>`;
+  const strong=(d.required||[]).filter(r=>r.pct!=null&&r.pct>=90).map(r=>r.label);
+  const improve=(d.required||[]).filter(r=>r.pct!=null&&r.pct<70).map(r=>r.label);
+  const extras=(d.extras||[]).map(x=>`<div class="ret-card"><div class="n">${x.value}</div><div class="l">${esc(x.label)} (7d)</div></div>`).join('');
   const wows=(d.wowsForMe||[]);
-  host.innerHTML=`<div class="card"><div class="ret-cards">${cards}</div>
-    <p class="hint" style="margin-top:10px">This is yours to watch — keep your rounds on time, your beds flipped, and the little things delivered. Numbers reset on a rolling 7-day window.</p></div>
-    ${wows.length?`<div class="card"><h3>👏 Recognition you've received (30 days)</h3>${wows.map(w=>`<div class="pc-note">👏 ${esc(w.text)} <span class="hint">— ${esc(w.by_name||'')}, ${esc(w.at||'')}</span></div>`).join('')}</div>`:''}`;
+  host.innerHTML=`
+    <div class="card" style="text-align:center;border-left:4px solid var(--gold)">
+      <div class="hint" style="text-transform:uppercase;letter-spacing:.6px">Overall this week</div>
+      <div style="font-size:48px;font-weight:700;line-height:1.1;color:${statCol(d.overall)}">${d.overall==null?'—':d.overall+'%'}</div>
+      <div class="hint">${d.shifts7} shift${d.shifts7===1?'':'s'}${d.hours?' · '+d.hours+' hrs':''} this week${d.flagged7?' · <span style="color:var(--danger)">⚠ '+d.flagged7+' rounds flagged</span>':''}</div>
+    </div>
+    <div class="card"><h3>Your duties — % of what you were supposed to do</h3>
+      ${(d.required||[]).length?(d.required||[]).map(bar).join(''):'<div class="hint">No required duties tracked yet — clock in and run a shift and this fills in.</div>'}
+      ${strong.length?`<div class="pc-note" style="margin-top:10px;color:var(--good)">💪 Crushing it: ${strong.map(esc).join(', ')} — nice work!</div>`:''}
+      ${improve.length?`<div class="pc-note" style="margin-top:6px;color:var(--danger)">🎯 Focus here: ${improve.map(esc).join(', ')}</div>`:''}</div>
+    <div class="card"><h3>Care &amp; extras you delivered</h3><div class="ret-cards">${extras}</div></div>
+    ${wows.length?`<div class="card"><h3>👏 Recognition you've received (30 days)</h3>${wows.map(w=>`<div class="pc-note">👏 ${esc(w.text)} <span class="hint">— ${esc(w.by_name||'')}, ${esc(w.at||'')}</span></div>`).join('')}</div>`:''}
+    <div id="teamStats"></div>`;
+  if(d.canManage) loadTeamStats();
+}
+async function loadTeamStats(){
+  const host=$('teamStats'); if(!host) return;
+  let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML=''; return; }
+  if(!d.team.length){ host.innerHTML=''; return; }
+  const medal=i=>['🥇','🥈','🥉'][i]||'';
+  host.innerHTML=`<div class="card"><h3>Team — how everyone's doing (7 days)</h3><p class="sub sans">Overall % across required duties, best to worst. Coach the bottom, celebrate the top.</p>
+    <table class="tbl"><tr><th>Staff</th><th>Role</th><th>Overall</th><th>Shifts</th></tr>
+    ${d.team.map((t,i)=>`<tr><td>${medal(i)} <strong>${esc(t.name)}</strong></td><td class="hint">${esc(t.role||'')}</td><td><strong style="color:${statCol(t.overall)}">${t.overall==null?'—':t.overall+'%'}</strong>${t.flagged7?' <span class="hint" title="rounds flagged">⚠'+t.flagged7+'</span>':''}</td><td>${t.shifts7}</td></tr>`).join('')}</table></div>`;
 }
 // My Role, folded into the bottom of My Shift (no separate tab) — collapsible so the
 // live shift stays on top: what I do, not my lane, how my shift flows, what great is.

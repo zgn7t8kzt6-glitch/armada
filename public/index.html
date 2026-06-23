@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624E" />
+<link rel="stylesheet" href="/styles.css?v=20260624F" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -75,6 +75,7 @@
     <button data-view="roundscan">Rounds</button>
     <button data-view="rounds">Rounds Status</button>
     <button data-view="bedboard">Bed Turnover</button>
+    <button data-view="laundry">Laundry</button>
     <button data-view="bedmap">Bed Board</button>
     <button data-view="property">Belongings</button>
     <button data-view="engagement">Engagement</button>
@@ -975,6 +976,18 @@
 
     <!-- CASE MANAGEMENT -->
     <!-- DIGNITY KITS -->
+    <section id="laundry" class="view">
+      <div class="card"><div class="cmd-hero-row"><div><h3>Laundry</h3><p class="sub sans">Track every load so nothing sits wet or gets lost — washing → drying → folding → done.</p></div><button class="btn btn-ghost sans" onclick="loadLaundry()">Refresh</button></div>
+        <div id="laundryKpis" class="ret-cards"></div></div>
+      <div class="card"><h3>Start a load</h3>
+        <div class="grid3"><div><label>Type</label><select id="ln_kind"><option>Linens</option><option>Towels</option><option>Client clothes</option><option>Blankets</option><option>Other</option></select></div>
+          <div><label>Label / details</label><input id="ln_label" placeholder="e.g. Room 4 linens / John's clothes"/></div>
+          <div><label>Client (optional)</label><select id="ln_client"></select></div></div>
+        <div class="toolbar"><button class="btn btn-gold sans" onclick="addLaundry()">Start load</button><span id="ln_msg" class="hint"></span></div></div>
+      <div class="card"><h3>In progress</h3><div id="laundryActive"></div></div>
+      <div class="card"><h3>Done (last 24h)</h3><div id="laundryDone"></div></div>
+    </section>
+
     <section id="dignity" class="view">
       <div class="card">
         <h3>Dignity Kits</h3>
@@ -2528,7 +2541,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624E"></script>
-<script src="/housing.js?v=20260624E"></script>
+<script src="/app.js?v=20260624F"></script>
+<script src="/housing.js?v=20260624F"></script>
 </body>
 </html>

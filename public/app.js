@@ -182,7 +182,7 @@ const GROUP_OF={
   arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
   // Stay — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
-  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',bedmap:'stay',engagement:'stay',program:'stay',meals:'stay',property:'stay',
+  concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',bedmap:'stay',laundry:'stay',engagement:'stay',program:'stay',meals:'stay',property:'stay',
   casemgmt:'stay',retention:'stay',surveys:'stay',incidents:'stay',compliance:'stay',
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
@@ -220,6 +220,7 @@ const VIEW_ROLES = {
   rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
+  laundry:     ['BHT / Tech','Housekeeping','Nurse','Director of Operations','Clinical Director'],
   bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director','Front Desk'],
   property:    ['BHT / Tech','Nurse','Case Manager','Front Desk','Clinical Director','Director of Operations'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
@@ -273,7 +274,7 @@ const ROLE_MENU = {
   // tab), Intake (the full arrival checklist — dignity bag lives there, no standalone
   // Dignity tab), then the day's work. My Tasks lives ON My Shift, not as a tab.
   // My Role is folded into My Shift (its own collapsible at the bottom) — no tab.
-  'BHT / Tech': ['dashboard','rounds','arrivalcheck','property','meals','bedboard','engagement','clients','incidents','concierge','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','library'],
   'Nurse':      ['dashboard','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
   'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
@@ -471,6 +472,7 @@ function show(v){
   if(v==='casemgmt') loadCaseMgmt();
   if(v==='continuum') loadContinuum();
   if(v==='dignity') loadDignity();
+  if(v==='laundry') loadLaundry();
   if(v==='myrole') loadMyRole();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
@@ -5229,6 +5231,26 @@ async function renderDashRole(){
       ${qual?`<h3 style="font-size:13px;margin:14px 0 6px">What great looks like</h3>${qual}`:''}
     </div></details>`;
 }
+/* ---- Laundry board ---- */
+async function loadLaundry(){
+  let d; try{ d=await api('/laundry'); }catch(e){ if($('laundryActive'))$('laundryActive').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
+  const c=k=>d.active.filter(x=>x.status===k).length;
+  if($('laundryKpis')) $('laundryKpis').innerHTML = `<div class="ret-card ${c('Washing')?'rc-warn':''}"><div class="n">${c('Washing')}</div><div class="l">Washing</div></div>
+    <div class="ret-card ${c('Drying')?'rc-warn':''}"><div class="n">${c('Drying')}</div><div class="l">Drying</div></div>
+    <div class="ret-card ${c('Folding')?'rc-high':''}"><div class="n">${c('Folding')}</div><div class="l">To fold</div></div>
+    <div class="ret-card"><div class="n">${d.active.length}</div><div class="l">Open loads</div></div>`;
+  if($('ln_client')) fillClientSelect($('ln_client'),'No client');
+  const next={Washing:'Drying',Drying:'Folding',Folding:'Done'};
+  const pill=s=>`<span class="risk ${s==='Folding'?'risk-high':'risk-elev'}">${esc(s)}</span>`;
+  if($('laundryActive')) $('laundryActive').innerHTML = d.active.length? d.active.map(l=>`<div class="todo"><div class="txt">${pill(l.status)} <strong>${esc(l.label)}</strong>${l.kind?' <span class="hint">· '+esc(l.kind)+'</span>':''}<div class="hint">${esc(l.started_by_name||'')}${l.created_at?' · '+esc(l.created_at):''}</div></div>
+      ${next[l.status]?`<button class="btn btn-gold btn-sm sans" onclick="advLaundry(${l.id},'${next[l.status]}')">→ ${next[l.status]}</button>`:''}
+      <button class="btn btn-ghost btn-sm sans" onclick="advLaundry(${l.id},'Done')">✓ Done</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="delLaundry(${l.id})" title="Remove">✕</button></div>`).join('') : '<div class="pc-note">No loads in progress.</div>';
+  if($('laundryDone')) $('laundryDone').innerHTML = d.done.length? d.done.map(l=>`<div class="pc-note">✅ ${esc(l.label)} <span class="hint">· ${esc(l.started_by_name||'')}${l.updated_at?' · '+esc(l.updated_at):''}</span></div>`).join('') : '<div class="hint">Nothing finished in the last 24 hours.</div>';
+}
+async function addLaundry(){ const label=($('ln_label').value.trim())||$('ln_kind').value; try{ await api('/laundry',{method:'POST',body:JSON.stringify({kind:$('ln_kind').value,label,client_id:$('ln_client').value||null})}); $('ln_label').value=''; if($('ln_msg'))$('ln_msg').textContent='✓ Started'; loadLaundry(); }catch(e){ if($('ln_msg'))$('ln_msg').textContent=e.message; } }
+async function advLaundry(id,status){ try{ await api('/laundry/'+id+'/status',{method:'POST',body:JSON.stringify({status})}); loadLaundry(); }catch(e){ alert(e.message); } }
+async function delLaundry(id){ if(!confirm('Remove this load?'))return; try{ await api('/laundry/'+id,{method:'DELETE'}); loadLaundry(); }catch(e){ alert(e.message); } }
 // Simple per-shift walk-around checklist — tap to confirm, resets each shift.
 async function renderShiftChecklist(){
   const host=$('dashChecklist'); if(!host) return;

@@ -1050,6 +1050,25 @@ app.post('/api/meals/snack', requireAuth, (req, res) => {
 // Caterer scorecard — last 30 days of meal checks (held the standard?).
 app.get('/api/meals/scorecard', requireAuth, (req, res) => res.json(mealScorecard()));
 
+/* ---------------- Laundry board ---------------- */
+app.get('/api/laundry', requireAuth, (req, res) => {
+  const active = db.prepare(`SELECT id, label, kind, status, started_by_name, substr(created_at,12,5) created_at FROM laundry_loads WHERE status != 'Done' ORDER BY CASE status WHEN 'Folding' THEN 0 WHEN 'Drying' THEN 1 ELSE 2 END, id`).all();
+  const done = db.prepare(`SELECT id, label, kind, started_by_name, substr(updated_at,12,5) updated_at FROM laundry_loads WHERE status = 'Done' AND updated_at >= datetime('now','-1 day') ORDER BY updated_at DESC LIMIT 30`).all();
+  res.json({ active, done });
+});
+app.post('/api/laundry', requireAuth, (req, res) => {
+  const b = req.body || {}; const label = (b.label || '').trim() || (b.kind || 'Load');
+  db.prepare(`INSERT INTO laundry_loads (label, kind, client_id, note, started_by_id, started_by_name) VALUES (?,?,?,?,?,?)`)
+    .run(label.slice(0, 120), (b.kind || '').slice(0, 20) || null, b.client_id || null, (b.note || '').trim() || null, req.user.id, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/laundry/:id/status', requireAuth, (req, res) => {
+  const st = ['Washing', 'Drying', 'Folding', 'Done'].includes(req.body?.status) ? req.body.status : 'Washing';
+  db.prepare(`UPDATE laundry_loads SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(st, req.params.id);
+  res.json({ ok: true });
+});
+app.delete('/api/laundry/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM laundry_loads WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+
 /* ---------------- Shift checklist (recurring walk-around duties) ---------------- */
 app.get('/api/shift-checklist', requireAuth, (req, res) => {
   const today = appToday(), sh = currentShift();

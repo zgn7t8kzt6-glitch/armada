@@ -3663,6 +3663,17 @@ async function loadBedBoard(){
         ${canManageStaffing()?`<button class="btn btn-ghost btn-sm sans" onclick="removeTurnover(${b.id})" title="Dismiss a mistaken flag (manager only)">✕</button>`:''}
       </div></div>`).join('') : '<div class="hint">All beds clean — nothing waiting. 🎉</div>';
   $('tovClean').innerHTML = (d.cleaned||[]).length ? d.cleaned.map(b=>`<div class="pc-note">✅ <strong>${esc(b.room)}</strong> <span class="hint">· cleaned by ${esc(b.cleaned_by||'')} · ${esc(b.at||'')}</span> <a onclick="reopenTurnover(${b.id})" style="cursor:pointer;color:var(--muted);margin-left:6px">undo</a></div>`).join('') : '<div class="hint">No beds cleaned in the last 24 hours.</div>';
+  loadTurnoverScore();
+}
+async function loadTurnoverScore(){
+  const card=$('tovScoreCard'); if(!card) return;
+  if(!canManageStaffing()){ card.style.display='none'; return; }
+  let d; try{ d=await api('/turnovers/scorecard'); }catch(e){ card.style.display='none'; return; }
+  card.style.display='';
+  const medal=i=>['🥇','🥈','🥉'][i]||(i+1)+'.';
+  $('tovScore').innerHTML = d.byPerson.length
+    ? `<table class="tbl"><tr><th>Staff</th><th>Beds cleaned</th><th>Avg time to clean</th></tr>${d.byPerson.map((p,i)=>`<tr><td>${medal(i)} <strong>${esc(p.name)}</strong></td><td>${p.n}</td><td>${p.avgMin!=null?(p.avgMin>=60?Math.floor(p.avgMin/60)+'h '+(p.avgMin%60)+'m':p.avgMin+'m'):'—'}</td></tr>`).join('')}</table><p class="hint" style="margin-top:6px">${d.total7} bed${d.total7===1?'':'s'} cleaned in the last 7 days.</p>`
+    : '<div class="hint">No beds cleaned in the last 7 days yet.</div>';
 }
 async function addTurnover(){
   const room=$('tov_room')?$('tov_room').value.trim():''; if(!room){ if($('tov_msg'))$('tov_msg').textContent='Enter a room/bed.'; return; }

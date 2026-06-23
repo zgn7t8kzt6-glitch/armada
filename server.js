@@ -6349,14 +6349,31 @@ app.delete('/api/turnovers/:id', requireAuth, requireStaffingManager, (req, res)
 });
 // Overdue bed turnovers: a bed still dirty more than a shift (~8h) after discharge
 // raises an alert for the on-call leader (in-app, like the coverage alerts).
+const bedEscalated = new Map();
 setInterval(() => {
   try {
-    const overdue = db.prepare(`SELECT id, room FROM bed_turnovers WHERE status='dirty' AND flagged_at <= datetime('now','-8 hours')`).all();
+    const overdue = db.prepare(`SELECT id, room FROM bed_turnovers WHERE status IN ('dirty','cleaning') AND flagged_at <= datetime('now','-8 hours')`).all();
+    const lead = shiftLead();
     for (const b of overdue) {
-      createAlert(null, 'bed_overdue_' + b.id, 'Elevated', `Bed ${b.room} still needs turnover — discharged over 8 hours ago and not cleaned. Get it flipped this shift.`);
+      createAlert(null, 'bed_overdue_' + b.id, 'High', `Bed ${b.room} still needs turnover — discharged over 8 hours ago and not cleaned. Get it flipped this shift.`);
+      // Text the lead in charge once per overdue bed so it doesn't just sit.
+      if (!bedEscalated.has(b.id) && lead && lead.phone && smsConfigured()) {
+        bedEscalated.set(b.id, Date.now());
+        sendSms({ to: lead.phone, body: `Armada: Bed ${b.room} still not cleaned 8h+ after discharge. Please get it flipped.` }).catch(() => {});
+      }
     }
+    const live = new Set(overdue.map((b) => b.id));
+    for (const id of [...bedEscalated.keys()]) if (!live.has(id)) bedEscalated.delete(id);
   } catch (e) { console.error('[bed overdue]', e.message); }
 }, 20 * 60 * 1000).unref?.();
+// Bed-turnover accountability — who cleaned how many, and how fast.
+app.get('/api/turnovers/scorecard', requireAuth, requireStaffingManager, (req, res) => {
+  const byPerson = db.prepare(`SELECT cleaned_by name, COUNT(*) n, AVG((julianday(cleaned_at)-julianday(flagged_at))*1440) avgMin
+    FROM bed_turnovers WHERE status='clean' AND cleaned_by IS NOT NULL AND cleaned_at >= datetime('now','-7 day')
+    GROUP BY cleaned_by ORDER BY n DESC LIMIT 15`).all();
+  const total7 = db.prepare(`SELECT COUNT(*) n FROM bed_turnovers WHERE status='clean' AND cleaned_at >= datetime('now','-7 day')`).get().n;
+  res.json({ byPerson: byPerson.map((p) => ({ name: p.name, n: p.n, avgMin: p.avgMin != null ? Math.round(p.avgMin) : null })), total7 });
+});
 
 // ── Daily roster / attendance dashboard ─────────────────────────────────────
 // Did the scheduled people show up? Supervisor marks present/absent; we also

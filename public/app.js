@@ -2154,7 +2154,7 @@ async function delArrivalItem(id){ if(!confirm('Remove this arrival item?'))retu
 let PROP_CATS=['Cash','Phone / electronics','Wallet / ID / cards','Jewelry / watch','Keys','Clothing','Medication (to pharmacy/secure)','Documents','Other'];
 async function loadProperty(){
   let d; try{ d=await api('/property'); }catch(e){ $('propBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
-  PROP_CATS=d.categories||PROP_CATS; window.PROP_STAFF=d.staff||[]; window.PROP_FLAG=d.flagAmount; window.PROP_CANMANAGE=d.canManage;
+  PROP_CATS=d.categories||PROP_CATS; window.PROP_STAFF=d.staff||[]; window.PROP_FLAG=d.flagAmount; window.PROP_CANMANAGE=d.canManage; window.PROP_LISTS=d.lists||window.PROP_LISTS;
   $('propKpis').innerHTML=`<div class="ret-cards" style="margin:0 0 8px">
     <div class="ret-card"><div class="n">${d.clients.filter(c=>c.hasIntake).length}</div><div class="l">Belongings on file</div></div>
     <div class="ret-card"><div class="n">${money(d.totalCash)}</div><div class="l">Cash held in trust</div></div>
@@ -2173,22 +2173,31 @@ async function loadProperty(){
 }
 async function openProperty(cid){
   let d; try{ d=await api('/property/'+cid); }catch(e){ alert(e.message); return; }
-  if(d.staff) window.PROP_STAFF=d.staff;
+  if(d.staff) window.PROP_STAFF=d.staff; if(d.lists) window.PROP_LISTS=d.lists;
   const m=d.meta; const items=d.items||[];
   const itemRow=i=>`<div class="cmd-row">${i.hasPhoto?`<img src="/api/property/item/${i.id}/photo" onclick="window.open('/api/property/item/${i.id}/photo','_blank')" style="width:46px;height:46px;border-radius:8px;object-fit:cover;border:1px solid var(--line);cursor:pointer;flex:none" alt="photo"/>`:''}<div class="cmd-row-main">${i.status==='returned'?'↩︎ ':'📦 '}<b>${esc(i.category||'Item')}</b> — ${esc(i.description)}${i.qty&&i.qty!==1?' ×'+i.qty:''}${i.est_value!=null?' <span class="hint">· est '+money(i.est_value)+'</span>':''}${i.condition?' <span class="hint">· '+esc(i.condition)+'</span>':''}${i.status==='returned'?' <span class="hint">· returned '+esc(String(i.returned_at||'').slice(0,10))+'</span>':''}</div>${i.status==='stored'?`<button class="btn btn-ghost btn-sm sans" onclick="returnPropItem(${i.id},${cid})">Return</button>`:''}</div>`;
   const evIcon={intake_count:'📝',cash_deposit:'➕',cash_withdrawal:'➖',return:'↩︎',return_all:'✅',audit:'🔍',discrepancy:'⚠️',access:'🔓'};
   const evRow=e=>`<div class="cmd-row ${e.type==='discrepancy'?'cmd-row-flag':''}"><div class="cmd-row-main">${evIcon[e.type]||'•'} ${esc((e.type||'').replace(/_/g,' '))}${e.amount!=null?` <b>${e.amount<0?'−':''}${money(Math.abs(e.amount))}</b>`:''}${e.balance_after!=null&&/cash|return/.test(e.type)?` <span class="hint">→ bal ${money(e.balance_after)}</span>`:''}
     <div class="hint">${esc(String(e.created_at||'').slice(0,16).replace('T',' '))} · by ${esc(e.staff||'')}${e.witness?' · witness '+esc(e.witness):''}${e.client_ack?' · client ✍ '+esc(e.client_ack):''}${e.note?'<br>'+esc(e.note):''}</div></div></div>`;
+  const s=m&&m.search;
+  const searchBlock = s ? `<div style="margin-top:8px;border-top:1px dashed var(--line);padding-top:8px">
+      <div class="kv"><span class="k">Search</span><span class="v">${s.consent?'consent ✓':'consent ?'} · ${s.none_found?'none found':((s.found||[]).length+' item(s) found')}</span></div>
+      ${(s.found||[]).length?`<div class="hint">Found: ${s.found.map(esc).join(', ')}</div>`:''}
+      ${(s.disposed||[]).length||s.disposed_other?`<div class="hint">Disposed (witnessed): ${[...(s.disposed||[]),s.disposed_other].filter(Boolean).map(esc).join(', ')}</div>`:''}
+      ${s.sent_home?`<div class="hint">Sent home: ${esc(s.sent_home)}${s.sent_home_person?' → '+esc(s.sent_home_person):''}</div>`:''}
+      ${(s.bins||s.luggage)?`<div class="hint">${s.bins||0} bin(s) · ${s.luggage||0} luggage piece(s)</div>`:''}
+      ${(s.meds||[]).length?`<div class="hint">Meds: ${s.meds.map(esc).join(', ')}</div>`:''}
+    </div>` : '';
   const intakeBlock = m
     ? `<div class="kv"><span class="k">Counted by</span><span class="v">${esc(m.intake_by||'')}${m.intake_witness?' + witness '+esc(m.intake_witness):''}</span></div>
        <div class="kv"><span class="k">Client signed</span><span class="v">${esc(m.intake_client_ack||'—')}</span></div>
-       <div class="kv"><span class="k">Stored</span><span class="v">${esc(m.safe_location||'—')}${m.bag_number?' · bag '+esc(m.bag_number):''}${m.sealed?' · sealed ✓':''}</span></div>`
-    : `<div class="pc-note" style="background:#fbecea;border-left:3px solid var(--danger)">No belongings count on file. Do the dual-witnessed intake count first.</div>`;
+       <div class="kv"><span class="k">Stored</span><span class="v">${esc(m.safe_location||'—')}${m.bag_number?' · bag '+esc(m.bag_number):''}${m.sealed?' · sealed ✓':''}</span></div>${searchBlock}`
+    : `<div class="pc-note" style="background:#fbecea;border-left:3px solid var(--danger)">No belongings count on file. Do the dual-witnessed search &amp; intake first.</div>`;
   $('propBody').innerHTML=`
     <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="loadProperty()">← All clients</button></div>
     <div class="cmd-grid">
       <div class="card"><div class="cmd-hero-row"><div><h3>${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3><p class="sub sans" style="margin:0">Belongings & valuables</p></div>
-        <button class="btn ${m?'btn-ghost':'btn-primary'} btn-sm sans" onclick="propIntake(${cid})">${m?'Re-count intake':'Record intake count'}</button></div>
+        <button class="btn ${m?'btn-ghost':'btn-primary'} btn-sm sans" onclick="propIntake(${cid})">${m?'Re-do search & intake':'🔎 Search & intake'}</button></div>
         ${intakeBlock}
         <div style="margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0;font-size:14px">Cash in trust</h3><b style="font-size:20px;color:var(--navy)">${money(d.balance)}</b></div>
         <div class="toolbar no-print" style="justify-content:flex-start;gap:6px"><button class="btn btn-primary btn-sm sans" onclick="propCash(${cid},'deposit')">＋ Cash in</button><button class="btn btn-ghost btn-sm sans" onclick="propCash(${cid},'withdrawal')">－ Cash out</button><button class="btn btn-ghost btn-sm sans" onclick="propAudit(${cid})">🔍 Audit count</button></div>
@@ -2210,13 +2219,31 @@ function sigFields(opts={}){
 }
 function witnessBody(){ return { witness_id: $('pp_witness').value, witness_pw: $('pp_witnesspw').value }; }
 function propIntake(cid){
-  const save=hmodal(`<h3>Intake belongings count</h3>
-    <p class="sub sans">Count everything <b>with the client and a second staff witness present</b>. Add each valuable as an item; count cash with "Cash in". All three sign.</p>
+  const L=window.PROP_LISTS||{prohibited:[],disposed:[],meds:[]};
+  const chk=(arr,cls)=>arr.map(it=>`<label style="display:block;font-size:13px;text-transform:none;letter-spacing:0;font-weight:400;margin:3px 0"><input type="checkbox" class="${cls}" data-l="${esc(it)}" style="width:auto;margin-right:7px"/>${esc(it)}</label>`).join('');
+  const save=hmodal(`<h3>Person &amp; belongings search + intake</h3>
+    <p class="sub sans">Conduct the search <b>with the client and a second staff witness present</b>. Mark anything found, then store valuables (use + Item / Cash in). All three sign.</p>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-weight:500"><input type="checkbox" id="pp_consent" checked style="width:auto"/> Client was informed the search is for safety (non-punitive) and consented</label>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:6px"><input type="checkbox" id="pp_none" style="width:auto"/> No prohibited / restricted items found</label>
+    <label style="margin-top:10px">Prohibited / restricted items found — check any present</label>
+    <div style="max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px 12px">${chk(L.prohibited,'pp_found')}</div>
+    <label style="margin-top:10px">Items disposed of per policy (witness present)</label>
+    <div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px">${chk(L.disposed,'pp_disp')}<label style="display:block;font-size:13px;text-transform:none;letter-spacing:0;font-weight:400;margin-top:4px">Other: <input id="pp_disp_other" style="width:60%;display:inline-block"/></label></div>
+    <label style="margin-top:10px">Items sent home with approved person</label>
+    <input id="pp_senthome" placeholder="Describe items sent home"/>
+    <input id="pp_person" placeholder="Name of approved person" style="margin-top:6px"/>
+    <div class="grid2" style="margin-top:6px"><div><label>Number of bins</label><input id="pp_bins" type="number" min="0"/></div><div><label>Luggage pieces</label><input id="pp_lug" type="number" min="0"/></div></div>
+    <label style="margin-top:10px">Medication handling</label>
+    <div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px">${chk(L.meds,'pp_meds')}</div>
+    <hr style="margin:14px 0">
     <label>Where stored (safe / locker)</label><input id="pp_loc" placeholder="e.g. Front safe, locker 3"/>
     <div class="grid2"><div><label>Sealed bag #</label><input id="pp_bag" placeholder="e.g. 0481"/></div>
       <div><label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:24px"><input type="checkbox" id="pp_sealed" style="width:auto"/> Tamper-evident bag sealed</label></div></div>
     ${sigFields({clientAck:true})}`);
-  save.onclick=async()=>{ try{ await api('/property/'+cid+'/intake',{method:'POST',body:JSON.stringify({safe_location:$('pp_loc').value,bag_number:$('pp_bag').value,sealed:$('pp_sealed').checked,...witnessBody(),client_ack:$('pp_client').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+  save.onclick=async()=>{
+    const pick=cls=>[...document.querySelectorAll('.'+cls+':checked')].map(c=>c.dataset.l);
+    const search={ consent:$('pp_consent').checked, none_found:$('pp_none').checked, found:pick('pp_found'), disposed:pick('pp_disp'), disposed_other:$('pp_disp_other').value.trim(), sent_home:$('pp_senthome').value.trim(), sent_home_person:$('pp_person').value.trim(), bins:$('pp_bins').value, luggage:$('pp_lug').value, meds:pick('pp_meds') };
+    try{ await api('/property/'+cid+'/intake',{method:'POST',body:JSON.stringify({safe_location:$('pp_loc').value,bag_number:$('pp_bag').value,sealed:$('pp_sealed').checked,search,...witnessBody(),client_ack:$('pp_client').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
 }
 function addPropItem(cid){
   const save=hmodal(`<h3>Add belonging</h3>

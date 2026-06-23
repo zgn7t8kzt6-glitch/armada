@@ -5322,6 +5322,20 @@ app.post('/api/arrival/template', requireAuth, requireAdmin, (req, res) => {
 
 /* ───────── Client belongings & valuables — chain of custody (dual control) ───────── */
 const PROPERTY_CATEGORIES = ['Cash', 'Phone / electronics', 'Wallet / ID / cards', 'Jewelry / watch', 'Keys', 'Clothing', 'Medication (to pharmacy/secure)', 'Documents', 'Other'];
+// Prohibited / restricted items checked for during the intake search.
+const PROHIBITED_ITEMS = [
+  'Phones / cell phones', 'Smart watch', 'iPad / iPods / tablets', 'Headphones / earbuds', 'Laptops / computers',
+  'Cash', 'Credit / debit cards', 'Gift cards', 'Insurance card(s)', 'Chargers / cords',
+  'Vaping products', 'Lighters, lighter fluid or matches', 'Cameras', 'Electronic devices or TVs', 'Batteries / power banks',
+  'Aerosol sprays of any kind', 'Any item with alcohol as one of the first 3 ingredients', 'Perfume, cologne or aftershave',
+  'Mouthwash / bodywash / shampoo / conditioner (opened or used)', 'Makeup / toiletries (opened or used)', 'Hair spray', 'Nail glue / polish / remover', 'Metal nail files',
+  'Razors / box cutters / letter openers', 'Hair clippers / scissors', 'Flat irons / curling irons', 'Appliances (iron, blender, coffee pot)', 'Exercise equipment',
+  'Baby oil or any powders', 'Q-tips', 'Markers', 'Incense / candles', 'Fireworks',
+  'Jewelry', 'Watches', 'Car keys', 'Cups / hats / wraps / durags / bandanas', 'Clothing in excess of 5 days', 'Shoes in excess of 5 pair (+ shower shoes)',
+  'Monitoring devices (scanners, CB, etc.)', 'Radios / CD / MP3 players', 'Papers / beepers', 'Pornographic materials', 'Food (non-perishable)', 'Valuables (describe in items)',
+];
+const DISPOSED_ITEMS = ['Alcoholic beverages / intoxicating substances', 'Any illegal drug', 'Marijuana / THC products', 'Drug paraphernalia', 'Weapons of any kind', 'Bleach', 'Mouthwash containing alcohol', 'Dryer sheets / fabric softener', 'Toothpicks', 'Food / drink (perishable)'];
+const MEDS_HANDLING = ['Medications sent to nursing for reconciliation', 'OTC / supplements sent to nursing for review', 'Sharps secured by nursing'];
 function cashBalance(clientId) {
   const r = db.prepare(`SELECT IFNULL(SUM(amount),0) b FROM property_events WHERE client_id = ? AND type IN ('cash_deposit','cash_withdrawal','return')`).get(clientId);
   return Math.round((r.b || 0) * 100) / 100;
@@ -5348,7 +5362,7 @@ app.get('/api/property', requireAuth, (req, res) => {
     return { id: c.id, name: c.pref || c.name, room: c.room || '', hasIntake: !!meta, status: meta?.status || 'none', items, cash: cashBalance(c.id), flagged: !!lastDisc };
   });
   const staff = db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all();
-  res.json({ clients: rows, categories: PROPERTY_CATEGORIES, staff, totalCash: rows.reduce((a, r) => a + r.cash, 0), flagged: rows.filter((r) => r.flagged).length, flagAmount: +(getState('property_flag_amount') || 100), canManage: isLeadership(req) });
+  res.json({ clients: rows, categories: PROPERTY_CATEGORIES, staff, totalCash: rows.reduce((a, r) => a + r.cash, 0), flagged: rows.filter((r) => r.flagged).length, flagAmount: +(getState('property_flag_amount') || 100), canManage: isLeadership(req), lists: { prohibited: PROHIBITED_ITEMS, disposed: DISPOSED_ITEMS, meds: MEDS_HANDLING } });
 });
 // Admin/leadership: set the cash-out amount that flags leadership.
 app.post('/api/property/settings', requireAuth, (req, res) => {
@@ -5370,10 +5384,11 @@ app.get('/api/property/:cid', requireAuth, (req, res) => {
   if (!c) return res.status(404).json({ error: 'Not found' });
   res.json({
     client: { id: c.id, name: c.pref || c.name, room: c.room || '', discharged: !!c.discharge_status },
-    meta: db.prepare(`SELECT * FROM property_meta WHERE client_id = ?`).get(cid) || null,
+    meta: (() => { const mm = db.prepare(`SELECT * FROM property_meta WHERE client_id = ?`).get(cid); return mm ? { ...mm, search: jparse(mm.search, null) } : null; })(),
     items: db.prepare(`SELECT * FROM property_items WHERE client_id = ? ORDER BY status, id`).all(cid).map(({ photo, ...r }) => ({ ...r, hasPhoto: !!photo })),
     events: db.prepare(`SELECT * FROM property_events WHERE client_id = ? ORDER BY id DESC LIMIT 100`).all(cid),
     balance: cashBalance(cid), categories: PROPERTY_CATEGORIES,
+    lists: { prohibited: PROHIBITED_ITEMS, disposed: DISPOSED_ITEMS, meds: MEDS_HANDLING },
     staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all(),
   });
 });
@@ -5382,11 +5397,12 @@ app.post('/api/property/:cid/intake', requireAuth, (req, res) => {
   const cid = +req.params.cid; const b = req.body || {};
   const w = checkWitness(req); if (w.error) return res.status(400).json({ error: w.error });
   if (!b.client_ack || !String(b.client_ack).trim()) return res.status(400).json({ error: 'The client must sign that the inventory is accurate.' });
+  const search = b.search ? JSON.stringify(b.search) : null;
   const ex = db.prepare(`SELECT client_id FROM property_meta WHERE client_id = ?`).get(cid);
-  if (ex) db.prepare(`UPDATE property_meta SET safe_location=?, bag_number=?, sealed=?, status='open', intake_by=?, intake_witness=?, intake_client_ack=?, intake_at=datetime('now') WHERE client_id=?`)
-    .run(b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, req.user.name, w.name, String(b.client_ack).trim(), cid);
-  else db.prepare(`INSERT INTO property_meta (client_id, safe_location, bag_number, sealed, status, intake_by, intake_witness, intake_client_ack, intake_at) VALUES (?,?,?,?, 'open', ?,?,?, datetime('now'))`)
-    .run(cid, b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, req.user.name, w.name, String(b.client_ack).trim());
+  if (ex) db.prepare(`UPDATE property_meta SET safe_location=?, bag_number=?, sealed=?, status='open', search=?, intake_by=?, intake_witness=?, intake_client_ack=?, intake_at=datetime('now') WHERE client_id=?`)
+    .run(b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, search, req.user.name, w.name, String(b.client_ack).trim(), cid);
+  else db.prepare(`INSERT INTO property_meta (client_id, safe_location, bag_number, sealed, status, search, intake_by, intake_witness, intake_client_ack, intake_at) VALUES (?,?,?,?, 'open', ?,?,?,?, datetime('now'))`)
+    .run(cid, b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, search, req.user.name, w.name, String(b.client_ack).trim());
   logPropertyEvent(cid, 'intake_count', { note: `Belongings counted & secured${b.bag_number ? ' · bag ' + b.bag_number : ''}${b.safe_location ? ' · ' + b.safe_location : ''}`, staff: req.user.name, witness: w.name, client_ack: String(b.client_ack).trim() });
   audit({ user: req.user, action: 'PROPERTY_INTAKE', entity: 'client', entity_id: cid, detail: `witness ${w.name}`, ip: req.ip });
   res.json({ ok: true });

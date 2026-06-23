@@ -957,7 +957,7 @@ function mealTimeliness(meal, served_at) {
 function snackStatus() {
   const today = appToday();
   const sk = db.prepare(`SELECT *, CAST((julianday('now') - julianday(created_at)) * 1440 AS INT) ageMin FROM snack_checks WHERE date = ? ORDER BY id DESC LIMIT 1`).get(today);
-  return { lastBy: sk ? sk.by_name : null, ageMin: sk ? sk.ageMin : null, snacks: !!(sk && sk.snacks), coffee: !!(sk && sk.coffee), juice: !!(sk && sk.juice), stale: !sk || sk.ageMin > 240 };
+  return { lastBy: sk ? sk.by_name : null, ageMin: sk ? sk.ageMin : null, snacks: !!(sk && sk.snacks), coffee: !!(sk && sk.coffee), juice: !!(sk && sk.juice), stale: !sk || sk.ageMin > 150 };
 }
 // 30-day caterer scorecard rollup — shared by the Meals view, the kitchen brief,
 // and the Command Center.
@@ -4933,9 +4933,9 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     add(overdue.length > 0, { icon: '🔍', label: `${overdue.length} safety check${overdue.length > 1 ? 's' : ''} due`, sub: 'Open Round Status, then scan each room', view: 'rounds', sev: 'high' });
     add(toWelcome.length > 0, { icon: '👋', label: `New intake — ${toWelcome.length} to welcome`, sub: 'Greet by name, search belongings, dignity bag, scrubs, Care Card', view: 'arrivalcheck', sev: 'high' });
     add(atRisk.length > 0, { icon: '⚠️', label: `${atRisk.length} to watch — at risk of leaving`, sub: 'Run the Save before they walk', view: 'clients', sev: 'high' });
+    add(sn.stale, { icon: '☕', label: 'Stock snacks, coffee & juice', sub: sn.lastBy ? `Last topped up ${Math.round((sn.ageMin || 0) / 60)}h ago — keep it full, nobody hungry or thirsty` : 'Not stocked yet — fill the station now', view: 'meals', sev: 'high' });
     add(!mchk && mtime !== 'overdue', { icon: '🍽️', label: `Inspect & log ${meal}`, sub: 'Count portions, rate it, log the time served', view: 'meals', sev: 'warn' });
     add(flips > 0, { icon: '🛏️', label: `${flips} room${flips > 1 ? 's' : ''} to flip`, sub: 'Discharged today — refresh + laundry', view: 'bedboard', sev: 'warn' });
-    add(sn.stale, { icon: '☕', label: 'Stock the snack station', sub: 'Snacks, coffee & juice — never empty', view: 'meals', sev: 'warn' });
     add(personalTouches.length > 0, { icon: '💛', label: `${personalTouches.length} personal touch${personalTouches.length > 1 ? 'es' : ''} to deliver`, sub: 'The little things they love', view: 'clients', sev: 'normal' });
     add(notEngaged.length > 0, { icon: '🎲', label: `${notEngaged.length} not engaged yet`, sub: 'Boredom drives people out — get them into something', view: 'engagement', sev: 'normal' });
     priority = P;

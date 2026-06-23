@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624P" />
+<link rel="stylesheet" href="/styles.css?v=20260624Q" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1222,6 +1222,8 @@
         <div class="grid2">
           <div><label>Daily inventory-check reminder</label><select id="au_inv_check_on"><option value="on">On</option><option value="off">Off</option></select></div>
           <div><label>Inventory due-by hour (0–23)</label><input id="au_inv_check_hour" type="number" min="0" max="23"/></div>
+          <div><label>“How I’m doing” — rounds target / shift</label><input id="au_target_rounds_per_shift" type="number" min="1" max="50"/></div>
+          <div><label>Snack top-ups target / shift</label><input id="au_target_snacks_per_shift" type="number" min="1" max="20"/></div>
         </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:12px"><button class="btn btn-gold sans" onclick="saveAutomation()">Save automation</button><span id="au_msg" class="hint" style="align-self:center"></span></div>
       </div>
@@ -2551,7 +2553,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624P"></script>
-<script src="/housing.js?v=20260624P"></script>
+<script src="/app.js?v=20260624Q"></script>
+<script src="/housing.js?v=20260624Q"></script>
 </body>
 </html>

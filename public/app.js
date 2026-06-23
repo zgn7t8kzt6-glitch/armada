@@ -1196,6 +1196,7 @@ async function loadAutomation(){
     set('au_survey_alert_on',a.survey_alert_on); set('au_survey_alert_to',a.survey_alert_to);
     set('au_scorecard_on',a.scorecard_on); set('au_scorecard_day',a.scorecard_day);
     set('au_inv_check_on',a.inv_check_on); set('au_inv_check_hour',a.inv_check_hour);
+    set('au_target_rounds_per_shift',a.target_rounds_per_shift); set('au_target_snacks_per_shift',a.target_snacks_per_shift);
   }catch(e){}
 }
 async function saveAutomation(){
@@ -1205,7 +1206,8 @@ async function saveAutomation(){
     meal_on:$('au_meal_on').value, meal_hour:$('au_meal_hour').value,
     survey_alert_on:$('au_survey_alert_on').value, survey_alert_to:$('au_survey_alert_to').value,
     scorecard_on:$('au_scorecard_on').value, scorecard_day:$('au_scorecard_day').value,
-    inv_check_on:$('au_inv_check_on').value, inv_check_hour:$('au_inv_check_hour').value };
+    inv_check_on:$('au_inv_check_on').value, inv_check_hour:$('au_inv_check_hour').value,
+    target_rounds_per_shift:($('au_target_rounds_per_shift')||{}).value, target_snacks_per_shift:($('au_target_snacks_per_shift')||{}).value };
   try{ await api('/settings/automation',{method:'POST',body:JSON.stringify(body)}); $('au_msg').textContent='✓ Saved'; }
   catch(e){ $('au_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
@@ -5276,9 +5278,19 @@ async function loadTeamStats(){
   let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML=''; return; }
   if(!d.team.length){ host.innerHTML=''; return; }
   const medal=i=>['🥇','🥈','🥉'][i]||'';
-  host.innerHTML=`<div class="card"><h3>Team — how everyone's doing (7 days)</h3><p class="sub sans">Overall % across required duties, best to worst. Coach the bottom, celebrate the top.</p>
+  host.innerHTML=`<div class="card"><h3>Team — how everyone's doing (7 days)</h3><p class="sub sans">Overall % across required duties, best to worst. Tap a person to coach with specifics.</p>
     <table class="tbl"><tr><th>Staff</th><th>Role</th><th>Overall</th><th>Shifts</th></tr>
-    ${d.team.map((t,i)=>`<tr><td>${medal(i)} <strong>${esc(t.name)}</strong></td><td class="hint">${esc(t.role||'')}</td><td><strong style="color:${statCol(t.overall)}">${t.overall==null?'—':t.overall+'%'}</strong>${t.flagged7?' <span class="hint" title="rounds flagged">⚠'+t.flagged7+'</span>':''}</td><td>${t.shifts7}</td></tr>`).join('')}</table></div>`;
+    ${d.team.map((t,i)=>`<tr style="cursor:pointer" onclick="openUserStats(${t.id}, ${JSON.stringify(t.name).replace(/"/g,'&quot;')})"><td>${medal(i)} <strong>${esc(t.name)}</strong></td><td class="hint">${esc(t.role||'')}</td><td><strong style="color:${statCol(t.overall)}">${t.overall==null?'—':t.overall+'%'}</strong>${t.flagged7?' <span class="hint" title="rounds flagged">⚠'+t.flagged7+'</span>':''}</td><td>${t.shifts7} ›</td></tr>`).join('')}</table></div>`;
+}
+async function openUserStats(id, name){
+  let d; try{ d=await api('/user-stats/'+id); }catch(e){ alert(e.message); return; }
+  const bar=r=>`<div style="margin:9px 0"><div style="display:flex;justify-content:space-between;font-size:14px"><span>${esc(r.label)}</span><strong style="color:${statCol(r.pct)}">${r.pct==null?'—':r.pct+'%'} <span class="hint" style="font-weight:400">${r.done}/${r.target}</span></strong></div><div class="res-track" style="height:8px;margin-top:4px"><div class="res-fill" style="width:${r.pct||0}%;background:${statCol(r.pct)}"></div></div></div>`;
+  const extras=(d.extras||[]).map(x=>`<span class="chip" style="margin:2px">${esc(x.label)}: <strong>${x.value}</strong></span>`).join('');
+  hmodalPlain(`<h3>${esc(name)} <span class="hint" style="font-weight:400">· ${esc(d.role||'')}</span></h3>
+    <div style="text-align:center;margin:6px 0 10px"><div style="font-size:36px;font-weight:700;color:${statCol(d.overall)}">${d.overall==null?'—':d.overall+'%'}</div><div class="hint">${d.shifts7} shift${d.shifts7===1?'':'s'}${d.hours?' · '+d.hours+' hrs':''} this week${d.flagged7?' · ⚠ '+d.flagged7+' rounds flagged':''}</div></div>
+    ${(d.required||[]).length?(d.required||[]).map(bar).join(''):'<div class="hint">No required duties tracked this week.</div>'}
+    <div style="margin-top:10px">${extras}</div>
+    <div class="toolbar" style="margin-top:14px"><button class="btn btn-ghost sans" onclick="closeHModal()">Close</button></div>`);
 }
 // My Role, folded into the bottom of My Shift (no separate tab) — collapsible so the
 // live shift stays on top: what I do, not my lane, how my shift flows, what great is.

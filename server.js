@@ -1619,10 +1619,12 @@ app.get('/api/settings/automation', requireAuth, requireAdmin, (req, res) => res
   scorecard_day: autoCfg('scorecard_day', 1),
   inv_check_on: autoCfg('inv_check_on', 'on'),
   inv_check_hour: +autoCfg('inv_check_hour', 14),
+  target_rounds_per_shift: +autoCfg('target_rounds_per_shift', 8),
+  target_snacks_per_shift: +autoCfg('target_snacks_per_shift', 1),
 }));
 app.post('/api/settings/automation', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
-  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour', 'survey_alert_on', 'survey_alert_to', 'scorecard_on', 'scorecard_day', 'inv_check_on', 'inv_check_hour']) {
+  for (const k of ['detox_min', 'default_min', 'carecard_min', 'brief_hour', 'brief_on', 'recovery_max', 'welcome_auto', 'alert_detail', 'meal_on', 'meal_hour', 'survey_alert_on', 'survey_alert_to', 'scorecard_on', 'scorecard_day', 'inv_check_on', 'inv_check_hour', 'target_rounds_per_shift', 'target_snacks_per_shift']) {
     if (b[k] !== undefined) setState('auto_' + k, String(b[k]).trim());
   }
   audit({ user: req.user, action: 'AUTO_CONFIG', ip: req.ip });
@@ -3181,12 +3183,13 @@ function userStats(u) {
   const contracts = g(`SELECT COUNT(*) n FROM behavior_contracts WHERE status='Active'`);
   const items = g(`SELECT COUNT(*) n FROM shift_tasks WHERE active=1`);
   const ROUNDS_PER_SHIFT = +autoCfg('target_rounds_per_shift', 8);
+  const SNACKS_PER_SHIFT = +autoCfg('target_snacks_per_shift', 1);
   const pct = (d, t) => (t > 0 ? Math.min(100, Math.round(d / t * 100)) : null);
   const required = [];
   if (sched > 0) required.push({ label: 'Attendance', done: present, target: sched, pct: pct(present, sched) });
   if (shifts7 > 0) { const t = shifts7 * ROUNDS_PER_SHIFT; required.push({ label: 'Rounds on cadence', done: scans7, target: t, pct: pct(scans7, t) }); }
   if (items > 0 && shifts7 > 0) { const t = items * shifts7; required.push({ label: 'Shift checklist', done: checklist7, target: t, pct: pct(checklist7, t) }); }
-  if (shifts7 > 0) required.push({ label: 'Snack station', done: snacks7, target: shifts7, pct: pct(snacks7, shifts7) });
+  if (shifts7 > 0) { const t = Math.max(1, shifts7 * SNACKS_PER_SHIFT); required.push({ label: 'Snack station', done: snacks7, target: t, pct: pct(snacks7, t) }); }
   if (contracts > 0 && shifts7 > 0) { const t = contracts * shifts7; required.push({ label: 'Behavior check-ins', done: checkins7, target: t, pct: pct(checkins7, t) }); }
   const pcts = required.map((r) => r.pct).filter((p) => p != null);
   const overall = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
@@ -3206,11 +3209,19 @@ app.get('/api/my-stats', requireAuth, (req, res) => {
   const canManage = req.user.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(req.user.job_role || '');
   res.json({ ...s, wowsForMe, canManage });
 });
+const canSeeTeamStats = (u) => u.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(u.job_role || '');
+// Leadership: drill into one person's full breakdown.
+app.get('/api/user-stats/:id', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const u = db.prepare(`SELECT id, name, job_role FROM users WHERE id = ?`).get(+req.params.id);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  res.json(userStats(u));
+});
 // Leadership: a summary of how everyone's doing (overall % across required duties).
 app.get('/api/team-stats', requireAuth, (req, res) => {
-  if (!(req.user.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(req.user.job_role || ''))) return res.status(403).json({ error: 'Leadership only.' });
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
   const users = db.prepare(`SELECT id, name, job_role FROM users WHERE active=1 AND role!='admin' ORDER BY name`).all();
-  const team = users.map((u) => { const s = userStats(u); return { name: s.name, role: s.role, overall: s.overall, shifts7: s.shifts7, flagged7: s.flagged7 }; })
+  const team = users.map((u) => { const s = userStats(u); return { id: s.id, name: s.name, role: s.role, overall: s.overall, shifts7: s.shifts7, flagged7: s.flagged7 }; })
     .filter((t) => t.shifts7 > 0 || t.overall != null)
     .sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1));
   res.json({ team });

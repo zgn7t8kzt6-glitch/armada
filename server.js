@@ -5346,6 +5346,7 @@ app.get('/api/property/:cid', requireAuth, (req, res) => {
     items: db.prepare(`SELECT * FROM property_items WHERE client_id = ? ORDER BY status, id`).all(cid).map(({ photo, ...r }) => ({ ...r, hasPhoto: !!photo })),
     events: db.prepare(`SELECT * FROM property_events WHERE client_id = ? ORDER BY id DESC LIMIT 100`).all(cid),
     balance: cashBalance(cid), categories: PROPERTY_CATEGORIES,
+    staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all(),
   });
 });
 // Record the dual-witnessed intake count (opens the chain of custody).

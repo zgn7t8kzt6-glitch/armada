@@ -2117,7 +2117,7 @@ async function renderArrivalChecklist(){
   $('arrDetail').innerHTML = `<div class="card">
     <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3>
       <p class="sub sans" style="margin:2px 0 0">Arrival checklist · admitted ${esc(d.client.admit)} · <strong>${overall}% complete</strong></p></div>
-      <div class="toolbar" style="margin:0;gap:8px">${toggleBtn}<button class="btn btn-primary btn-sm sans no-print" onclick="closeArrival()">${overall===100?'✓ Done':'Done — back to arrivals'}</button></div></div>
+      <div class="toolbar" style="margin:0;gap:8px">${canSeeView('property')?`<button class="btn btn-gold btn-sm sans no-print" onclick="openBelongings(${d.client.id})">📦 Belongings form</button>`:''}${toggleBtn}<button class="btn btn-primary btn-sm sans no-print" onclick="closeArrival()">${overall===100?'✓ Done':'Done — back to arrivals'}</button></div></div>
     <div class="res-track" style="height:7px;margin:8px 0 2px"><div class="res-fill" style="width:${overall}%"></div></div>
     ${(!mgmt && !myRoles.length)?'<div class="pc-note" style="margin-top:8px">Nothing assigned to your role for this admit — showing the full checklist.</div>':''}
     ${roles.map(roleBlock).join('')}
@@ -2126,6 +2126,8 @@ async function renderArrivalChecklist(){
   $('arrDetail').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function closeArrival(){ ARR_CID=null; const el=$('arrDetail'); if(el) el.innerHTML=''; const b=$('arrBoard'); if(b) b.scrollIntoView({behavior:'smooth',block:'start'}); }
+// Jump straight to a client's belongings (chain-of-custody) form.
+function openBelongings(cid){ show('property'); setTimeout(()=>openProperty(cid), 30); }
 async function toggleArrival(cid,iid,done){ try{ await api('/arrival/check',{method:'POST',body:JSON.stringify({client_id:cid,item_id:iid,done})}); renderArrivalChecklist(); loadArrivalTasks(); }catch(e){ alert(e.message); } }
 async function loadArrivalTemplate(){
   let d; try{ d=await api('/arrival/template'); }catch(e){ return; }
@@ -2159,6 +2161,7 @@ async function loadProperty(){
 }
 async function openProperty(cid){
   let d; try{ d=await api('/property/'+cid); }catch(e){ alert(e.message); return; }
+  if(d.staff) window.PROP_STAFF=d.staff;
   const m=d.meta; const items=d.items||[];
   const itemRow=i=>`<div class="cmd-row">${i.hasPhoto?`<img src="/api/property/item/${i.id}/photo" onclick="window.open('/api/property/item/${i.id}/photo','_blank')" style="width:46px;height:46px;border-radius:8px;object-fit:cover;border:1px solid var(--line);cursor:pointer;flex:none" alt="photo"/>`:''}<div class="cmd-row-main">${i.status==='returned'?'↩︎ ':'📦 '}<b>${esc(i.category||'Item')}</b> — ${esc(i.description)}${i.qty&&i.qty!==1?' ×'+i.qty:''}${i.est_value!=null?' <span class="hint">· est '+money(i.est_value)+'</span>':''}${i.condition?' <span class="hint">· '+esc(i.condition)+'</span>':''}${i.status==='returned'?' <span class="hint">· returned '+esc(String(i.returned_at||'').slice(0,10))+'</span>':''}</div>${i.status==='stored'?`<button class="btn btn-ghost btn-sm sans" onclick="returnPropItem(${i.id},${cid})">Return</button>`:''}</div>`;
   const evIcon={intake_count:'📝',cash_deposit:'➕',cash_withdrawal:'➖',return:'↩︎',return_all:'✅',audit:'🔍',discrepancy:'⚠️',access:'🔓'};

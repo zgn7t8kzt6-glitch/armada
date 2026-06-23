@@ -5027,6 +5027,7 @@ async function loadDashboard(){
     bar.innerHTML = `<span class="hint">👁 Preview dashboard as role:</span><select id="dashAsSel" class="sans" onchange="setDashPreview(this.value)"><option value="">My role (${esc(ME.job_role||'Team')})</option>${(d.roles||[]).map(r=>`<option value="${esc(r)}" ${r===DASH_PREVIEW?'selected':''}>${esc(r)}</option>`).join('')}</select>${d.previewing?`<span class="risk risk-warn">previewing ${esc(d.previewing)}</span>`:''}`;
   }
   $('dashSubtitle').textContent = d.subtitle||'';
+  renderClock();
   renderFacility(d.facility);
   renderCrew();
   renderBContracts();
@@ -5300,6 +5301,29 @@ async function renderBContracts(){
     <p class="sub sans" style="margin:0 0 8px">Active contract — check in <b>every shift</b> and log how they're doing. Worse alerts the lead.</p>${rows}</div>`;
 }
 async function bCheckin(id,rating){ let note=''; if(rating==='Worse') note=prompt('What happened? (optional — this alerts the lead)')||''; try{ await api('/behavior-contracts/'+id+'/checkin',{method:'POST',body:JSON.stringify({rating,note})}); renderBContracts(); }catch(e){ alert(e.message); } }
+// Clock in/out — front and center on My Shift. Clocking in puts you on shift.
+let CLOCK_GEO=false;
+async function renderClock(){
+  const host=$('dashClock'); if(!host) return;
+  let s; try{ s=await api('/clock/status'); }catch(e){ host.innerHTML=''; return; }
+  CLOCK_GEO=!!s.geofenceOn;
+  const t = s.since ? new Date(String(s.since).replace(' ','T')+'Z').toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+  host.innerHTML = s.clockedIn
+    ? `<div class="card" style="border-left:4px solid var(--good);background:#f3f8f4;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:22px">🟢</span><div style="flex:1;min-width:160px"><strong>You're on the clock</strong>${t?` <span class="hint">· since ${esc(t)}</span>`:''}<div class="hint">You're counted on shift while clocked in.</div></div>
+        <button class="btn btn-ghost sans" onclick="clockOut()">Clock out</button></div>`
+    : `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:22px">🕐</span><div style="flex:1;min-width:160px"><strong>You're not clocked in</strong><div class="hint">Clock in when you arrive — it puts you on shift.</div></div>
+        <button class="btn btn-gold sans" onclick="clockIn()">Clock in</button></div>`;
+}
+function clockPos(){ return new Promise(r=>{ if(!navigator.geolocation) return r(null); navigator.geolocation.getCurrentPosition(p=>r(p), ()=>r(null), {enableHighAccuracy:true,timeout:8000,maximumAge:60000}); }); }
+async function clockPunch(dir){
+  let body={};
+  if(CLOCK_GEO){ const p=await clockPos(); if(p) body={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}; }
+  try{ await api('/clock/'+dir,{method:'POST',body:JSON.stringify(body)}); renderClock(); renderCrew(); }catch(e){ alert(e.message); }
+}
+function clockIn(){ clockPunch('in'); }
+function clockOut(){ if(!confirm('Clock out now?'))return; clockPunch('out'); }
 // Who's on shift + the lead in charge — with a one-tap Call button for emergencies.
 async function renderCrew(){
   const host=$('dashCrew'); if(!host) return;

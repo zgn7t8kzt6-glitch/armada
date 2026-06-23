@@ -4997,6 +4997,7 @@ async function loadDashboard(){
     bar.innerHTML = `<span class="hint">👁 Preview dashboard as role:</span><select id="dashAsSel" class="sans" onchange="setDashPreview(this.value)"><option value="">My role (${esc(ME.job_role||'Team')})</option>${(d.roles||[]).map(r=>`<option value="${esc(r)}" ${r===DASH_PREVIEW?'selected':''}>${esc(r)}</option>`).join('')}</select>${d.previewing?`<span class="risk risk-warn">previewing ${esc(d.previewing)}</span>`:''}`;
   }
   $('dashSubtitle').textContent = d.subtitle||'';
+  renderShiftReport();
   if(d.lean){ renderLeanDashboard(d); return; }
   if($('dashActions')) $('dashActions').style.display='';
   const ns=d.northStar;
@@ -5182,6 +5183,44 @@ async function loadAlertScore(){
       <div><strong class="sans">Most responsive (7 days)</strong>${staff?`<table class="tbl" style="margin-top:6px">${staff}</table>`:'<div class="hint" style="margin-top:6px">No alerts handled yet.</div>'}</div>
       <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
     </div>`;
+}
+// Shift pass-down — the first thing on My Shift is the report the LAST shift left,
+// then you write your own for the next shift. An unbroken chain.
+async function renderShiftReport(){
+  const host=$('dashShiftReport'); if(!host) return;
+  let d; try{ d=await api('/shift-report'); }catch(e){ host.innerHTML=''; return; }
+  const p=d.previous;
+  const line=(lbl,val)=> val?`<div style="margin-top:6px"><span class="hint" style="text-transform:uppercase;letter-spacing:.5px;font-size:11px">${lbl}</span><div>${esc(val).replace(/\n/g,'<br>')}</div></div>`:'';
+  const prevHtml = p
+    ? `<div class="hint">${esc(p.shift)} shift · ${esc(p.shift_date)}${p.by_name?' · '+esc(p.by_name):''}${p.census!=null?' · census '+p.census:''}</div>
+       ${line('What you need to know', p.summary)}${line('Watch list', p.watch)}${line('Left to do', p.followups)}
+       ${(!p.summary&&!p.watch&&!p.followups)?'<div class="pc-note" style="margin-top:6px">No notes were left.</div>':''}`
+    : `<div class="pc-note">No prior shift report yet — you'll set the first one.</div>`;
+  const cur=d.current;
+  host.innerHTML=`<div class="card" style="border-left:4px solid var(--aqua);background:#f4fafb">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">📋 Last shift's report — read before you start</h3></div>
+      <div class="toolbar" style="gap:6px"><button class="btn btn-ghost btn-sm sans" onclick="shiftReportHistory()">Earlier</button><button class="btn btn-gold btn-sm sans" onclick="writeShiftReport()">${cur?'Update my report':'Write my shift report'}</button></div></div>
+    <div style="margin-top:8px">${prevHtml}</div>
+    ${cur?`<div class="pc-note" style="margin-top:10px">✓ Your ${esc(d.shift)} report is saved${cur.by_name?' ('+esc(cur.by_name)+')':''} — tap “Update my report” to add more.</div>`:''}
+  </div>`;
+}
+async function writeShiftReport(){
+  let d; try{ d=await api('/shift-report'); }catch(e){ alert(e.message); return; }
+  const c=d.current||{};
+  const save=hmodal(`<h3>${d.current?'Update':'Write'} the ${esc(d.shift)} shift report</h3>
+    <p class="sub sans">The next shift reads this first. Keep it to what matters.</p>
+    <label>What the next shift needs to know</label><textarea id="sr_summary" rows="3" placeholder="How the unit is, anything notable that happened">${esc(c.summary||'')}</textarea>
+    <label>Watch list — clients / situations</label><textarea id="sr_watch" rows="2" placeholder="Who or what to keep an eye on">${esc(c.watch||'')}</textarea>
+    <label>Left to do / follow-ups</label><textarea id="sr_followups" rows="2" placeholder="Anything not finished this shift">${esc(c.followups||'')}</textarea>`);
+  save.onclick=async()=>{ try{ await api('/shift-report',{method:'POST',body:JSON.stringify({summary:$('sr_summary').value,watch:$('sr_watch').value,followups:$('sr_followups').value})}); closeHModal(); renderShiftReport(); }catch(e){ alert(e.message); } };
+}
+async function shiftReportHistory(){
+  let d; try{ d=await api('/shift-report/history'); }catch(e){ alert(e.message); return; }
+  const rows=(d.reports||[]).map(r=>`<div class="card" style="margin-bottom:8px"><div class="hint">${esc(r.shift)} shift · ${esc(r.shift_date)}${r.by_name?' · '+esc(r.by_name):''}</div>
+    ${r.summary?`<div style="margin-top:4px">${esc(r.summary).replace(/\n/g,'<br>')}</div>`:''}
+    ${r.watch?`<div class="hint" style="margin-top:4px">👁 ${esc(r.watch).replace(/\n/g,'<br>')}</div>`:''}
+    ${r.followups?`<div class="hint" style="margin-top:4px">☑ ${esc(r.followups).replace(/\n/g,'<br>')}</div>`:''}</div>`).join('')||'<div class="empty">No reports yet.</div>';
+  hmodalPlain(`<h3>Shift reports — recent</h3><div style="max-height:60vh;overflow:auto;margin-top:8px">${rows}</div><div class="toolbar" style="margin-top:12px"><button class="btn btn-ghost sans" onclick="closeHModal()">Close</button></div>`);
 }
 // Lean shift screen (frontline roles): greeting + critical alerts + ONE ranked
 // "needs you now" list. Everything else is intentionally hidden to cut the noise.

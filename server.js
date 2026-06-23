@@ -1049,6 +1049,25 @@ app.post('/api/meals/snack', requireAuth, (req, res) => {
 });
 // Caterer scorecard — last 30 days of meal checks (held the standard?).
 app.get('/api/meals/scorecard', requireAuth, (req, res) => res.json(mealScorecard()));
+
+/* ---------------- Shift report (the pass-down) ---------------- */
+function shiftReportCtx() {
+  const today = appToday(), sh = currentShift();
+  const current = db.prepare(`SELECT * FROM shift_reports WHERE shift_date = ? AND shift = ?`).get(today, sh) || null;
+  const previous = db.prepare(`SELECT * FROM shift_reports WHERE NOT (shift_date = ? AND shift = ?) ORDER BY created_at DESC LIMIT 1`).get(today, sh) || null;
+  return { shift: sh, shift_date: today, current, previous };
+}
+app.get('/api/shift-report', requireAuth, (req, res) => res.json(shiftReportCtx()));
+app.get('/api/shift-report/history', requireAuth, (req, res) => res.json({ reports: db.prepare(`SELECT * FROM shift_reports ORDER BY created_at DESC LIMIT 15`).all() }));
+app.post('/api/shift-report', requireAuth, (req, res) => {
+  const b = req.body || {}; const today = appToday(), sh = currentShift();
+  db.prepare(`INSERT INTO shift_reports (shift_date, shift, summary, watch, followups, census, by_id, by_name)
+    VALUES (?,?,?,?,?,?,?,?)
+    ON CONFLICT(shift_date, shift) DO UPDATE SET summary=excluded.summary, watch=excluded.watch, followups=excluded.followups, census=excluded.census, by_id=excluded.by_id, by_name=excluded.by_name, updated_at=datetime('now')`)
+    .run(today, sh, (b.summary || '').trim() || null, (b.watch || '').trim() || null, (b.followups || '').trim() || null, censusNow(), req.user.id, req.user.name);
+  audit({ user: req.user, action: 'SHIFT_REPORT', detail: `${sh} ${today}`, ip: req.ip });
+  res.json({ ok: true });
+});
 // Meal menu — staff records what's being served each meal (residents don't).
 app.get('/api/meals/menu', requireAuth, (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();

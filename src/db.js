@@ -1401,6 +1401,20 @@ db.exec(`CREATE TABLE IF NOT EXISTS snack_checks (
   note TEXT, by_id INTEGER REFERENCES users(id), by_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// SHIFT REPORT — the unit-level pass-down each shift writes for the next. One row
+// per shift; the next shift reads it as the first thing on My Shift, then writes
+// their own — an unbroken chain of "what you need to know."
+db.exec(`CREATE TABLE IF NOT EXISTS shift_reports (
+  id INTEGER PRIMARY KEY,
+  shift_date TEXT NOT NULL,
+  shift TEXT NOT NULL,
+  summary TEXT, watch TEXT, followups TEXT,
+  census INTEGER,
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(shift_date, shift)
+);`);
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');

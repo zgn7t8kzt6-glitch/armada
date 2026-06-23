@@ -152,6 +152,20 @@ export function acceptInvite(token, password) {
   return { ok: true, email: u.email, name: u.name };
 }
 
+// Verify a second staff member's credentials inline (e.g. a witness co-signing a
+// cash count) without starting a session — true non-repudiation, not a typed name.
+export function verifyCredentials(username, password) {
+  const u = db.prepare(`SELECT id, name, username, password_hash, active FROM users WHERE lower(username) = ? OR lower(email) = ?`).get(String(username || '').toLowerCase().trim(), String(username || '').toLowerCase().trim());
+  if (!u || !u.active || !password) return null;
+  return bcrypt.compareSync(String(password), u.password_hash) ? { id: u.id, name: u.name } : null;
+}
+
+export function verifyUserById(id, password) {
+  const u = db.prepare(`SELECT id, name, password_hash, active FROM users WHERE id = ?`).get(id);
+  if (!u || !u.active || !password) return null;
+  return bcrypt.compareSync(String(password), u.password_hash) ? { id: u.id, name: u.name } : null;
+}
+
 export function login(req, res, username, password) {
   const user = db.prepare(`SELECT * FROM users WHERE username = ? AND active = 1`).get(username.toLowerCase().trim());
   if (!user || !bcrypt.compareSync(password, user.password_hash)) return null;

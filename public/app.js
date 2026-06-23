@@ -3653,11 +3653,13 @@ async function loadBedBoard(){
     <div class="ret-card ${d.overdue?'rc-high':''}"><div class="n">${d.overdue}</div><div class="l">Overdue (past a shift)</div></div>
     <div class="ret-card"><div class="n">${(d.cleaned||[]).length}</div><div class="l">Cleaned (24h)</div></div>`;
   const fmtAge=m=>m>=60?Math.floor(m/60)+'h '+(m%60)+'m':m+'m';
-  $('tovDirty').innerHTML = d.dirty.length ? d.dirty.map(b=>`<div class="cmd-row ${b.overdue?'cmd-row-flag':''}">
-      <div class="cmd-row-main"><strong>🛏️ ${esc(b.room)}</strong>${b.who?' <span class="hint">· '+esc(b.who)+' left</span>':''}
-        <div class="hint">${b.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}waiting ${fmtAge(b.mins)}${b.reason?' · '+esc(b.reason):''}</div></div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-gold btn-sm sans" onclick="cleanTurnover(${b.id})">✓ Cleaned / open</button>
+  $('tovDirty').innerHTML = d.dirty.length ? d.dirty.map(b=>`<div class="cmd-row ${b.overdue?'cmd-row-flag':''}" style="flex-wrap:wrap">
+      <div class="cmd-row-main" style="flex:1;min-width:170px"><strong>🛏️ ${esc(b.room)}</strong>${b.status==='cleaning'?' <span class="risk risk-elev">cleaning</span>':' <span class="risk risk-warn">needs cleaning</span>'}${b.who?' <span class="hint">· '+esc(b.who)+' left</span>':''}
+        <div class="hint">${b.overdue?'<span style="color:var(--danger);font-weight:600">OVERDUE</span> · ':''}waiting ${fmtAge(b.mins)}${b.reason?' · '+esc(b.reason):''}${b.status==='cleaning'&&b.cleaned_by?' · 🧹 '+esc(b.cleaned_by)+' cleaning':''}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${b.status==='cleaning'
+          ? `<button class="btn btn-gold btn-sm sans" onclick="cleanTurnover(${b.id})">✓ Cleaned</button>`
+          : `<button class="btn btn-ghost btn-sm sans" onclick="startTurnover(${b.id})">🧹 Start cleaning</button><button class="btn btn-gold btn-sm sans" onclick="cleanTurnover(${b.id})">✓ Cleaned</button>`}
         <button class="btn btn-ghost btn-sm sans" onclick="removeTurnover(${b.id})" title="Remove (flagged by mistake)">✕</button>
       </div></div>`).join('') : '<div class="hint">All beds clean — nothing waiting. 🎉</div>';
   $('tovClean').innerHTML = (d.cleaned||[]).length ? d.cleaned.map(b=>`<div class="pc-note">✅ <strong>${esc(b.room)}</strong> <span class="hint">· cleaned by ${esc(b.cleaned_by||'')} · ${esc(b.at||'')}</span> <a onclick="reopenTurnover(${b.id})" style="cursor:pointer;color:var(--muted);margin-left:6px">undo</a></div>`).join('') : '<div class="hint">No beds cleaned in the last 24 hours.</div>';
@@ -3667,6 +3669,7 @@ async function addTurnover(){
   try{ await api('/turnovers',{method:'POST',body:JSON.stringify({room,who:($('tov_who')||{}).value||''})}); $('tov_room').value=''; if($('tov_who'))$('tov_who').value=''; if($('tov_msg'))$('tov_msg').textContent=''; loadBedBoard(); }
   catch(e){ if($('tov_msg'))$('tov_msg').textContent=e.message; }
 }
+async function startTurnover(id){ try{ await api('/turnovers/'+id+'/start',{method:'POST'}); loadBedBoard(); }catch(e){ alert(e.message); } }
 async function cleanTurnover(id){ try{ await api('/turnovers/'+id+'/clean',{method:'POST'}); loadBedBoard(); }catch(e){ alert(e.message); } }
 async function reopenTurnover(id){ try{ await api('/turnovers/'+id+'/reopen',{method:'POST'}); loadBedBoard(); }catch(e){ alert(e.message); } }
 async function removeTurnover(id){ if(!confirm('Remove this bed from the board?'))return; try{ await api('/turnovers/'+id,{method:'DELETE'}); loadBedBoard(); }catch(e){ alert(e.message); } }

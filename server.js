@@ -3374,6 +3374,8 @@ app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
         .run(cid, 'property_unreturned', 'High', `${(pc?.pref || pc?.name || 'A client')} was discharged with belongings not returned — $${pbal.toFixed(2)} in trust and ${pitems} item(s) still stored. Return them now.`, rolesForAlert('property_unreturned'));
     }
   } catch (e) { /* never block discharge on this */ }
+  // Auto-flag the bed for turnover so it lands on the Bed Turnover board to be cleaned.
+  flagTurnoverForClient(+req.params.id, status === 'Transferred' ? 'transfer' : 'discharge');
   if (status !== 'Transferred') {
     // Aftercare calls are REQUIRED tasks, auto-assigned to the Aftercare Coordinator.
     const coordId = getState('aftercare_coordinator');
@@ -4937,7 +4939,8 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const meal = currentMeal();
     const mchk = db.prepare(`SELECT served_at FROM meal_checks WHERE date = ? AND meal = ?`).get(today, meal);
     const mtime = mealTimeliness(meal, mchk ? mchk.served_at : null);
-    const flips = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
+    reconcileTurnovers();
+    const flips = db.prepare(`SELECT COUNT(*) n FROM bed_turnovers WHERE status IN ('dirty','cleaning')`).get().n;
     const sn = snackStatus();
     const P = [];
     const add = (cond, o) => { if (cond) P.push(o); };
@@ -6274,8 +6277,25 @@ app.post('/api/staffing/assignments/:id/cover', requireAuth, requireStaffingMana
 // ── Bed turnover board (RT bed flips) ───────────────────────────────────────
 // A bed flags 'dirty' when a client discharges (auto via Kipu sync) or by hand
 // for a room switch; RTs mark it clean/open. Overdue = still dirty past a shift.
+// Catch-all: ensure every recently-discharged client's bed is on the board — covers
+// manual discharges AND Kipu-synced ones. Idempotent: skips a room that already has
+// a turnover dated on/after that discharge (so cleaned beds don't re-appear).
+function reconcileTurnovers() {
+  try {
+    const recent = db.prepare(`SELECT room, pref, name, substr(discharge_date,1,10) dd, discharge_status FROM clients
+      WHERE discharge_date >= date('now','-2 day') AND room IS NOT NULL AND TRIM(room) != ''`).all();
+    const ins = db.prepare(`INSERT INTO bed_turnovers (room, who, reason, flagged_shift) VALUES (?,?,?,?)`);
+    const seen = db.prepare(`SELECT 1 FROM bed_turnovers WHERE room = ? AND date(flagged_at) >= ? LIMIT 1`);
+    for (const c of recent) {
+      const room = c.room.trim();
+      if (seen.get(room, c.dd)) continue;
+      ins.run(room.slice(0, 40), ((c.pref || (c.name || '').split(/\s+/)[0]) || '').slice(0, 60) || null, c.discharge_status === 'Transferred' ? 'transfer' : 'discharge', currentShift());
+    }
+  } catch (e) { /* never block on reconciliation */ }
+}
 app.get('/api/turnovers', requireAuth, (req, res) => {
-  const dirty = db.prepare(`SELECT id, room, who, reason, flagged_at FROM bed_turnovers WHERE status = 'dirty' ORDER BY flagged_at`).all();
+  reconcileTurnovers();
+  const dirty = db.prepare(`SELECT id, room, who, reason, status, cleaned_by, flagged_at FROM bed_turnovers WHERE status IN ('dirty','cleaning') ORDER BY flagged_at`).all();
   const cleaned = db.prepare(`SELECT id, room, who, cleaned_by, substr(cleaned_at,1,16) at FROM bed_turnovers
     WHERE status = 'clean' AND cleaned_at >= datetime('now','-1 day') ORDER BY cleaned_at DESC LIMIT 30`).all();
   const now = Date.now();
@@ -6286,12 +6306,27 @@ app.get('/api/turnovers', requireAuth, (req, res) => {
   });
   res.json({ dirty: dirtyOut, cleaned, openCount: dirtyOut.length, overdue: dirtyOut.filter((b) => b.overdue).length });
 });
+// Auto-flag a discharged/transferred client's bed for cleaning (idempotent per room).
+function flagTurnoverForClient(cid, reason) {
+  try {
+    const c = db.prepare(`SELECT room, pref, name FROM clients WHERE id = ?`).get(cid);
+    const room = ((c && c.room) || '').trim();
+    if (!room) return;
+    if (db.prepare(`SELECT 1 FROM bed_turnovers WHERE room = ? AND status IN ('dirty','cleaning') LIMIT 1`).get(room)) return;
+    db.prepare(`INSERT INTO bed_turnovers (room, who, reason, flagged_shift) VALUES (?,?,?,?)`)
+      .run(room.slice(0, 40), ((c.pref || (c.name || '').split(/\s+/)[0]) || '').slice(0, 60) || null, reason || 'discharge', currentShift());
+  } catch (e) { /* never block discharge on turnover flagging */ }
+}
 app.post('/api/turnovers', requireAuth, (req, res) => {
   const room = (req.body?.room || '').trim();
   if (!room) return res.status(400).json({ error: 'Which bed/room?' });
   if (db.prepare(`SELECT 1 FROM bed_turnovers WHERE room = ? AND status = 'dirty' LIMIT 1`).get(room)) return res.json({ ok: true, already: true });
   db.prepare(`INSERT INTO bed_turnovers (room, who, reason, flagged_shift) VALUES (?,?,?,?)`)
     .run(room.slice(0, 40), (req.body?.who || '').trim().slice(0, 60) || null, 'manual', currentShift());
+  res.json({ ok: true });
+});
+app.post('/api/turnovers/:id/start', requireAuth, (req, res) => {
+  db.prepare(`UPDATE bed_turnovers SET status='cleaning', cleaned_by=? WHERE id=? AND status='dirty'`).run(req.user.name, req.params.id);
   res.json({ ok: true });
 });
 app.post('/api/turnovers/:id/clean', requireAuth, (req, res) => {

@@ -1055,16 +1055,26 @@ function shiftReportCtx() {
   const today = appToday(), sh = currentShift();
   const current = db.prepare(`SELECT * FROM shift_reports WHERE shift_date = ? AND shift = ?`).get(today, sh) || null;
   const previous = db.prepare(`SELECT * FROM shift_reports WHERE NOT (shift_date = ? AND shift = ?) ORDER BY created_at DESC LIMIT 1`).get(today, sh) || null;
-  return { shift: sh, shift_date: today, current, previous };
+  // Suggested counts so the writer confirms rather than tallies from scratch.
+  const dcToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
+  const incToday = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE substr(created_at,1,10) = ?`).get(today).n;
+  const suggest = { census: censusNow(), discharges: dcToday, incidents: incToday };
+  return { shift: sh, shift_date: today, current, previous, suggest };
 }
 app.get('/api/shift-report', requireAuth, (req, res) => res.json(shiftReportCtx()));
 app.get('/api/shift-report/history', requireAuth, (req, res) => res.json({ reports: db.prepare(`SELECT * FROM shift_reports ORDER BY created_at DESC LIMIT 15`).all() }));
 app.post('/api/shift-report', requireAuth, (req, res) => {
   const b = req.body || {}; const today = appToday(), sh = currentShift();
-  db.prepare(`INSERT INTO shift_reports (shift_date, shift, summary, watch, followups, census, by_id, by_name)
-    VALUES (?,?,?,?,?,?,?,?)
-    ON CONFLICT(shift_date, shift) DO UPDATE SET summary=excluded.summary, watch=excluded.watch, followups=excluded.followups, census=excluded.census, by_id=excluded.by_id, by_name=excluded.by_name, updated_at=datetime('now')`)
-    .run(today, sh, (b.summary || '').trim() || null, (b.watch || '').trim() || null, (b.followups || '').trim() || null, censusNow(), req.user.id, req.user.name);
+  const data = (b.data && typeof b.data === 'object') ? JSON.stringify(b.data) : null;
+  // Keep the legacy columns populated from the structured answers for list previews.
+  const d = b.data || {};
+  const summary = (b.summary || d.notes || d.summary || '').trim() || null;
+  const watch = (b.watch || d.watch || '').trim() || null;
+  const followups = (b.followups || d.followups || '').trim() || null;
+  db.prepare(`INSERT INTO shift_reports (shift_date, shift, summary, watch, followups, data, census, by_id, by_name)
+    VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(shift_date, shift) DO UPDATE SET summary=excluded.summary, watch=excluded.watch, followups=excluded.followups, data=excluded.data, census=excluded.census, by_id=excluded.by_id, by_name=excluded.by_name, updated_at=datetime('now')`)
+    .run(today, sh, summary, watch, followups, data, (d.census != null && d.census !== '') ? parseInt(d.census, 10) || 0 : censusNow(), req.user.id, req.user.name);
   audit({ user: req.user, action: 'SHIFT_REPORT', detail: `${sh} ${today}`, ip: req.ip });
   res.json({ ok: true });
 });

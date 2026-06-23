@@ -1416,6 +1416,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS shift_reports (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(shift_date, shift)
 );`);
+addColumn('shift_reports', 'data', 'TEXT');   // structured pass-down answers (JSON)
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');

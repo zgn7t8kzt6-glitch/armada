@@ -1392,6 +1392,16 @@ CREATE TABLE IF NOT EXISTS behavior_contract_notes (
   contract_id INTEGER REFERENCES behavior_contracts(id) ON DELETE CASCADE,
   note TEXT NOT NULL, by_id INTEGER REFERENCES users(id), by_name TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS behavior_checkins (
+  id INTEGER PRIMARY KEY,
+  contract_id INTEGER REFERENCES behavior_contracts(id) ON DELETE CASCADE,
+  client_id INTEGER,
+  shift_date TEXT NOT NULL, shift TEXT NOT NULL,
+  rating TEXT,                               -- Better | Holding | Worse
+  note TEXT, by_id INTEGER, by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(contract_id, shift_date, shift)
 );`);
 // SNACK STATION — was the snack/coffee/juice station stocked, and when? Respect = the
 // little things are always there. One row per stock-up, newest wins for "stocked now".

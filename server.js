@@ -5191,6 +5191,32 @@ app.post('/api/behavior-contracts', requireAuth, (req, res) => {
   audit({ user: req.user, action: 'BCONTRACT_NEW', entity: 'client', entity_id: +b.client_id, ip: req.ip });
   res.json({ ok: true, id: r.lastInsertRowid });
 });
+// Active contracts + whether each got a behavioral check-in this shift (so My Shift
+// can flag them prominently and prompt the check-in every shift).
+app.get('/api/behavior-contracts/active', requireAuth, (req, res) => {
+  const today = appToday(), sh = currentShift();
+  const rows = db.prepare(`SELECT bc.id, bc.client_id, bc.reason, c.pref, c.name, c.room,
+      (SELECT 1 FROM behavior_checkins k WHERE k.contract_id = bc.id AND k.shift_date = ? AND k.shift = ?) checked,
+      (SELECT rating FROM behavior_checkins k WHERE k.contract_id = bc.id AND k.shift_date = ? AND k.shift = ?) thisRating
+    FROM behavior_contracts bc LEFT JOIN clients c ON c.id = bc.client_id
+    WHERE bc.status = 'Active' ORDER BY bc.id DESC`).all(today, sh, today, sh);
+  res.json({ shift: sh, contracts: rows.map((r) => ({ id: r.id, client_id: r.client_id, name: r.pref || r.name || 'Client', room: r.room || '', reason: r.reason || '', checked: !!r.checked, rating: r.thisRating || '' })) });
+});
+app.post('/api/behavior-contracts/:id/checkin', requireAuth, (req, res) => {
+  const today = appToday(), sh = currentShift();
+  const bc = db.prepare(`SELECT id, client_id FROM behavior_contracts WHERE id = ?`).get(req.params.id);
+  if (!bc) return res.status(404).json({ error: 'Not found' });
+  const rating = ['Better', 'Holding', 'Worse'].includes(req.body?.rating) ? req.body.rating : 'Holding';
+  const note = (req.body?.note || '').trim() || null;
+  db.prepare(`INSERT INTO behavior_checkins (contract_id, client_id, shift_date, shift, rating, note, by_id, by_name)
+    VALUES (?,?,?,?,?,?,?,?)
+    ON CONFLICT(contract_id, shift_date, shift) DO UPDATE SET rating=excluded.rating, note=excluded.note, by_id=excluded.by_id, by_name=excluded.by_name`)
+    .run(bc.id, bc.client_id, today, sh, rating, note, req.user.id, req.user.name);
+  db.prepare(`INSERT INTO behavior_contract_notes (contract_id, note, by_id, by_name) VALUES (?,?,?,?)`).run(bc.id, `Shift check-in (${sh}): ${rating}${note ? ' — ' + note : ''}`, req.user.id, req.user.name);
+  if (rating === 'Worse') { const c = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(bc.client_id) || {}; createAlert(bc.client_id, 'behavior_contract', 'High', `${c.pref || c.name || 'A client'} on a behavioral contract is doing WORSE this shift${note ? ': ' + note : ''}. Check in / loop in the lead.`); }
+  audit({ user: req.user, action: 'BCONTRACT_CHECKIN', entity: 'client', entity_id: bc.client_id, detail: rating, ip: req.ip });
+  res.json({ ok: true });
+});
 app.post('/api/behavior-contracts/:id/note', requireAuth, (req, res) => {
   const note = (req.body?.note || '').trim(); if (!note) return res.status(400).json({ error: 'Empty note.' });
   const bc = db.prepare(`SELECT id, client_id FROM behavior_contracts WHERE id = ?`).get(req.params.id);

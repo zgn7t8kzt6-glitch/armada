@@ -5013,6 +5013,7 @@ async function loadDashboard(){
   $('dashSubtitle').textContent = d.subtitle||'';
   renderFacility(d.facility);
   renderCrew();
+  renderBContracts();
   renderShiftReport();
   renderShiftChecklist();
   renderDashTasks();
@@ -5243,6 +5244,26 @@ async function renderShiftChecklist(){
 async function toggleShiftTask(id,done){ try{ await api('/shift-checklist/'+id,{method:'POST',body:JSON.stringify({done})}); renderShiftChecklist(); }catch(e){ alert(e.message); renderShiftChecklist(); } }
 async function addShiftTask(){ const label=prompt('Add a shift-checklist item:'); if(!label||!label.trim())return; try{ await api('/shift-checklist/template/edit',{method:'POST',body:JSON.stringify({add:label.trim()})}); renderShiftChecklist(); }catch(e){ alert(e.message); } }
 async function delShiftTask(id){ if(!confirm('Remove this checklist item?'))return; try{ await api('/shift-checklist/template/edit',{method:'POST',body:JSON.stringify({remove:id})}); renderShiftChecklist(); }catch(e){ alert(e.message); } }
+// Behavioral contracts — a prominent flag on My Shift + a per-shift check-in so we
+// actually track whether they're turning it around.
+async function renderBContracts(){
+  const host=$('dashBContracts'); if(!host) return;
+  let d; try{ d=await api('/behavior-contracts/active'); }catch(e){ host.innerHTML=''; return; }
+  const cs=d.contracts||[];
+  if(!cs.length){ host.innerHTML=''; return; }
+  const rows=cs.map(c=>`<div class="todo" style="align-items:center;flex-wrap:wrap">
+      <div class="txt"><strong>${esc(c.name)}</strong>${c.room?' <span class="hint">· '+esc(c.room)+'</span>':''} — behavioral contract${c.reason?`<div class="hint">${esc(c.reason)}</div>`:''}
+        ${c.checked?`<div class="hint" style="color:var(--good)">✓ checked this shift — ${esc(c.rating||'')}</div>`:'<div class="hint" style="color:var(--danger)">Check-in needed this shift</div>'}</div>
+      ${c.checked?'':`<div style="display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm sans" onclick="bCheckin(${c.id},'Better')">😊 Better</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="bCheckin(${c.id},'Holding')">😐 Holding</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="bCheckin(${c.id},'Worse')">⚠️ Worse</button></div>`}
+      <button class="btn btn-ghost btn-sm sans" onclick="openBContract(${c.id})">Notes</button></div>`).join('');
+  host.innerHTML=`<div class="card" style="border-left:4px solid var(--danger);background:#fff8f7">
+    <h3 style="margin:0 0 4px;color:#b3382f">⚠️ On a behavioral contract <span class="badge">${cs.length}</span></h3>
+    <p class="sub sans" style="margin:0 0 8px">Active contract — check in <b>every shift</b> and log how they're doing. Worse alerts the lead.</p>${rows}</div>`;
+}
+async function bCheckin(id,rating){ let note=''; if(rating==='Worse') note=prompt('What happened? (optional — this alerts the lead)')||''; try{ await api('/behavior-contracts/'+id+'/checkin',{method:'POST',body:JSON.stringify({rating,note})}); renderBContracts(); }catch(e){ alert(e.message); } }
 // Who's on shift + the lead in charge — with a one-tap Call button for emergencies.
 async function renderCrew(){
   const host=$('dashCrew'); if(!host) return;

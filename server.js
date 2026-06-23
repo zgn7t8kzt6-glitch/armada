@@ -1885,13 +1885,16 @@ try {
 // Some alerts have a short life. A round reminder only makes sense until the next
 // round is due (~1h) — after that you can't go back and do the old one, so it
 // auto-misses (and counts against the rounds %). Minutes; absent = lives the shift.
-const ALERT_TTL_MIN = { rounds: 60 };
+const ALERT_TTL_MIN = { rounds: 120 };
 function rolloverAlerts() {
   const today = appToday(), sh = currentShift();
   // Adopt any legacy/unstamped New alerts into the current shift first.
   db.prepare(`UPDATE alerts SET shift_date = ?, shift = ? WHERE status = 'New' AND (shift_date IS NULL OR shift IS NULL)`).run(today, sh);
   // TTL'd alerts past their window → Missed (e.g. an overdue round you can't redo).
   db.prepare(`UPDATE alerts SET status = 'Missed' WHERE status = 'New' AND expires_at IS NOT NULL AND expires_at < datetime('now')`).run();
+  // Round reminders are point-in-time — you can't redo a missed round. Any round
+  // alert older than its window auto-misses (also catches legacy rows with no TTL).
+  db.prepare(`UPDATE alerts SET status = 'Missed' WHERE status = 'New' AND kind = 'rounds' AND created_at < datetime('now','-${ALERT_TTL_MIN.rounds || 120} minutes')`).run();
   // Anything still New from a prior shift → Missed.
   db.prepare(`UPDATE alerts SET status = 'Missed' WHERE status = 'New' AND (shift_date != ? OR shift != ?)`).run(today, sh);
 }
@@ -4648,6 +4651,7 @@ function anticipationNudges(clients, hour) {
   return out.slice(0, 12);
 }
 app.get('/api/dashboard', requireAuth, (req, res) => {
+  rolloverAlerts();   // expire stale/round/prior-shift alerts before building the panel
   const today = appToday();
   const h = localHour();
   const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
@@ -4672,6 +4676,13 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const newAdmits = active.filter(isNew);
   const atRisk = active.map((c) => ({ c, lvl: riskOf(c) })).filter((x) => x.lvl === 'High' || x.lvl === 'Elevated');
   const personalTouches = active.filter((c) => (c.touch && c.touch.trim()) || (c.prefs && c.prefs.trim()));
+  // Facility-at-a-glance — the first thing on My Shift: who's here, who's coming/going today.
+  const facility = {
+    census: active.length,
+    scheduled: db.prepare(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).get(today).n,
+    admitted: newAdmits.length,
+    discharged: db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n,
+  };
 
   if (jr === 'Executive Director' || jr === 'Clinical Director') {
     subtitle = 'The house at a glance — census, who\'s at risk, how we\'re serving, and what needs leadership.';
@@ -4876,8 +4887,8 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const P = [];
     const add = (cond, o) => { if (cond) P.push(o); };
     add(mtime === 'overdue', { icon: '⏰', label: `Serve ${meal} now`, sub: 'Past serve time — their time matters', view: 'meals', sev: 'high' });
-    add(overdue.length > 0, { icon: '🔍', label: `${overdue.length} safety check${overdue.length > 1 ? 's' : ''} due`, sub: 'Scan each room — eyes on every client', view: 'roundscan', sev: 'high' });
-    add(toWelcome.length > 0, { icon: '👋', label: `Welcome ${toWelcome.length} new arrival${toWelcome.length > 1 ? 's' : ''}`, sub: 'Greet by name, start the Care Card', view: 'clients', sev: 'high' });
+    add(overdue.length > 0, { icon: '🔍', label: `${overdue.length} safety check${overdue.length > 1 ? 's' : ''} due`, sub: 'Open Round Status, then scan each room', view: 'rounds', sev: 'high' });
+    add(toWelcome.length > 0, { icon: '👋', label: `New intake — ${toWelcome.length} to welcome`, sub: 'Greet by name, search belongings, dignity bag, scrubs, Care Card', view: 'arrivalcheck', sev: 'high' });
     add(atRisk.length > 0, { icon: '⚠️', label: `${atRisk.length} to watch — at risk of leaving`, sub: 'Run the Save before they walk', view: 'clients', sev: 'high' });
     add(!mchk && mtime !== 'overdue', { icon: '🍽️', label: `Inspect & log ${meal}`, sub: 'Count portions, rate it, log the time served', view: 'meals', sev: 'warn' });
     add(flips > 0, { icon: '🛏️', label: `${flips} room${flips > 1 ? 's' : ''} to flip`, sub: 'Discharged today — refresh + laundry', view: 'bedboard', sev: 'warn' });
@@ -5010,11 +5021,14 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   // Only the Executive Director's My Shift shows everything. Operations & Clinical
   // directors each see their own lane (tagged in alerts.roles); a user with no/
   // unrecognized role sees only general (untagged) alerts.
+  // CRITICAL ONLY on the shift screen: High/Critical, and never the operational
+  // round reminders (those live in "Needs you now" as a single count and auto-miss,
+  // so they can't clog this "drop everything" panel — see the screenshot fix).
   const fullAlertView = jr === 'Executive Director';
   const alerts = fullAlertView
-    ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all()
-    : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND (roles IS NULL OR roles LIKE ?) ORDER BY (level = 'High') DESC, id DESC LIMIT 10`).all('%|' + jr + '|%');
-  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins, lean, priority,
+    ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' ORDER BY id DESC LIMIT 10`).all()
+    : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' AND (roles IS NULL OR roles LIKE ?) ORDER BY id DESC LIMIT 10`).all('%|' + jr + '|%');
+  res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins, lean, priority, facility,
     canPreview: req.user.role === 'admin', roles: req.user.role === 'admin' ? JOB_ROLES : undefined, previewing: jr !== (req.user.job_role || '') ? jr : null });
 });
 
@@ -7386,15 +7400,15 @@ app.get('/api/alerts', requireAuth, (req, res) => {
   // Normal operational nudges) is surfaced on the relevant dashboards, not here, so
   // the alert panel stays a true "drop everything" list and never trains people to
   // ignore it. `?status=all` shows the full history for leadership review.
-  const crit = status === 'all' ? '' : ` AND a.level IN ('High','Critical')`;
-  const critSub = status === 'all' ? '' : ` AND level IN ('High','Critical')`;
+  const crit = status === 'all' ? '' : ` AND a.level IN ('High','Critical') AND a.kind != 'rounds'`;
+  const critSub = status === 'all' ? '' : ` AND level IN ('High','Critical') AND kind != 'rounds'`;
   const sub = status === 'all'
     ? `SELECT MAX(id) FROM alerts GROUP BY client_id, kind`
     : `SELECT MAX(id) FROM alerts WHERE status = ?${critSub} GROUP BY client_id, kind`;
   const where = status === 'all' ? `WHERE a.id IN (${sub})` : `WHERE a.status = ?${crit} AND a.id IN (${sub})`;
   const args = status === 'all' ? [] : [status, status];
   const rows = db.prepare(`SELECT a.*, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id ${where} ORDER BY a.id DESC LIMIT 100`).all(...args);
-  const newCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT MAX(id) FROM alerts WHERE status = 'New' AND level IN ('High','Critical') GROUP BY client_id, kind)`).get().n;
+  const newCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT MAX(id) FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' GROUP BY client_id, kind)`).get().n;
   // This shift's completion: how many alerts raised this shift have been handled.
   const today = appToday(), sh = currentShift();
   const tot = db.prepare(`SELECT COUNT(*) n FROM alerts WHERE shift_date = ? AND shift = ?`).get(today, sh).n;

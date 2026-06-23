@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260623X" />
+<link rel="stylesheet" href="/styles.css?v=20260623Y" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -91,7 +91,7 @@
     <button data-view="messages">Messages <span id="msgBadge" class="badge-danger" style="display:none"></span></button>
     <button data-view="family" data-subview>Family</button>
     <button data-view="arrivals">Front Desk</button>
-    <button data-view="arrivalcheck">Arrival Tasks</button>
+    <button data-view="arrivalcheck">Intake</button>
     <button data-view="admissions">Admissions</button>
     <button data-view="alumni">Alumni</button>
     <button data-view="accountability" data-admin data-subview>Accountability</button>
@@ -184,6 +184,7 @@
           <div class="toolbar" id="dashActions" style="gap:8px"><button class="btn btn-ghost sans" onclick="dashLogSave()" title="You ran the Save — log it and the outcome">🛟 Log a Save</button><button class="btn btn-gold sans" onclick="logWow()" title="You delivered something special, or solved a problem on the spot">✨ Log a Wow</button></div>
         </div>
       </div>
+      <div id="dashFacility" class="ret-cards"></div>
       <div id="dashShiftReport"></div>
       <div id="dashStandard"></div>
       <div id="dashAlerts"></div>
@@ -193,6 +194,7 @@
       <div id="dashNudges"></div>
       <div id="dashTiles" class="ret-cards"></div>
       <div id="dashSections"></div>
+      <div id="dashMyTasks"></div>
       <div id="dashWins"></div>
     </section>
 
@@ -2522,7 +2524,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260623X"></script>
-<script src="/housing.js?v=20260623X"></script>
+<script src="/app.js?v=20260623Y"></script>
+<script src="/housing.js?v=20260623Y"></script>
 </body>
 </html>

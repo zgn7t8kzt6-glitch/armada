@@ -269,9 +269,12 @@ const UNIVERSAL_VIEWS = ['myrole','mytasks','messages','team','training','librar
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
-  'BHT / Tech': ['dashboard','myrole','roundscan','rounds','property','meals','bedboard','engagement','incidents','concierge','clients','dignity','mytasks','messages','team','training','library'],
-  'Nurse':      ['dashboard','myrole','roundscan','rounds','concierge','clients','bedmap','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
-  'Front Desk': ['dashboard','myrole','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','mytasks','messages','team','training','library'],
+  // Ordered by how the shift actually flows. Round Status (not the duplicate scan
+  // tab), Intake (the full arrival checklist — dignity bag lives there, no standalone
+  // Dignity tab), then the day's work. My Tasks lives ON My Shift, not as a tab.
+  'BHT / Tech': ['dashboard','rounds','arrivalcheck','property','meals','bedboard','engagement','clients','incidents','concierge','myrole','messages','team','training','library'],
+  'Nurse':      ['dashboard','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','myrole','messages','team','training','library'],
+  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','myrole','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
   'Housing Director': ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
@@ -4997,7 +5000,9 @@ async function loadDashboard(){
     bar.innerHTML = `<span class="hint">👁 Preview dashboard as role:</span><select id="dashAsSel" class="sans" onchange="setDashPreview(this.value)"><option value="">My role (${esc(ME.job_role||'Team')})</option>${(d.roles||[]).map(r=>`<option value="${esc(r)}" ${r===DASH_PREVIEW?'selected':''}>${esc(r)}</option>`).join('')}</select>${d.previewing?`<span class="risk risk-warn">previewing ${esc(d.previewing)}</span>`:''}`;
   }
   $('dashSubtitle').textContent = d.subtitle||'';
+  renderFacility(d.facility);
   renderShiftReport();
+  renderDashTasks();
   if(d.lean){ renderLeanDashboard(d); return; }
   if($('dashActions')) $('dashActions').style.display='';
   const ns=d.northStar;
@@ -5183,6 +5188,32 @@ async function loadAlertScore(){
       <div><strong class="sans">Most responsive (7 days)</strong>${staff?`<table class="tbl" style="margin-top:6px">${staff}</table>`:'<div class="hint" style="margin-top:6px">No alerts handled yet.</div>'}</div>
       <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
     </div>`;
+}
+// Facility at a glance — the first thing on My Shift: who's here, coming, and going.
+function renderFacility(f){
+  const host=$('dashFacility'); if(!host) return;
+  if(!f){ host.innerHTML=''; return; }
+  const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  host.innerHTML = box(f.census,'Patients here')
+    + box(f.scheduled,'Scheduled today', f.scheduled?'rc-warn':'')
+    + box(f.admitted,'Admitted today')
+    + box(f.discharged,'Discharged today');
+}
+// My Tasks, folded onto My Shift (no separate tab): your aftercare calls + anything
+// a teammate assigned you. Hidden when there's nothing, so the screen stays clean.
+async function renderDashTasks(){
+  const host=$('dashMyTasks'); if(!host) return;
+  let d; try{ d=await api('/my-tasks'); }catch(e){ host.innerHTML=''; return; }
+  const today=d.today;
+  const calls=(d.calls||[]).map(c=>`<div class="todo"><div class="txt">🤝 <strong>${esc(c.pref||c.name)}</strong> — ${esc(c.type)} aftercare call · due ${esc(c.due_date)} ${c.due_date<=today?'<span class="risk risk-high">due</span>':''}</div>
+    <button class="btn btn-ghost btn-sm sans" onclick="doneCall(${c.id},'Done')">Done</button><button class="btn btn-ghost btn-sm sans" onclick="doneCall(${c.id},'Unreachable')">No answer</button></div>`).join('');
+  const tasks=(d.tasks||[]).map(t=>taskCard(t,'mine')).join('');
+  if(!calls && !tasks){ host.innerHTML=''; return; }
+  host.innerHTML=`<div class="card"><h3 style="margin:0 0 6px">✅ My tasks</h3>${calls}${tasks}</div>`;
+  document.querySelectorAll('#dashMyTasks details.todo').forEach(dd=>{
+    const id=(dd.querySelector('[id^="thread_"]')||{}).id; if(!id) return; const tid=id.split('_')[1];
+    dd.addEventListener('toggle', ()=>{ if(dd.open) loadTaskThread(tid); });
+  });
 }
 // Shift pass-down — a guided questionnaire (mostly yes/no taps + short prompts) so
 // it's quick AND gets filled out properly. The next shift reads it first on My Shift.

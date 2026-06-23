@@ -269,13 +269,38 @@ const UNIVERSAL_VIEWS = ['myrole','mytasks','messages','team','training','librar
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
-  'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedmap','bedboard','property','clients','dignity','myrole','mytasks','messages','team','training','library'],
-  'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','bedmap','records','incidents','inventory','compliance','myrole','mytasks','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','roundscan','rounds','property','meals','bedboard','engagement','concierge','clients','dignity','myrole','mytasks','messages','team','training','library'],
+  'Nurse':      ['dashboard','roundscan','rounds','concierge','clients','bedmap','records','incidents','inventory','compliance','myrole','mytasks','messages','team','training','library'],
   'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','myrole','mytasks','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
   'Housing Director': ['housing','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','housing','voice','activities','residents','houses','mytasks','messages'],
+};
+// Plain-language "how my shift flows" — the rhythm of the job in order, each step
+// linking to the tool. This is the train-a-new-hire-in-five-minutes layer.
+const SHIFT_FLOW = {
+  'BHT / Tech': [
+    { t:'Start of shift — read My Shift', d:'Your tiles show exactly what needs you right now. Start at the top.', v:'dashboard' },
+    { t:'Every hour — do your Rounds', d:'Scan each room, lay eyes on every client, and log it. The clock only clears when you scan.', v:'roundscan' },
+    { t:'New arrival — Belongings, then welcome', d:'Search with a witness, secure & sign for everything, then greet them by name and start their Care Card.', v:'property' },
+    { t:'Mealtimes — the Table', d:'Announce the meal, help serve, and make sure snacks, coffee & juice are out.', v:'meals' },
+    { t:'After a discharge — flip the room', d:'Turn the room over and finish the laundry so it’s spotless for the next person.', v:'bedboard' },
+    { t:'All shift — keep them engaged', d:'Deliver the personal touches on your dashboard; nobody bored or alone.', v:'engagement' },
+    { t:'End of shift — hand off clean', d:'Finish any open rounds and leave a note for the next shift.', v:'messages' },
+  ],
+  'Nurse': [
+    { t:'Start of shift — read My Shift', d:'Your tiles flag what’s urgent: meds, assessments, and who to watch.', v:'dashboard' },
+    { t:'Every hour — verify Rounds', d:'Lay eyes on every client and log it by scanning each room.', v:'roundscan' },
+    { t:'Clinical care', d:'Meds, vitals, and withdrawal monitoring — document as you go.', v:'records' },
+    { t:'End of shift — hand off clean', d:'Update records and leave a clear note for the next nurse.', v:'messages' },
+  ],
+  'Front Desk': [
+    { t:'Start of shift — read My Shift', d:'See who’s arriving today and what the door needs.', v:'dashboard' },
+    { t:'Arrivals — the warm welcome', d:'Greet by name, run the arrival checklist, and tap Done when finished.', v:'arrivalcheck' },
+    { t:'All day — field requests', d:'Take concierge requests and route them to the right person.', v:'concierge' },
+    { t:'Keep stock ready', d:'Take inventory so the team never runs short.', v:'inventory' },
+  ],
 };
 function flatMenu(){
   if(!ME) return null;
@@ -2536,7 +2561,7 @@ async function loadRounds(){
     <div class="ret-card"><div class="n">q${d.defaultMin}</div><div class="l">Default cadence</div></div>`;
   if($('roundsQuestion')) $('roundsQuestion').innerHTML = d.question ? `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Ask every client this ${esc((d.shift||'').toLowerCase())} shift</div><h3 style="margin:4px 0 0">“${esc(d.question)}”</h3><p class="sub sans" style="margin:4px 0 0">Ask it on rounds. Capture anything worth keeping with 📝 Note next to the client.</p></div>` : '';
   const rows=[...d.rows].sort((a,b)=>(b.overdue-a.overdue)||((b.minsSince??1e9)-(a.minsSince??1e9)));
-  const scanBannerHtml = `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:220px"><strong>Rounds are completed by scanning.</strong> <span class="hint">A check below only clears when you scan that room's QR — there is no desk check-off. The clock here reflects verified scans.</span></div><button class="btn btn-gold sans" onclick="show('roundscan')">📍 Open Scan Rounds</button></div></div>`;
+  const scanBannerHtml = `<div class="card" style="border-left:4px solid var(--gold);background:#faf6ee"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:220px"><strong>This is the status board — to actually do a round, scan each room.</strong> <span class="hint">A check below only clears when you scan that room's QR; there is no desk check-off. The clock reflects verified scans.</span></div><button class="btn btn-gold sans" onclick="show('roundscan')">📍 Start Rounds</button></div></div>`;
   board.innerHTML = scanBannerHtml + rows.map(r=>{
     const when = r.minsSince==null?'never scanned':(r.minsSince+'m ago'+(r.lastBy?' · '+esc(r.lastBy):''));
     const noteHtml = r.note ? `<div class="hint" style="margin-top:2px">📝 ${esc(r.note)}${r.noteBy?' <span style="opacity:.7">— '+esc(r.noteBy)+'</span>':''}</div>` : '';
@@ -3983,11 +4008,13 @@ async function loadMyRole(){
   const menu=(ROLE_MENU[role]||[]).filter(v=>v!=='myrole'&&v!=='dashboard'&&canSeeView(v));
   const label=v=>{ const b=document.querySelector(`#nav button[data-view="${v}"]`); return b?b.textContent.trim():v; };
   const tools=menu.map(v=>`<button class="btn btn-ghost btn-sm sans" onclick="show('${v}')">${esc(label(v))} ›</button>`).join('');
+  const flow=(SHIFT_FLOW[role]||[]).map((s,i)=>`<div class="flow-step"><div class="flow-num">${i+1}</div><div class="flow-body"><div class="flow-t">${esc(s.t)}</div><div class="flow-d">${esc(s.d)}</div>${s.v&&canSeeView(s.v)?`<button class="btn btn-ghost btn-sm sans" style="margin-top:6px" onclick="show('${s.v}')">Open ${esc(label(s.v))} ›</button>`:''}</div></div>`).join('');
   host.innerHTML=`
     <div class="card">
       <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(role)}</h3><p class="sub sans" style="margin:2px 0 0">${esc(p.purpose||'')}</p></div></div>
       ${p.reportsTo?`<div class="hint" style="margin-top:8px">Reports to: <b>${esc(p.reportsTo)}</b></div>`:''}
     </div>
+    ${flow?`<div class="card"><h3>How my shift flows</h3><p class="sub sans">The rhythm of the job, in order. When in doubt, start at step 1.</p><div class="flow" style="margin-top:10px">${flow}</div></div>`:''}
     <div class="cmd-grid">
       <div class="card"><h3>What I do</h3><p class="sub sans">My responsibilities every shift.</p><ul style="margin:8px 0;padding-left:18px;font-size:14px;line-height:1.65">${resp||'<li>—</li>'}</ul></div>
       ${lim?`<div class="card" style="border-color:#e3b3ac;background:#fff8f7"><h3 style="color:#b3382f">Not my lane</h3><p class="sub sans">Hand these to the right person — never do them yourself.</p><ul style="margin:8px 0;padding-left:18px;font-size:14px;line-height:1.65">${lim}</ul></div>`:''}

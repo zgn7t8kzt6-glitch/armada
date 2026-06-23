@@ -2178,7 +2178,7 @@ async function openProperty(cid){
   const itemRow=i=>`<div class="cmd-row">${i.hasPhoto?`<img src="/api/property/item/${i.id}/photo" onclick="window.open('/api/property/item/${i.id}/photo','_blank')" style="width:46px;height:46px;border-radius:8px;object-fit:cover;border:1px solid var(--line);cursor:pointer;flex:none" alt="photo"/>`:''}<div class="cmd-row-main">${i.status==='returned'?'↩︎ ':'📦 '}<b>${esc(i.category||'Item')}</b> — ${esc(i.description)}${i.qty&&i.qty!==1?' ×'+i.qty:''}${i.est_value!=null?' <span class="hint">· est '+money(i.est_value)+'</span>':''}${i.condition?' <span class="hint">· '+esc(i.condition)+'</span>':''}${i.status==='returned'?' <span class="hint">· returned '+esc(String(i.returned_at||'').slice(0,10))+'</span>':''}</div>${i.status==='stored'?`<button class="btn btn-ghost btn-sm sans" onclick="returnPropItem(${i.id},${cid})">Return</button>`:''}</div>`;
   const evIcon={intake_count:'📝',cash_deposit:'➕',cash_withdrawal:'➖',return:'↩︎',return_all:'✅',audit:'🔍',discrepancy:'⚠️',access:'🔓'};
   const evRow=e=>`<div class="cmd-row ${e.type==='discrepancy'?'cmd-row-flag':''}"><div class="cmd-row-main">${evIcon[e.type]||'•'} ${esc((e.type||'').replace(/_/g,' '))}${e.amount!=null?` <b>${e.amount<0?'−':''}${money(Math.abs(e.amount))}</b>`:''}${e.balance_after!=null&&/cash|return/.test(e.type)?` <span class="hint">→ bal ${money(e.balance_after)}</span>`:''}
-    <div class="hint">${esc(String(e.created_at||'').slice(0,16).replace('T',' '))} · by ${esc(e.staff||'')}${e.witness?' · witness '+esc(e.witness):''}${e.client_ack?' · client ✍ '+esc(e.client_ack):''}${e.note?'<br>'+esc(e.note):''}</div></div></div>`;
+    <div class="hint">${esc(String(e.created_at||'').slice(0,16).replace('T',' '))} · by ${esc(e.staff||'')}${e.witness?' · witness '+esc(e.witness):''}${e.client_ack&&e.client_ack!=='signed'?' · client '+esc(e.client_ack):''}${e.hasSig?` · <a onclick="window.open('/api/property/event/${e.id}/sig','_blank')" style="cursor:pointer;color:var(--gold);font-weight:600">✍ signature</a>`:''}${e.note?'<br>'+esc(e.note):''}</div></div></div>`;
   const s=m&&m.search;
   const searchBlock = s ? `<div style="margin-top:8px;border-top:1px dashed var(--line);padding-top:8px">
       <div class="kv"><span class="k">Search</span><span class="v">${s.consent?'consent ✓':'consent ?'} · ${s.none_found?'none found':((s.found||[]).length+' item(s) found')}</span></div>
@@ -2190,7 +2190,7 @@ async function openProperty(cid){
     </div>` : '';
   const intakeBlock = m
     ? `<div class="kv"><span class="k">Counted by</span><span class="v">${esc(m.intake_by||'')}${m.intake_witness?' + witness '+esc(m.intake_witness):''}</span></div>
-       <div class="kv"><span class="k">Client signed</span><span class="v">${esc(m.intake_client_ack||'—')}</span></div>
+       <div class="kv"><span class="k">Client signed</span><span class="v">${m.hasIntakeSig?`<img src="/api/property/${cid}/intake-sig" style="height:44px;border:1px solid var(--line);border-radius:6px;background:#fff;vertical-align:middle"/>`:esc(m.intake_client_ack||'—')}</span></div>
        <div class="kv"><span class="k">Stored</span><span class="v">${esc(m.safe_location||'—')}${m.bag_number?' · bag '+esc(m.bag_number):''}${m.sealed?' · sealed ✓':''}</span></div>${searchBlock}`
     : `<div class="pc-note" style="background:#fbecea;border-left:3px solid var(--danger)">No belongings count on file. Do the dual-witnessed search &amp; intake first.</div>`;
   $('propBody').innerHTML=`
@@ -2214,10 +2214,28 @@ function sigFields(opts={}){
   return `<label>Witness — a second staff member signs in (required)</label>
     <div class="grid2"><div><select id="pp_witness"><option value="">— select staff —</option>${staff}</select></div>
     <div><input id="pp_witnesspw" type="password" placeholder="Their password" autocomplete="off"/></div></div>
-    <p class="hint">The witness selects their name and enters their own password — a real second signature, not just a typed name.</p>
-    ${opts.clientAck?`<label>Client signature (type full name) — they confirm/receive</label><input id="pp_client" placeholder="Client full name"/>`:''}`;
+    <p class="hint">The witness selects their name and enters their own password — a real second signature.</p>
+    ${opts.clientAck?`<label>Client — print name (optional)</label><input id="pp_client" placeholder="Client full name"/>
+      <label>Client signature ✍️ — have the client sign below</label>
+      <div style="border:1px solid var(--line);border-radius:10px;background:#fff"><canvas id="pp_sigpad" style="width:100%;height:150px;display:block;touch-action:none;border-radius:10px"></canvas></div>
+      <div class="toolbar" style="margin:5px 0 0;justify-content:space-between;align-items:center"><span class="hint">Hand the device to the client to sign with their finger.</span><button type="button" class="btn btn-ghost btn-sm sans" onclick="window._sigpad&&window._sigpad.clear()">Clear</button></div>`:''}`;
 }
 function witnessBody(){ return { witness_id: $('pp_witness').value, witness_pw: $('pp_witnesspw').value }; }
+function initSigPad(){ setTimeout(()=>{ window._sigpad=makeSigPad('pp_sigpad'); }, 30); }
+function clientSig(){ return window._sigpad ? window._sigpad.dataURL() : null; }
+function makeSigPad(id){ const c=document.getElementById(id); if(!c) return null; const ctx=c.getContext('2d');
+  const ratio=window.devicePixelRatio||1; const rect=c.getBoundingClientRect();
+  c.width=Math.max(1,rect.width)*ratio; c.height=Math.max(1,rect.height)*ratio; ctx.scale(ratio,ratio);
+  ctx.lineWidth=2.2; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#16242a';
+  let drawing=false,dirty=false,last=null;
+  const pos=e=>{ const r=c.getBoundingClientRect(); const t=(e.touches&&e.touches[0])||e; return {x:t.clientX-r.left,y:t.clientY-r.top}; };
+  const down=e=>{ drawing=true; last=pos(e); if(e.cancelable)e.preventDefault(); };
+  const mv=e=>{ if(!drawing)return; const p=pos(e); ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(p.x,p.y); ctx.stroke(); last=p; dirty=true; if(e.cancelable)e.preventDefault(); };
+  const up=()=>{ drawing=false; };
+  c.addEventListener('pointerdown',down); c.addEventListener('pointermove',mv); window.addEventListener('pointerup',up);
+  c.addEventListener('touchstart',down,{passive:false}); c.addEventListener('touchmove',mv,{passive:false}); window.addEventListener('touchend',up);
+  return { clear(){ ctx.clearRect(0,0,c.width*ratio,c.height*ratio); dirty=false; }, isEmpty(){ return !dirty; }, dataURL(){ return dirty? c.toDataURL('image/png'):null; } };
+}
 function propIntake(cid){
   const L=window.PROP_LISTS||{prohibited:[],disposed:[],meds:[]};
   const chk=(arr,cls)=>arr.map(it=>`<label style="display:block;font-size:13px;text-transform:none;letter-spacing:0;font-weight:400;margin:3px 0"><input type="checkbox" class="${cls}" data-l="${esc(it)}" style="width:auto;margin-right:7px"/>${esc(it)}</label>`).join('');
@@ -2240,10 +2258,12 @@ function propIntake(cid){
     <div class="grid2"><div><label>Sealed bag #</label><input id="pp_bag" placeholder="e.g. 0481"/></div>
       <div><label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:24px"><input type="checkbox" id="pp_sealed" style="width:auto"/> Tamper-evident bag sealed</label></div></div>
     ${sigFields({clientAck:true})}`);
+  initSigPad();
   save.onclick=async()=>{
+    const sig=clientSig(); if(!sig){ alert('Please have the client sign on the screen.'); return; }
     const pick=cls=>[...document.querySelectorAll('.'+cls+':checked')].map(c=>c.dataset.l);
     const search={ consent:$('pp_consent').checked, none_found:$('pp_none').checked, found:pick('pp_found'), disposed:pick('pp_disp'), disposed_other:$('pp_disp_other').value.trim(), sent_home:$('pp_senthome').value.trim(), sent_home_person:$('pp_person').value.trim(), bins:$('pp_bins').value, luggage:$('pp_lug').value, meds:pick('pp_meds') };
-    try{ await api('/property/'+cid+'/intake',{method:'POST',body:JSON.stringify({safe_location:$('pp_loc').value,bag_number:$('pp_bag').value,sealed:$('pp_sealed').checked,search,...witnessBody(),client_ack:$('pp_client').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+    try{ await api('/property/'+cid+'/intake',{method:'POST',body:JSON.stringify({safe_location:$('pp_loc').value,bag_number:$('pp_bag').value,sealed:$('pp_sealed').checked,search,...witnessBody(),client_ack:$('pp_client').value,client_sig:sig})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
 }
 function addPropItem(cid){
   const save=hmodal(`<h3>Add belonging</h3>
@@ -2265,7 +2285,9 @@ function propCash(cid,type){
     <label>Amount ($)</label><input id="pp_amt" type="number" step="0.01" min="0"/>
     <label>Note (denominations, reason)</label><input id="pp_note" placeholder="${out?'what it’s for':'e.g. 2×$20, 1×$5'}"/>
     ${sigFields({clientAck:out})}`);
-  save.onclick=async()=>{ try{ await api('/property/'+cid+'/cash',{method:'POST',body:JSON.stringify({type,amount:$('pp_amt').value,note:$('pp_note').value,...witnessBody(),client_ack:out?$('pp_client').value:null})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+  if(out) initSigPad();
+  save.onclick=async()=>{ if(out){ const sig=clientSig(); if(!sig){ alert('Please have the client sign on the screen.'); return; } }
+    try{ await api('/property/'+cid+'/cash',{method:'POST',body:JSON.stringify({type,amount:$('pp_amt').value,note:$('pp_note').value,...witnessBody(),client_ack:out?$('pp_client').value:null,client_sig:out?clientSig():null})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
 }
 function propAudit(cid){
   const save=hmodal(`<h3>Audit cash count</h3>
@@ -2285,7 +2307,9 @@ function propReturnAll(cid){
     <label>Note</label><input id="pp_note"/>`);
   const upd=()=>{ const m=$('pp_method').value; $('pp_reflabel').textContent = m==='Check'?'Check #':m==='Electronic transfer'?'Reference / where sent':m==='Cash'?'(cash — small amounts only)':'Prepaid card — last 4 digits'; };
   if($('pp_method')) $('pp_method').onchange=upd;
-  save.onclick=async()=>{ try{ await api('/property/'+cid+'/return-all',{method:'POST',body:JSON.stringify({...witnessBody(),client_ack:$('pp_client').value,note:$('pp_note').value,method:$('pp_method').value,reference:$('pp_ref').value})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+  initSigPad();
+  save.onclick=async()=>{ const sig=clientSig(); if(!sig){ alert('Please have the client sign on the screen.'); return; }
+    try{ await api('/property/'+cid+'/return-all',{method:'POST',body:JSON.stringify({...witnessBody(),client_ack:$('pp_client').value,note:$('pp_note').value,method:$('pp_method').value,reference:$('pp_ref').value,client_sig:sig})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
 }
 async function returnPropItem(id,cid){ if(!confirm('Mark this item returned to the client?'))return; try{ await api('/property/item/'+id+'/return',{method:'POST',body:'{}'}); openProperty(cid); }catch(e){ alert(e.message); } }
 function setPropFlag(){ const cur=window.PROP_FLAG||100; const v=prompt('Alert leadership when a single cash-out is at or above this amount ($):', cur); if(v===null) return; const amt=Math.max(0,+v||0); api('/property/settings',{method:'POST',body:JSON.stringify({flag_amount:amt})}).then(()=>loadProperty()).catch(e=>alert(e.message)); }

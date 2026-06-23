@@ -1273,6 +1273,9 @@ CREATE INDEX IF NOT EXISTS idx_property_events_client ON property_events(client_
 // Person & belongings SEARCH checklist (consent, contraband found, disposed,
 // sent-home, bins/luggage, meds handling) stored as JSON on the intake record.
 addColumn('property_meta', 'search', 'TEXT');
+// Real drawn client signatures (data-URL PNG) captured on the device.
+addColumn('property_meta', 'intake_client_sig', 'TEXT');
+addColumn('property_events', 'client_sig', 'TEXT');
 // Per-diem revenue rates by ASAM level of care (admin-editable). Seed the four
 // Armada bills today; other levels default to 0 until a rate is set.
 if (!getState('loc_rates')) setState('loc_rates', JSON.stringify({ '3.7-WM': 442, '3.7': 342, '3.2-WM': 289, '3.5': 240 }));

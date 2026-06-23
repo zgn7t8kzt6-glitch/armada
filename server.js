@@ -5348,10 +5348,17 @@ function checkWitness(req) {
   if (w.id === req.user.id) return { error: 'The witness must be a different staff member than you.' };
   return { name: w.name };
 }
-function logPropertyEvent(clientId, type, { amount = null, note = null, staff, witness = null, client_ack = null }) {
+function logPropertyEvent(clientId, type, { amount = null, note = null, staff, witness = null, client_ack = null, client_sig = null }) {
   const bal = cashBalance(clientId);
-  db.prepare(`INSERT INTO property_events (client_id, type, amount, balance_after, note, staff, witness, client_ack) VALUES (?,?,?,?,?,?,?,?)`)
-    .run(clientId, type, amount, bal, note, staff, witness, client_ack);
+  db.prepare(`INSERT INTO property_events (client_id, type, amount, balance_after, note, staff, witness, client_ack, client_sig) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(clientId, type, amount, bal, note, staff, witness, client_ack, client_sig);
+}
+function validSig(s) { return typeof s === 'string' && /^data:image\/(png|jpeg);base64,/.test(s) && s.length < 600000; }
+function serveSig(res, dataurl) {
+  const m = dataurl && /^data:(image\/[\w.+-]+);base64,(.+)$/s.exec(dataurl);
+  if (!m) return res.status(404).end();
+  res.set('Content-Type', m[1]); res.set('Cache-Control', 'private, max-age=300');
+  res.send(Buffer.from(m[2], 'base64'));
 }
 app.get('/api/property', requireAuth, (req, res) => {
   const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
@@ -5371,6 +5378,9 @@ app.post('/api/property/settings', requireAuth, (req, res) => {
   setState('property_flag_amount', String(amt));
   res.json({ ok: true, flagAmount: amt });
 });
+// Serve drawn client signatures as image bytes.
+app.get('/api/property/:cid/intake-sig', requireAuth, (req, res) => { const r = db.prepare(`SELECT intake_client_sig FROM property_meta WHERE client_id = ?`).get(req.params.cid); serveSig(res, r && r.intake_client_sig); });
+app.get('/api/property/event/:id/sig', requireAuth, (req, res) => { const r = db.prepare(`SELECT client_sig FROM property_events WHERE id = ?`).get(req.params.id); serveSig(res, r && r.client_sig); });
 // Quick belongings status for a client (used by the discharge guard).
 app.get('/api/clients/:id/property-status', requireAuth, (req, res) => {
   const cid = +req.params.id;
@@ -5384,9 +5394,9 @@ app.get('/api/property/:cid', requireAuth, (req, res) => {
   if (!c) return res.status(404).json({ error: 'Not found' });
   res.json({
     client: { id: c.id, name: c.pref || c.name, room: c.room || '', discharged: !!c.discharge_status },
-    meta: (() => { const mm = db.prepare(`SELECT * FROM property_meta WHERE client_id = ?`).get(cid); return mm ? { ...mm, search: jparse(mm.search, null) } : null; })(),
+    meta: (() => { const mm = db.prepare(`SELECT * FROM property_meta WHERE client_id = ?`).get(cid); if (!mm) return null; const { intake_client_sig, ...rest } = mm; return { ...rest, search: jparse(mm.search, null), hasIntakeSig: !!intake_client_sig }; })(),
     items: db.prepare(`SELECT * FROM property_items WHERE client_id = ? ORDER BY status, id`).all(cid).map(({ photo, ...r }) => ({ ...r, hasPhoto: !!photo })),
-    events: db.prepare(`SELECT * FROM property_events WHERE client_id = ? ORDER BY id DESC LIMIT 100`).all(cid),
+    events: db.prepare(`SELECT * FROM property_events WHERE client_id = ? ORDER BY id DESC LIMIT 100`).all(cid).map(({ client_sig, ...e }) => ({ ...e, hasSig: !!client_sig })),
     balance: cashBalance(cid), categories: PROPERTY_CATEGORIES,
     lists: { prohibited: PROHIBITED_ITEMS, disposed: DISPOSED_ITEMS, meds: MEDS_HANDLING },
     staff: db.prepare(`SELECT id, name, job_role FROM users WHERE active = 1 ORDER BY name`).all(),
@@ -5396,14 +5406,15 @@ app.get('/api/property/:cid', requireAuth, (req, res) => {
 app.post('/api/property/:cid/intake', requireAuth, (req, res) => {
   const cid = +req.params.cid; const b = req.body || {};
   const w = checkWitness(req); if (w.error) return res.status(400).json({ error: w.error });
-  if (!b.client_ack || !String(b.client_ack).trim()) return res.status(400).json({ error: 'The client must sign that the inventory is accurate.' });
+  if (!validSig(b.client_sig)) return res.status(400).json({ error: 'The client must sign on the screen.' });
+  const ack = b.client_ack ? String(b.client_ack).trim() : 'signed';
   const search = b.search ? JSON.stringify(b.search) : null;
   const ex = db.prepare(`SELECT client_id FROM property_meta WHERE client_id = ?`).get(cid);
-  if (ex) db.prepare(`UPDATE property_meta SET safe_location=?, bag_number=?, sealed=?, status='open', search=?, intake_by=?, intake_witness=?, intake_client_ack=?, intake_at=datetime('now') WHERE client_id=?`)
-    .run(b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, search, req.user.name, w.name, String(b.client_ack).trim(), cid);
-  else db.prepare(`INSERT INTO property_meta (client_id, safe_location, bag_number, sealed, status, search, intake_by, intake_witness, intake_client_ack, intake_at) VALUES (?,?,?,?, 'open', ?,?,?,?, datetime('now'))`)
-    .run(cid, b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, search, req.user.name, w.name, String(b.client_ack).trim());
-  logPropertyEvent(cid, 'intake_count', { note: `Belongings counted & secured${b.bag_number ? ' · bag ' + b.bag_number : ''}${b.safe_location ? ' · ' + b.safe_location : ''}`, staff: req.user.name, witness: w.name, client_ack: String(b.client_ack).trim() });
+  if (ex) db.prepare(`UPDATE property_meta SET safe_location=?, bag_number=?, sealed=?, status='open', search=?, intake_by=?, intake_witness=?, intake_client_ack=?, intake_client_sig=?, intake_at=datetime('now') WHERE client_id=?`)
+    .run(b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, search, req.user.name, w.name, ack, b.client_sig, cid);
+  else db.prepare(`INSERT INTO property_meta (client_id, safe_location, bag_number, sealed, status, search, intake_by, intake_witness, intake_client_ack, intake_client_sig, intake_at) VALUES (?,?,?,?, 'open', ?,?,?,?,?, datetime('now'))`)
+    .run(cid, b.safe_location || null, b.bag_number || null, b.sealed ? 1 : 0, search, req.user.name, w.name, ack, b.client_sig);
+  logPropertyEvent(cid, 'intake_count', { note: `Belongings counted & secured${b.bag_number ? ' · bag ' + b.bag_number : ''}${b.safe_location ? ' · ' + b.safe_location : ''}`, staff: req.user.name, witness: w.name, client_ack: ack, client_sig: b.client_sig });
   audit({ user: req.user, action: 'PROPERTY_INTAKE', entity: 'client', entity_id: cid, detail: `witness ${w.name}`, ip: req.ip });
   res.json({ ok: true });
 });
@@ -5441,9 +5452,9 @@ app.post('/api/property/:cid/cash', requireAuth, (req, res) => {
   const isOut = b.type === 'withdrawal';
   if (isOut) {
     if (amt > cashBalance(cid)) return res.status(400).json({ error: 'Amount exceeds the client’s balance.' });
-    if (!b.client_ack || !String(b.client_ack).trim()) return res.status(400).json({ error: 'The client must sign to receive cash.' });
+    if (!validSig(b.client_sig)) return res.status(400).json({ error: 'The client must sign on the screen to receive cash.' });
   }
-  logPropertyEvent(cid, isOut ? 'cash_withdrawal' : 'cash_deposit', { amount: isOut ? -amt : amt, note: b.note || null, staff: req.user.name, witness: w.name, client_ack: b.client_ack ? String(b.client_ack).trim() : null });
+  logPropertyEvent(cid, isOut ? 'cash_withdrawal' : 'cash_deposit', { amount: isOut ? -amt : amt, note: b.note || null, staff: req.user.name, witness: w.name, client_ack: b.client_ack ? String(b.client_ack).trim() : null, client_sig: isOut ? b.client_sig : null });
   audit({ user: req.user, action: isOut ? 'PROPERTY_CASH_OUT' : 'PROPERTY_CASH_IN', entity: 'client', entity_id: cid, detail: `$${amt} · witness ${w.name}`, ip: req.ip });
   // Flag big cash-outs to leadership (anti-skim). Threshold is admin-configurable.
   const flagAmt = +(getState('property_flag_amount') || 100);
@@ -5474,16 +5485,17 @@ app.post('/api/property/:cid/audit', requireAuth, (req, res) => {
 app.post('/api/property/:cid/return-all', requireAuth, (req, res) => {
   const cid = +req.params.cid; const b = req.body || {};
   const w = checkWitness(req); if (w.error) return res.status(400).json({ error: w.error });
-  if (!b.client_ack || !String(b.client_ack).trim()) return res.status(400).json({ error: 'The client must sign that they received everything.' });
+  if (!validSig(b.client_sig)) return res.status(400).json({ error: 'The client must sign on the screen that they received everything.' });
+  const ack = b.client_ack ? String(b.client_ack).trim() : 'signed';
   const method = ['Prepaid Visa card', 'Check', 'Electronic transfer', 'Cash'].includes(b.method) ? b.method : 'Prepaid Visa card';
   const ref = b.reference ? String(b.reference).trim() : '';
   const bal = cashBalance(cid);
   if (bal > 0) {
     if (method === 'Prepaid Visa card' && !ref) return res.status(400).json({ error: 'Enter the prepaid card’s last 4 digits.' });
-    logPropertyEvent(cid, 'return', { amount: -bal, note: `Returned cash $${bal.toFixed(2)} via ${method}${ref ? ' (' + ref + ')' : ''} at discharge`, staff: req.user.name, witness: w.name, client_ack: String(b.client_ack).trim() });
+    logPropertyEvent(cid, 'return', { amount: -bal, note: `Returned cash $${bal.toFixed(2)} via ${method}${ref ? ' (' + ref + ')' : ''} at discharge`, staff: req.user.name, witness: w.name, client_ack: ack, client_sig: b.client_sig });
   }
   db.prepare(`UPDATE property_items SET status='returned', returned_at=datetime('now') WHERE client_id = ? AND status = 'stored'`).run(cid);
-  logPropertyEvent(cid, 'return_all', { note: `All belongings returned to client at discharge${bal > 0 ? ' · cash via ' + method + (ref ? ' (' + ref + ')' : '') : ''}${b.note ? ' · ' + b.note : ''}`, staff: req.user.name, witness: w.name, client_ack: String(b.client_ack).trim() });
+  logPropertyEvent(cid, 'return_all', { note: `All belongings returned to client at discharge${bal > 0 ? ' · cash via ' + method + (ref ? ' (' + ref + ')' : '') : ''}${b.note ? ' · ' + b.note : ''}`, staff: req.user.name, witness: w.name, client_ack: ack, client_sig: b.client_sig });
   db.prepare(`UPDATE property_meta SET status='returned' WHERE client_id = ?`).run(cid);
   audit({ user: req.user, action: 'PROPERTY_RETURN', entity: 'client', entity_id: cid, detail: `cash $${bal}`, ip: req.ip });
   res.json({ ok: true });

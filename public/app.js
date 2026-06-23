@@ -4401,11 +4401,14 @@ async function loadMeals(){
   let d; try{ d=await api('/meals/today'); }catch(e){ $('mealsToday').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
   MEALS_DATA=d;
   const done=d.today.filter(m=>m.logged).length, issues=d.today.filter(m=>m.logged&&!m.complete).length;
+  const late=d.today.filter(m=>m.timeliness==='late'||m.timeliness==='overdue').length;
   $('mealsKpis').innerHTML = `
     <div class="ret-card"><div class="n">${d.expected}</div><div class="l">On the unit (portions)</div></div>
     <div class="ret-card ${done<d.today.length?'rc-warn':''}"><div class="n">${done}/${d.today.length}</div><div class="l">Meals inspected today</div></div>
+    <div class="ret-card ${late?'rc-high':''}"><div class="n">${late}</div><div class="l">Late / overdue</div></div>
     <div class="ret-card ${issues?'rc-high':''}"><div class="n">${issues}</div><div class="l">Flagged today</div></div>`;
   $('mealsToday').innerHTML = d.today.map(m=>mealCard(m,d)).join('');
+  loadSnack();
   loadMealsScore();
   loadMenu();
   loadMealFeedback();
@@ -4497,15 +4500,23 @@ function mealCard(m,d){
     return `<button type="button" class="meal-grp${on?' on':''}" data-meal="${m.meal}" data-grp="${esc(g)}" data-req="${req?1:0}" onclick="toggleGroup(this)">${on?'✓ ':''}${esc(g)}${req?' *':''}</button>`;
   }).join('');
   const likeBtn=(v,lbl)=>`<button type="button" class="meal-like${m.liked===v?' on':''}" data-meal="${m.meal}" data-like="${v}" onclick="pickLike(this)">${lbl}</button>`;
+  const timePill = m.timeliness==='late' ? '<span class="risk risk-high">served late</span>'
+    : m.timeliness==='overdue' ? '<span class="risk risk-high">⏰ LATE — serve now</span>'
+    : m.timeliness==='ontime' ? '<span class="risk risk-low">on time</span>'
+    : m.timeliness==='upcoming' ? `<span class="hint">serves ${esc(m.target||'')}</span>` : '';
+  const star=(n)=>`<button type="button" class="meal-star${m.quality&&n<=m.quality?' on':''}" data-q="${n}" onclick="pickStar(this)">★</button>`;
   return `<details class="card" ${open?'open':''}>
-    <summary class="sans" style="cursor:pointer;font-weight:600">${esc(m.meal)} ${statusPill} ${cur?'<span class="badge">now</span>':''} ${m.logged?`<span class="hint">· ${m.received??'?'}/${m.expected??'?'} portions${m.by?' · '+esc(m.by):''}</span>`:''}</summary>
+    <summary class="sans" style="cursor:pointer;font-weight:600">${esc(m.meal)} ${statusPill} ${timePill} ${cur?'<span class="badge">now</span>':''} ${m.logged?`<span class="hint">· ${m.received??'?'}/${m.expected??'?'} portions${m.served_at?' · served '+esc(m.served_at):''}${m.by?' · '+esc(m.by):''}</span>`:''}</summary>
     <div style="margin-top:12px">
       <div class="grid2">
         <div class="field"><label>Portions needed (on the unit)</label><input type="number" id="meal_exp_${m.meal}" min="0" value="${m.expected!=null?m.expected:d.expected}"/></div>
         <div class="field"><label>Portions delivered</label><input type="number" id="meal_rec_${m.meal}" min="0" value="${m.received!=null?m.received:''}" placeholder="count what arrived"/></div>
       </div>
+      <div class="field"><label>Time served ⏰ — serve on time; respecting their time respects them${m.target?` (target ${esc(m.target)})`:''}</label><input type="time" id="meal_served_${m.meal}" value="${esc(m.served_at||'')}"/></div>
       <label>Food groups delivered <span class="hint">(* = required for a complete plate)</span></label>
       <div id="meal_grps_${m.meal}" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px">${groupChips}</div>
+      <label>Quality rating ⭐ — rate every meal so we hold quality</label>
+      <div id="meal_q_${m.meal}" class="meal-stars" data-val="${m.quality||''}" style="margin:4px 0 12px">${[1,2,3,4,5].map(star).join('')}</div>
       <label>Did clients like it?</label>
       <div id="meal_like_${m.meal}" style="display:flex;gap:6px;margin:4px 0 12px">${likeBtn('Liked','👍 Liked')}${likeBtn('OK','😐 OK')}${likeBtn('Disliked','👎 No')}</div>
       <div class="field"><label>Issues / what was missing (optional)</label><textarea id="meal_iss_${m.meal}" rows="2" placeholder="e.g. only 18 trays for 22 · no vegetable · chicken undercooked">${esc(m.issues||'')}</textarea></div>
@@ -4520,11 +4531,14 @@ function mealCard(m,d){
 }
 function toggleGroup(b){ b.classList.toggle('on'); b.textContent=(b.classList.contains('on')?'✓ ':'')+b.dataset.grp+(b.dataset.req==='1'?' *':''); }
 function pickLike(b){ b.parentNode.querySelectorAll('.meal-like').forEach(x=>x.classList.remove('on')); b.classList.add('on'); b.parentNode.dataset.val=b.dataset.like; }
+function pickStar(b){ const n=+b.dataset.q, wrap=b.parentNode; wrap.dataset.val=n; wrap.querySelectorAll('.meal-star').forEach(s=>s.classList.toggle('on', +s.dataset.q<=n)); }
 async function mealPhotoPick(meal,input){ const f=input.files&&input.files[0]; if(!f)return; try{ MEAL_PHOTO[meal]=await resizeImage(f,900,0.7); $('meal_thumb_'+meal).innerHTML=`<img src="${MEAL_PHOTO[meal]}" style="height:36px;border-radius:6px"/>`; }catch(e){} input.value=''; }
 async function saveMealCheck(meal){
   const grps=[...document.querySelectorAll(`#meal_grps_${meal} .meal-grp.on`)].map(b=>b.dataset.grp);
   const likeWrap=$('meal_like_'+meal); const liked=likeWrap?likeWrap.dataset.val:'';
-  const body={ meal, expected:$('meal_exp_'+meal).value, received:$('meal_rec_'+meal).value, groups:grps, liked:liked||undefined, issues:$('meal_iss_'+meal).value };
+  const qWrap=$('meal_q_'+meal); const quality=qWrap&&qWrap.dataset.val?+qWrap.dataset.val:undefined;
+  const served_at=$('meal_served_'+meal)?$('meal_served_'+meal).value:'';
+  const body={ meal, expected:$('meal_exp_'+meal).value, received:$('meal_rec_'+meal).value, groups:grps, liked:liked||undefined, quality, served_at:served_at||undefined, issues:$('meal_iss_'+meal).value };
   if(MEAL_PHOTO[meal]) body.photo=MEAL_PHOTO[meal];
   $('meal_msg_'+meal).textContent='Saving…';
   try{ const r=await api('/meals/check',{method:'POST',body:JSON.stringify(body)});
@@ -4532,11 +4546,27 @@ async function saveMealCheck(meal){
     delete MEAL_PHOTO[meal]; loadMeals();
   }catch(e){ $('meal_msg_'+meal).textContent=e.message; }
 }
+async function loadSnack(){
+  const el=$('snackBody'); if(!el) return;
+  let sn=(MEALS_DATA&&MEALS_DATA.snack); if(!sn){ try{ sn=await api('/meals/snack'); }catch(e){ el.innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; } }
+  const ageStr = sn.ageMin==null?'not stocked yet today':(sn.ageMin<60?sn.ageMin+'m ago':Math.round(sn.ageMin/60)+'h ago');
+  const tog=(id,lbl)=>`<label class="pi-toggle" style="margin:0"><input type="checkbox" id="${id}" checked/> <span>${lbl}</span></label>`;
+  el.innerHTML=`<div class="${sn.stale?'pc-note':'hint'}" style="margin-bottom:10px">${sn.stale?'⚠ ':'✓ '}${sn.lastBy?('Last stocked '+ageStr+' by '+esc(sn.lastBy)):'Not stocked yet today'}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:12px">${tog('sn_snacks','Snacks')}${tog('sn_coffee','Coffee')}${tog('sn_juice','Juice &amp; water')}</div>
+    <button class="btn btn-gold sans" onclick="saveSnack()">Stocked now ✓</button> <span id="snack_msg" class="hint" style="margin-left:8px"></span>`;
+}
+async function saveSnack(){
+  try{ const r=await api('/meals/snack',{method:'POST',body:JSON.stringify({snacks:$('sn_snacks').checked,coffee:$('sn_coffee').checked,juice:$('sn_juice').checked})});
+    if(MEALS_DATA) MEALS_DATA.snack=r.snack; $('snack_msg').textContent='✓ Logged'; loadSnack();
+  }catch(e){ $('snack_msg').textContent=e.message; }
+}
 async function loadMealsScore(){
   let s; try{ s=await api('/meals/scorecard'); }catch(e){ return; }
   if(!s.logged){ $('mealsScore').innerHTML='<div class="hint">No meals inspected in the last 30 days yet.</div>'; return; }
   $('mealsScore').innerHTML = `<div class="ret-cards">
       <div class="ret-card ${s.completePct!=null&&s.completePct<90?'rc-warn':''}"><div class="n">${s.completePct!=null?s.completePct+'%':'—'}</div><div class="l">Met the standard</div></div>
+      <div class="ret-card ${s.onTimePct!=null&&s.onTimePct<90?'rc-warn':''}"><div class="n">${s.onTimePct!=null?s.onTimePct+'%':'—'}</div><div class="l">Served on time</div></div>
+      <div class="ret-card"><div class="n">${s.qualityAvg!=null?s.qualityAvg+'★':'—'}</div><div class="l">Avg quality (1–5)</div></div>
       <div class="ret-card"><div class="n">${s.likedPct!=null?s.likedPct+'%':'—'}</div><div class="l">Clients liked it</div></div>
       <div class="ret-card ${s.shortCount?'rc-high':''}"><div class="n">${s.shortCount}</div><div class="l">Short deliveries</div></div>
       <div class="ret-card"><div class="n">${s.logged}</div><div class="l">Meals inspected</div></div>

@@ -1369,6 +1369,16 @@ CREATE TABLE IF NOT EXISTS candidates (
 );
 `);
 addColumn('role_profiles', 'limitations', 'TEXT');   // what's out of this role's lane (JSON array)
+addColumn('meal_checks', 'served_at', 'TEXT');       // HH:MM the meal was actually served (timeliness)
+// SNACK STATION — was the snack/coffee/juice station stocked, and when? Respect = the
+// little things are always there. One row per stock-up, newest wins for "stocked now".
+db.exec(`CREATE TABLE IF NOT EXISTS snack_checks (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,
+  snacks INTEGER, coffee INTEGER, juice INTEGER,
+  note TEXT, by_id INTEGER REFERENCES users(id), by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');

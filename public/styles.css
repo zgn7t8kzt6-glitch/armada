@@ -757,3 +757,8 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 .flow-body{flex:1;padding-top:2px}
 .flow-t{font-weight:700;font-size:14.5px;color:var(--navy,#16242a)}
 .flow-d{font-size:13.5px;color:var(--muted);margin-top:2px;line-height:1.5}
+
+/* ── Meal quality stars ── */
+.meal-stars{display:flex;gap:4px}
+.meal-star{font-size:24px;line-height:1;background:none;border:none;cursor:pointer;color:#d8d8de;padding:0 2px;transition:color .1s}
+.meal-star.on{color:#f5b301}

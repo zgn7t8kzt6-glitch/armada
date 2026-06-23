@@ -941,6 +941,24 @@ const MEAL_REQUIRED_BY = {
 function requiredFor(meal) { return MEAL_REQUIRED_BY[meal] || ['Protein', 'Grain/Carb', 'Vegetable', 'Fruit']; }
 function currentMeal() { const h = localHour(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : 'Dinner'; }
 function censusNow() { return db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n; }
+// Meal timeliness — served on time is a form of respect. Targets are configurable.
+const MEAL_TARGETS = { Breakfast: '08:00', Lunch: '12:30', Dinner: '18:00' };
+const MEAL_GRACE = 15; // minutes past target before a meal counts as "late"
+function mealTarget(meal) { return autoCfg('meal_target_' + meal, MEAL_TARGETS[meal] || ''); }
+function hmToMin(s) { const m = /^(\d{1,2}):(\d{2})$/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+function localMinutes() { const p = new Intl.DateTimeFormat('en-US', { timeZone: APP_TZ, hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(new Date()); return ((+p.find((x) => x.type === 'hour').value) % 24) * 60 + (+p.find((x) => x.type === 'minute').value); }
+// Returns 'ontime' | 'late' | 'overdue' (past target, not served) | 'upcoming' | null
+function mealTimeliness(meal, served_at) {
+  const tmin = hmToMin(mealTarget(meal)); if (tmin == null) return null;
+  const smin = hmToMin(served_at);
+  if (smin != null) return smin > tmin + MEAL_GRACE ? 'late' : 'ontime';
+  return localMinutes() > tmin + MEAL_GRACE ? 'overdue' : 'upcoming';
+}
+function snackStatus() {
+  const today = appToday();
+  const sk = db.prepare(`SELECT *, CAST((julianday('now') - julianday(created_at)) * 1440 AS INT) ageMin FROM snack_checks WHERE date = ? ORDER BY id DESC LIMIT 1`).get(today);
+  return { lastBy: sk ? sk.by_name : null, ageMin: sk ? sk.ageMin : null, snacks: !!(sk && sk.snacks), coffee: !!(sk && sk.coffee), juice: !!(sk && sk.juice), stale: !sk || sk.ageMin > 240 };
+}
 // 30-day caterer scorecard rollup — shared by the Meals view, the kitchen brief,
 // and the Command Center.
 function mealScorecard() {
@@ -950,12 +968,18 @@ function mealScorecard() {
   const liked = rows.filter((r) => r.liked === 'Liked').length;
   const likedRated = rows.filter((r) => r.liked).length;
   const short = rows.filter((r) => r.received != null && r.expected != null && r.received < r.expected).length;
+  const qRows = rows.filter((r) => r.quality);
+  const qualityAvg = qRows.length ? Math.round(qRows.reduce((s, r) => s + r.quality, 0) / qRows.length * 10) / 10 : null;
+  const timed = rows.filter((r) => r.served_at);
+  const onTime = timed.filter((r) => { const t = hmToMin(mealTarget(r.meal)), s = hmToMin(r.served_at); return t != null && s != null && s <= t + MEAL_GRACE; }).length;
+  const onTimePct = timed.length ? Math.round(onTime / timed.length * 100) : null;
   const missCount = {};
   for (const r of rows) { let g = []; try { g = JSON.parse(r.groups || '[]'); } catch { /* */ } requiredFor(r.meal).filter((x) => !g.includes(x)).forEach((x) => { missCount[x] = (missCount[x] || 0) + 1; }); }
   const recentIssues = rows.filter((r) => r.issues).slice(0, 8).map((r) => ({ date: r.date, meal: r.meal, issue: r.issues }));
   return {
     logged, completePct: logged ? Math.round(complete / logged * 100) : null,
     likedPct: likedRated ? Math.round(liked / likedRated * 100) : null, shortCount: short,
+    qualityAvg, onTimePct,
     missing: Object.entries(missCount).sort((a, b) => b[1] - a[1]).map(([g, n]) => ({ group: g, n })),
     recentIssues,
   };
@@ -967,14 +991,16 @@ app.get('/api/meals/today', requireAuth, (req, res) => {
   const checks = {};
   db.prepare(`SELECT * FROM meal_checks WHERE date = ?`).all(today).forEach((r) => { checks[r.meal] = r; });
   res.json({
-    date: today, current: currentMeal(), expected, groups: MEAL_GROUPS, meals: MEALS_LIST,
+    date: today, current: currentMeal(), expected, groups: MEAL_GROUPS, meals: MEALS_LIST, snack: snackStatus(),
     today: MEALS_LIST.map((m) => {
       const req = requiredFor(m);
       const c = checks[m];
-      if (!c) return { meal: m, logged: false, required: req };
+      const target = mealTarget(m);
+      if (!c) return { meal: m, logged: false, required: req, target, served_at: null, timeliness: mealTimeliness(m, null) };
       let groups = []; try { groups = JSON.parse(c.groups || '[]'); } catch { /* */ }
       return { meal: m, logged: true, required: req, expected: c.expected, received: c.received, groups, liked: c.liked || '',
         quality: c.quality, issues: c.issues || '', complete: !!c.complete, photo: c.photo || null, by: c.by_name || '',
+        target, served_at: c.served_at || null, timeliness: mealTimeliness(m, c.served_at),
         missing: req.filter((g) => !groups.includes(g)) };
     }),
   });
@@ -989,16 +1015,17 @@ app.post('/api/meals/check', requireAuth, async (req, res) => {
   const expected = (b.expected === 0 || b.expected) ? Math.max(0, parseInt(b.expected, 10) || 0) : censusNow();
   const liked = ['Liked', 'OK', 'Disliked'].includes(b.liked) ? b.liked : null;
   const quality = (b.quality === 0 || b.quality) ? Math.max(1, Math.min(5, parseInt(b.quality, 10) || 0)) : null;
+  const served_at = /^\d{1,2}:\d{2}$/.test(b.served_at || '') ? b.served_at : null;
   let photo = null; if (b.photo) { try { photo = validPhoto(b.photo); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const missing = requiredFor(meal).filter((g) => !groups.includes(g));
   const enough = (received != null && expected != null) ? received >= expected : true;
   const complete = (missing.length === 0 && enough) ? 1 : 0;
-  db.prepare(`INSERT INTO meal_checks (date, meal, expected, received, groups, liked, quality, issues, photo, complete, by_id, by_name)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  db.prepare(`INSERT INTO meal_checks (date, meal, expected, received, groups, liked, quality, issues, photo, complete, served_at, by_id, by_name)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(date, meal) DO UPDATE SET expected=excluded.expected, received=excluded.received, groups=excluded.groups,
       liked=excluded.liked, quality=excluded.quality, issues=excluded.issues, photo=COALESCE(excluded.photo, meal_checks.photo),
-      complete=excluded.complete, by_id=excluded.by_id, by_name=excluded.by_name, updated_at=datetime('now')`)
-    .run(today, meal, expected, received, JSON.stringify(groups), liked, quality, (b.issues || '').trim() || null, photo, complete, req.user.id, req.user.name);
+      complete=excluded.complete, served_at=COALESCE(excluded.served_at, meal_checks.served_at), by_id=excluded.by_id, by_name=excluded.by_name, updated_at=datetime('now')`)
+    .run(today, meal, expected, received, JSON.stringify(groups), liked, quality, (b.issues || '').trim() || null, photo, complete, served_at, req.user.id, req.user.name);
   audit({ user: req.user, action: 'MEAL_CHECK', detail: `${meal} ${complete ? 'OK' : 'ISSUE'}`, ip: req.ip });
   // A short or incomplete delivery is a defect — flag it so the caterer is held to standard.
   if (!complete) {
@@ -1009,6 +1036,16 @@ app.post('/api/meals/check', requireAuth, async (req, res) => {
     createAlert(null, `meal_${today}_${meal}`, 'Elevated', `${meal} delivery issue — ${parts.join(' · ')}. Logged by ${req.user.name}.`);
   }
   res.json({ ok: true, complete: !!complete, enough, missing });
+});
+// Snack station — log that snacks / coffee / juice are stocked (the little things,
+// always there). Newest log is "stocked now"; goes stale after 4 hours.
+app.get('/api/meals/snack', requireAuth, (req, res) => res.json(snackStatus()));
+app.post('/api/meals/snack', requireAuth, (req, res) => {
+  const b = req.body || {};
+  db.prepare(`INSERT INTO snack_checks (date, snacks, coffee, juice, note, by_id, by_name) VALUES (?,?,?,?,?,?,?)`)
+    .run(appToday(), b.snacks ? 1 : 0, b.coffee ? 1 : 0, b.juice ? 1 : 0, (b.note || '').trim() || null, req.user.id, req.user.name);
+  audit({ user: req.user, action: 'SNACK_STOCK', detail: [b.snacks && 'snacks', b.coffee && 'coffee', b.juice && 'juice'].filter(Boolean).join(', '), ip: req.ip });
+  res.json({ ok: true, snack: snackStatus() });
 });
 // Caterer scorecard — last 30 days of meal checks (held the standard?).
 app.get('/api/meals/scorecard', requireAuth, (req, res) => res.json(mealScorecard()));
@@ -4858,18 +4895,37 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     }
   }
   // Meal service — for the roles that serve/stock food (techs + kitchen): prompt
-  // to inspect the current meal delivery if it hasn't been checked yet.
+  // to serve on time, inspect & rate the delivery, and keep the snack station stocked.
   if (jr === 'BHT / Tech' || jr === 'Catering / Dietary') {
     const meal = currentMeal();
-    const chk = db.prepare(`SELECT complete, received, expected FROM meal_checks WHERE date = ? AND meal = ?`).get(today, meal);
+    const chk = db.prepare(`SELECT complete, received, expected, served_at, quality FROM meal_checks WHERE date = ? AND meal = ?`).get(today, meal);
     const needsCheck = !chk;
+    const time = mealTimeliness(meal, chk ? chk.served_at : null);
+    const target = mealTarget(meal);
+    // Timeliness reminder — serving on time is respect. Loudest for lunch & dinner.
+    if (time === 'overdue') {
+      tiles.push({ key: 'mealtime', label: `${meal} is late`, n: `was ${target}`, sev: 'high', view: 'meals' });
+      sections.push({ key: 'mealtime', title: `⏰ ${meal} is past its serve time (${target}) — serve it now`,
+        cta: { label: 'Open Meals →', view: 'meals' },
+        items: [{ name: 'Serve on time, every time.', sub: 'People feel respected when their time is respected. A late meal tells them they don’t matter — get it out now and log the time served.', badge: 'LATE' }] });
+    } else if (time === 'upcoming' && (meal === 'Lunch' || meal === 'Dinner')) {
+      sections.push({ key: 'mealtime', title: `🍽️ ${meal} serves at ${target} — be ready`,
+        items: [{ name: 'Have it out on time.', sub: 'Respecting their time is respecting them. Plate up a few minutes early so no one waits.' }] });
+    }
+    const ratedNote = (chk && chk.quality) ? ` · you rated it ${chk.quality}/5` : '';
     tiles.push({ key: 'meal', label: `${meal} delivery`, n: needsCheck ? 'Check' : (chk.complete ? '✓' : '⚠'), sev: needsCheck ? 'warn' : (chk.complete ? 'ok' : 'high'), view: 'meals' });
-    sections.push({ key: 'meal', title: `🍽️ ${meal} — inspect the caterer's delivery`,
+    sections.push({ key: 'meal', title: `🍽️ ${meal} — inspect, rate & log the caterer's delivery`,
       cta: { label: 'Open meal check →', view: 'meals' },
       items: [needsCheck
-        ? { name: `${meal} not checked yet`, sub: `Confirm enough portions (${censusNow()} on the unit) and all food groups, then log it.`, badge: 'TO DO' }
-        : (chk.complete ? { name: `${meal} ✓ inspected`, sub: `${chk.received ?? '?'} of ${chk.expected ?? '?'} portions · complete` }
+        ? { name: `${meal} not checked yet`, sub: `Confirm portions (${censusNow()} on the unit) + all food groups, rate the quality (1–5), then log the time served.`, badge: 'TO DO' }
+        : (chk.complete ? { name: `${meal} ✓ inspected${ratedNote}`, sub: `${chk.received ?? '?'} of ${chk.expected ?? '?'} portions · complete${chk.served_at ? ' · served ' + chk.served_at : ''}` }
           : { name: `${meal} flagged`, sub: 'Short or missing a food group — see the meal check', badge: 'ISSUE' })] });
+    // Snack station — are snacks, coffee & juice actually stocked?
+    const sn = snackStatus();
+    tiles.push({ key: 'snack', label: 'Snack station', n: sn.stale ? 'Stock' : '✓', sev: sn.stale ? 'warn' : 'ok', view: 'meals' });
+    if (sn.stale) sections.push({ key: 'snack', title: '☕ Snack station — stock snacks, coffee & juice',
+      cta: { label: 'Open Meals →', view: 'meals' },
+      items: [{ name: sn.lastBy ? `Last stocked ${Math.round(sn.ageMin / 60)}h ago by ${sn.lastBy}` : 'Not stocked yet today', sub: 'Nobody hungry or thirsty, ever. Top up the station and tap “Stocked now”.', badge: 'TO DO' }] });
   }
   // Operations layer — on every role's shift screen so nothing operational is
   // invisible: open maintenance work orders, and whether today's shifts are short.

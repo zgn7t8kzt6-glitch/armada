@@ -2236,34 +2236,72 @@ function makeSigPad(id){ const c=document.getElementById(id); if(!c) return null
   c.addEventListener('touchstart',down,{passive:false}); c.addEventListener('touchmove',mv,{passive:false}); window.addEventListener('touchend',up);
   return { clear(){ ctx.clearRect(0,0,c.width*ratio,c.height*ratio); dirty=false; }, isEmpty(){ return !dirty; }, dataURL(){ return dirty? c.toDataURL('image/png'):null; } };
 }
+// Belongings intake — a step-by-step wizard so staff aren't faced with one huge
+// scrolling form. State lives in window.PI so moving between steps never loses data.
 function propIntake(cid){
-  const L=window.PROP_LISTS||{prohibited:[],disposed:[],meds:[]};
-  const chk=(arr,cls)=>arr.map(it=>`<label style="display:block;font-size:13px;text-transform:none;letter-spacing:0;font-weight:400;margin:3px 0"><input type="checkbox" class="${cls}" data-l="${esc(it)}" style="width:auto;margin-right:7px"/>${esc(it)}</label>`).join('');
-  const save=hmodal(`<h3>Person &amp; belongings search + intake</h3>
-    <p class="sub sans">Conduct the search <b>with the client and a second staff witness present</b>. Mark anything found, then store valuables (use + Item / Cash in). All three sign.</p>
-    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-weight:500"><input type="checkbox" id="pp_consent" checked style="width:auto"/> Client was informed the search is for safety (non-punitive) and consented</label>
-    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:6px"><input type="checkbox" id="pp_none" style="width:auto"/> No prohibited / restricted items found</label>
-    <label style="margin-top:10px">Prohibited / restricted items found — check any present</label>
-    <div style="max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px 12px">${chk(L.prohibited,'pp_found')}</div>
-    <label style="margin-top:10px">Items disposed of per policy (witness present)</label>
-    <div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px">${chk(L.disposed,'pp_disp')}<label style="display:block;font-size:13px;text-transform:none;letter-spacing:0;font-weight:400;margin-top:4px">Other: <input id="pp_disp_other" style="width:60%;display:inline-block"/></label></div>
-    <label style="margin-top:10px">Items sent home with approved person</label>
-    <input id="pp_senthome" placeholder="Describe items sent home"/>
-    <input id="pp_person" placeholder="Name of approved person" style="margin-top:6px"/>
-    <div class="grid2" style="margin-top:6px"><div><label>Number of bins</label><input id="pp_bins" type="number" min="0"/></div><div><label>Luggage pieces</label><input id="pp_lug" type="number" min="0"/></div></div>
-    <label style="margin-top:10px">Medication handling</label>
-    <div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px">${chk(L.meds,'pp_meds')}</div>
-    <hr style="margin:14px 0">
-    <label>Where stored (safe / locker)</label><input id="pp_loc" placeholder="e.g. Front safe, locker 3"/>
-    <div class="grid2"><div><label>Sealed bag #</label><input id="pp_bag" placeholder="e.g. 0481"/></div>
-      <div><label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:24px"><input type="checkbox" id="pp_sealed" style="width:auto"/> Tamper-evident bag sealed</label></div></div>
-    ${sigFields({clientAck:true})}`);
-  initSigPad();
-  save.onclick=async()=>{
-    const sig=clientSig(); if(!sig){ alert('Please have the client sign on the screen.'); return; }
-    const pick=cls=>[...document.querySelectorAll('.'+cls+':checked')].map(c=>c.dataset.l);
-    const search={ consent:$('pp_consent').checked, none_found:$('pp_none').checked, found:pick('pp_found'), disposed:pick('pp_disp'), disposed_other:$('pp_disp_other').value.trim(), sent_home:$('pp_senthome').value.trim(), sent_home_person:$('pp_person').value.trim(), bins:$('pp_bins').value, luggage:$('pp_lug').value, meds:pick('pp_meds') };
-    try{ await api('/property/'+cid+'/intake',{method:'POST',body:JSON.stringify({safe_location:$('pp_loc').value,bag_number:$('pp_bag').value,sealed:$('pp_sealed').checked,search,...witnessBody(),client_ack:$('pp_client').value,client_sig:sig})}); closeHModal(); openProperty(cid); }catch(e){ alert(e.message); } };
+  window.PI={ cid, step:1, proh:new Set(), disp:new Set(), meds:new Set(),
+    consent:true, none:false, disposed_other:'', sent_home:'', sent_home_person:'',
+    bins:'', luggage:'', safe_location:'', bag_number:'', sealed:false };
+  piRender();
+}
+function piChips(arr,key){ return (arr||[]).map(it=>{ const on=PI[key].has(it)?' on':''; return `<button type="button" class="pchip${on}" data-k="${key}" data-l="${esc(it)}" onclick="piToggle(this)">${esc(it)}</button>`; }).join(''); }
+function piToggle(el){ const k=el.dataset.k,l=el.dataset.l,set=PI[k];
+  if(set.has(l)){ set.delete(l); el.classList.remove('on'); }
+  else{ set.add(l); el.classList.add('on'); if(k==='proh'){ PI.none=false; const n=document.getElementById('pi_none'); if(n) n.checked=false; } } }
+function piFilter(q){ q=(q||'').toLowerCase(); document.querySelectorAll('#pi_proh .pchip').forEach(c=>{ c.style.display=c.dataset.l.toLowerCase().includes(q)?'':'none'; }); }
+function piCapture(){ const g=id=>document.getElementById(id);
+  if(g('pi_consent')) PI.consent=g('pi_consent').checked;
+  if(g('pi_none')) PI.none=g('pi_none').checked;
+  if(g('pi_disp_other')) PI.disposed_other=g('pi_disp_other').value;
+  if(g('pi_senthome')) PI.sent_home=g('pi_senthome').value;
+  if(g('pi_person')) PI.sent_home_person=g('pi_person').value;
+  if(g('pi_bins')) PI.bins=g('pi_bins').value;
+  if(g('pi_lug')) PI.luggage=g('pi_lug').value;
+  if(g('pi_loc')) PI.safe_location=g('pi_loc').value;
+  if(g('pi_bag')) PI.bag_number=g('pi_bag').value;
+  if(g('pi_sealed')) PI.sealed=g('pi_sealed').checked; }
+function piNav(dir){ piCapture(); PI.step=Math.min(3,Math.max(1,PI.step+dir)); piRender(); }
+function piStep1(){ const L=window.PROP_LISTS||{prohibited:[]};
+  return `<p class="sub sans">Search the client &amp; their bags <b>with the client and a second staff witness present.</b></p>
+    <label class="pi-toggle"><input type="checkbox" id="pi_consent" ${PI.consent?'checked':''}/> <span>Client was told the search is for safety (non-punitive) and agreed</span></label>
+    <label class="pi-toggle pi-big"><input type="checkbox" id="pi_none" ${PI.none?'checked':''}/> <span>✅ Nothing prohibited found — clean intake</span></label>
+    <label style="margin-top:14px">Tap any prohibited / restricted item found</label>
+    <input id="pi_filter" placeholder="🔍 Type to find an item…" oninput="piFilter(this.value)" style="margin-bottom:9px"/>
+    <div id="pi_proh" class="pchips">${piChips(L.prohibited,'proh')}</div>`; }
+function piStep2(){ const L=window.PROP_LISTS||{disposed:[],meds:[]};
+  return `<label>Items disposed of per policy (witness present)</label>
+    <div class="pchips">${piChips(L.disposed,'disp')}</div>
+    <input id="pi_disp_other" placeholder="Other disposed item…" value="${esc(PI.disposed_other)}" style="margin-top:9px"/>
+    <label style="margin-top:14px">Items sent home with an approved person</label>
+    <input id="pi_senthome" placeholder="Describe items sent home" value="${esc(PI.sent_home)}"/>
+    <input id="pi_person" placeholder="Name of approved person" value="${esc(PI.sent_home_person)}" style="margin-top:7px"/>
+    <div class="grid2" style="margin-top:11px"><div><label>Number of bins</label><input id="pi_bins" type="number" min="0" value="${esc(PI.bins)}"/></div>
+      <div><label>Luggage pieces</label><input id="pi_lug" type="number" min="0" value="${esc(PI.luggage)}"/></div></div>
+    <label style="margin-top:14px">Medication handling</label>
+    <div class="pchips">${piChips(L.meds,'meds')}</div>`; }
+function piStep3(){
+  return `<label>Where stored (safe / locker)</label><input id="pi_loc" placeholder="e.g. Front safe, locker 3" value="${esc(PI.safe_location)}"/>
+    <div class="grid2" style="margin-top:6px"><div><label>Sealed bag #</label><input id="pi_bag" placeholder="e.g. 0481" value="${esc(PI.bag_number)}"/></div>
+      <div><label class="pi-toggle" style="margin-top:24px"><input type="checkbox" id="pi_sealed" ${PI.sealed?'checked':''}/> <span>Tamper-evident bag sealed</span></label></div></div>
+    <hr style="margin:16px 0">
+    ${sigFields({clientAck:true})}`; }
+function piRender(){ const s=PI.step;
+  const steps=[[1,'Search'],[2,'Items & count'],[3,'Store & sign']];
+  const head=`<h3 style="margin-bottom:2px">Belongings intake</h3>
+    <div class="pi-steps">${steps.map(([n,t])=>`<span class="pi-step${n===s?' on':''}${n<s?' done':''}">${n<s?'✓':n}. ${t}</span>`).join('')}</div>`;
+  const body = s===1?piStep1() : s===2?piStep2() : piStep3();
+  const foot=`<div class="toolbar" style="margin-top:18px;justify-content:space-between">
+    <button class="btn btn-ghost sans" onclick="${s===1?'closeHModal()':'piNav(-1)'}">${s===1?'Cancel':'← Back'}</button>
+    <button class="btn btn-primary sans" onclick="${s<3?'piNav(1)':'piSubmit()'}">${s<3?'Next →':'Save intake'}</button></div>`;
+  hmodalPlain(head+body+foot);
+  if(s===3) initSigPad();
+}
+function piSubmit(){ piCapture();
+  const sig=clientSig(); if(!sig){ alert('Please have the client sign on the screen.'); return; }
+  if(!$('pp_witness').value){ alert('A second staff witness must sign in.'); return; }
+  const cid=PI.cid;
+  const search={ consent:PI.consent, none_found:PI.none, found:[...PI.proh], disposed:[...PI.disp], disposed_other:PI.disposed_other.trim(), sent_home:PI.sent_home.trim(), sent_home_person:PI.sent_home_person.trim(), bins:PI.bins, luggage:PI.luggage, meds:[...PI.meds] };
+  api('/property/'+cid+'/intake',{method:'POST',body:JSON.stringify({safe_location:PI.safe_location,bag_number:PI.bag_number,sealed:PI.sealed,search,...witnessBody(),client_ack:($('pp_client')&&$('pp_client').value)||'',client_sig:sig})}).then(()=>{ closeHModal(); openProperty(cid); }).catch(e=>alert(e.message));
 }
 function addPropItem(cid){
   const save=hmodal(`<h3>Add belonging</h3>

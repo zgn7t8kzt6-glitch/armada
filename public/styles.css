@@ -735,3 +735,16 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
   .house-grid{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
 }
 
+
+/* ── Belongings intake wizard ── */
+.pi-steps{display:flex;gap:6px;margin:4px 0 14px;flex-wrap:wrap}
+.pi-step{font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:20px;background:#f1f1f3;color:#8a8a93;letter-spacing:.02em}
+.pi-step.on{background:#16242a;color:#fff}
+.pi-step.done{background:#e7f4ee;color:#1a8a5a}
+.pi-toggle{display:flex;align-items:center;gap:9px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:8px;cursor:pointer}
+.pi-toggle input{width:auto;margin:0}
+.pi-big{padding:11px 13px;border:1.5px solid var(--line);border-radius:12px;font-size:14.5px;background:#fbfbfc}
+.pchips{display:flex;flex-wrap:wrap;gap:7px;max-height:250px;overflow:auto;padding:2px}
+.pchip{font:inherit;font-size:13px;padding:8px 13px;border:1px solid var(--line);border-radius:20px;background:#fff;color:#16242a;cursor:pointer;line-height:1.2;transition:background .12s,border-color .12s,color .12s}
+.pchip:hover{border-color:#bbb}
+.pchip.on{background:#fbe9e7;border-color:#e3b3ac;color:#b3382f;font-weight:600}

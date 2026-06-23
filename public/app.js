@@ -189,7 +189,7 @@ const GROUP_OF={
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
-  mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
+  myrole:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
@@ -265,13 +265,13 @@ Object.entries(HUBS).forEach(([k,h])=>h.items.forEach(([v])=>{ HUB_OF[v]=k; }));
 const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // The handful of shared pages housing staff still get (their own tasks/comms/learning) —
 // everything else clinical/detox stays hidden from them.
-const UNIVERSAL_VIEWS = ['mytasks','messages','team','training','library','standard'];
+const UNIVERSAL_VIEWS = ['myrole','mytasks','messages','team','training','library','standard'];
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
-  'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedmap','bedboard','property','clients','dignity','mytasks','messages','team','training','library'],
-  'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','bedmap','records','incidents','inventory','compliance','mytasks','messages','team','training','library'],
-  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','mytasks','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','rounds','roundscan','concierge','meals','engagement','bedmap','bedboard','property','clients','dignity','myrole','mytasks','messages','team','training','library'],
+  'Nurse':      ['dashboard','rounds','roundscan','concierge','clients','bedmap','records','incidents','inventory','compliance','myrole','mytasks','messages','team','training','library'],
+  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','myrole','mytasks','messages','team','training','library'],
   // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
   'Housing Director': ['housing','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
@@ -423,6 +423,7 @@ function show(v){
   if(v==='casemgmt') loadCaseMgmt();
   if(v==='continuum') loadContinuum();
   if(v==='dignity') loadDignity();
+  if(v==='myrole') loadMyRole();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -2240,7 +2241,7 @@ function makeSigPad(id){ const c=document.getElementById(id); if(!c) return null
 // scrolling form. State lives in window.PI so moving between steps never loses data.
 function propIntake(cid){
   window.PI={ cid, step:1, proh:new Set(), disp:new Set(), meds:new Set(),
-    consent:true, none:false, disposed_other:'', sent_home:'', sent_home_person:'',
+    consent:true, none:false, scrubs:false, wand:false, disposed_other:'', sent_home:'', sent_home_person:'',
     bins:'', luggage:'', safe_location:'', bag_number:'', sealed:false };
   piRender();
 }
@@ -2252,6 +2253,8 @@ function piFilter(q){ q=(q||'').toLowerCase(); document.querySelectorAll('#pi_pr
 function piCapture(){ const g=id=>document.getElementById(id);
   if(g('pi_consent')) PI.consent=g('pi_consent').checked;
   if(g('pi_none')) PI.none=g('pi_none').checked;
+  if(g('pi_scrubs')) PI.scrubs=g('pi_scrubs').checked;
+  if(g('pi_wand')) PI.wand=g('pi_wand').checked;
   if(g('pi_disp_other')) PI.disposed_other=g('pi_disp_other').value;
   if(g('pi_senthome')) PI.sent_home=g('pi_senthome').value;
   if(g('pi_person')) PI.sent_home_person=g('pi_person').value;
@@ -2264,6 +2267,8 @@ function piNav(dir){ piCapture(); PI.step=Math.min(3,Math.max(1,PI.step+dir)); p
 function piStep1(){ const L=window.PROP_LISTS||{prohibited:[]};
   return `<p class="sub sans">Search the client &amp; their bags <b>with the client and a second staff witness present.</b></p>
     <label class="pi-toggle"><input type="checkbox" id="pi_consent" ${PI.consent?'checked':''}/> <span>Client was told the search is for safety (non-punitive) and agreed</span></label>
+    <label class="pi-toggle"><input type="checkbox" id="pi_scrubs" ${PI.scrubs?'checked':''}/> <span>Client changed into facility scrubs</span></label>
+    <label class="pi-toggle"><input type="checkbox" id="pi_wand" ${PI.wand?'checked':''}/> <span>Scanned with the metal wand</span></label>
     <label class="pi-toggle pi-big"><input type="checkbox" id="pi_none" ${PI.none?'checked':''}/> <span>✅ Nothing prohibited found — clean intake</span></label>
     <label style="margin-top:14px">Tap any prohibited / restricted item found</label>
     <input id="pi_filter" placeholder="🔍 Type to find an item…" oninput="piFilter(this.value)" style="margin-bottom:9px"/>
@@ -2300,7 +2305,7 @@ function piSubmit(){ piCapture();
   const sig=clientSig(); if(!sig){ alert('Please have the client sign on the screen.'); return; }
   if(!$('pp_witness').value){ alert('A second staff witness must sign in.'); return; }
   const cid=PI.cid;
-  const search={ consent:PI.consent, none_found:PI.none, found:[...PI.proh], disposed:[...PI.disp], disposed_other:PI.disposed_other.trim(), sent_home:PI.sent_home.trim(), sent_home_person:PI.sent_home_person.trim(), bins:PI.bins, luggage:PI.luggage, meds:[...PI.meds] };
+  const search={ consent:PI.consent, none_found:PI.none, scrubs:PI.scrubs, wand:PI.wand, found:[...PI.proh], disposed:[...PI.disp], disposed_other:PI.disposed_other.trim(), sent_home:PI.sent_home.trim(), sent_home_person:PI.sent_home_person.trim(), bins:PI.bins, luggage:PI.luggage, meds:[...PI.meds] };
   api('/property/'+cid+'/intake',{method:'POST',body:JSON.stringify({safe_location:PI.safe_location,bag_number:PI.bag_number,sealed:PI.sealed,search,...witnessBody(),client_ack:($('pp_client')&&$('pp_client').value)||'',client_sig:sig})}).then(()=>{ closeHModal(); openProperty(cid); }).catch(e=>alert(e.message));
 }
 function addPropItem(cid){
@@ -3944,6 +3949,7 @@ async function openHireRole(roleEnc){
   HIRE.profile=p; HIRE.cands=cd.candidates||[];
   const qual=p.qualities.map(q=>`<div class="kv"><span class="k" style="min-width:150px">${esc(q.name)}</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted);max-width:60%">${esc(q.desc||'')}</span></div>`).join('');
   const resp=p.responsibilities.map(r=>`<li>${esc(r)}</li>`).join('');
+  const lim=(p.limitations||[]).map(r=>`<li>${esc(r)}</li>`).join('');
   const intv=p.interview.map(i=>`<div class="cmd-row"><div class="cmd-row-main">❓ ${esc(i.q)}${i.look?`<br><span class="hint">Listen for: ${esc(i.look)}</span>`:''}</div></div>`).join('');
   const byStage={}; HIRE.stages.forEach(s=>byStage[s]=[]); HIRE.cands.forEach(c=>{ (byStage[c.stage]=byStage[c.stage]||[]).push(c); });
   const pipe=HIRE.stages.map(s=>{ const list=byStage[s]||[]; if(!list.length && s==='Passed') return '';
@@ -3956,11 +3962,38 @@ async function openHireRole(roleEnc){
       <div class="card"><div class="cmd-hero-row"><div><h3>${esc(role)}</h3><p class="sub sans" style="margin:0">${esc(p.purpose||'')}</p></div>${p.canEdit?`<button class="btn btn-ghost btn-sm sans" onclick="editRoleProfile()">Edit profile</button>`:''}</div>
         <h3 style="margin-top:14px;font-size:13px">Defining qualities — select for these</h3>${qual}
         <h3 style="margin-top:14px;font-size:13px">Key responsibilities</h3><ul style="margin:6px 0;padding-left:18px;font-size:14px">${resp}</ul>
+        ${lim?`<h3 style="margin-top:14px;font-size:13px;color:#b3382f">Out of their lane</h3><ul style="margin:6px 0;padding-left:18px;font-size:14px">${lim}</ul>`:''}
       </div>
       <div class="card"><div class="cmd-hero-row"><div><h3>Hiring pipeline</h3></div>${p.canEdit?`<button class="btn btn-gold btn-sm sans" onclick="addCandidate()">+ Candidate</button>`:''}</div>
         <div style="margin-top:10px">${pipe}</div></div>
     </div>
     <div class="card"><h3>Structured interview guide</h3><p class="sub sans">Ask these and score the candidate against the defining qualities — select for talent, don't settle.</p>${intv}</div>`;
+}
+// "My Role" — a staff member's own job description, always on hand: what they do,
+// what's out of their lane, and one-tap access to every tool the job needs.
+async function loadMyRole(){
+  const host=$('myroleBody'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="empty">Loading…</div></div>';
+  let p; try{ p=await api('/my-role'); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const role=p.role||(ME&&ME.job_role)||'Team member';
+  const resp=(p.responsibilities||[]).map(r=>`<li>${esc(r)}</li>`).join('');
+  const lim=(p.limitations||[]).map(r=>`<li>${esc(r)}</li>`).join('');
+  const qual=(p.qualities||[]).map(q=>`<div class="kv"><span class="k" style="min-width:150px">${esc(q.name)}</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted);max-width:62%">${esc(q.desc||'')}</span></div>`).join('');
+  // My tools — the exact app functions this role uses, proving every duty has a home.
+  const menu=(ROLE_MENU[role]||[]).filter(v=>v!=='myrole'&&v!=='dashboard'&&canSeeView(v));
+  const label=v=>{ const b=document.querySelector(`#nav button[data-view="${v}"]`); return b?b.textContent.trim():v; };
+  const tools=menu.map(v=>`<button class="btn btn-ghost btn-sm sans" onclick="show('${v}')">${esc(label(v))} ›</button>`).join('');
+  host.innerHTML=`
+    <div class="card">
+      <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(role)}</h3><p class="sub sans" style="margin:2px 0 0">${esc(p.purpose||'')}</p></div></div>
+      ${p.reportsTo?`<div class="hint" style="margin-top:8px">Reports to: <b>${esc(p.reportsTo)}</b></div>`:''}
+    </div>
+    <div class="cmd-grid">
+      <div class="card"><h3>What I do</h3><p class="sub sans">My responsibilities every shift.</p><ul style="margin:8px 0;padding-left:18px;font-size:14px;line-height:1.65">${resp||'<li>—</li>'}</ul></div>
+      ${lim?`<div class="card" style="border-color:#e3b3ac;background:#fff8f7"><h3 style="color:#b3382f">Not my lane</h3><p class="sub sans">Hand these to the right person — never do them yourself.</p><ul style="margin:8px 0;padding-left:18px;font-size:14px;line-height:1.65">${lim}</ul></div>`:''}
+    </div>
+    ${tools?`<div class="card"><h3>My tools</h3><p class="sub sans">Everything the job needs is one tap away.</p><div class="toolbar" style="flex-wrap:wrap;gap:8px;margin-top:10px;justify-content:flex-start">${tools}</div></div>`:''}
+    ${qual?`<div class="card"><h3>What great looks like</h3><p class="sub sans">The qualities we hire and recognize for.</p><div style="margin-top:8px">${qual}</div></div>`:''}`;
 }
 function editRoleProfile(){
   const p=HIRE.profile; if(!p) return;
@@ -3969,13 +4002,15 @@ function editRoleProfile(){
   const save=hmodal(`<h3>Edit ${esc(p.role)} profile</h3>
     <label>Purpose</label><textarea id="rp_purpose" rows="2">${esc(p.purpose||'')}</textarea>
     <label>Defining qualities — one per line: "Name — description"</label><textarea id="rp_qual" rows="7">${esc(qText)}</textarea>
-    <label>Key responsibilities — one per line</label><textarea id="rp_resp" rows="5">${esc(p.responsibilities.join('\n'))}</textarea>
+    <label>Key responsibilities — one per line</label><textarea id="rp_resp" rows="6">${esc(p.responsibilities.join('\n'))}</textarea>
+    <label>Out of their lane / limitations — one per line</label><textarea id="rp_lim" rows="4">${esc((p.limitations||[]).join('\n'))}</textarea>
     <label>Interview questions — one per line: "Question || what to listen for"</label><textarea id="rp_intv" rows="7">${esc(iText)}</textarea>`);
   save.onclick=async()=>{
     const qualities=$('rp_qual').value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{ const m=l.split(/\s+[—-]\s+/); return {name:(m[0]||'').trim(), desc:(m.slice(1).join(' - ')).trim()}; });
     const interview=$('rp_intv').value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{ const m=l.split('||'); return {q:(m[0]||'').trim(), look:(m[1]||'').trim()}; });
     const responsibilities=$('rp_resp').value.split('\n').map(l=>l.trim()).filter(Boolean);
-    try{ await api('/hiring/profile/'+encodeURIComponent(p.role),{method:'POST',body:JSON.stringify({purpose:$('rp_purpose').value,qualities,responsibilities,interview})}); closeHModal(); openHireRole(encodeURIComponent(p.role)); }catch(e){ alert(e.message); }
+    const limitations=$('rp_lim').value.split('\n').map(l=>l.trim()).filter(Boolean);
+    try{ await api('/hiring/profile/'+encodeURIComponent(p.role),{method:'POST',body:JSON.stringify({purpose:$('rp_purpose').value,qualities,responsibilities,limitations,interview})}); closeHModal(); openHireRole(encodeURIComponent(p.role)); }catch(e){ alert(e.message); }
   };
 }
 function addCandidate(){

@@ -1368,6 +1368,7 @@ CREATE TABLE IF NOT EXISTS candidates (
   created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), by TEXT
 );
 `);
+addColumn('role_profiles', 'limitations', 'TEXT');   // what's out of this role's lane (JSON array)
 addColumn('meal_feedback', 'dish', 'TEXT');   // snapshot of the dish served (from the menu)
 addColumn('alerts', 'roles', 'TEXT');          // pipe-wrapped roles this alert pertains to (NULL = everyone)
 addColumn('clients', 'consent_on_file', 'INTEGER');

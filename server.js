@@ -147,8 +147,25 @@ const BASE_INTERVIEW = [
 ];
 const ROLE_SPECIFICS = {
   'BHT / Tech': { purpose: 'Be the steady, caring presence on the unit — keep clients safe, seen, and supported every shift.',
+    reportsTo: 'Nurse on shift / Clinical Director',
     qualities: [{ name: 'Calm under crisis', desc: 'De-escalates and stays grounded when things get intense.' }, { name: 'Observant', desc: 'Notices changes in mood, behavior, and safety risks early.' }],
-    responsibilities: ['Rounds, safety checks & documentation', 'De-escalation and milieu management', 'Anticipate and meet client needs', 'Accurate shift handoffs'],
+    responsibilities: [
+      'Complete property/belongings searches — change into scrubs and use the metal wand',
+      'Lock up belongings, complete the checklist and sign off — with accurate documentation',
+      'Keep belongings organized and accessible',
+      'Help serve and announce meals; facilitate clients to the dining room; keep snacks, coffee & juice available',
+      'Flip rooms after discharge and complete the laundry',
+      'Maintain a safe environment, clear of any contraband',
+      'Complete hourly rounds — log each client’s location and check in with them',
+      'Engage in positive interactions with clients and provide assistance as needed',
+      'Navigate clients to the right provider when they have needs (counselor, nursing, case management)',
+    ],
+    limitations: [
+      'Providing direct services, clinically or medically',
+      'Giving advice about clinical, medical, or any programming',
+      'Sharing protected health information outside of HIPAA and 42 CFR Part 2 guidelines',
+      'Overriding medical, clinical, or admissions decisions',
+    ],
     interview: [{ q: 'A client becomes agitated and raises their voice at you — walk me through what you do.', look: 'De-escalation, calm' }, { q: 'How do you preserve dignity during tasks like searches or vitals?', look: 'Respect, warmth' }] },
   'Nurse': { purpose: 'Deliver safe, compassionate clinical care and protect every client through the medical side of detox.',
     qualities: [{ name: 'Clinical rigor', desc: 'Precise with meds, vitals, and protocols.' }, { name: 'Composure', desc: 'Steady in medical urgency.' }],
@@ -199,15 +216,19 @@ function defaultProfileFor(role) {
   return {
     role, side: sideOfRole(role),
     purpose: s.purpose || `Deliver excellent, caring service as ${role}, and uphold our standards every day.`,
+    reportsTo: s.reportsTo || '',
     qualities: [...BASE_QUALITIES, ...(s.qualities || [])],
     responsibilities: s.responsibilities || ['Carry out the role’s duties to a high standard', 'Anticipate and meet needs', 'Document accurately', 'Support the team'],
+    limitations: s.limitations || [],
     interview: [...BASE_INTERVIEW, ...(s.interview || [])],
   };
 }
 function getRoleProfile(role) {
+  const base = ROLE_SPECIFICS[role] || {};
   const row = db.prepare(`SELECT * FROM role_profiles WHERE role=?`).get(role);
   if (!row) return defaultProfileFor(role);
-  return { role, side: row.side || sideOfRole(role), purpose: row.purpose || '', qualities: jparse(row.qualities, []), responsibilities: jparse(row.responsibilities, []), interview: jparse(row.interview, []) };
+  // reportsTo isn't stored — it comes from the role definition.
+  return { role, side: row.side || sideOfRole(role), purpose: row.purpose || '', reportsTo: base.reportsTo || '', qualities: jparse(row.qualities, []), responsibilities: jparse(row.responsibilities, []), limitations: jparse(row.limitations, base.limitations || []), interview: jparse(row.interview, []) };
 }
 function canHire(req, side) {
   if (req.user?.role === 'admin' || req.user?.job_role === 'Executive Director') return true;
@@ -2990,11 +3011,18 @@ app.post('/api/hiring/profile/:role', requireAuth, (req, res) => {
   if (!canHire(req, side)) return res.status(403).json({ error: 'Leadership only.' });
   const b = req.body || {};
   const ex = db.prepare(`SELECT role FROM role_profiles WHERE role=?`).get(role);
-  if (ex) db.prepare(`UPDATE role_profiles SET side=?,purpose=?,qualities=?,responsibilities=?,interview=?,updated_by=?,updated=datetime('now') WHERE role=?`)
-    .run(side, b.purpose || '', JSON.stringify(b.qualities || []), JSON.stringify(b.responsibilities || []), JSON.stringify(b.interview || []), req.user.name, role);
-  else db.prepare(`INSERT INTO role_profiles (role,side,purpose,qualities,responsibilities,interview,updated_by,updated) VALUES (?,?,?,?,?,?,?,datetime('now'))`)
-    .run(role, side, b.purpose || '', JSON.stringify(b.qualities || []), JSON.stringify(b.responsibilities || []), JSON.stringify(b.interview || []), req.user.name);
+  if (ex) db.prepare(`UPDATE role_profiles SET side=?,purpose=?,qualities=?,responsibilities=?,limitations=?,interview=?,updated_by=?,updated=datetime('now') WHERE role=?`)
+    .run(side, b.purpose || '', JSON.stringify(b.qualities || []), JSON.stringify(b.responsibilities || []), JSON.stringify(b.limitations || []), JSON.stringify(b.interview || []), req.user.name, role);
+  else db.prepare(`INSERT INTO role_profiles (role,side,purpose,qualities,responsibilities,limitations,interview,updated_by,updated) VALUES (?,?,?,?,?,?,?,?,datetime('now'))`)
+    .run(role, side, b.purpose || '', JSON.stringify(b.qualities || []), JSON.stringify(b.responsibilities || []), JSON.stringify(b.limitations || []), JSON.stringify(b.interview || []), req.user.name);
   res.json({ ok: true });
+});
+// "My Role" — every staff member can always see their own job description,
+// responsibilities, and what's out of their lane.
+app.get('/api/my-role', requireAuth, (req, res) => {
+  const role = req.user.job_role || '';
+  if (!role) return res.json({ role: '', purpose: '', responsibilities: [], limitations: [], qualities: [] });
+  res.json(getRoleProfile(role));
 });
 app.get('/api/hiring/candidates', requireAuth, (req, res) => {
   let rows;

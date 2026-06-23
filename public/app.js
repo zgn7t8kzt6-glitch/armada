@@ -3660,7 +3660,7 @@ async function loadBedBoard(){
         ${b.status==='cleaning'
           ? `<button class="btn btn-gold btn-sm sans" onclick="cleanTurnover(${b.id})">✓ Cleaned</button>`
           : `<button class="btn btn-ghost btn-sm sans" onclick="startTurnover(${b.id})">🧹 Start cleaning</button><button class="btn btn-gold btn-sm sans" onclick="cleanTurnover(${b.id})">✓ Cleaned</button>`}
-        <button class="btn btn-ghost btn-sm sans" onclick="removeTurnover(${b.id})" title="Remove (flagged by mistake)">✕</button>
+        ${canManageStaffing()?`<button class="btn btn-ghost btn-sm sans" onclick="removeTurnover(${b.id})" title="Dismiss a mistaken flag (manager only)">✕</button>`:''}
       </div></div>`).join('') : '<div class="hint">All beds clean — nothing waiting. 🎉</div>';
   $('tovClean').innerHTML = (d.cleaned||[]).length ? d.cleaned.map(b=>`<div class="pc-note">✅ <strong>${esc(b.room)}</strong> <span class="hint">· cleaned by ${esc(b.cleaned_by||'')} · ${esc(b.at||'')}</span> <a onclick="reopenTurnover(${b.id})" style="cursor:pointer;color:var(--muted);margin-left:6px">undo</a></div>`).join('') : '<div class="hint">No beds cleaned in the last 24 hours.</div>';
 }
@@ -3672,7 +3672,7 @@ async function addTurnover(){
 async function startTurnover(id){ try{ await api('/turnovers/'+id+'/start',{method:'POST'}); loadBedBoard(); }catch(e){ alert(e.message); } }
 async function cleanTurnover(id){ try{ await api('/turnovers/'+id+'/clean',{method:'POST'}); loadBedBoard(); }catch(e){ alert(e.message); } }
 async function reopenTurnover(id){ try{ await api('/turnovers/'+id+'/reopen',{method:'POST'}); loadBedBoard(); }catch(e){ alert(e.message); } }
-async function removeTurnover(id){ if(!confirm('Remove this bed from the board?'))return; try{ await api('/turnovers/'+id,{method:'DELETE'}); loadBedBoard(); }catch(e){ alert(e.message); } }
+async function removeTurnover(id){ if(!confirm('Dismiss this bed (flagged by mistake)? Only do this if it was not a real discharge.'))return; try{ await api('/turnovers/'+id,{method:'DELETE'}); loadBedBoard(); }catch(e){ alert(e.message); } }
 
 /* ---- Daily roster / attendance ---- */
 function rosterShift(n){ const d=new Date($('ros_date').value||today()); d.setDate(d.getDate()+n); $('ros_date').value=d.toISOString().slice(0,10); loadRoster(); }

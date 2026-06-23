@@ -6339,8 +6339,11 @@ app.post('/api/turnovers/:id/reopen', requireAuth, (req, res) => {
   db.prepare(`UPDATE bed_turnovers SET status='dirty', cleaned_by=NULL, cleaned_at=NULL, cleaned_shift=NULL WHERE id=?`).run(req.params.id);
   res.json({ ok: true });
 });
-app.delete('/api/turnovers/:id', requireAuth, (req, res) => {
-  db.prepare(`DELETE FROM bed_turnovers WHERE id=?`).run(req.params.id);
+// A dirty bed can't be "X'd away" — frontline staff must actually clean it. Only a
+// staffing manager can dismiss a mistaken flag, and it's kept (status 'dismissed')
+// so the discharge reconciliation won't just re-create it.
+app.delete('/api/turnovers/:id', requireAuth, requireStaffingManager, (req, res) => {
+  db.prepare(`UPDATE bed_turnovers SET status='dismissed', cleaned_by=?, cleaned_at=datetime('now') WHERE id=?`).run(req.user.name, req.params.id);
   db.prepare(`UPDATE alerts SET status='Resolved' WHERE kind=? AND status='New'`).run('bed_overdue_' + req.params.id);
   res.json({ ok: true });
 });

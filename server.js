@@ -5446,33 +5446,59 @@ function arrivalRoleFor(jr) {
 }
 // Board: recent admits with per-role completion, so the team sees what's left.
 app.get('/api/arrival/board', requireAuth, (req, res) => {
-  const items = db.prepare(`SELECT id, role FROM arrival_items WHERE active = 1`).all();
-  const totalByRole = {}; items.forEach((i) => { totalByRole[i.role] = (totalByRole[i.role] || 0) + 1; });
+  const items = db.prepare(`SELECT id, role, label FROM arrival_items WHERE active = 1`).all();
+  const gatedIds = items.filter((i) => isBelongingsArrivalItem(i.label)).map((i) => i.id);
+  const totalByRole = {}, gatedByRole = {};
+  items.forEach((i) => { totalByRole[i.role] = (totalByRole[i.role] || 0) + 1; if (gatedIds.includes(i.id)) gatedByRole[i.role] = (gatedByRole[i.role] || 0) + 1; });
   const admits = db.prepare(`SELECT id, pref, name, room, admit FROM clients WHERE active = 1 AND discharge_status IS NULL
     AND substr(admit,1,10) >= date('now','-5 day') ORDER BY admit DESC, id DESC`).all();
-  const doneByRole = db.prepare(`SELECT i.role, COUNT(*) n FROM arrival_checks ch JOIN arrival_items i ON i.id = ch.item_id WHERE ch.client_id = ? GROUP BY i.role`);
+  // Count manual checks but exclude the gated belongings items — those only count
+  // when the signed Belongings form is done (added back below).
+  const notIn = gatedIds.length ? ` AND ch.item_id NOT IN (${gatedIds.map(() => '?').join(',')})` : '';
+  const doneByRole = db.prepare(`SELECT i.role, COUNT(*) n FROM arrival_checks ch JOIN arrival_items i ON i.id = ch.item_id WHERE ch.client_id = ?${notIn} GROUP BY i.role`);
   res.json({ roles: ARRIVAL_ROLES, admits: admits.map((c) => {
-    const done = {}; doneByRole.all(c.id).forEach((r) => { done[r.role] = r.n; });
-    const roles = ARRIVAL_ROLES.map((r) => ({ role: r, done: done[r] || 0, total: totalByRole[r] || 0 }));
+    const done = {}; doneByRole.all(c.id, ...gatedIds).forEach((r) => { done[r.role] = r.n; });
+    const intakeDone = belongingsIntakeDone(c.id);
+    const roles = ARRIVAL_ROLES.map((r) => { let dn = done[r] || 0; if (intakeDone) dn += (gatedByRole[r] || 0); return { role: r, done: Math.min(dn, totalByRole[r] || 0), total: totalByRole[r] || 0 }; });
     const total = roles.reduce((a, r) => a + r.total, 0); const d = roles.reduce((a, r) => a + r.done, 0);
-    return { id: c.id, name: c.pref || c.name, room: c.room || '', admit: (c.admit || '').slice(0, 10), pct: total ? Math.round(d / total * 100) : 100, roles };
+    return { id: c.id, name: c.pref || c.name, room: c.room || '', admit: (c.admit || '').slice(0, 10), pct: total ? Math.min(100, Math.round(d / total * 100)) : 100, roles };
   }) });
 });
 // One client's full checklist, grouped by role, with done status.
+// The belongings/valuables steps can't be self-attested — they're only "done" when
+// the signed Belongings form is actually completed for this client. Most important
+// item on intake; gate it on the real form, not a checkbox.
+const isBelongingsArrivalItem = (label) => /belong|valuable|contraband|propert/i.test(label || '');
+function belongingsIntakeDone(cid) {
+  return !!db.prepare(`SELECT 1 FROM property_meta WHERE client_id = ? AND intake_client_sig IS NOT NULL`).get(cid);
+}
 app.get('/api/arrival/checklist/:id', requireAuth, (req, res) => {
   const c = db.prepare(`SELECT id, pref, name, room, admit FROM clients WHERE id = ?`).get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Not found' });
   const items = db.prepare(`SELECT id, role, label, sort FROM arrival_items WHERE active = 1 ORDER BY role, sort, id`).all();
   const done = {}; db.prepare(`SELECT item_id, by_name, done_at FROM arrival_checks WHERE client_id = ?`).all(c.id).forEach((x) => { done[x.item_id] = x; });
+  const intakeDone = belongingsIntakeDone(c.id);
   const byRole = {};
-  for (const it of items) (byRole[it.role] = byRole[it.role] || []).push({ id: it.id, label: it.label, done: !!done[it.id], by: done[it.id]?.by_name || '', at: done[it.id] ? String(done[it.id].done_at).slice(0, 16) : '' });
-  res.json({ client: { id: c.id, name: c.pref || c.name, room: c.room || '', admit: (c.admit || '').slice(0, 10) },
+  for (const it of items) {
+    const gated = isBelongingsArrivalItem(it.label);
+    (byRole[it.role] = byRole[it.role] || []).push({
+      id: it.id, label: it.label,
+      gated,
+      done: gated ? intakeDone : !!done[it.id],
+      by: gated ? '' : (done[it.id]?.by_name || ''),
+      at: gated ? '' : (done[it.id] ? String(done[it.id].done_at).slice(0, 16) : ''),
+    });
+  }
+  res.json({ client: { id: c.id, name: c.pref || c.name, room: c.room || '', admit: (c.admit || '').slice(0, 10) }, intakeDone,
     roles: ARRIVAL_ROLES.filter((r) => byRole[r]).map((r) => ({ role: r, items: byRole[r] })) });
 });
 // Toggle an arrival item done/undone for a client.
 app.post('/api/arrival/check', requireAuth, (req, res) => {
   const b = req.body || {};
   if (!b.client_id || !b.item_id) return res.status(400).json({ error: 'client_id + item_id required' });
+  // Belongings steps can't be checked off by hand — they require the signed form.
+  const gItem = db.prepare(`SELECT label FROM arrival_items WHERE id = ?`).get(b.item_id);
+  if (gItem && isBelongingsArrivalItem(gItem.label)) return res.status(400).json({ error: 'Complete the Belongings form (with the client’s signature) — this step can’t be checked off by hand.' });
   if (b.done === false) { db.prepare(`DELETE FROM arrival_checks WHERE client_id = ? AND item_id = ?`).run(b.client_id, b.item_id); return res.json({ ok: true }); }
   db.prepare(`INSERT OR IGNORE INTO arrival_checks (client_id, item_id, by_id, by_name) VALUES (?,?,?,?)`).run(b.client_id, b.item_id, req.user.id, req.user.name);
   // Auto-notify the care team on the two key front-desk milestones.

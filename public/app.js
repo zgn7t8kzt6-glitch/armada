@@ -2162,9 +2162,19 @@ async function renderArrivalChecklist(){
   const showAll = mgmt || ARR_SHOWALL || !myRoles.length;   // managers (or no role match) see the full checklist
   const roles = showAll ? d.roles : myRoles;
   const allItems=d.roles.flatMap(r=>r.items||[]); const overall=allItems.length?Math.round(allItems.filter(i=>i.done).length/allItems.length*100):0;
-  const itemRow=(i)=>`<label style="display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border:1px solid var(--line);border-radius:12px;margin:8px 0;cursor:pointer;background:${i.done?'#f3f8f4':'#fff'}">
+  const itemRow=(i)=>{
+    if(i.gated){
+      // Belongings — the critical one. No checkbox; only the signed form completes it.
+      return `<div style="display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border:1.5px solid ${i.done?'var(--line)':'#e3b3ac'};border-radius:12px;margin:8px 0;background:${i.done?'#f3f8f4':'#fff8f7'}">
+        <span style="font-size:22px;margin-top:1px;flex:none">${i.done?'✅':'🔒'}</span>
+        <div style="flex:1"><span style="font-size:16px;line-height:1.35;${i.done?'color:#2d7a4f':'font-weight:600'}">${esc(i.label)}</span>
+          <div class="hint" style="margin-top:3px">${i.done?'✓ Belongings form completed & signed':'Required — fill the signed Belongings form. This can’t be checked off by hand.'}</div>
+          ${i.done?'':`<button class="btn btn-gold btn-sm sans no-print" style="margin-top:8px" onclick="openBelongings(${d.client.id})">📦 Fill belongings form</button>`}</div></div>`;
+    }
+    return `<label style="display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border:1px solid var(--line);border-radius:12px;margin:8px 0;cursor:pointer;background:${i.done?'#f3f8f4':'#fff'}">
       <input type="checkbox" ${i.done?'checked':''} onchange="toggleArrival(${d.client.id},${i.id},this.checked)" style="width:22px;height:22px;margin-top:1px;flex:none;accent-color:var(--gold)"/>
       <span style="font-size:16px;line-height:1.35;${i.done?'color:#2d7a4f;text-decoration:line-through':''}">${esc(i.label)}${i.done&&i.by?`<br><span class="hint" style="text-decoration:none">✓ ${esc(i.by)}${i.at?' · '+esc(i.at):''}</span>`:''}</span></label>`;
+  };
   const roleBlock=(r)=>{ const done=r.items.filter(i=>i.done).length; const mine=roleMatchesMe(r.role); const pct=r.items.length?Math.round(done/r.items.length*100):0;
     return `<div style="margin:16px 0 4px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px"><strong class="sans" style="font-size:15px">${esc(r.role)}</strong>${mine?'<span class="badge">your role</span>':''}<span class="hint" style="margin-left:auto">${done}/${r.items.length}</span></div>

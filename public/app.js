@@ -3903,7 +3903,7 @@ async function loadUsers(){
   const roles = META.jobRoles||[];
   if($('u_domains') && document.activeElement!==$('u_domains')) $('u_domains').value = (domains||[]).join('\n');
   if($('u_domhint')) $('u_domhint').textContent = (domains&&domains.length)?('Approved domains: '+domains.join(', ')):'No approved domains set — add some below first.';
-  $('userList').innerHTML = `<table class="tbl"><tr><th>Name</th><th>Email / login</th><th>Job role</th><th>Access</th><th>Status</th><th></th></tr>${
+  $('userList').innerHTML = `<table class="tbl"><tr><th>Name</th><th>Email / login</th><th>Phone</th><th>Job role</th><th>Access</th><th>Status</th><th></th></tr>${
     users.map(u=>{
       const roleOpts = roles.map(r=>`<option ${u.job_role===r?'selected':''}>${esc(r)}</option>`).join('');
       const missing = u.job_role && !roles.includes(u.job_role) ? `<option selected>${esc(u.job_role)}</option>` : (u.job_role?'':'<option selected value="">— none set —</option>');
@@ -3913,6 +3913,7 @@ async function loadUsers(){
       return `<tr data-uid="${u.id}">
         <td><input class="us-name sans" value="${esc(u.name)}" style="min-width:120px"/></td>
         <td>${esc(u.email||u.username)}</td>
+        <td><input class="us-phone sans" value="${esc(u.phone||'')}" placeholder="cell" style="min-width:110px"/></td>
         <td><select class="us-job sans">${missing}${roleOpts}</select></td>
         <td><select class="us-role sans"><option value="staff" ${u.role!=='admin'?'selected':''}>Staff</option><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option></select></td>
         <td style="text-align:center">${status}<br><label class="hint" style="text-transform:none;letter-spacing:0"><input type="checkbox" class="us-active" ${u.active!==0?'checked':''}/> active</label></td>
@@ -3939,7 +3940,8 @@ function userRow(id){ return document.querySelector('tr[data-uid="'+id+'"]'); }
 async function saveUser(id){
   const r=userRow(id); if(!r) return;
   const body={ name:r.querySelector('.us-name').value, job_role:r.querySelector('.us-job').value,
-    role:r.querySelector('.us-role').value, active:r.querySelector('.us-active').checked?1:0 };
+    role:r.querySelector('.us-role').value, active:r.querySelector('.us-active').checked?1:0,
+    phone:(r.querySelector('.us-phone')||{}).value||'' };
   if($('userMsg')) $('userMsg').textContent='Saving…';
   try{ await api('/users/'+id,{method:'POST',body:JSON.stringify(body)}); if($('userMsg')) $('userMsg').textContent='✓ Saved'; loadUsers(); }
   catch(e){ if($('userMsg')) $('userMsg').textContent='Error: '+esc(e.message); }
@@ -5269,19 +5271,20 @@ async function renderCrew(){
   const host=$('dashCrew'); if(!host) return;
   let d; try{ d=await api('/shift-crew'); }catch(e){ host.innerHTML=''; return; }
   const t=d.team||{};
-  const grp=(label,arr)=> (arr&&arr.length)?`<span style="margin-right:14px"><b>${label}:</b> ${arr.map(esc).join(', ')}</span>`:'';
+  const tel=(p)=>String(p).replace(/[^0-9+]/g,'');
+  const person=p=>`${esc(p.name)}${p.phone?` <a href="tel:${esc(tel(p.phone))}" style="text-decoration:none" title="Call ${esc(p.name)}">📞</a>`:''}`;
+  const grp=(label,arr)=> (arr&&arr.length)?`<div style="margin-top:4px"><b>${label}:</b> ${arr.map(person).join(', ')}</div>`:'';
   const team=[grp('Nurses',t.nurses),grp('Techs',t.rts),grp('Case mgmt',t.caseManagers),grp('Therapists',t.therapists)].filter(Boolean).join('');
   const l=d.lead;
-  const tel=(p)=>p.replace(/[^0-9+]/g,'');
   const leadHtml = (l&&l.name)
     ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:20px">👤</span>
-        <div style="flex:1;min-width:160px"><div style="font-weight:700">${esc(l.name)}${l.role?` <span class="hint" style="font-weight:400">· ${esc(l.role)}</span>`:''}</div><div class="hint">Lead in charge — behavioral-contract calls & emergencies</div></div>
+        <div style="flex:1;min-width:160px"><div style="font-weight:700">${esc(l.name)}${l.role?` <span class="hint" style="font-weight:400">· ${esc(l.role)}</span>`:''}${l.isDefault?' <span class="hint">(default)</span>':''}</div><div class="hint">Lead in charge — behavioral-contract calls & emergencies</div></div>
         ${l.phone?`<a class="btn btn-gold btn-sm sans" href="tel:${esc(tel(l.phone))}">📞 Call lead</a>`:''}
         ${d.canSetLead?`<button class="btn btn-ghost btn-sm sans" onclick="setShiftLead()">Change</button>`:''}</div>`
-    : `<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap"><span class="hint">No shift lead set — the person in charge for behavioral-contract calls & emergencies.</span>${d.canSetLead?`<button class="btn btn-gold btn-sm sans" onclick="setShiftLead()">Set lead</button>`:''}</div>`;
+    : `<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap"><span class="hint">No shift lead set.</span>${d.canSetLead?`<button class="btn btn-gold btn-sm sans" onclick="setShiftLead()">Set lead</button>`:''}</div>`;
   host.innerHTML=`<div class="card" style="border-left:4px solid var(--gold)">${leadHtml}
-    <div class="hint" style="margin-top:10px;line-height:1.7">${team?('🩺 On shift now — '+team):'No one marked on shift yet.'}</div></div>`;
+    <div class="hint" style="margin-top:10px;line-height:1.7">${team?('🩺 On shift now'+team):'No one marked on shift yet.'}</div></div>`;
 }
 function setShiftLead(){
   api('/shift-crew').then(d=>{
@@ -5289,8 +5292,9 @@ function setShiftLead(){
     const save=hmodal(`<h3>Set the shift lead</h3><p class="sub sans">The person in charge right now — behavioral-contract calls, decisions, emergencies. Shown to everyone on My Shift.</p>
       <label>Name</label><input id="sl_name" value="${esc(l.name||'')}"/>
       <label>Role / title</label><input id="sl_role" value="${esc(l.role||'')}" placeholder="e.g. Charge Nurse, Shift Lead"/>
-      <label>Phone (for the Call button)</label><input id="sl_phone" value="${esc(l.phone||'')}" placeholder="e.g. 555-123-4567"/>`);
-    save.onclick=async()=>{ try{ await api('/shift-lead',{method:'POST',body:JSON.stringify({name:$('sl_name').value,role:$('sl_role').value,phone:$('sl_phone').value})}); closeHModal(); renderCrew(); }catch(e){ alert(e.message); } };
+      <label>Phone (for the Call button)</label><input id="sl_phone" value="${esc(l.phone||'')}" placeholder="e.g. 555-123-4567"/>
+      <label class="pi-toggle" style="margin-top:8px"><input type="checkbox" id="sl_default"/> <span>Also make this the default lead (used when no one is assigned)</span></label>`);
+    save.onclick=async()=>{ try{ await api('/shift-lead',{method:'POST',body:JSON.stringify({name:$('sl_name').value,role:$('sl_role').value,phone:$('sl_phone').value,asDefault:$('sl_default').checked})}); closeHModal(); renderCrew(); }catch(e){ alert(e.message); } };
   }).catch(e=>alert(e.message));
 }
 // Facility at a glance — the first thing on My Shift: who's here, coming, and going.

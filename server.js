@@ -3018,7 +3018,7 @@ app.post('/api/assignments', requireAuth, requireAdmin, (req, res) => {
 /* ---------------- users (admin) ---------------- */
 app.get('/api/users', requireAuth, requireAdmin, (req, res) => {
   res.json({
-    users: db.prepare(`SELECT id, name, username, email, role, job_role, active, pending, invited_at FROM users ORDER BY name`).all(),
+    users: db.prepare(`SELECT id, name, username, email, role, job_role, active, pending, invited_at, phone FROM users ORDER BY name`).all(),
     domains: allowedDomains(),
   });
 });
@@ -3204,12 +3204,13 @@ app.post('/api/users/:id', requireAuth, requireAdmin, (req, res) => {
   const job_role = b.job_role != null ? String(b.job_role).trim() : u.job_role;
   const role = b.role != null ? (b.role === 'admin' ? 'admin' : 'staff') : u.role;
   const active = b.active != null ? (b.active ? 1 : 0) : u.active;
+  const phone = b.phone != null ? String(b.phone).trim().slice(0, 30) : u.phone;
   // Don't allow demoting/deactivating the last active admin.
   if (u.role === 'admin' && (role !== 'admin' || !active)) {
     const admins = db.prepare(`SELECT COUNT(*) n FROM users WHERE role = 'admin' AND active = 1`).get().n;
     if (admins <= 1) return res.status(400).json({ error: 'This is the last active admin — promote someone else first.' });
   }
-  db.prepare(`UPDATE users SET name = ?, job_role = ?, role = ?, active = ? WHERE id = ?`).run(name, job_role, role, active, id);
+  db.prepare(`UPDATE users SET name = ?, job_role = ?, role = ?, active = ?, phone = ? WHERE id = ?`).run(name, job_role, role, active, phone || null, id);
   if (b.password && String(b.password).trim()) {
     db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hashPassword(String(b.password)), id);
     db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(id);   // force re-login with the new password
@@ -7802,18 +7803,35 @@ app.get('/api/care-team/onshift', requireAuth, (req, res) => {
 });
 // Who's on shift + the lead in charge (behavioral-contract calls, decisions,
 // emergencies). The lead is set by leadership and shown to everyone on My Shift.
-function shiftLead() { try { const v = getState('shift_lead'); return v ? JSON.parse(v) : null; } catch { return null; } }
+function defaultLead() {
+  try { const v = getState('default_lead'); if (v) return JSON.parse(v); } catch { /* */ }
+  // Seed: if no one is assigned, the building defaults to Brandon.
+  const u = db.prepare(`SELECT name, phone FROM users WHERE lower(name) LIKE 'brandon%' AND active = 1 ORDER BY id LIMIT 1`).get();
+  return { name: 'Brandon', role: 'On-call lead', phone: (u && u.phone) || '' };
+}
+function shiftLead() {
+  try { const v = getState('shift_lead'); if (v) return JSON.parse(v); } catch { /* */ }
+  const d = defaultLead(); return d ? { ...d, isDefault: true } : null;   // no one assigned → default (Brandon)
+}
 const canSetLead = (u) => u.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(u.job_role || '');
-app.get('/api/shift-crew', requireAuth, (req, res) => {
+// On-shift staff with phones so the crew list can offer a one-tap call.
+function onShiftWithPhones() {
   const { buckets, shift } = computeOnShift();
-  res.json({ shift, team: buckets, lead: shiftLead(), canSetLead: canSetLead(req.user) });
+  const phones = {};
+  db.prepare(`SELECT name, phone FROM users WHERE active = 1 AND phone IS NOT NULL AND phone != ''`).all().forEach((u) => { phones[u.name.toLowerCase()] = u.phone; });
+  const wp = (arr) => (arr || []).map((n) => ({ name: n, phone: phones[String(n).toLowerCase()] || '' }));
+  return { shift, team: { nurses: wp(buckets.nurses), rts: wp(buckets.rts), caseManagers: wp(buckets.caseManagers), therapists: wp(buckets.therapists) } };
+}
+app.get('/api/shift-crew', requireAuth, (req, res) => {
+  const { shift, team } = onShiftWithPhones();
+  res.json({ shift, team, lead: shiftLead(), canSetLead: canSetLead(req.user) });
 });
 app.post('/api/shift-lead', requireAuth, (req, res) => {
   if (!canSetLead(req.user)) return res.status(403).json({ error: 'Leadership only.' });
   const b = req.body || {}; const name = (b.name || '').trim();
-  if (!name) { setState('shift_lead', ''); return res.json({ ok: true, lead: null }); }
-  const lead = { name: name.slice(0, 80), role: (b.role || '').trim().slice(0, 60), phone: (b.phone || '').trim().slice(0, 30), by: req.user.name, at: new Date().toISOString() };
-  setState('shift_lead', JSON.stringify(lead));
+  const lead = name ? { name: name.slice(0, 80), role: (b.role || '').trim().slice(0, 60), phone: (b.phone || '').trim().slice(0, 30), by: req.user.name, at: new Date().toISOString() } : null;
+  setState('shift_lead', lead ? JSON.stringify(lead) : '');
+  if (b.asDefault && lead) setState('default_lead', JSON.stringify({ name: lead.name, role: lead.role, phone: lead.phone }));
   res.json({ ok: true, lead });
 });
 

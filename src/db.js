@@ -1427,6 +1427,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS shift_reports (
   UNIQUE(shift_date, shift)
 );`);
 addColumn('shift_reports', 'data', 'TEXT');   // structured pass-down answers (JSON)
+addColumn('users', 'phone', 'TEXT');          // staff cell — for on-shift contact / call buttons
 // SHIFT CHECKLIST — the simple recurring walk-around duties staff confirm each
 // shift (snacks filled, common areas tidy, eyes on every client…). Resets every
 // shift; completion is keyed to (shift_date, shift) so a new shift starts fresh.

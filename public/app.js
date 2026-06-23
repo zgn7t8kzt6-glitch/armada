@@ -272,10 +272,11 @@ const ROLE_MENU = {
   // Ordered by how the shift actually flows. Round Status (not the duplicate scan
   // tab), Intake (the full arrival checklist — dignity bag lives there, no standalone
   // Dignity tab), then the day's work. My Tasks lives ON My Shift, not as a tab.
-  'BHT / Tech': ['dashboard','rounds','arrivalcheck','property','meals','bedboard','engagement','clients','incidents','concierge','myrole','messages','team','training','library'],
-  'Nurse':      ['dashboard','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','myrole','messages','team','training','library'],
-  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','myrole','messages','team','training','library'],
-  // Housing staff get a clean, housing-only sidebar — none of the detox/clinical pages.
+  // My Role is folded into My Shift (its own collapsible at the bottom) — no tab.
+  'BHT / Tech': ['dashboard','rounds','arrivalcheck','property','meals','bedboard','engagement','clients','incidents','concierge','messages','team','training','library'],
+  'Nurse':      ['dashboard','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
+  'Front Desk': ['dashboard','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','messages','team','training','library'],
+  // Housing staff don't use the detox My Shift, so they keep a My Role tab.
   'Housing Director': ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','myrole','housing','voice','activities','residents','houses','mytasks','messages'],
@@ -5015,6 +5016,7 @@ async function loadDashboard(){
   renderShiftReport();
   renderShiftChecklist();
   renderDashTasks();
+  renderDashRole();
   if(d.lean){ renderLeanDashboard(d); return; }
   if($('dashActions')) $('dashActions').style.display='';
   const ns=d.northStar;
@@ -5200,6 +5202,29 @@ async function loadAlertScore(){
       <div><strong class="sans">Most responsive (7 days)</strong>${staff?`<table class="tbl" style="margin-top:6px">${staff}</table>`:'<div class="hint" style="margin-top:6px">No alerts handled yet.</div>'}</div>
       <div><strong class="sans">Recently missed</strong><div style="margin-top:6px">${missed}</div></div>
     </div>`;
+}
+// My Role, folded into the bottom of My Shift (no separate tab) — collapsible so the
+// live shift stays on top: what I do, not my lane, how my shift flows, what great is.
+async function renderDashRole(){
+  const host=$('dashRole'); if(!host) return;
+  let p; try{ p=await api('/my-role'); }catch(e){ host.innerHTML=''; return; }
+  const role=p.role||(ME&&ME.job_role)||'';
+  if(!role){ host.innerHTML=''; return; }
+  const resp=(p.responsibilities||[]).map(r=>`<li>${esc(r)}</li>`).join('');
+  const lim=(p.limitations||[]).map(r=>`<li>${esc(r)}</li>`).join('');
+  const qual=(p.qualities||[]).map(q=>`<div class="kv"><span class="k" style="min-width:150px">${esc(q.name)}</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted);max-width:62%">${esc(q.desc||'')}</span></div>`).join('');
+  const label=v=>{ const b=document.querySelector(`#nav button[data-view="${v}"]`); return b?(b.firstChild?b.firstChild.textContent.trim():b.textContent.trim()):v; };
+  const flow=(SHIFT_FLOW[role]||[]).map((s,i)=>`<div class="flow-step"><div class="flow-num">${i+1}</div><div class="flow-body"><div class="flow-t">${esc(s.t)}</div><div class="flow-d">${esc(s.d)}</div>${s.v&&canSeeView(s.v)?`<button class="btn btn-ghost btn-sm sans" style="margin-top:6px" onclick="show('${s.v}')">Open ${esc(label(s.v))} ›</button>`:''}</div></div>`).join('');
+  host.innerHTML=`<details class="card"><summary style="cursor:pointer;font-weight:700;color:var(--navy);font-size:15px">📋 My role — ${esc(role)} · what I do, not my lane &amp; how my shift flows</summary>
+    <div style="margin-top:12px">
+      ${p.purpose?`<p class="sub sans" style="margin:0 0 10px">${esc(p.purpose)}</p>`:''}
+      ${flow?`<h3 style="font-size:13px;margin:6px 0 6px">How my shift flows</h3><div class="flow">${flow}</div>`:''}
+      <div class="cmd-grid" style="margin-top:12px">
+        <div><h3 style="font-size:13px;margin:0 0 4px">What I do</h3><ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.6">${resp||'<li>—</li>'}</ul></div>
+        ${lim?`<div><h3 style="font-size:13px;margin:0 0 4px;color:#b3382f">Not my lane</h3><ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.6">${lim}</ul></div>`:''}
+      </div>
+      ${qual?`<h3 style="font-size:13px;margin:14px 0 6px">What great looks like</h3>${qual}`:''}
+    </div></details>`;
 }
 // Simple per-shift walk-around checklist — tap to confirm, resets each shift.
 async function renderShiftChecklist(){

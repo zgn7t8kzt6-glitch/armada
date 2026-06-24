@@ -3291,16 +3291,19 @@ const DISC_GUIDE = {
   C: { name: 'Conscientious (C)', blurb: 'Precise, analytical, high standards.', appreciate: 'Recognize the quality and accuracy of their work; specifics matter.', strengths: 'Thorough, accurate, holds a high bar.', watch: 'Perfectionist; can be slow to decide.', lead: 'Give clear expectations and the data/why; value their precision.' },
 };
 function empDisc(uid) { try { const r = db.prepare(`SELECT disc FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.disc ? JSON.parse(r.disc) : null; } catch { return null; } }
-// Big Five + Honesty-Humility (HEXACO) — the scientifically validated model, using
-// free public-domain (IPIP) markers. 24 items, 4 per trait (r=reverse-scored).
-// For development & recognition — NOT a hiring test.
-const BIG5_Q = [
-  { k: 'C', t: 'Follows through and gets things done', r: 0 }, { k: 'C', t: 'Pays attention to the details', r: 0 }, { k: 'C', t: 'Leaves tasks unfinished', r: 1 }, { k: 'C', t: 'Is reliable — can be counted on', r: 0 },
-  { k: 'ES', t: 'Stays calm under pressure', r: 0 }, { k: 'ES', t: 'Rarely gets rattled or stressed', r: 0 }, { k: 'ES', t: 'Gets upset or overwhelmed easily', r: 1 }, { k: 'ES', t: 'Bounces back quickly after a hard moment', r: 0 },
-  { k: 'A', t: 'Is warm and caring with people', r: 0 }, { k: 'A', t: 'Feels and shows empathy for others', r: 0 }, { k: 'A', t: 'Can be cold or blunt with people', r: 1 }, { k: 'A', t: 'Goes out of the way to help', r: 0 },
-  { k: 'E', t: 'Is outgoing and talkative', r: 0 }, { k: 'E', t: 'Is energized by being around people', r: 0 }, { k: 'E', t: 'Is quiet and reserved', r: 1 }, { k: 'E', t: 'Takes the lead in a group', r: 0 },
-  { k: 'O', t: 'Is open to new ideas and ways of doing things', r: 0 }, { k: 'O', t: 'Is curious and likes to learn', r: 0 }, { k: 'O', t: 'Prefers routine and dislikes change', r: 1 }, { k: 'O', t: 'Finds creative solutions', r: 0 },
-  { k: 'H', t: 'Is honest even when no one is watching', r: 0 }, { k: 'H', t: "Would never take what isn't theirs", r: 0 }, { k: 'H', t: 'Bends the rules when it benefits them', r: 1 }, { k: 'H', t: 'Is humble and not out for personal gain', r: 0 },
+// Big Five + Honesty-Humility (HEXACO) — the scientifically validated model. We use
+// FORCED-CHOICE ("most / least like me") blocks of equally-desirable statements so it
+// can't be gamed by just picking the "good" answer. For development & recognition.
+const BIG5_FC = [
+  [{ k: 'C', t: 'I finish what I start' }, { k: 'E', t: 'I bring energy to a room' }, { k: 'A', t: "I put others' feelings first" }, { k: 'O', t: 'I look for new ways to do things' }],
+  [{ k: 'H', t: 'I give others the credit' }, { k: 'ES', t: "I stay calm when it's chaotic" }, { k: 'C', t: 'I double-check my work' }, { k: 'E', t: 'I speak up in groups' }],
+  [{ k: 'A', t: 'I comfort people who are upset' }, { k: 'O', t: 'I am curious how things work' }, { k: 'H', t: 'I am content without recognition' }, { k: 'C', t: 'I keep careful track of details' }],
+  [{ k: 'ES', t: "Setbacks don't rattle me" }, { k: 'E', t: 'I enjoy meeting new people' }, { k: 'H', t: 'I would return extra change without thinking' }, { k: 'A', t: 'I am patient with difficult people' }],
+  [{ k: 'C', t: 'I am dependable and on time' }, { k: 'O', t: 'I like learning new skills' }, { k: 'ES', t: 'I keep my cool under pressure' }, { k: 'H', t: 'I admit when I am wrong' }],
+  [{ k: 'E', t: 'I rally the team' }, { k: 'A', t: 'I go out of my way to help' }, { k: 'O', t: 'I question the usual way' }, { k: 'C', t: 'I follow through on every task' }],
+  [{ k: 'H', t: "I'd never cut a corner no one would catch" }, { k: 'ES', t: 'I bounce back fast' }, { k: 'A', t: 'I am warm with everyone' }, { k: 'E', t: 'I am comfortable in the spotlight' }],
+  [{ k: 'O', t: 'I enjoy change and variety' }, { k: 'C', t: 'I plan ahead carefully' }, { k: 'H', t: 'I share the spotlight' }, { k: 'ES', t: 'I rarely worry' }],
+  [{ k: 'A', t: "I notice when someone's struggling" }, { k: 'E', t: 'I am outgoing' }, { k: 'C', t: 'I am organized' }, { k: 'O', t: 'I think of creative solutions' }],
 ];
 const BIG5_GUIDE = {
   C: { name: 'Conscientiousness', high: 'Reliable, organized, follows through — the backbone of safety rounds.', low: 'May cut corners or miss follow-through — give checklists and firm deadlines.', tip: 'Trust them with ownership; recognize their reliability by name.' },
@@ -3311,6 +3314,18 @@ const BIG5_GUIDE = {
   H: { name: 'Honesty-Humility', high: 'Strong integrity — recognize it; they set the tone for the team.', low: 'A growth area, not a verdict — integrity grows with crystal-clear expectations and recognition. Keep the dual-control cash rules universal for everyone; never single one person out.', tip: 'Develop it: set the standard for all, catch people doing it right, and let the process (witness + signatures + audits) protect everyone.' },
 };
 function empBig5(uid) { try { const r = db.prepare(`SELECT bigfive FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.bigfive ? JSON.parse(r.bigfive) : null; } catch { return null; } }
+// Situational Judgment — realistic scenarios, hard to fake, job-relevant. Scores the
+// competencies that matter most here. The "right" answer isn't always obvious.
+const SJT_Q = [
+  { c: 'integrity', s: "You find $40 on the floor of a client's room and you're alone.", o: [{ t: 'Log it as found cash with a witness and secure it', v: 2 }, { t: 'Hold it and turn it in at end of shift', v: 1 }, { t: "Keep it — it was just lying there", v: 0 }] },
+  { c: 'integrity', s: 'A coworker asks you to clock them in 20 minutes early as a favor.', o: [{ t: "Kindly decline — that's falsifying time", v: 2 }, { t: 'Do it once; it’s no big deal', v: 0 }, { t: 'Do it but tell them not to make it a habit', v: 0 }] },
+  { c: 'integrity', s: 'You realize you logged a medication time wrong and nobody noticed.', o: [{ t: 'Report it right away and correct it', v: 2 }, { t: 'Quietly fix it; no harm done', v: 0 }, { t: 'Leave it — it was close enough', v: 0 }] },
+  { c: 'deescalation', s: 'A client is yelling and threatening to leave AMA.', o: [{ t: 'Stay calm, acknowledge how hard it is, sit with them', v: 2 }, { t: 'Firmly explain the rules and the consequences', v: 1 }, { t: 'Tell them to calm down or they’ll have to leave', v: 0 }] },
+  { c: 'reliability', s: "It's 2am, your round is due, it's quiet and you're exhausted.", o: [{ t: 'Do the full round and scan every room', v: 2 }, { t: 'Glance down the hall and scan from there', v: 0 }, { t: 'Skip the quiet rooms, check the rest', v: 0 }] },
+  { c: 'care', s: "A new admit is withdrawn and hasn't eaten.", o: [{ t: 'Sit with them, offer food, learn one thing about them', v: 2 }, { t: 'Note it and tell the nurse', v: 1 }, { t: 'Give them space for now', v: 0 }] },
+];
+const SJT_COMPS = { integrity: 'Integrity', deescalation: 'De-escalation', reliability: 'Reliability', care: 'Care & warmth' };
+function empSjt(uid) { try { const r = db.prepare(`SELECT sjt FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.sjt ? JSON.parse(r.sjt) : null; } catch { return null; } }
 function empProfile(uid) { const r = db.prepare(`SELECT likes, personality, motivators, recognition, notes, updated_by, updated FROM employee_profiles WHERE user_id=?`).get(uid); return r || {}; }
 app.get('/api/employee/:id/profile', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
@@ -3319,22 +3334,52 @@ app.get('/api/employee/:id/profile', requireAuth, (req, res) => {
   const s = userStats(u); const prev = prevOverall(u);
   const notes = db.prepare(`SELECT note, by_name, substr(created_at,1,16) at FROM employee_notes WHERE user_id=? ORDER BY id DESC LIMIT 50`).all(u.id);
   const wows90 = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize=? AND created_at>=datetime('now','-90 day')`).get(u.name).n;
-  const disc = empDisc(u.id); const bigfive = empBig5(u.id);
-  res.json({ user: { id: u.id, name: u.name, role: u.job_role || '' }, profile: empProfile(u.id), notes, wows90, disc, discGuide: disc ? DISC_GUIDE[disc.primary] : null, discQuestions: DISC_Q, bigfive, big5Guide: BIG5_GUIDE, big5Questions: BIG5_Q, stats: { ...s, trend: (s.overall != null && prev != null) ? s.overall - prev : null }, aiReady: claudeConfigured() });
+  const disc = empDisc(u.id); const bigfive = empBig5(u.id); const sjt = empSjt(u.id);
+  res.json({ user: { id: u.id, name: u.name, role: u.job_role || '' }, profile: empProfile(u.id), notes, wows90, disc, discGuide: disc ? DISC_GUIDE[disc.primary] : null, discQuestions: DISC_Q, bigfive, big5Guide: BIG5_GUIDE, big5Blocks: BIG5_FC, sjt, sjtQuestions: SJT_Q, sjtComps: SJT_COMPS, stats: { ...s, trend: (s.overall != null && prev != null) ? s.overall - prev : null }, aiReady: claudeConfigured() });
 });
 app.post('/api/employee/:id/bigfive', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
-  const ans = req.body?.answers || {}; const sum = {}, cnt = {};
-  ['C', 'ES', 'A', 'E', 'O', 'H'].forEach((k) => { sum[k] = 0; cnt[k] = 0; });
-  BIG5_Q.forEach((q, i) => { const v = +ans[i]; if (v >= 1 && v <= 5) { sum[q.k] += q.r ? (6 - v) : v; cnt[q.k]++; } });
-  if (Object.values(cnt).some((c) => c < 1)) return res.status(400).json({ error: 'Answer all the questions.' });
+  // Forced-choice scoring: per block the rater picks the MOST and LEAST like the person.
+  // Most → +1 to that trait, Least → −1. A trait can't be inflated by saying yes to everything.
+  const ans = req.body?.answers || {}; const score = {}, seen = {};
+  ['C', 'ES', 'A', 'E', 'O', 'H'].forEach((k) => { score[k] = 0; seen[k] = 0; });
+  let answered = 0;
+  BIG5_FC.forEach((block, i) => {
+    const a = ans[i]; if (!a || a.most == null || a.least == null) return;
+    const most = block[+a.most], least = block[+a.least];
+    if (!most || !least || a.most === a.least) return;
+    answered++;
+    block.forEach((o) => { seen[o.k]++; });
+    score[most.k] += 1; score[least.k] -= 1;
+  });
+  if (answered < BIG5_FC.length) return res.status(400).json({ error: 'Answer every block — pick a Most and a Least in each.' });
   const out = { at: new Date().toISOString().slice(0, 10), by: req.user.name };
-  ['C', 'ES', 'A', 'E', 'O', 'H'].forEach((k) => { out[k] = Math.round(sum[k] / (cnt[k] * 5) * 100); });
+  ['C', 'ES', 'A', 'E', 'O', 'H'].forEach((k) => { out[k] = seen[k] ? Math.max(0, Math.min(100, Math.round(50 + (score[k] / seen[k]) * 50))) : 50; });
   const uid = +req.params.id;
   const ex = db.prepare(`SELECT user_id FROM employee_profiles WHERE user_id=?`).get(uid);
   if (ex) db.prepare(`UPDATE employee_profiles SET bigfive=? WHERE user_id=?`).run(JSON.stringify(out), uid);
   else db.prepare(`INSERT INTO employee_profiles (user_id, bigfive) VALUES (?,?)`).run(uid, JSON.stringify(out));
   res.json({ ok: true, bigfive: out });
+});
+app.post('/api/employee/:id/sjt', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  // Situational judgment: each answer carries a 0/1/2 value. Score per competency = earned/max.
+  const ans = req.body?.answers || {}; const earned = {}, max = {};
+  Object.keys(SJT_COMPS).forEach((c) => { earned[c] = 0; max[c] = 0; });
+  let answered = 0;
+  SJT_Q.forEach((q, i) => {
+    max[q.c] += 2;
+    const pick = ans[i]; if (pick == null || !q.o[+pick]) return;
+    answered++; earned[q.c] += q.o[+pick].v;
+  });
+  if (answered < SJT_Q.length) return res.status(400).json({ error: 'Answer every scenario.' });
+  const out = { at: new Date().toISOString().slice(0, 10), by: req.user.name };
+  Object.keys(SJT_COMPS).forEach((c) => { out[c] = max[c] ? Math.round(earned[c] / max[c] * 100) : null; });
+  const uid = +req.params.id;
+  const ex = db.prepare(`SELECT user_id FROM employee_profiles WHERE user_id=?`).get(uid);
+  if (ex) db.prepare(`UPDATE employee_profiles SET sjt=? WHERE user_id=?`).run(JSON.stringify(out), uid);
+  else db.prepare(`INSERT INTO employee_profiles (user_id, sjt) VALUES (?,?)`).run(uid, JSON.stringify(out));
+  res.json({ ok: true, sjt: out });
 });
 app.post('/api/employee/:id/disc', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
@@ -3376,11 +3421,12 @@ app.post('/api/employee/:id/coach', requireAuth, async (req, res) => {
   const improve = s.required.filter((r) => r.pct != null && r.pct < 70).map((r) => r.label);
   const wows90 = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize=? AND created_at>=datetime('now','-90 day')`).get(u.name).n;
   const log = db.prepare(`SELECT note FROM employee_notes WHERE user_id=? ORDER BY id DESC LIMIT 10`).all(u.id).map((n) => n.note);
-  const disc = empDisc(u.id); const b5 = empBig5(u.id);
+  const disc = empDisc(u.id); const b5 = empBig5(u.id); const sjt = empSjt(u.id);
   const ctx = [
     `Employee: ${u.name} — ${u.job_role || 'staff'}`,
     disc ? `Personality (DISC): ${DISC_GUIDE[disc.primary].name} primary / ${DISC_GUIDE[disc.secondary].name} secondary. They appreciate: ${DISC_GUIDE[disc.primary].appreciate}` : '',
-    b5 ? `Big Five + Honesty-Humility (0-100): Conscientiousness ${b5.C}, Emotional stability ${b5.ES}, Warmth ${b5.A}, Extraversion ${b5.E}, Openness ${b5.O}, Honesty-Humility ${b5.H}. Higher = stronger.` : '',
+    b5 ? `Big Five + Honesty-Humility (0-100, forced-choice so it can't be gamed): Conscientiousness ${b5.C}, Emotional stability ${b5.ES}, Warmth ${b5.A}, Extraversion ${b5.E}, Openness ${b5.O}, Honesty-Humility ${b5.H}. Higher = stronger.` : '',
+    sjt ? `Situational judgment (0-100, real on-the-job scenarios): Integrity ${sjt.integrity}, De-escalation ${sjt.deescalation}, Reliability ${sjt.reliability}, Care & warmth ${sjt.care}. Treat low scores as development areas, never as a verdict on the person.` : '',
     `Overall performance this week: ${s.overall != null ? s.overall + '%' : 'n/a'} (trend ${prev != null && s.overall != null ? (s.overall - prev >= 0 ? '+' : '') + (s.overall - prev) : 'n/a'} vs last week)`,
     `Excelling at: ${strong.join(', ') || '—'}`,
     `Needs development: ${improve.join(', ') || '—'}`,

@@ -5308,13 +5308,18 @@ let EMP_CUR=null;
 async function openEmployeeProfile(id, name){
   EMP_CUR={id,name};
   let d; try{ d=await api('/employee/'+id+'/profile'); }catch(e){ alert(e.message); return; }
-  EMP_CUR.questions=d.discQuestions||[]; EMP_CUR.big5Questions=d.big5Questions||[];
+  EMP_CUR.questions=d.discQuestions||[]; EMP_CUR.big5Blocks=d.big5Blocks||[]; EMP_CUR.sjtQuestions=d.sjtQuestions||[]; EMP_CUR.sjtComps=d.sjtComps||{};
   const s=d.stats||{}, p=d.profile||{};
   const b5=d.bigfive, bg=d.big5Guide||{};
   const trait=k=>{ const v=b5[k]; const g=bg[k]||{}; const read=v>=70?g.high:v<=40?g.low:''; return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13.5px"><span>${esc(g.name||k)}</span><strong>${v}</strong></div><div class="res-track" style="height:7px;margin:3px 0"><div class="res-fill" style="width:${v}%"></div></div>${read?`<div class="hint" style="font-size:12.5px">${esc(read)}</div>`:''}</div>`; };
   const big5Html = b5
-    ? `<div class="card" style="margin:10px 0 0"><div class="cmd-hero-row"><div><h3 style="margin:0">🔬 Personality (Big Five + Integrity)</h3><p class="sub sans" style="margin:0">The scientific read — for development &amp; recognition.</p></div><button class="btn btn-ghost btn-sm sans" onclick="big5Assess(${id})">Retake</button></div>${['C','ES','A','E','O','H'].map(trait).join('')}</div>`
-    : `<div class="card" style="margin:10px 0 0;background:#f4f8f4;border-left:4px solid var(--good)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔬 Personality (Big Five + Integrity)</h3><p class="sub sans" style="margin:0">The scientifically validated read — reliability, stability, warmth, openness, extraversion &amp; integrity.</p></div><button class="btn btn-gold btn-sm sans" onclick="big5Assess(${id})">Take assessment</button></div></div>`;
+    ? `<div class="card" style="margin:10px 0 0"><div class="cmd-hero-row"><div><h3 style="margin:0">🔬 Personality (Big Five + Integrity)</h3><p class="sub sans" style="margin:0">Forced-choice read — can't be gamed. For development &amp; recognition.</p></div><button class="btn btn-ghost btn-sm sans" onclick="big5Assess(${id})">Retake</button></div>${['C','ES','A','E','O','H'].map(trait).join('')}</div>`
+    : `<div class="card" style="margin:10px 0 0;background:#f4f8f4;border-left:4px solid var(--good)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔬 Personality (Big Five + Integrity)</h3><p class="sub sans" style="margin:0">Forced-choice ("most / least like them") so it can't be gamed — reliability, stability, warmth, openness, extraversion &amp; integrity.</p></div><button class="btn btn-gold btn-sm sans" onclick="big5Assess(${id})">Take assessment</button></div></div>`;
+  const sjt=d.sjt, sc=d.sjtComps||{};
+  const sjtRow=k=>{ const v=sjt[k]; if(v==null) return ''; const col=v>=80?'var(--good)':v>=50?'var(--gold)':'var(--danger)'; return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13.5px"><span>${esc(sc[k]||k)}</span><strong style="color:${col}">${v}</strong></div><div class="res-track" style="height:7px;margin:3px 0"><div class="res-fill" style="width:${v}%;background:${col}"></div></div></div>`; };
+  const sjtHtml = sjt
+    ? `<div class="card" style="margin:10px 0 0"><div class="cmd-hero-row"><div><h3 style="margin:0">⚖️ Judgment on the job</h3><p class="sub sans" style="margin:0">Real scenarios — integrity, de-escalation, reliability, care. Low = develop, never a verdict.</p></div><button class="btn btn-ghost btn-sm sans" onclick="sjtAssess(${id})">Retake</button></div>${Object.keys(sc).map(sjtRow).join('')}</div>`
+    : `<div class="card" style="margin:10px 0 0;background:#fbf7f0;border-left:4px solid var(--gold)"><div class="cmd-hero-row"><div><h3 style="margin:0">⚖️ Judgment on the job</h3><p class="sub sans" style="margin:0">Hard-to-fake scenarios that reveal how they'd actually handle integrity, an escalating client, a 2am round &amp; a struggling admit.</p></div><button class="btn btn-gold btn-sm sans" onclick="sjtAssess(${id})">Take assessment</button></div></div>`;
   const disc=d.disc, gg=d.discGuide;
   const discHtml = (disc&&gg)
     ? `<div class="card" style="margin:10px 0 0"><div class="cmd-hero-row"><div><h3 style="margin:0">🧭 Personality — ${esc(gg.name)}</h3><p class="sub sans" style="margin:0">${esc(gg.blurb)}</p></div><button class="btn btn-ghost btn-sm sans" onclick="discAssess(${id})">Retake</button></div>
@@ -5332,6 +5337,7 @@ async function openEmployeeProfile(id, name){
       ${strong.length?`<div class="pc-note" style="color:var(--good);margin-top:6px">💪 ${strong.map(esc).join(', ')}</div>`:''}${improve.length?`<div class="pc-note" style="color:var(--danger);margin-top:4px">🎯 ${improve.map(esc).join(', ')}</div>`:''}</div>
     <div class="card" style="background:#faf6ee;border-left:4px solid var(--gold);margin:0"><div class="cmd-hero-row"><div><h3 style="margin:0">✦ How Horst would lead ${first}</h3></div>${d.aiReady?`<button class="btn btn-gold btn-sm sans" onclick="coachEmployee(${id})">Generate</button>`:''}</div><div id="empCoach" class="sans" style="margin-top:8px;font-size:14px;line-height:1.5">${d.aiReady?'<span class="hint">Tap Generate for personalized coaching from their profile + numbers.</span>':'<span class="hint">AI not configured.</span>'}</div></div>
     ${big5Html}
+    ${sjtHtml}
     ${discHtml}
     <h3 style="font-size:13px;margin-top:14px">Their profile <span class="hint" style="font-weight:400">— only leadership sees this</span></h3>
     ${fld('ep_likes','What they like / interests',p.likes,'coffee black, their dog Max, weekend fisherman…')}
@@ -5361,17 +5367,50 @@ async function submitDisc(id){
   if(missing){ alert('Please rate every statement.'); return; }
   try{ await api('/employee/'+id+'/disc',{method:'POST',body:JSON.stringify({answers})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); }
 }
+function big5Pick(bi,kind,oi){
+  // enforce that Most and Least can't be the same option within a block
+  const other=kind==='most'?'least':'most';
+  if((B5_SEL[bi]||{})[other]===oi){ B5_SEL[bi][other]=null; }
+  B5_SEL[bi]=B5_SEL[bi]||{}; B5_SEL[bi][kind]=oi;
+  big5Paint(bi);
+}
+function big5Paint(bi){
+  const sel=B5_SEL[bi]||{};
+  const block=(EMP_CUR&&EMP_CUR.big5Blocks[bi])||[];
+  block.forEach((o,oi)=>{
+    const m=$('b5_'+bi+'_most_'+oi), l=$('b5_'+bi+'_least_'+oi);
+    if(m){ m.className='btn btn-sm sans '+(sel.most===oi?'btn-gold':'btn-ghost'); }
+    if(l){ l.className='btn btn-sm sans '+(sel.least===oi?'btn-gold':'btn-ghost'); }
+  });
+}
+let B5_SEL={};
 function big5Assess(id){
-  const qs=(EMP_CUR&&EMP_CUR.big5Questions)||[];
-  if(!qs.length){ alert('Reopen the profile and try again.'); return; }
-  const rows=qs.map((q,i)=>`<div style="display:flex;align-items:center;gap:10px;margin:8px 0"><div style="flex:1;font-size:14px">${esc(q.t)}</div><select id="b5_${i}" style="width:auto"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div>`).join('');
-  hmodalPlain(`<h3>Personality read — Big Five + Integrity</h3><p class="sub sans">Rate each 1 (not like them) – 5 (very like them). Most accurate if they self-rate. For development &amp; recognition — not a hiring test.</p><div style="max-height:60vh;overflow:auto">${rows}</div><div class="toolbar" style="margin-top:12px;justify-content:space-between"><button class="btn btn-ghost sans" onclick="openEmployeeProfile(${id}, EMP_CUR&&EMP_CUR.name)">Back</button><button class="btn btn-gold sans" onclick="submitBig5(${id})">See result</button></div>`);
+  const blocks=(EMP_CUR&&EMP_CUR.big5Blocks)||[];
+  if(!blocks.length){ alert('Reopen the profile and try again.'); return; }
+  B5_SEL={};
+  const rows=blocks.map((block,bi)=>`<div class="card" style="margin:8px 0;padding:10px"><div class="hint" style="margin-bottom:6px">Block ${bi+1} of ${blocks.length} — pick the <b style="color:var(--gold)">MOST</b> and the <b>LEAST</b> like them</div>${block.map((o,oi)=>`<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><div style="flex:1;font-size:13.5px">${esc(o.t)}</div><button id="b5_${bi}_most_${oi}" class="btn btn-ghost btn-sm sans" onclick="big5Pick(${bi},'most',${oi})">Most</button><button id="b5_${bi}_least_${oi}" class="btn btn-ghost btn-sm sans" onclick="big5Pick(${bi},'least',${oi})">Least</button></div>`).join('')}</div>`).join('');
+  hmodalPlain(`<h3>Personality read — Big Five + Integrity</h3><p class="sub sans">In each block, pick the one statement that's <b>most</b> like them and the one that's <b>least</b> like them. Every option is a good trait — that's what keeps it honest. ~2 minutes.</p><div style="max-height:60vh;overflow:auto">${rows}</div><div class="toolbar" style="margin-top:12px;justify-content:space-between"><button class="btn btn-ghost sans" onclick="openEmployeeProfile(${id}, EMP_CUR&&EMP_CUR.name)">Back</button><button class="btn btn-gold sans" onclick="submitBig5(${id})">See result</button></div>`);
 }
 async function submitBig5(id){
-  const answers={}; let missing=false;
-  (EMP_CUR.big5Questions||[]).forEach((q,i)=>{ const v=($('b5_'+i)||{}).value; if(!v) missing=true; answers[i]=v; });
-  if(missing){ alert('Please rate every statement.'); return; }
+  const blocks=(EMP_CUR&&EMP_CUR.big5Blocks)||[]; const answers={}; let missing=false;
+  blocks.forEach((b,bi)=>{ const s=B5_SEL[bi]||{}; if(s.most==null||s.least==null){ missing=true; } answers[bi]={most:s.most,least:s.least}; });
+  if(missing){ alert('Pick a Most and a Least in every block.'); return; }
   try{ await api('/employee/'+id+'/bigfive',{method:'POST',body:JSON.stringify({answers})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); }
+}
+let SJT_SEL={};
+function sjtPick(qi,oi){ SJT_SEL[qi]=oi; const q=(EMP_CUR&&EMP_CUR.sjtQuestions[qi])||{}; (q.o||[]).forEach((o,j)=>{ const b=$('sjt_'+qi+'_'+j); if(b) b.className='btn btn-sm sans '+(oi===j?'btn-gold':'btn-ghost'); }); }
+function sjtAssess(id){
+  const qs=(EMP_CUR&&EMP_CUR.sjtQuestions)||[];
+  if(!qs.length){ alert('Reopen the profile and try again.'); return; }
+  SJT_SEL={};
+  const rows=qs.map((q,qi)=>`<div class="card" style="margin:8px 0;padding:10px"><div style="font-size:14px;font-weight:600;margin-bottom:6px">${qi+1}. ${esc(q.s)}</div>${q.o.map((o,j)=>`<button id="sjt_${qi}_${j}" class="btn btn-ghost btn-sm sans" style="display:block;width:100%;text-align:left;margin:4px 0" onclick="sjtPick(${qi},${j})">${esc(o.t)}</button>`).join('')}</div>`).join('');
+  hmodalPlain(`<h3>Judgment on the job</h3><p class="sub sans">For each situation, pick what this person would most likely do. Best answered from what you've actually seen them do — or have them answer themselves. There isn't always an obvious "right" answer.</p><div style="max-height:60vh;overflow:auto">${rows}</div><div class="toolbar" style="margin-top:12px;justify-content:space-between"><button class="btn btn-ghost sans" onclick="openEmployeeProfile(${id}, EMP_CUR&&EMP_CUR.name)">Back</button><button class="btn btn-gold sans" onclick="submitSjt(${id})">See result</button></div>`);
+}
+async function submitSjt(id){
+  const qs=(EMP_CUR&&EMP_CUR.sjtQuestions)||[]; const answers={}; let missing=false;
+  qs.forEach((q,qi)=>{ if(SJT_SEL[qi]==null) missing=true; answers[qi]=SJT_SEL[qi]; });
+  if(missing){ alert('Answer every scenario.'); return; }
+  try{ await api('/employee/'+id+'/sjt',{method:'POST',body:JSON.stringify({answers})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); }
 }
 async function loadTeamStats(){
   const host=$('teamStats'); if(!host) return;

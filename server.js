@@ -1092,6 +1092,24 @@ app.post('/api/shift-checklist/template/edit', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- Client Voice — everything clients tell us from the kiosk ---------------- */
+app.get('/api/client-voice', requireAuth, (req, res) => {
+  const reachouts = db.prepare(`SELECT r.id, r.text, r.priority, r.status, substr(r.created_at,1,16) at, c.pref, c.name
+    FROM requests r LEFT JOIN clients c ON c.id=r.client_id
+    WHERE r.created_by_name='Client (kiosk)' AND r.department<>'Suggestion box' ORDER BY r.id DESC LIMIT 40`).all();
+  const suggestions = db.prepare(`SELECT r.id, r.text, r.status, substr(r.created_at,1,16) at, c.pref
+    FROM requests r LEFT JOIN clients c ON c.id=r.client_id WHERE r.department='Suggestion box' ORDER BY r.id DESC LIMIT 30`).all();
+  const surveys = db.prepare(`SELECT sr.id, substr(sr.created_at,1,16) at, c.pref, c.name, ROUND(AVG(sa.value_num),1) score, GROUP_CONCAT(sa.value_text,' · ') comments
+    FROM survey_responses sr LEFT JOIN clients c ON c.id=sr.client_id LEFT JOIN survey_answers sa ON sa.response_id=sr.id
+    WHERE sr.created_at>=datetime('now','-30 day') GROUP BY sr.id ORDER BY sr.id DESC LIMIT 30`).all();
+  const meals = db.prepare(`SELECT meal_date, meal, dish, comment, (SELECT pref FROM clients WHERE id=mf.client_id) pref
+    FROM meal_feedback mf WHERE created_at>=datetime('now','-14 day') AND comment IS NOT NULL AND comment<>'' ORDER BY id DESC LIMIT 30`).all();
+  const openReach = db.prepare(`SELECT COUNT(*) n FROM requests WHERE created_by_name='Client (kiosk)' AND status<>'Done'`).get().n;
+  const sc = db.prepare(`SELECT AVG(value_num) a FROM survey_answers sa JOIN survey_responses sr ON sr.id=sa.response_id WHERE sa.value_num IS NOT NULL AND sr.created_at>=datetime('now','-30 day')`).get().a;
+  const mlk = db.prepare(`SELECT AVG(liked) a FROM meal_feedback WHERE liked IS NOT NULL AND created_at>=datetime('now','-14 day')`).get().a;
+  res.json({ reachouts, suggestions, surveys, meals, kpi: { openReach, expScore: sc != null ? Math.round(sc * 10) / 10 : null, mealLiked: mlk != null ? Math.round(mlk * 100) : null } });
+});
+
 /* ---------------- Shift report (the pass-down) ---------------- */
 function shiftReportCtx() {
   const today = appToday(), sh = currentShift();

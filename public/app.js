@@ -183,7 +183,7 @@ const GROUP_OF={
   // Stay — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
   concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',bedmap:'stay',laundry:'stay',engagement:'stay',program:'stay',meals:'stay',property:'stay',
-  casemgmt:'stay',retention:'stay',surveys:'stay',incidents:'stay',compliance:'stay',
+  casemgmt:'stay',retention:'stay',surveys:'stay',clientvoice:'stay',incidents:'stay',compliance:'stay',
   // Handoff — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
@@ -221,6 +221,7 @@ const VIEW_ROLES = {
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
   laundry:     ['BHT / Tech','Housekeeping','Nurse','Director of Operations','Clinical Director'],
+  clientvoice: [...CARE,'Front Desk','Director of Operations'],
   bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director','Front Desk'],
   property:    ['BHT / Tech','Nurse','Case Manager','Front Desk','Clinical Director','Director of Operations'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
@@ -276,7 +277,7 @@ const ROLE_MENU = {
   // My Role is folded into My Shift (its own collapsible at the bottom) — no tab.
   'BHT / Tech': ['dashboard','mystats','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','library'],
   'Nurse':      ['dashboard','mystats','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
-  'Front Desk': ['dashboard','mystats','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','family','bedmap','property','inventory','messages','team','training','library'],
+  'Front Desk': ['dashboard','mystats','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
   'Housing Director': ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
@@ -473,6 +474,7 @@ function show(v){
   if(v==='continuum') loadContinuum();
   if(v==='dignity') loadDignity();
   if(v==='laundry') loadLaundry();
+  if(v==='clientvoice') loadClientVoice();
   if(v==='myrole') loadMyRole();
   if(v==='mystats') loadMyStats();
   if(v==='rounds') loadRounds();
@@ -5321,6 +5323,22 @@ async function renderDashRole(){
       </div>
       ${qual?`<h3 style="font-size:13px;margin:14px 0 6px">What great looks like</h3>${qual}`:''}
     </div></details>`;
+}
+/* ---- Client Voice — all kiosk feedback in one place ---- */
+async function loadClientVoice(){
+  let d; try{ d=await api('/client-voice'); }catch(e){ if($('cvBody'))$('cvBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const k=d.kpi||{};
+  if($('cvKpis')) $('cvKpis').innerHTML=`<div class="ret-card ${k.openReach?'rc-warn':''}"><div class="n">${k.openReach}</div><div class="l">Open reach-outs</div></div>
+    <div class="ret-card"><div class="n">${k.expScore!=null?k.expScore+'/5':'—'}</div><div class="l">Experience (30d)</div></div>
+    <div class="ret-card"><div class="n">${k.mealLiked!=null?k.mealLiked+'%':'—'}</div><div class="l">Liked meals (14d)</div></div>`;
+  const reach=(d.reachouts||[]).map(r=>`<div class="todo ${r.status==='Done'?'done':''}"><div class="txt">${r.priority==='Urgent'?'🔴 ':'🗣 '}<strong>${esc(r.pref||r.name||'A client')}</strong> — ${esc(r.text)}<div class="hint">${esc(r.at)} · ${esc(r.status)}</div></div>${r.status!=='Done'?`<button class="btn btn-ghost btn-sm sans" onclick="show('concierge')">Open</button>`:''}</div>`).join('')||'<div class="hint">No kiosk reach-outs.</div>';
+  const sugg=(d.suggestions||[]).map(s=>`<div class="pc-note">💡 ${esc(s.text)} <span class="hint">— ${esc(s.pref||'anonymous')}, ${esc(s.at)}</span></div>`).join('')||'<div class="hint">No suggestions yet.</div>';
+  const surv=(d.surveys||[]).map(s=>`<div class="pc-note">${s.score!=null?'⭐ <strong>'+s.score+'/5</strong> ':''}${s.comments?'“'+esc(s.comments)+'”':'<span class="hint">(no comment)</span>'} <span class="hint">— ${esc(s.pref||s.name||'a client')}, ${esc(s.at)}</span></div>`).join('')||'<div class="hint">No survey responses in 30 days.</div>';
+  const meals=(d.meals||[]).map(m=>`<div class="pc-note">🍽 “${esc(m.comment)}” <span class="hint">— ${esc(m.pref||'a resident')} · ${esc(m.meal)} ${esc(m.meal_date)}${m.dish?' ('+esc(m.dish)+')':''}</span></div>`).join('')||'<div class="hint">No meal comments in 14 days.</div>';
+  if($('cvBody')) $('cvBody').innerHTML=`<div class="card"><h3>🗣 Reach-outs &amp; requests</h3>${reach}</div>
+    <div class="card"><h3>💡 Suggestions</h3>${sugg}</div>
+    <div class="card"><h3>⭐ Experience surveys (30d)</h3>${surv}</div>
+    <div class="card"><h3>🍽 Meal feedback (14d)</h3>${meals}</div>`;
 }
 /* ---- Laundry board ---- */
 async function loadLaundry(){

@@ -5308,7 +5308,14 @@ let EMP_CUR=null;
 async function openEmployeeProfile(id, name){
   EMP_CUR={id,name};
   let d; try{ d=await api('/employee/'+id+'/profile'); }catch(e){ alert(e.message); return; }
+  EMP_CUR.questions=d.discQuestions||[];
   const s=d.stats||{}, p=d.profile||{};
+  const disc=d.disc, gg=d.discGuide;
+  const discHtml = (disc&&gg)
+    ? `<div class="card" style="margin:10px 0 0"><div class="cmd-hero-row"><div><h3 style="margin:0">🧭 Personality — ${esc(gg.name)}</h3><p class="sub sans" style="margin:0">${esc(gg.blurb)}</p></div><button class="btn btn-ghost btn-sm sans" onclick="discAssess(${id})">Retake</button></div>
+       <div style="display:flex;gap:10px;margin:10px 0">${['D','I','S','C'].map(k=>`<div style="flex:1;text-align:center"><div style="font-weight:700;color:${k===disc.primary?'var(--gold)':'var(--muted)'}">${k}</div><div class="res-track" style="height:6px"><div class="res-fill" style="width:${disc[k]}%"></div></div><div class="hint">${disc[k]}%</div></div>`).join('')}</div>
+       <div style="font-size:13.5px;line-height:1.6"><b style="color:var(--good)">Appreciate:</b> ${esc(gg.appreciate)}<br><b>Strengths:</b> ${esc(gg.strengths)}<br><b style="color:var(--danger)">Watch:</b> ${esc(gg.watch)}<br><b>Lead them:</b> ${esc(gg.lead)}</div></div>`
+    : `<div class="card" style="margin:10px 0 0;background:#f4fafb;border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🧭 Personality read</h3><p class="sub sans" style="margin:0">A quick DISC-style read — how to lead &amp; appreciate them.</p></div><button class="btn btn-gold btn-sm sans" onclick="discAssess(${id})">Take assessment</button></div></div>`;
   const strong=(s.required||[]).filter(r=>r.pct!=null&&r.pct>=90).map(r=>r.label);
   const improve=(s.required||[]).filter(r=>r.pct!=null&&r.pct<70).map(r=>r.label);
   const notes=(d.notes||[]).map(n=>`<div class="pc-note">📝 ${esc(n.note)} <span class="hint">— ${esc(n.by_name||'')}, ${esc(n.at)}</span></div>`).join('')||'<div class="hint">No coaching notes yet.</div>';
@@ -5319,6 +5326,7 @@ async function openEmployeeProfile(id, name){
     <div style="text-align:center;margin:4px 0 8px"><div style="font-size:30px;font-weight:700;color:${statCol(s.overall)}">${s.overall==null?'—':s.overall+'%'}</div><div class="hint">${s.shifts7||0} shift${s.shifts7===1?'':'s'} this week${s.trend!=null?trendStr(s.trend):''} · ${d.wows90||0} Wows (90d)</div>
       ${strong.length?`<div class="pc-note" style="color:var(--good);margin-top:6px">💪 ${strong.map(esc).join(', ')}</div>`:''}${improve.length?`<div class="pc-note" style="color:var(--danger);margin-top:4px">🎯 ${improve.map(esc).join(', ')}</div>`:''}</div>
     <div class="card" style="background:#faf6ee;border-left:4px solid var(--gold);margin:0"><div class="cmd-hero-row"><div><h3 style="margin:0">✦ How Horst would lead ${first}</h3></div>${d.aiReady?`<button class="btn btn-gold btn-sm sans" onclick="coachEmployee(${id})">Generate</button>`:''}</div><div id="empCoach" class="sans" style="margin-top:8px;font-size:14px;line-height:1.5">${d.aiReady?'<span class="hint">Tap Generate for personalized coaching from their profile + numbers.</span>':'<span class="hint">AI not configured.</span>'}</div></div>
+    ${discHtml}
     <h3 style="font-size:13px;margin-top:14px">Their profile <span class="hint" style="font-weight:400">— only leadership sees this</span></h3>
     ${fld('ep_likes','What they like / interests',p.likes,'coffee black, their dog Max, weekend fisherman…')}
     ${fld('ep_personality','Personality & style',p.personality,'quiet; takes feedback hard; leads by example…')}
@@ -5335,6 +5343,18 @@ async function openEmployeeProfile(id, name){
 async function saveEmployeeProfile(id){ try{ await api('/employee/'+id+'/profile',{method:'POST',body:JSON.stringify({likes:$('ep_likes').value,personality:$('ep_personality').value,motivators:$('ep_motivators').value,recognition:$('ep_recognition').value,notes:$('ep_notes').value})}); if($('ep_msg'))$('ep_msg').textContent='✓ Saved'; }catch(e){ alert(e.message); } }
 async function addEmployeeNote(id){ const t=($('ep_note')||{}).value||''; if(!t.trim())return; try{ await api('/employee/'+id+'/note',{method:'POST',body:JSON.stringify({note:t.trim()})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); } }
 async function coachEmployee(id){ const el=$('empCoach'); if(el)el.innerHTML='<span class="hint">✦ Thinking…</span>'; try{ const r=await api('/employee/'+id+'/coach',{method:'POST'}); if(el) el.innerHTML=esc(r.brief).replace(/\n/g,'<br>'); }catch(e){ if(el) el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+function discAssess(id){
+  const qs=(EMP_CUR&&EMP_CUR.questions)||[];
+  if(!qs.length){ alert('Reopen the profile and try again.'); return; }
+  const rows=qs.map((q,i)=>`<div style="display:flex;align-items:center;gap:10px;margin:8px 0"><div style="flex:1;font-size:14px">${esc(q.t)}</div><select id="disc_${i}" style="width:auto"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div>`).join('');
+  hmodalPlain(`<h3>Personality read</h3><p class="sub sans">Rate each 1 (not like them) – 5 (very like them). Answer from what you see — or have them self-rate. Takes ~2 minutes.</p><div style="max-height:60vh;overflow:auto">${rows}</div><div class="toolbar" style="margin-top:12px;justify-content:space-between"><button class="btn btn-ghost sans" onclick="openEmployeeProfile(${id}, EMP_CUR&&EMP_CUR.name)">Back</button><button class="btn btn-gold sans" onclick="submitDisc(${id})">See result</button></div>`);
+}
+async function submitDisc(id){
+  const answers={}; let missing=false;
+  (EMP_CUR.questions||[]).forEach((q,i)=>{ const v=($('disc_'+i)||{}).value; if(!v) missing=true; answers[i]=v; });
+  if(missing){ alert('Please rate every statement.'); return; }
+  try{ await api('/employee/'+id+'/disc',{method:'POST',body:JSON.stringify({answers})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); }
+}
 async function loadTeamStats(){
   const host=$('teamStats'); if(!host) return;
   let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML=''; return; }

@@ -3204,7 +3204,13 @@ function userStats(u, win) {
   const S = `datetime('now','-${win.since} day')`, U = win.until > 0 ? `datetime('now','-${win.until} day')` : `datetime('now','+1 minute')`;
   const dS = `date('now','-${win.since} day')`, dU = win.until > 0 ? `date('now','-${win.until} day')` : `date('now','+1 day')`;
   const g = (sql, ...a) => { try { return db.prepare(sql).get(...a).n || 0; } catch { return 0; } };
-  const shifts = g(`SELECT COUNT(*) n FROM time_entries WHERE user_id=? AND clock_in>=${S} AND clock_in<${U}`, uid);
+  // "Worked a shift" = clocked in OR on the schedule OR actually did rounds that day.
+  // People are working even when they forget to clock in — don't penalize the stats.
+  const shifts = g(`SELECT COUNT(*) n FROM (
+      SELECT DISTINCT substr(clock_in,1,10) d FROM time_entries WHERE user_id=? AND clock_in>=${S} AND clock_in<${U}
+      UNION SELECT DISTINCT s.date FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.user_id=? AND s.date>=${dS} AND s.date<${dU} AND a.status!='called_off'
+      UNION SELECT DISTINCT substr(ts,1,10) FROM round_scans WHERE by_id=? AND ts>=${S} AND ts<${U}
+    )`, uid, uid, uid);
   const hours = (() => { try { const r = db.prepare(`SELECT SUM((julianday(COALESCE(clock_out,datetime('now')))-julianday(clock_in))*24) h FROM time_entries WHERE user_id=? AND clock_in>=${S} AND clock_in<${U}`).get(uid); return r.h ? Math.round(r.h * 10) / 10 : 0; } catch { return 0; } })();
   const scans = g(`SELECT COUNT(*) n FROM round_scans WHERE by_id=? AND ts>=${S} AND ts<${U}`, uid);
   const flagged = g(`SELECT COUNT(*) n FROM round_scans WHERE by_id=? AND flagged=1 AND ts>=${S} AND ts<${U}`, uid);
@@ -3269,6 +3275,22 @@ app.get('/api/team-stats', requireAuth, (req, res) => {
 });
 // Employee profile — the staff Care Card (admin/leadership only): what makes them
 // tick + a coaching log + AI "how Horst would lead this person."
+// Lightweight DISC-style read — a free, standard model. 12 statements, 3 per type,
+// rated 1–5. Fill it from observation or have the person self-rate. Gives the leader
+// how to lead/appreciate this person without it being obvious to staff.
+const DISC_Q = [
+  { k: 'D', t: 'Direct and decisive' }, { k: 'D', t: 'Competitive — likes to win' }, { k: 'D', t: 'Takes charge; fast-paced' },
+  { k: 'I', t: 'Outgoing and talkative' }, { k: 'I', t: 'Enthusiastic — lights up a room' }, { k: 'I', t: 'Persuasive; builds rapport easily' },
+  { k: 'S', t: 'Calm, patient, steady' }, { k: 'S', t: 'Loyal team player; supportive' }, { k: 'S', t: 'Prefers stability and routine' },
+  { k: 'C', t: 'Precise and detail-oriented' }, { k: 'C', t: 'Analytical; wants the facts' }, { k: 'C', t: 'High standards; careful' },
+];
+const DISC_GUIDE = {
+  D: { name: 'Driver (D)', blurb: 'Direct, results-focused, decisive.', appreciate: 'Recognize results and give autonomy + a challenge. Be brief; respect their time.', strengths: 'Decisive, takes initiative, drives things forward.', watch: 'Can be blunt or impatient; may steamroll others.', lead: 'Be concise, focus on goals & outcomes, let them own the how.' },
+  I: { name: 'Influencer (I)', blurb: 'Social, enthusiastic, persuasive.', appreciate: 'Praise warmly and publicly — social recognition lands best.', strengths: 'Motivates others, builds rapport, brings energy.', watch: 'Can be disorganized or over-promise.', lead: 'Be friendly, give variety & visibility, recognize in front of the team.' },
+  S: { name: 'Steady (S)', blurb: 'Calm, loyal, dependable team player.', appreciate: 'A sincere, private thank-you and steady reassurance — not a big show.', strengths: 'Reliable, patient, supportive, great teammate.', watch: 'Resists sudden change; avoids conflict.', lead: 'Be patient and personal, notice their effort, change things gradually.' },
+  C: { name: 'Conscientious (C)', blurb: 'Precise, analytical, high standards.', appreciate: 'Recognize the quality and accuracy of their work; specifics matter.', strengths: 'Thorough, accurate, holds a high bar.', watch: 'Perfectionist; can be slow to decide.', lead: 'Give clear expectations and the data/why; value their precision.' },
+};
+function empDisc(uid) { try { const r = db.prepare(`SELECT disc FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.disc ? JSON.parse(r.disc) : null; } catch { return null; } }
 function empProfile(uid) { const r = db.prepare(`SELECT likes, personality, motivators, recognition, notes, updated_by, updated FROM employee_profiles WHERE user_id=?`).get(uid); return r || {}; }
 app.get('/api/employee/:id/profile', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
@@ -3277,7 +3299,23 @@ app.get('/api/employee/:id/profile', requireAuth, (req, res) => {
   const s = userStats(u); const prev = prevOverall(u);
   const notes = db.prepare(`SELECT note, by_name, substr(created_at,1,16) at FROM employee_notes WHERE user_id=? ORDER BY id DESC LIMIT 50`).all(u.id);
   const wows90 = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize=? AND created_at>=datetime('now','-90 day')`).get(u.name).n;
-  res.json({ user: { id: u.id, name: u.name, role: u.job_role || '' }, profile: empProfile(u.id), notes, wows90, stats: { ...s, trend: (s.overall != null && prev != null) ? s.overall - prev : null }, aiReady: claudeConfigured() });
+  const disc = empDisc(u.id);
+  res.json({ user: { id: u.id, name: u.name, role: u.job_role || '' }, profile: empProfile(u.id), notes, wows90, disc, discGuide: disc ? DISC_GUIDE[disc.primary] : null, discQuestions: DISC_Q, stats: { ...s, trend: (s.overall != null && prev != null) ? s.overall - prev : null }, aiReady: claudeConfigured() });
+});
+app.post('/api/employee/:id/disc', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const ans = req.body?.answers || {}; const sum = { D: 0, I: 0, S: 0, C: 0 }, cnt = { D: 0, I: 0, S: 0, C: 0 };
+  DISC_Q.forEach((q, i) => { const v = +ans[i]; if (v >= 1 && v <= 5) { sum[q.k] += v; cnt[q.k]++; } });
+  if (Object.values(cnt).some((c) => c < 1)) return res.status(400).json({ error: 'Answer all the questions.' });
+  const pctOf = (k) => Math.round(sum[k] / (cnt[k] * 5) * 100);
+  const scores = { D: pctOf('D'), I: pctOf('I'), S: pctOf('S'), C: pctOf('C') };
+  const order = Object.entries(scores).sort((a, b) => b[1] - a[1]).map((e) => e[0]);
+  const disc = { ...scores, primary: order[0], secondary: order[1], at: new Date().toISOString().slice(0, 10), by: req.user.name };
+  const uid = +req.params.id;
+  const ex = db.prepare(`SELECT user_id FROM employee_profiles WHERE user_id=?`).get(uid);
+  if (ex) db.prepare(`UPDATE employee_profiles SET disc=? WHERE user_id=?`).run(JSON.stringify(disc), uid);
+  else db.prepare(`INSERT INTO employee_profiles (user_id, disc) VALUES (?,?)`).run(uid, JSON.stringify(disc));
+  res.json({ ok: true, disc, guide: DISC_GUIDE[disc.primary] });
 });
 app.post('/api/employee/:id/profile', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
@@ -3304,8 +3342,10 @@ app.post('/api/employee/:id/coach', requireAuth, async (req, res) => {
   const improve = s.required.filter((r) => r.pct != null && r.pct < 70).map((r) => r.label);
   const wows90 = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize=? AND created_at>=datetime('now','-90 day')`).get(u.name).n;
   const log = db.prepare(`SELECT note FROM employee_notes WHERE user_id=? ORDER BY id DESC LIMIT 10`).all(u.id).map((n) => n.note);
+  const disc = empDisc(u.id);
   const ctx = [
     `Employee: ${u.name} — ${u.job_role || 'staff'}`,
+    disc ? `Personality (DISC): ${DISC_GUIDE[disc.primary].name} primary / ${DISC_GUIDE[disc.secondary].name} secondary. They appreciate: ${DISC_GUIDE[disc.primary].appreciate}` : '',
     `Overall performance this week: ${s.overall != null ? s.overall + '%' : 'n/a'} (trend ${prev != null && s.overall != null ? (s.overall - prev >= 0 ? '+' : '') + (s.overall - prev) : 'n/a'} vs last week)`,
     `Excelling at: ${strong.join(', ') || '—'}`,
     `Needs development: ${improve.join(', ') || '—'}`,

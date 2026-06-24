@@ -3259,7 +3259,10 @@ app.get('/api/user-stats/:id', requireAuth, (req, res) => {
 app.get('/api/team-stats', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
   const users = db.prepare(`SELECT id, name, job_role FROM users WHERE active=1 AND role!='admin' ORDER BY name`).all();
-  const team = users.map((u) => { const s = userStats(u); const prev = prevOverall(u); return { id: s.id, name: s.name, role: s.role, overall: s.overall, shifts7: s.shifts7, flagged7: s.flagged7, trend: (s.overall != null && prev != null) ? s.overall - prev : null }; })
+  const team = users.map((u) => { const s = userStats(u); const prev = prevOverall(u);
+    const strong = s.required.filter((r) => r.pct != null && r.pct >= 90).map((r) => r.label);
+    const improve = s.required.filter((r) => r.pct != null && r.pct < 70).map((r) => r.label);
+    return { id: s.id, name: s.name, role: s.role, overall: s.overall, shifts7: s.shifts7, flagged7: s.flagged7, trend: (s.overall != null && prev != null) ? s.overall - prev : null, strong, improve }; })
     .filter((t) => t.shifts7 > 0 || t.overall != null)
     .sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1));
   res.json({ team });

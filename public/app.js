@@ -192,7 +192,7 @@ const GROUP_OF={
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
-  myrole:'team',mystats:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
+  myrole:'team',mystats:'team',employees:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
@@ -228,6 +228,7 @@ const VIEW_ROLES = {
   bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director','Front Desk'],
   property:    ['BHT / Tech','Nurse','Case Manager','Front Desk','Clinical Director','Director of Operations'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
+  employees:   ['Executive Director','Director of Operations','Clinical Director'],
   hiring:      ['Executive Director','Director of Operations','Clinical Director'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
   excellence:  ['Executive Director','Director of Operations','Clinical Director'],
@@ -480,6 +481,7 @@ function show(v){
   if(v==='clientvoice') loadClientVoice();
   if(v==='myrole') loadMyRole();
   if(v==='mystats') loadMyStats();
+  if(v==='employees') loadEmployees();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5283,6 +5285,24 @@ async function loadMyStats(){
     ${wows.length?`<div class="card"><h3>👏 Recognition you've received (30 days)</h3>${wows.map(w=>`<div class="pc-note">👏 ${esc(w.text)} <span class="hint">— ${esc(w.by_name||'')}, ${esc(w.at||'')}</span></div>`).join('')}</div>`:''}
     <div id="teamStats"></div>`;
   if(d.canManage) loadTeamStats();
+}
+// Leadership: every employee at a glance — excelling / needs work / trend.
+async function loadEmployees(){
+  const host=$('empBody'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="empty">Loading…</div></div>';
+  let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  if(!d.team.length){ host.innerHTML='<div class="card"><div class="empty">No staff activity yet this week.</div></div>'; return; }
+  const arrow=t=> t==null?'<span class="hint">–</span>':t>0?`<span style="color:var(--good)">▲ ${t}</span>`:t<0?`<span style="color:var(--danger)">▼ ${-t}</span>`:'<span class="hint">– even</span>';
+  host.innerHTML=`<div class="card"><div style="overflow-x:auto"><table class="tbl" style="width:100%">
+    <tr><th>Employee</th><th>Role</th><th>Overall</th><th>Trend</th><th>💪 Excelling</th><th>🎯 Needs work</th><th>Shifts</th></tr>
+    ${d.team.map(t=>`<tr style="cursor:pointer" onclick="openUserStats(${t.id}, ${JSON.stringify(t.name).replace(/"/g,'&quot;')})">
+      <td><strong>${esc(t.name)}</strong></td><td class="hint">${esc(t.role||'')}</td>
+      <td><strong style="color:${statCol(t.overall)}">${t.overall==null?'—':t.overall+'%'}</strong>${t.flagged7?' <span class="hint" title="rounds flagged">⚠'+t.flagged7+'</span>':''}</td>
+      <td>${arrow(t.trend)}</td>
+      <td style="color:var(--good);font-size:13px">${(t.strong||[]).join(', ')||'—'}</td>
+      <td style="color:var(--danger);font-size:13px">${(t.improve||[]).join(', ')||'—'}</td>
+      <td>${t.shifts7} ›</td></tr>`).join('')}</table></div>
+    <p class="hint" style="margin-top:8px">Tap anyone for their full breakdown. This is for developing people — celebrate the top, support the bottom.</p></div>`;
 }
 async function loadTeamStats(){
   const host=$('teamStats'); if(!host) return;

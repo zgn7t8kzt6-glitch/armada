@@ -1429,6 +1429,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS shift_reports (
 );`);
 addColumn('shift_reports', 'data', 'TEXT');   // structured pass-down answers (JSON)
 addColumn('users', 'phone', 'TEXT');          // staff cell — for on-shift contact / call buttons
+addColumn('users', 'last_login', 'TEXT');     // last successful sign-in (stamped in startSession)
 // EMPLOYEE PROFILE — the staff version of a Care Card (admin/leadership only). What
 // makes each person tick, plus a coaching log, so we can develop & recognize them well.
 db.exec(`CREATE TABLE IF NOT EXISTS employee_profiles (

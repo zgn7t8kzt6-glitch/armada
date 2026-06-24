@@ -6698,6 +6698,11 @@ app.post('/api/projects/:id/checklist', requireAuth, (req, res) => {
 });
 app.delete('/api/projects/:id', requireAuth, requireAdmin, (req, res) => { db.prepare(`DELETE FROM projects WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 
+// ── STAFF SIGN-INS — every staff member and the last time they signed in ──
+app.get('/api/staff-activity', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`SELECT id, name, username, job_role, role, active, last_login FROM users ORDER BY active DESC, (last_login IS NULL), last_login DESC, name`).all();
+  res.json({ staff: rows.map((u) => ({ id: u.id, name: u.name, username: u.username, role: u.role === 'admin' ? 'Owner / Admin' : (u.job_role || ''), active: !!u.active, lastLogin: u.last_login || null })) });
+});
 // ── LEADERSHIP ROLL-UP — every director's scorecard + routine run, side by side ─
 app.get('/api/leadership', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();

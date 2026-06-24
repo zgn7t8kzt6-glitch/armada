@@ -196,7 +196,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -485,6 +485,7 @@ function show(v){
   if(v==='mygrowth') loadMyGrowth();
   if(v==='employees') loadEmployees();
   if(v==='leadmirror') loadLeadMirror();
+  if(v==='staffsignins') loadStaffSignins();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5516,6 +5517,28 @@ async function lmSubmitJudge(id){
   try{ await api('/leadership/mirror/'+id+'/judgment',{method:'POST',body:JSON.stringify({answers})}); openLeadMirror(id, LM_CUR&&LM_CUR.name); }catch(e){ alert(e.message); }
 }
 async function lmCoach(id){ const el=$('lmCoach'); if(el)el.innerHTML='<span class="hint">✦ Thinking…</span>'; try{ const r=await api('/leadership/mirror/'+id+'/coach',{method:'POST'}); if(el)el.innerHTML=esc(r.brief).replace(/\n/g,'<br>'); }catch(e){ if(el)el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+/* ───────── STAFF SIGN-INS — last time each person signed in (admin) ───────── */
+function sinceStr(iso){
+  if(!iso) return null;
+  const t=new Date(iso.replace(' ','T')+'Z').getTime(); if(isNaN(t)) return null;
+  const m=Math.floor((Date.now()-t)/60000);
+  if(m<1) return 'just now'; if(m<60) return m+'m ago';
+  const h=Math.floor(m/60); if(h<24) return h+'h ago';
+  const d=Math.floor(h/24); if(d<30) return d+'d ago';
+  const mo=Math.floor(d/30); return mo+'mo ago';
+}
+function fmtDT(iso){ if(!iso) return ''; const dt=new Date(iso.replace(' ','T')+'Z'); if(isNaN(dt)) return esc(iso); return dt.toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
+async function loadStaffSignins(){
+  const host=$('staffsignins'); if(!host) return;
+  host.innerHTML='<div class="hint">Loading…</div>';
+  let d; try{ d=await api('/staff-activity'); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const staff=d.staff||[];
+  const row=u=>{ const s=sinceStr(u.lastLogin); const stale=u.lastLogin&&((Date.now()-new Date(u.lastLogin.replace(' ','T')+'Z').getTime())/86400000)>=14;
+    const last=u.lastLogin?`<span title="${esc(fmtDT(u.lastLogin))}">${esc(fmtDT(u.lastLogin))} <span class="hint">· ${esc(s||'')}</span></span>`:'<span class="hint">Never signed in</span>';
+    return `<tr${u.active?'':' style="opacity:.5"'}><td><strong>${esc(u.name)}</strong>${u.active?'':' <span class="hint">(inactive)</span>'}</td><td class="hint">${esc(u.role||'')}</td><td style="${(!u.lastLogin||stale)?'color:var(--danger)':''}">${last}</td></tr>`; };
+  host.innerHTML=`<div class="card"><h3>Staff sign-ins</h3><p class="sub sans">The last time each person signed in. Sorted by most recent; never-signed-in and 2+ weeks stale are flagged in red.</p>
+    <table class="tbl"><tr><th>Staff</th><th>Role</th><th>Last sign-in</th></tr>${staff.map(row).join('')}</table></div>`;
+}
 /* ───────── MY GROWTH — every employee's own goals + monthly check-in ───────── */
 async function loadMyGrowth(){
   const host=$('mygrowth'); if(!host) return;

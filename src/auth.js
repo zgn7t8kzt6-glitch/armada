@@ -85,6 +85,7 @@ function startSession(req, res, user) {
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
   db.prepare(`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`).run(token, user.id, expires.toISOString());
   res.cookie(COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', expires });
+  try { db.prepare(`UPDATE users SET last_login = datetime('now') WHERE id = ?`).run(user.id); } catch {}
   audit({ user, action: 'LOGIN', ip: req.ip });
   return safeUser(user);
 }

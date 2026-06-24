@@ -3442,6 +3442,133 @@ app.post('/api/employee/:id/coach', requireAuth, async (req, res) => {
   try { const brief = await askAssistant(q, ctx); res.json({ brief }); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
+
+/* ───────────── LEADERSHIP MIRROR — the executive-coach read ─────────────
+   The highest-level assessment, for the CEO and every leader. Three layers a
+   top consultant would insist on: (1) REAL DATA — what's actually happening in
+   the org they lead; (2) a hard-to-game leadership STYLE read (forced-choice);
+   (3) leadership JUDGMENT on real executive dilemmas. Then Horst gives an
+   honest read of where they strive, where they struggle, and how they best
+   lead. For development — honest, never punitive. */
+const LEAD_COMPS = {
+  vision: 'Vision & standards', develop: 'Develops people', accountability: 'Accountability & follow-through',
+  composure: 'Composure under pressure', integrity: 'Integrity', decisiveness: 'Decisiveness', listening: 'Listening & empathy',
+};
+// Forced-choice style blocks — every option is a real leadership strength, so you
+// can't ace it by picking the "good" answer. Pick MOST and LEAST like you.
+const LEAD_FC = [
+  [{ k: 'vision', t: 'I hold an uncompromising standard, even when it’s costly' }, { k: 'develop', t: 'I spend real time growing my people' }, { k: 'decisiveness', t: 'I make the call when others hesitate' }, { k: 'listening', t: 'I truly hear people before I respond' }],
+  [{ k: 'accountability', t: 'I close every loop I open' }, { k: 'composure', t: 'I’m steadiest when it’s chaos' }, { k: 'integrity', t: 'I do the right thing when no one would know' }, { k: 'vision', t: 'I keep everyone pointed at the bigger why' }],
+  [{ k: 'develop', t: 'I catch people doing it right and say so' }, { k: 'listening', t: 'I ask more than I tell' }, { k: 'decisiveness', t: 'I’d rather decide and adjust than wait' }, { k: 'accountability', t: 'I own the miss before I look outward' }],
+  [{ k: 'integrity', t: 'I’d hold a top performer to the same line as everyone' }, { k: 'composure', t: 'Bad news doesn’t rattle me' }, { k: 'vision', t: 'I set the bar higher than people think possible' }, { k: 'develop', t: 'I build leaders, not just followers' }],
+  [{ k: 'listening', t: 'People tell me the hard truth because I make it safe' }, { k: 'accountability', t: 'My commitments are as good as done' }, { k: 'decisiveness', t: 'I cut through analysis to a clear next step' }, { k: 'integrity', t: 'My word and my actions match' }],
+  [{ k: 'composure', t: 'I keep the room calm in a crisis' }, { k: 'vision', t: 'I can paint the future so people want it' }, { k: 'develop', t: 'I’d give up a win to grow someone' }, { k: 'listening', t: 'I read what people aren’t saying' }],
+  [{ k: 'decisiveness', t: 'I take responsibility for the tough decisions' }, { k: 'integrity', t: 'I admit my mistakes out loud' }, { k: 'accountability', t: 'I follow through on the unglamorous things' }, { k: 'composure', t: 'Pressure makes me more focused, not less' }],
+];
+// Leadership judgment — real executive dilemmas. The "right" answer isn't always obvious.
+const LEAD_SJT = [
+  { c: 'integrity', s: 'Your best, hardest-to-replace employee quietly broke a cash-handling rule. No client was harmed.', o: [{ t: 'Hold them to the exact same standard as anyone, with care and clarity', v: 2 }, { t: 'A private warning; they’re too valuable to lose', v: 1 }, { t: 'Let it slide this once — results matter most', v: 0 }] },
+  { c: 'develop', s: 'A leader who reports to you keeps missing the mark and morale on their team is slipping.', o: [{ t: 'Coach them directly and honestly, with a clear plan and support', v: 2 }, { t: 'Quietly route around them and pick up the slack yourself', v: 0 }, { t: 'Wait and hope it turns around', v: 0 }] },
+  { c: 'accountability', s: 'A initiative you championed failed and it cost money.', o: [{ t: 'Own it publicly, name the lesson, and fix the process', v: 2 }, { t: 'Acknowledge it privately and move on', v: 1 }, { t: 'Point to the factors outside your control', v: 0 }] },
+  { c: 'composure', s: 'Two emergencies hit at once and your team is looking at you, rattled.', o: [{ t: 'Get calm, name the priority, and assign clear next steps', v: 2 }, { t: 'Jump in and personally handle the biggest fire', v: 1 }, { t: 'Match their urgency so they know you take it seriously', v: 0 }] },
+  { c: 'listening', s: 'A frontline tech tells you a policy you set is hurting clients.', o: [{ t: 'Hear them fully, dig in, and change it if they’re right', v: 2 }, { t: 'Explain why the policy exists', v: 1 }, { t: 'Thank them and note it for later', v: 0 }] },
+  { c: 'vision', s: 'The team is hitting numbers but the work has gone transactional and a little cold.', o: [{ t: 'Re-anchor everyone on the purpose and raise the standard of care', v: 2 }, { t: 'Leave it alone — the numbers are fine', v: 0 }, { t: 'Add an incentive for better scores', v: 1 }] },
+  { c: 'decisiveness', s: 'You have 70% of the information and a decision is overdue.', o: [{ t: 'Decide, communicate it, and adjust as you learn', v: 2 }, { t: 'Wait for more certainty before committing', v: 0 }, { t: 'Push the decision to the team to build consensus', v: 1 }] },
+];
+function empLead(uid) { try { const r = db.prepare(`SELECT leadership FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.leadership ? JSON.parse(r.leadership) : null; } catch { return null; } }
+function saveLead(uid, lead) {
+  const ex = db.prepare(`SELECT user_id FROM employee_profiles WHERE user_id=?`).get(uid);
+  if (ex) db.prepare(`UPDATE employee_profiles SET leadership=? WHERE user_id=?`).run(JSON.stringify(lead), uid);
+  else db.prepare(`INSERT INTO employee_profiles (user_id, leadership) VALUES (?,?)`).run(uid, JSON.stringify(lead));
+}
+const LEADER_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'Housing Director', 'HR'];
+const isLeader = (u) => u.role === 'admin' || LEADER_ROLES.includes(u.job_role || '');
+// Real org signals a top consultant would put in front of a leader — pulled live.
+function leadershipSignals() {
+  const staff = db.prepare(`SELECT id, name, job_role FROM users WHERE active=1 AND role!='admin'`).all();
+  const cur = [], prev = [];
+  staff.forEach((u) => { const s = userStats(u); if (s.overall != null) cur.push(s.overall); const p = prevOverall(u); if (p != null) prev.push(p); });
+  const avg = (a) => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : null;
+  const teamAvg = avg(cur), teamPrev = avg(prev);
+  return { teamAvg, teamTrend: (teamAvg != null && teamPrev != null) ? teamAvg - teamPrev : null, teamN: cur.length };
+}
+function leaderOwnSignals(u) {
+  const recognitionGiven = db.prepare(`SELECT COUNT(*) n FROM wows WHERE by_id=? AND created_at>=datetime('now','-30 day')`).get(u.id).n;
+  const coachingNotes = db.prepare(`SELECT COUNT(*) n FROM employee_notes WHERE by_name=? AND created_at>=datetime('now','-30 day')`).get(u.name).n;
+  return { recognitionGiven, coachingNotes };
+}
+// Permission: you can see your OWN mirror if you lead; admin (CEO) can see anyone's.
+function canSeeMirror(user, targetId) { return user.role === 'admin' || (isLeader(user) && user.id === targetId); }
+app.get('/api/leadership/mirror/:id', requireAuth, (req, res) => {
+  const id = +req.params.id;
+  if (!canSeeMirror(req.user, id)) return res.status(403).json({ error: 'Leadership only.' });
+  const u = db.prepare(`SELECT id, name, job_role, role FROM users WHERE id=?`).get(id);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  if (!isLeader(u)) return res.status(400).json({ error: 'Not a leadership role.' });
+  const lead = empLead(id);
+  res.json({
+    user: { id: u.id, name: u.name, role: u.role === 'admin' ? 'Owner / CEO' : (u.job_role || 'Leader') },
+    lead, comps: LEAD_COMPS, styleBlocks: LEAD_FC, judgmentQuestions: LEAD_SJT,
+    org: leadershipSignals(), own: leaderOwnSignals(u), aiReady: claudeConfigured(),
+  });
+});
+// CEO + each leader: the roster of leaders the CEO can mirror.
+app.get('/api/leadership/leaders', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Owner only.' });
+  const rows = db.prepare(`SELECT id, name, job_role, role FROM users WHERE active=1 AND (role='admin' OR job_role IN ('Executive Director','Director of Operations','Clinical Director','Housing Director','HR')) ORDER BY role='admin' DESC, name`).all();
+  const leaders = rows.map((u) => { const l = empLead(u.id); return { id: u.id, name: u.name, role: u.role === 'admin' ? 'Owner / CEO' : (u.job_role || 'Leader'), taken: !!(l && l.style && l.judgment) }; });
+  res.json({ leaders });
+});
+app.post('/api/leadership/mirror/:id/style', requireAuth, (req, res) => {
+  const id = +req.params.id;
+  if (!canSeeMirror(req.user, id)) return res.status(403).json({ error: 'Leadership only.' });
+  const ans = req.body?.answers || {}; const score = {}, seen = {};
+  Object.keys(LEAD_COMPS).forEach((k) => { score[k] = 0; seen[k] = 0; });
+  let answered = 0;
+  LEAD_FC.forEach((block, i) => {
+    const a = ans[i]; if (!a || a.most == null || a.least == null || a.most === a.least) return;
+    const most = block[+a.most], least = block[+a.least]; if (!most || !least) return;
+    answered++; block.forEach((o) => { seen[o.k]++; }); score[most.k] += 1; score[least.k] -= 1;
+  });
+  if (answered < LEAD_FC.length) return res.status(400).json({ error: 'Pick a Most and a Least in every block.' });
+  const style = { at: new Date().toISOString().slice(0, 10) };
+  Object.keys(LEAD_COMPS).forEach((k) => { style[k] = seen[k] ? Math.max(0, Math.min(100, Math.round(50 + (score[k] / seen[k]) * 50))) : 50; });
+  const lead = empLead(id) || {}; lead.style = style; saveLead(id, lead);
+  res.json({ ok: true, style });
+});
+app.post('/api/leadership/mirror/:id/judgment', requireAuth, (req, res) => {
+  const id = +req.params.id;
+  if (!canSeeMirror(req.user, id)) return res.status(403).json({ error: 'Leadership only.' });
+  const ans = req.body?.answers || {}; const earned = {}, max = {};
+  Object.keys(LEAD_COMPS).forEach((c) => { earned[c] = 0; max[c] = 0; });
+  let answered = 0;
+  LEAD_SJT.forEach((q, i) => { max[q.c] += 2; const p = ans[i]; if (p == null || !q.o[+p]) return; answered++; earned[q.c] += q.o[+p].v; });
+  if (answered < LEAD_SJT.length) return res.status(400).json({ error: 'Answer every scenario.' });
+  const judgment = { at: new Date().toISOString().slice(0, 10) };
+  Object.keys(LEAD_COMPS).forEach((c) => { judgment[c] = max[c] ? Math.round(earned[c] / max[c] * 100) : null; });
+  const lead = empLead(id) || {}; lead.judgment = judgment; saveLead(id, lead);
+  res.json({ ok: true, judgment });
+});
+app.post('/api/leadership/mirror/:id/coach', requireAuth, async (req, res) => {
+  const id = +req.params.id;
+  if (!canSeeMirror(req.user, id)) return res.status(403).json({ error: 'Leadership only.' });
+  if (!claudeConfigured()) return res.status(503).json({ error: 'AI is not configured.' });
+  const u = db.prepare(`SELECT id, name, job_role, role FROM users WHERE id=?`).get(id);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  const lead = empLead(id) || {}; const org = leadershipSignals(); const own = leaderOwnSignals(u);
+  const self = req.user.id === id;
+  const fmt = (o) => o ? Object.keys(LEAD_COMPS).map((k) => `${LEAD_COMPS[k]} ${o[k]}`).join(', ') : 'not taken yet';
+  const ctx = [
+    `Leader: ${u.name} — ${u.role === 'admin' ? 'Owner / CEO' : (u.job_role || 'leader')}`,
+    `Leadership STYLE (forced-choice, 0-100, can't be gamed): ${fmt(lead.style)}`,
+    `Leadership JUDGMENT (real dilemmas, 0-100): ${fmt(lead.judgment)}`,
+    `REAL ORG DATA they help lead: team performance avg ${org.teamAvg != null ? org.teamAvg + '%' : 'n/a'} across ${org.teamN} staff, trend ${org.teamTrend != null ? (org.teamTrend >= 0 ? '+' : '') + org.teamTrend : 'n/a'} vs prior period.`,
+    `Their own leadership behavior (30d): recognition given to staff = ${own.recognitionGiven}; coaching notes logged = ${own.coachingNotes}.`,
+  ].filter(Boolean).join('\n');
+  const q = `You are Horst Schulze, Ritz-Carlton co-founder, acting as the highest-level executive coach. You are giving ${self ? 'this leader, directly,' : 'the CEO, about one of their leaders,'} an HONEST read — the kind a great consultant gives behind closed doors. We lead the way we ask our people to serve: dignity, genuine care, uncompromising standards. Use ONLY the data provided; don't invent specifics. Be direct and warm — name the hard things kindly but clearly. Give five short labeled parts:\n1) WHERE YOU STRIVE — the real strengths (tie to the data).\n2) WHERE YOU STRUGGLE — the honest growth edges, named plainly (never cruel).\n3) THE BLIND SPOT — the one thing they likely can't see in themselves.\n4) HOW YOU LEAD BEST — the conditions and approach where this person is at their best.\n5) ONE MOVE THIS WEEK — a single concrete action to grow.\n${self ? 'Address them as "you".' : 'Refer to the leader by name.'}`;
+  try { const brief = await askAssistant(q, ctx); res.json({ brief }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
 // "My Role" — every staff member can always see their own job description,
 // responsibilities, and what's out of their lane.
 app.get('/api/my-role', requireAuth, (req, res) => {

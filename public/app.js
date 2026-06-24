@@ -192,7 +192,7 @@ const GROUP_OF={
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
-  myrole:'team',mystats:'team',employees:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
+  myrole:'team',mystats:'team',employees:'team',leadmirror:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
@@ -229,6 +229,7 @@ const VIEW_ROLES = {
   property:    ['BHT / Tech','Nurse','Case Manager','Front Desk','Clinical Director','Director of Operations'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
   employees:   ['Executive Director','Director of Operations','Clinical Director'],
+  leadmirror:  ['Executive Director','Director of Operations','Clinical Director','Housing Director','HR'],
   hiring:      ['Executive Director','Director of Operations','Clinical Director'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
   excellence:  ['Executive Director','Director of Operations','Clinical Director'],
@@ -283,7 +284,7 @@ const ROLE_MENU = {
   'Nurse':      ['dashboard','mystats','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
   'Front Desk': ['dashboard','mystats','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
-  'Housing Director': ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
+  'Housing Director': ['housing','myrole','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','myrole','housing','voice','activities','residents','houses','mytasks','messages'],
 };
@@ -330,7 +331,7 @@ function canSeeView(v){
   // Nobody on the clinical/detox side does — not even the broad-leadership roles below.
   if(HOUSING_VIEWS.includes(v)) return ME.role==='admin' || ME.job_role==='Executive Director' || HOUSING_ROLES.includes(ME.job_role);
   // Housing-only staff never see the clinical/detox pages — just a few shared ones.
-  if(isHousingRole()) return UNIVERSAL_VIEWS.includes(v);
+  if(isHousingRole()) return UNIVERSAL_VIEWS.includes(v) || (v==='leadmirror' && ME.job_role==='Housing Director');
   // Broad leadership sees every (non-housing) page (Command/config stays admin-only via renderGroups).
   // The Director of Operations oversees clinical, medical, admissions & case management
   // and owns QA/compliance + discharge/retention, so she needs the full picture.
@@ -482,6 +483,7 @@ function show(v){
   if(v==='myrole') loadMyRole();
   if(v==='mystats') loadMyStats();
   if(v==='employees') loadEmployees();
+  if(v==='leadmirror') loadLeadMirror();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5412,6 +5414,85 @@ async function submitSjt(id){
   if(missing){ alert('Answer every scenario.'); return; }
   try{ await api('/employee/'+id+'/sjt',{method:'POST',body:JSON.stringify({answers})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); }
 }
+/* ───────── LEADERSHIP MIRROR — the executive-coach read (CEO + every leader) ───────── */
+let LM_CUR=null;
+async function loadLeadMirror(){
+  const host=$('leadmirror'); if(!host) return;
+  host.innerHTML='<div class="hint">Loading…</div>';
+  // The owner gets a roster of every leader (incl. themselves); a leader lands straight on their own mirror.
+  if(ME && ME.role==='admin'){
+    let d; try{ d=await api('/leadership/leaders'); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+    host.innerHTML=`<div class="card"><h3>🪞 Leadership Mirror</h3><p class="sub sans">The highest-level read — what a world-class executive coach would tell you. Real org data + a read of leadership style &amp; judgment, then Horst's honest take on where each leader strives, struggles, and leads best. Start with yourself.</p>
+      <table class="tbl"><tr><th>Leader</th><th>Seat</th><th>Status</th><th></th></tr>
+      ${d.leaders.map(l=>`<tr style="cursor:pointer" onclick="openLeadMirror(${l.id}, ${JSON.stringify(l.name).replace(/"/g,'&quot;')})"><td><strong>${esc(l.name)}</strong>${l.id===ME.id?' <span class="hint">(you)</span>':''}</td><td class="hint">${esc(l.role)}</td><td>${l.taken?'<span style="color:var(--good)">✓ Complete</span>':'<span class="hint">Not started</span>'}</td><td>›</td></tr>`).join('')}</table>
+      <p class="hint" style="margin-top:8px">For development, not punishment. Be honest with your leaders the way you'd want a great mentor to be honest with you.</p></div>`;
+  } else {
+    openLeadMirror(ME.id, ME.name);
+    host.innerHTML='<div class="hint">Opening your mirror…</div>';
+  }
+}
+async function openLeadMirror(id, name){
+  LM_CUR={id,name};
+  let d; try{ d=await api('/leadership/mirror/'+id); }catch(e){ alert(e.message); return; }
+  LM_CUR.styleBlocks=d.styleBlocks||[]; LM_CUR.judgmentQuestions=d.judgmentQuestions||[]; LM_CUR.comps=d.comps||{};
+  const c=d.comps||{}, lead=d.lead||{}, org=d.org||{}, own=d.own||{};
+  const self=ME&&ME.id===id;
+  const who=self?'you':esc((name||'').split(' ')[0]||'them');
+  const bar=(v,lbl)=>{ const col=v>=70?'var(--good)':v>=45?'var(--gold)':'var(--danger)'; return `<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;font-size:13.5px"><span>${esc(lbl)}</span><strong style="color:${col}">${v}</strong></div><div class="res-track" style="height:7px;margin:3px 0"><div class="res-fill" style="width:${v}%;background:${col}"></div></div></div>`; };
+  const compRows=(obj)=>obj?Object.keys(c).map(k=>obj[k]!=null?bar(obj[k],c[k]):'').join(''):'';
+  // Real-data card
+  const tt=org.teamTrend; const ttStr=tt==null?'':(tt>0?`<span style="color:var(--good)">▲${tt}</span>`:tt<0?`<span style="color:var(--danger)">▼${-tt}</span>`:'<span class="hint">flat</span>');
+  const dataCard=`<div class="card" style="margin:0 0 10px;background:#f4f8f4;border-left:4px solid var(--good)"><h3 style="margin:0 0 6px">📊 The real data</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:120px;text-align:center"><div style="font-size:26px;font-weight:700;color:${org.teamAvg==null?'var(--muted)':statCol(org.teamAvg)}">${org.teamAvg==null?'—':org.teamAvg+'%'}</div><div class="hint">Team performance${ttStr?' '+ttStr:''}<br>(${org.teamN||0} staff)</div></div>
+      <div style="flex:1;min-width:120px;text-align:center"><div style="font-size:26px;font-weight:700">${own.recognitionGiven||0}</div><div class="hint">Recognition given<br>(30 days)</div></div>
+      <div style="flex:1;min-width:120px;text-align:center"><div style="font-size:26px;font-weight:700">${own.coachingNotes||0}</div><div class="hint">Coaching logged<br>(30 days)</div></div>
+    </div><p class="hint" style="margin:8px 0 0">The engine ${who} ${self?'help':'helps'} lead — are the people getting better, and ${self?'are you':'is ' + who} catching them doing right?</p></div>`;
+  // Style card
+  const styleCard=lead.style
+    ? `<div class="card" style="margin:0 0 10px"><div class="cmd-hero-row"><div><h3 style="margin:0">🧭 Leadership style</h3><p class="sub sans" style="margin:0">Forced-choice — can't be gamed.</p></div><button class="btn btn-ghost btn-sm sans" onclick="lmStyle(${id})">Retake</button></div>${compRows(lead.style)}</div>`
+    : `<div class="card" style="margin:0 0 10px;background:#f4fafb;border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🧭 Leadership style</h3><p class="sub sans" style="margin:0">A hard-to-fake read of how ${who} ${self?'lead':'leads'} — vision, developing people, accountability, composure, integrity, decisiveness, listening.</p></div><button class="btn btn-gold btn-sm sans" onclick="lmStyle(${id})">Take it</button></div></div>`;
+  // Judgment card
+  const judgeCard=lead.judgment
+    ? `<div class="card" style="margin:0 0 10px"><div class="cmd-hero-row"><div><h3 style="margin:0">⚖️ Leadership judgment</h3><p class="sub sans" style="margin:0">Real executive dilemmas.</p></div><button class="btn btn-ghost btn-sm sans" onclick="lmJudge(${id})">Retake</button></div>${compRows(lead.judgment)}</div>`
+    : `<div class="card" style="margin:0 0 10px;background:#fbf7f0;border-left:4px solid var(--gold)"><div class="cmd-hero-row"><div><h3 style="margin:0">⚖️ Leadership judgment</h3><p class="sub sans" style="margin:0">Real dilemmas a leader here actually faces — a star who broke a rule, a failing direct report, a crisis, a hard truth from the front line.</p></div><button class="btn btn-gold btn-sm sans" onclick="lmJudge(${id})">Take it</button></div></div>`;
+  const readBtn=d.aiReady?`<button class="btn btn-gold btn-sm sans" onclick="lmCoach(${id})">Generate</button>`:'';
+  hmodalPlain(`<h3>🪞 ${esc(name)} <span class="hint" style="font-weight:400">· ${esc(d.user.role||'')}</span></h3>
+   <div style="max-height:74vh;overflow:auto;padding-right:4px">
+    ${dataCard}${styleCard}${judgeCard}
+    <div class="card" style="background:#faf6ee;border-left:4px solid var(--gold);margin:0"><div class="cmd-hero-row"><div><h3 style="margin:0">✦ Horst's honest read</h3><p class="sub sans" style="margin:0">Where ${who} ${self?'strive':'strives'}, struggle, the blind spot &amp; one move.</p></div>${readBtn}</div><div id="lmCoach" class="sans" style="margin-top:8px;font-size:14px;line-height:1.55">${d.aiReady?'<span class="hint">Tap Generate once style + judgment are done for the fullest read.</span>':'<span class="hint">AI not configured.</span>'}</div></div>
+   </div>
+   <div class="toolbar" style="margin-top:12px"><button class="btn btn-ghost sans" onclick="closeHModal();${ME&&ME.role==='admin'?'loadLeadMirror()':''}">Close</button></div>`);
+}
+let LM_SEL={};
+function lmStylePick(bi,kind,oi){ const other=kind==='most'?'least':'most'; LM_SEL[bi]=LM_SEL[bi]||{}; if(LM_SEL[bi][other]===oi) LM_SEL[bi][other]=null; LM_SEL[bi][kind]=oi; const block=(LM_CUR&&LM_CUR.styleBlocks[bi])||[]; block.forEach((o,j)=>{ const m=$('lm_'+bi+'_most_'+j), l=$('lm_'+bi+'_least_'+j); const s=LM_SEL[bi]||{}; if(m)m.className='btn btn-sm sans '+(s.most===j?'btn-gold':'btn-ghost'); if(l)l.className='btn btn-sm sans '+(s.least===j?'btn-gold':'btn-ghost'); }); }
+function lmStyle(id){
+  const blocks=(LM_CUR&&LM_CUR.styleBlocks)||[]; if(!blocks.length){ alert('Reopen and try again.'); return; }
+  LM_SEL={};
+  const rows=blocks.map((block,bi)=>`<div class="card" style="margin:8px 0;padding:10px"><div class="hint" style="margin-bottom:6px">Block ${bi+1} of ${blocks.length} — pick the <b style="color:var(--gold)">MOST</b> and <b>LEAST</b> like ${id===(ME&&ME.id)?'you':'them'}</div>${block.map((o,j)=>`<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><div style="flex:1;font-size:13.5px">${esc(o.t)}</div><button id="lm_${bi}_most_${j}" class="btn btn-ghost btn-sm sans" onclick="lmStylePick(${bi},'most',${j})">Most</button><button id="lm_${bi}_least_${j}" class="btn btn-ghost btn-sm sans" onclick="lmStylePick(${bi},'least',${j})">Least</button></div>`).join('')}</div>`).join('');
+  hmodalPlain(`<h3>Leadership style</h3><p class="sub sans">In each block, pick the one <b>most</b> like ${id===(ME&&ME.id)?'you':'them'} and the one <b>least</b>. Every option is a real strength — that's what keeps it honest.</p><div style="max-height:60vh;overflow:auto">${rows}</div><div class="toolbar" style="margin-top:12px;justify-content:space-between"><button class="btn btn-ghost sans" onclick="openLeadMirror(${id}, LM_CUR&&LM_CUR.name)">Back</button><button class="btn btn-gold sans" onclick="lmSubmitStyle(${id})">See result</button></div>`);
+}
+async function lmSubmitStyle(id){
+  const blocks=(LM_CUR&&LM_CUR.styleBlocks)||[]; const answers={}; let missing=false;
+  blocks.forEach((b,bi)=>{ const s=LM_SEL[bi]||{}; if(s.most==null||s.least==null) missing=true; answers[bi]={most:s.most,least:s.least}; });
+  if(missing){ alert('Pick a Most and a Least in every block.'); return; }
+  try{ await api('/leadership/mirror/'+id+'/style',{method:'POST',body:JSON.stringify({answers})}); openLeadMirror(id, LM_CUR&&LM_CUR.name); }catch(e){ alert(e.message); }
+}
+let LMJ_SEL={};
+function lmJudgePick(qi,oi){ LMJ_SEL[qi]=oi; const q=(LM_CUR&&LM_CUR.judgmentQuestions[qi])||{}; (q.o||[]).forEach((o,j)=>{ const b=$('lmj_'+qi+'_'+j); if(b)b.className='btn btn-sm sans '+(oi===j?'btn-gold':'btn-ghost'); }); }
+function lmJudge(id){
+  const qs=(LM_CUR&&LM_CUR.judgmentQuestions)||[]; if(!qs.length){ alert('Reopen and try again.'); return; }
+  LMJ_SEL={};
+  const rows=qs.map((q,qi)=>`<div class="card" style="margin:8px 0;padding:10px"><div style="font-size:14px;font-weight:600;margin-bottom:6px">${qi+1}. ${esc(q.s)}</div>${q.o.map((o,j)=>`<button id="lmj_${qi}_${j}" class="btn btn-ghost btn-sm sans" style="display:block;width:100%;text-align:left;margin:4px 0" onclick="lmJudgePick(${qi},${j})">${esc(o.t)}</button>`).join('')}</div>`).join('');
+  hmodalPlain(`<h3>Leadership judgment</h3><p class="sub sans">For each dilemma, pick what ${id===(ME&&ME.id)?'you':'they'} would most likely do. There isn't always an obvious right answer.</p><div style="max-height:60vh;overflow:auto">${rows}</div><div class="toolbar" style="margin-top:12px;justify-content:space-between"><button class="btn btn-ghost sans" onclick="openLeadMirror(${id}, LM_CUR&&LM_CUR.name)">Back</button><button class="btn btn-gold sans" onclick="lmSubmitJudge(${id})">See result</button></div>`);
+}
+async function lmSubmitJudge(id){
+  const qs=(LM_CUR&&LM_CUR.judgmentQuestions)||[]; const answers={}; let missing=false;
+  qs.forEach((q,qi)=>{ if(LMJ_SEL[qi]==null) missing=true; answers[qi]=LMJ_SEL[qi]; });
+  if(missing){ alert('Answer every scenario.'); return; }
+  try{ await api('/leadership/mirror/'+id+'/judgment',{method:'POST',body:JSON.stringify({answers})}); openLeadMirror(id, LM_CUR&&LM_CUR.name); }catch(e){ alert(e.message); }
+}
+async function lmCoach(id){ const el=$('lmCoach'); if(el)el.innerHTML='<span class="hint">✦ Thinking…</span>'; try{ const r=await api('/leadership/mirror/'+id+'/coach',{method:'POST'}); if(el)el.innerHTML=esc(r.brief).replace(/\n/g,'<br>'); }catch(e){ if(el)el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function loadTeamStats(){
   const host=$('teamStats'); if(!host) return;
   let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML=''; return; }

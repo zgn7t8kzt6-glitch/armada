@@ -1443,6 +1443,7 @@ CREATE TABLE IF NOT EXISTS employee_notes (
 addColumn('employee_profiles', 'disc', 'TEXT');   // DISC-style personality read (JSON: D/I/S/C scores + primary)
 addColumn('employee_profiles', 'bigfive', 'TEXT'); // Big Five + Honesty-Humility (HEXACO) scores (JSON)
 addColumn('employee_profiles', 'sjt', 'TEXT');     // Situational-judgment scores (JSON: competency %s)
+addColumn('employee_profiles', 'leadership', 'TEXT'); // Leadership Mirror: {style:{...}, judgment:{...}} (CEO + every leader)
 // LAUNDRY — track every load through washing → drying → folding → done so nothing
 // sits wet or gets lost. Simple operational board (like bed turnover).
 db.exec(`CREATE TABLE IF NOT EXISTS laundry_loads (

@@ -5295,15 +5295,46 @@ async function loadEmployees(){
   const arrow=t=> t==null?'<span class="hint">–</span>':t>0?`<span style="color:var(--good)">▲ ${t}</span>`:t<0?`<span style="color:var(--danger)">▼ ${-t}</span>`:'<span class="hint">– even</span>';
   host.innerHTML=`<div class="card"><div style="overflow-x:auto"><table class="tbl" style="width:100%">
     <tr><th>Employee</th><th>Role</th><th>Overall</th><th>Trend</th><th>💪 Excelling</th><th>🎯 Needs work</th><th>Shifts</th></tr>
-    ${d.team.map(t=>`<tr style="cursor:pointer" onclick="openUserStats(${t.id}, ${JSON.stringify(t.name).replace(/"/g,'&quot;')})">
+    ${d.team.map(t=>`<tr style="cursor:pointer" onclick="openEmployeeProfile(${t.id}, ${JSON.stringify(t.name).replace(/"/g,'&quot;')})">
       <td><strong>${esc(t.name)}</strong></td><td class="hint">${esc(t.role||'')}</td>
       <td><strong style="color:${statCol(t.overall)}">${t.overall==null?'—':t.overall+'%'}</strong>${t.flagged7?' <span class="hint" title="rounds flagged">⚠'+t.flagged7+'</span>':''}</td>
       <td>${arrow(t.trend)}</td>
       <td style="color:var(--good);font-size:13px">${(t.strong||[]).join(', ')||'—'}</td>
       <td style="color:var(--danger);font-size:13px">${(t.improve||[]).join(', ')||'—'}</td>
       <td>${t.shifts7} ›</td></tr>`).join('')}</table></div>
-    <p class="hint" style="margin-top:8px">Tap anyone for their full breakdown. This is for developing people — celebrate the top, support the bottom.</p></div>`;
+    <p class="hint" style="margin-top:8px">Tap anyone for their profile, coaching log &amp; how Horst would lead them. For developing people — celebrate the top, support the bottom.</p></div>`;
 }
+let EMP_CUR=null;
+async function openEmployeeProfile(id, name){
+  EMP_CUR={id,name};
+  let d; try{ d=await api('/employee/'+id+'/profile'); }catch(e){ alert(e.message); return; }
+  const s=d.stats||{}, p=d.profile||{};
+  const strong=(s.required||[]).filter(r=>r.pct!=null&&r.pct>=90).map(r=>r.label);
+  const improve=(s.required||[]).filter(r=>r.pct!=null&&r.pct<70).map(r=>r.label);
+  const notes=(d.notes||[]).map(n=>`<div class="pc-note">📝 ${esc(n.note)} <span class="hint">— ${esc(n.by_name||'')}, ${esc(n.at)}</span></div>`).join('')||'<div class="hint">No coaching notes yet.</div>';
+  const fld=(fid,lbl,val,ph)=>`<label>${lbl}</label><textarea id="${fid}" rows="2" placeholder="${esc(ph)}">${esc(val||'')}</textarea>`;
+  const first=esc((name||'').split(' ')[0]||'them');
+  hmodalPlain(`<h3>${esc(name)} <span class="hint" style="font-weight:400">· ${esc(d.user.role||'')}</span></h3>
+   <div style="max-height:72vh;overflow:auto;padding-right:4px">
+    <div style="text-align:center;margin:4px 0 8px"><div style="font-size:30px;font-weight:700;color:${statCol(s.overall)}">${s.overall==null?'—':s.overall+'%'}</div><div class="hint">${s.shifts7||0} shift${s.shifts7===1?'':'s'} this week${s.trend!=null?trendStr(s.trend):''} · ${d.wows90||0} Wows (90d)</div>
+      ${strong.length?`<div class="pc-note" style="color:var(--good);margin-top:6px">💪 ${strong.map(esc).join(', ')}</div>`:''}${improve.length?`<div class="pc-note" style="color:var(--danger);margin-top:4px">🎯 ${improve.map(esc).join(', ')}</div>`:''}</div>
+    <div class="card" style="background:#faf6ee;border-left:4px solid var(--gold);margin:0"><div class="cmd-hero-row"><div><h3 style="margin:0">✦ How Horst would lead ${first}</h3></div>${d.aiReady?`<button class="btn btn-gold btn-sm sans" onclick="coachEmployee(${id})">Generate</button>`:''}</div><div id="empCoach" class="sans" style="margin-top:8px;font-size:14px;line-height:1.5">${d.aiReady?'<span class="hint">Tap Generate for personalized coaching from their profile + numbers.</span>':'<span class="hint">AI not configured.</span>'}</div></div>
+    <h3 style="font-size:13px;margin-top:14px">Their profile <span class="hint" style="font-weight:400">— only leadership sees this</span></h3>
+    ${fld('ep_likes','What they like / interests',p.likes,'coffee black, their dog Max, weekend fisherman…')}
+    ${fld('ep_personality','Personality & style',p.personality,'quiet; takes feedback hard; leads by example…')}
+    ${fld('ep_motivators','What motivates them',p.motivators,'public praise, more responsibility, schedule flexibility…')}
+    ${fld('ep_recognition','How they like to be recognized',p.recognition,'private thank-you vs. shout-out at lineup…')}
+    ${fld('ep_notes','Notes',p.notes,'anything to remember')}
+    <div class="toolbar" style="justify-content:flex-start;margin-top:4px"><button class="btn btn-gold btn-sm sans" onclick="saveEmployeeProfile(${id})">Save profile</button><span id="ep_msg" class="hint" style="align-self:center"></span></div>
+    <h3 style="font-size:13px;margin-top:14px">Coaching log</h3>
+    <div class="handoff-add" style="gap:6px"><input id="ep_note" placeholder="Log a conversation or observation…"/><button class="btn btn-ghost btn-sm sans" onclick="addEmployeeNote(${id})">Add</button></div>
+    <div style="margin-top:8px">${notes}</div>
+   </div>
+   <div class="toolbar" style="margin-top:12px"><button class="btn btn-ghost sans" onclick="closeHModal()">Close</button></div>`);
+}
+async function saveEmployeeProfile(id){ try{ await api('/employee/'+id+'/profile',{method:'POST',body:JSON.stringify({likes:$('ep_likes').value,personality:$('ep_personality').value,motivators:$('ep_motivators').value,recognition:$('ep_recognition').value,notes:$('ep_notes').value})}); if($('ep_msg'))$('ep_msg').textContent='✓ Saved'; }catch(e){ alert(e.message); } }
+async function addEmployeeNote(id){ const t=($('ep_note')||{}).value||''; if(!t.trim())return; try{ await api('/employee/'+id+'/note',{method:'POST',body:JSON.stringify({note:t.trim()})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); } }
+async function coachEmployee(id){ const el=$('empCoach'); if(el)el.innerHTML='<span class="hint">✦ Thinking…</span>'; try{ const r=await api('/employee/'+id+'/coach',{method:'POST'}); if(el) el.innerHTML=esc(r.brief).replace(/\n/g,'<br>'); }catch(e){ if(el) el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function loadTeamStats(){
   const host=$('teamStats'); if(!host) return;
   let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML=''; return; }

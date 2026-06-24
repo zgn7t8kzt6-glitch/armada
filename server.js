@@ -3267,6 +3267,60 @@ app.get('/api/team-stats', requireAuth, (req, res) => {
     .sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1));
   res.json({ team });
 });
+// Employee profile — the staff Care Card (admin/leadership only): what makes them
+// tick + a coaching log + AI "how Horst would lead this person."
+function empProfile(uid) { const r = db.prepare(`SELECT likes, personality, motivators, recognition, notes, updated_by, updated FROM employee_profiles WHERE user_id=?`).get(uid); return r || {}; }
+app.get('/api/employee/:id/profile', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const u = db.prepare(`SELECT id, name, job_role FROM users WHERE id=?`).get(+req.params.id);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  const s = userStats(u); const prev = prevOverall(u);
+  const notes = db.prepare(`SELECT note, by_name, substr(created_at,1,16) at FROM employee_notes WHERE user_id=? ORDER BY id DESC LIMIT 50`).all(u.id);
+  const wows90 = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize=? AND created_at>=datetime('now','-90 day')`).get(u.name).n;
+  res.json({ user: { id: u.id, name: u.name, role: u.job_role || '' }, profile: empProfile(u.id), notes, wows90, stats: { ...s, trend: (s.overall != null && prev != null) ? s.overall - prev : null }, aiReady: claudeConfigured() });
+});
+app.post('/api/employee/:id/profile', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const b = req.body || {}; const uid = +req.params.id;
+  const v = ['likes', 'personality', 'motivators', 'recognition', 'notes'].map((f) => (b[f] || '').trim() || null);
+  const ex = db.prepare(`SELECT user_id FROM employee_profiles WHERE user_id=?`).get(uid);
+  if (ex) db.prepare(`UPDATE employee_profiles SET likes=?,personality=?,motivators=?,recognition=?,notes=?,updated_by=?,updated=datetime('now') WHERE user_id=?`).run(...v, req.user.name, uid);
+  else db.prepare(`INSERT INTO employee_profiles (user_id,likes,personality,motivators,recognition,notes,updated_by,updated) VALUES (?,?,?,?,?,?,?,datetime('now'))`).run(uid, ...v, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/employee/:id/note', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const note = (req.body?.note || '').trim(); if (!note) return res.status(400).json({ error: 'Empty note.' });
+  db.prepare(`INSERT INTO employee_notes (user_id, note, by_name) VALUES (?,?,?)`).run(+req.params.id, note.slice(0, 1000), req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/employee/:id/coach', requireAuth, async (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  if (!claudeConfigured()) return res.status(503).json({ error: 'AI is not configured.' });
+  const u = db.prepare(`SELECT id, name, job_role FROM users WHERE id=?`).get(+req.params.id);
+  if (!u) return res.status(404).json({ error: 'Not found' });
+  const s = userStats(u); const prev = prevOverall(u); const p = empProfile(u.id);
+  const strong = s.required.filter((r) => r.pct != null && r.pct >= 90).map((r) => r.label);
+  const improve = s.required.filter((r) => r.pct != null && r.pct < 70).map((r) => r.label);
+  const wows90 = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize=? AND created_at>=datetime('now','-90 day')`).get(u.name).n;
+  const log = db.prepare(`SELECT note FROM employee_notes WHERE user_id=? ORDER BY id DESC LIMIT 10`).all(u.id).map((n) => n.note);
+  const ctx = [
+    `Employee: ${u.name} — ${u.job_role || 'staff'}`,
+    `Overall performance this week: ${s.overall != null ? s.overall + '%' : 'n/a'} (trend ${prev != null && s.overall != null ? (s.overall - prev >= 0 ? '+' : '') + (s.overall - prev) : 'n/a'} vs last week)`,
+    `Excelling at: ${strong.join(', ') || '—'}`,
+    `Needs development: ${improve.join(', ') || '—'}`,
+    `Recognition received (90d): ${wows90} Wows`,
+    p.likes ? `What they like: ${p.likes}` : '',
+    p.personality ? `Personality & style: ${p.personality}` : '',
+    p.motivators ? `What motivates them: ${p.motivators}` : '',
+    p.recognition ? `How they like recognition: ${p.recognition}` : '',
+    p.notes ? `Notes: ${p.notes}` : '',
+    log.length ? `Recent coaching log: ${log.join(' | ')}` : '',
+  ].filter(Boolean).join('\n');
+  const q = `You are Horst Schulze, Ritz-Carlton co-founder, coaching the OWNER on how to lead ONE employee at an addiction-treatment center. We treat our people the way we ask them to treat clients: dignity, genuine care, and high standards. Give concise, warm, specific guidance in three short labeled parts:\n1) RECOGNIZE — how to encourage and recognize this person this week, tailored to them.\n2) DEVELOP — where to help them grow and how to coach it with care (never punishment), focusing on any "needs development" areas.\n3) ONE MOVE — a single concrete thing to do this week to make them feel valued and raise their game.\nBe direct, human, and practical. Do not invent facts beyond the data provided.`;
+  try { const brief = await askAssistant(q, ctx); res.json({ brief }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
 // "My Role" — every staff member can always see their own job description,
 // responsibilities, and what's out of their lane.
 app.get('/api/my-role', requireAuth, (req, res) => {

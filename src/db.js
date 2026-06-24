@@ -1429,6 +1429,17 @@ db.exec(`CREATE TABLE IF NOT EXISTS shift_reports (
 );`);
 addColumn('shift_reports', 'data', 'TEXT');   // structured pass-down answers (JSON)
 addColumn('users', 'phone', 'TEXT');          // staff cell — for on-shift contact / call buttons
+// EMPLOYEE PROFILE — the staff version of a Care Card (admin/leadership only). What
+// makes each person tick, plus a coaching log, so we can develop & recognize them well.
+db.exec(`CREATE TABLE IF NOT EXISTS employee_profiles (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  likes TEXT, personality TEXT, motivators TEXT, recognition TEXT, notes TEXT,
+  updated_by TEXT, updated TEXT
+);
+CREATE TABLE IF NOT EXISTS employee_notes (
+  id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  note TEXT NOT NULL, by_name TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // LAUNDRY — track every load through washing → drying → folding → done so nothing
 // sits wet or gets lost. Simple operational board (like bed turnover).
 db.exec(`CREATE TABLE IF NOT EXISTS laundry_loads (

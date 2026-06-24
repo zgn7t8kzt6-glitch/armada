@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624AB" />
+<link rel="stylesheet" href="/styles.css?v=20260624AC" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -55,6 +55,7 @@
     <button data-view="dashboard">My Shift</button>
     <button data-view="today">Today</button>
     <button data-view="command" data-admin>Command Center</button>
+    <button data-view="guide" data-admin>Owner's Guide</button>
     <button data-view="finance" data-admin>Revenue</button>
     <button data-view="expenses" data-admin>Budget</button>
     <button data-view="playbook" data-admin>Playbook Scorecard</button>
@@ -306,6 +307,44 @@
       <div id="expConfig"></div>
     </section>
     <!-- LEADERSHIP COMMAND CENTER (admin only) -->
+    <section id="guide" class="view">
+      <div class="card no-print"><div class="cmd-hero-row"><div><h3>Owner's Guide</h3><p class="sub sans" style="margin:0">Every feature and exactly where to find it. Staff see only their own tools — this is your full map.</p></div><button class="btn btn-ghost sans no-print" onclick="window.print()">🖨 Print</button></div></div>
+      <div class="cmd-grid">
+        <div class="card"><h3>🕐 My Shift <span class="hint" style="font-weight:400">— top of the app, everyone</span></h3><ul style="font-size:14px;line-height:1.7;padding-left:18px;margin:6px 0">
+          <li><b>Clock in / out</b> — first thing; puts you on shift (locked to the building or office WiFi).</li>
+          <li><b>Facility at a glance</b> — patients here, scheduled, admitted, discharged today.</li>
+          <li><b>Who's on shift + the Lead</b> — the crew, with a 📞 Call-the-lead button (defaults to Brandon).</li>
+          <li><b>Last shift's report</b> — read it before you start; write yours for the next shift.</li>
+          <li><b>Alerts</b> — critical only (clear each shift), <b>Needs you now</b> ranked to-dos, <b>Shift checklist</b>, <b>My Tasks</b>, and <b>My Role</b> at the bottom.</li></ul></div>
+
+        <div class="card"><h3>👥 Team <span class="hint" style="font-weight:400">— leadership</span></h3><ul style="font-size:14px;line-height:1.7;padding-left:18px;margin:6px 0">
+          <li><b>Employees</b> — every person: tap for their profile → performance %, <b>Big Five + DISC personality</b>, <b>"How Horst would lead them"</b> (AI), coaching log, what makes them tick. <i>Leadership-only.</i></li>
+          <li><b>How I'm doing</b> — each person's own scorecard (and your team summary).</li>
+          <li><b>Hiring</b>, <b>Training</b>, <b>Library / SOPs</b>, <b>Messages</b>.</li></ul></div>
+
+        <div class="card"><h3>🛏️ Stay <span class="hint" style="font-weight:400">— daily care</span></h3><ul style="font-size:14px;line-height:1.7;padding-left:18px;margin:6px 0">
+          <li><b>Client Voice</b> — all kiosk feedback in one place (reach-outs, suggestions, surveys, meal comments) with a date filter + new badge.</li>
+          <li><b>Rounds / Round Status</b> — scan each room, tap each client's condition.</li>
+          <li><b>Bed Turnover</b> — auto-flags a bed when someone's discharged; clean → done; manager-only dismiss.</li>
+          <li><b>Laundry</b>, <b>Meals</b> (snack station, timeliness, ratings), <b>Belongings</b> (the cash/valuables controls), <b>Incidents</b> (behavioral contracts).</li></ul></div>
+
+        <div class="card"><h3>🚪 Arrival &amp; Intake</h3><ul style="font-size:14px;line-height:1.7;padding-left:18px;margin:6px 0">
+          <li><b>Intake checklist</b> — greet, search belongings, dignity bag, scrubs, Care Card. The Belongings form is required — it can't be checked off by hand.</li>
+          <li><b>Front Desk / Arrivals</b>, <b>Admissions</b>, <b>Referrals &amp; Partners</b>.</li></ul></div>
+
+        <div class="card"><h3>🔒 The money controls <span class="hint" style="font-weight:400">— Stay → Belongings</span></h3><ul style="font-size:14px;line-height:1.7;padding-left:18px;margin:6px 0">
+          <li>Cash <b>in &amp; out</b>: second-staff <b>witness</b> + client's <b>printed name &amp; signature</b> + optional <b>photo of the cash</b>.</li>
+          <li>Sealed bag #, storage location, surprise <b>audits</b> (flag discrepancies), big cash-out alerts, and a <b>discharge guard</b> so no one leaves with belongings unreturned.</li></ul></div>
+
+        <div class="card"><h3>⚙️ Command <span class="hint" style="font-weight:400">— admin</span></h3><ul style="font-size:14px;line-height:1.7;padding-left:18px;margin:6px 0">
+          <li><b>Command Center</b> — census, flow, alert-response scorecard.</li>
+          <li><b>Settings → Automation</b> — performance <b>targets</b> (rounds/snack per shift), reminders.</li>
+          <li><b>Settings → Clock-in location lock</b> — set the geofence + <b>Allow this WiFi</b>.</li>
+          <li><b>Users</b> — add staff (email invite to sign up), set roles &amp; <b>phone numbers</b>. Revenue, Budget, Documentation, 90-Day Plan.</li></ul></div>
+      </div>
+      <div class="card"><h3>Who sees what</h3><p class="sub sans">Frontline staff (BHT, Nurse, Front Desk) get a clean top tools bar with only their tools — no sidebar, no leadership tabs. Hilltop (sober-living) staff see only Hilltop, never the detox side. Employees, Client Voice, personality profiles, and Settings are leadership-only.</p></div>
+    </section>
+
     <section id="command" class="view">
       <div class="card cmd-hero">
         <div class="cmd-hero-row">
@@ -2567,7 +2606,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624AB"></script>
-<script src="/housing.js?v=20260624AB"></script>
+<script src="/app.js?v=20260624AC"></script>
+<script src="/housing.js?v=20260624AC"></script>
 </body>
 </html>

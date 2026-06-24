@@ -3314,15 +3314,41 @@ const BIG5_GUIDE = {
   H: { name: 'Honesty-Humility', high: 'Strong integrity — recognize it; they set the tone for the team.', low: 'A growth area, not a verdict — integrity grows with crystal-clear expectations and recognition. Keep the dual-control cash rules universal for everyone; never single one person out.', tip: 'Develop it: set the standard for all, catch people doing it right, and let the process (witness + signatures + audits) protect everyone.' },
 };
 function empBig5(uid) { try { const r = db.prepare(`SELECT bigfive FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.bigfive ? JSON.parse(r.bigfive) : null; } catch { return null; } }
-// Situational Judgment — realistic scenarios, hard to fake, job-relevant. Scores the
-// competencies that matter most here. The "right" answer isn't always obvious.
+// Situational Judgment — hard to fake because every option is something a decent
+// person might reasonably do. The differences are subtle trade-offs (safety vs.
+// warmth, dignity vs. speed, loyalty vs. honesty), so the "right" answer isn't
+// obvious and you can't just pick the one good choice. Best=2, reasonable=1, off=0.
 const SJT_Q = [
-  { c: 'integrity', s: "You find $40 on the floor of a client's room and you're alone.", o: [{ t: 'Log it as found cash with a witness and secure it', v: 2 }, { t: 'Hold it and turn it in at end of shift', v: 1 }, { t: "Keep it — it was just lying there", v: 0 }] },
-  { c: 'integrity', s: 'A coworker asks you to clock them in 20 minutes early as a favor.', o: [{ t: "Kindly decline — that's falsifying time", v: 2 }, { t: 'Do it once; it’s no big deal', v: 0 }, { t: 'Do it but tell them not to make it a habit', v: 0 }] },
-  { c: 'integrity', s: 'You realize you logged a medication time wrong and nobody noticed.', o: [{ t: 'Report it right away and correct it', v: 2 }, { t: 'Quietly fix it; no harm done', v: 0 }, { t: 'Leave it — it was close enough', v: 0 }] },
-  { c: 'deescalation', s: 'A client is yelling and threatening to leave AMA.', o: [{ t: 'Stay calm, acknowledge how hard it is, sit with them', v: 2 }, { t: 'Firmly explain the rules and the consequences', v: 1 }, { t: 'Tell them to calm down or they’ll have to leave', v: 0 }] },
-  { c: 'reliability', s: "It's 2am, your round is due, it's quiet and you're exhausted.", o: [{ t: 'Do the full round and scan every room', v: 2 }, { t: 'Glance down the hall and scan from there', v: 0 }, { t: 'Skip the quiet rooms, check the rest', v: 0 }] },
-  { c: 'care', s: "A new admit is withdrawn and hasn't eaten.", o: [{ t: 'Sit with them, offer food, learn one thing about them', v: 2 }, { t: 'Note it and tell the nurse', v: 1 }, { t: 'Give them space for now', v: 0 }] },
+  { c: 'care', s: "You're mid-round (due now) when a client stops you, shaken from a hard phone call and wanting to talk.", o: [
+    { t: "Tell them you'll be right back, finish the round fast, then sit with them", v: 2 },
+    { t: 'Ask a coworker to cover the round so you can be with them now', v: 2 },
+    { t: 'Give them a few real minutes, then go finish the round', v: 1 },
+    { t: 'Sit with them as long as they need — the round can wait', v: 0 } ] },
+  { c: 'integrity', s: 'A friend on the team sometimes rounds up their documented round times to look on-schedule. Good worker.', o: [
+    { t: 'Talk to them privately first — give them the chance to correct it', v: 2 },
+    { t: 'Report it to the supervisor right away', v: 1 },
+    { t: "Stay out of it — it's their documentation, not yours", v: 0 },
+    { t: 'Start documenting your own times more carefully and say nothing', v: 0 } ] },
+  { c: 'deescalation', s: "Two clients are both agitated — one took the other's usual chair and neither will back down.", o: [
+    { t: 'Acknowledge both, stay neutral, calmly offer a fair solution', v: 2 },
+    { t: 'Quietly pull the calmer one aside and find them another good spot', v: 1 },
+    { t: 'Remind them both of the house rules on respect and sharing', v: 0 },
+    { t: 'Let them sort it out unless it escalates further', v: 0 } ] },
+  { c: 'reliability', s: 'Your relief is 25 minutes late and not answering. Your shift is technically over and you have somewhere to be.', o: [
+    { t: 'Stay to keep coverage and call the supervisor to sort it out', v: 2 },
+    { t: 'Wait 10 more minutes, leave a thorough handoff note, then go', v: 1 },
+    { t: "Leave on time — you fulfilled your shift", v: 0 },
+    { t: 'Text the late coworker and head out once you’ve sent it', v: 0 } ] },
+  { c: 'care', s: "A quiet client turns down every activity and says they're 'fine.' It's a busy shift.", o: [
+    { t: 'Find one small, low-pressure way to connect one-on-one later', v: 2 },
+    { t: 'Keep gently inviting them to join group when you pass by', v: 1 },
+    { t: 'Respect their space and flag it for the team to watch', v: 1 },
+    { t: "Take them at their word — they said they're fine", v: 0 } ] },
+  { c: 'integrity', s: "A client confides they're having thoughts of using again and begs you to keep it just between you two.", o: [
+    { t: 'Gently tell them you care too much to keep that private, and loop in clinical', v: 2 },
+    { t: 'Encourage them to tell their counselor themselves today', v: 1 },
+    { t: 'Promise confidentiality so they keep trusting you', v: 0 },
+    { t: 'Keep it quiet but check on them more often yourself', v: 0 } ] },
 ];
 const SJT_COMPS = { integrity: 'Integrity', deescalation: 'De-escalation', reliability: 'Reliability', care: 'Care & warmth' };
 function empSjt(uid) { try { const r = db.prepare(`SELECT sjt FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.sjt ? JSON.parse(r.sjt) : null; } catch { return null; } }
@@ -3465,15 +3491,45 @@ const LEAD_FC = [
   [{ k: 'composure', t: 'I keep the room calm in a crisis' }, { k: 'vision', t: 'I can paint the future so people want it' }, { k: 'develop', t: 'I’d give up a win to grow someone' }, { k: 'listening', t: 'I read what people aren’t saying' }],
   [{ k: 'decisiveness', t: 'I take responsibility for the tough decisions' }, { k: 'integrity', t: 'I admit my mistakes out loud' }, { k: 'accountability', t: 'I follow through on the unglamorous things' }, { k: 'composure', t: 'Pressure makes me more focused, not less' }],
 ];
-// Leadership judgment — real executive dilemmas. The "right" answer isn't always obvious.
+// Leadership judgment — real executive dilemmas where every choice is defensible.
+// The trade-offs (loyalty vs. fairness, speed vs. buy-in, candor vs. morale) make
+// the best answer subtle, not obvious. Best=2, reasonable=1, off=0.
 const LEAD_SJT = [
-  { c: 'integrity', s: 'Your best, hardest-to-replace employee quietly broke a cash-handling rule. No client was harmed.', o: [{ t: 'Hold them to the exact same standard as anyone, with care and clarity', v: 2 }, { t: 'A private warning; they’re too valuable to lose', v: 1 }, { t: 'Let it slide this once — results matter most', v: 0 }] },
-  { c: 'develop', s: 'A leader who reports to you keeps missing the mark and morale on their team is slipping.', o: [{ t: 'Coach them directly and honestly, with a clear plan and support', v: 2 }, { t: 'Quietly route around them and pick up the slack yourself', v: 0 }, { t: 'Wait and hope it turns around', v: 0 }] },
-  { c: 'accountability', s: 'A initiative you championed failed and it cost money.', o: [{ t: 'Own it publicly, name the lesson, and fix the process', v: 2 }, { t: 'Acknowledge it privately and move on', v: 1 }, { t: 'Point to the factors outside your control', v: 0 }] },
-  { c: 'composure', s: 'Two emergencies hit at once and your team is looking at you, rattled.', o: [{ t: 'Get calm, name the priority, and assign clear next steps', v: 2 }, { t: 'Jump in and personally handle the biggest fire', v: 1 }, { t: 'Match their urgency so they know you take it seriously', v: 0 }] },
-  { c: 'listening', s: 'A frontline tech tells you a policy you set is hurting clients.', o: [{ t: 'Hear them fully, dig in, and change it if they’re right', v: 2 }, { t: 'Explain why the policy exists', v: 1 }, { t: 'Thank them and note it for later', v: 0 }] },
-  { c: 'vision', s: 'The team is hitting numbers but the work has gone transactional and a little cold.', o: [{ t: 'Re-anchor everyone on the purpose and raise the standard of care', v: 2 }, { t: 'Leave it alone — the numbers are fine', v: 0 }, { t: 'Add an incentive for better scores', v: 1 }] },
-  { c: 'decisiveness', s: 'You have 70% of the information and a decision is overdue.', o: [{ t: 'Decide, communicate it, and adjust as you learn', v: 2 }, { t: 'Wait for more certainty before committing', v: 0 }, { t: 'Push the decision to the team to build consensus', v: 1 }] },
+  { c: 'integrity', s: 'Your best, hardest-to-replace employee broke a cash-handling rule. No client was harmed and they feel terrible.', o: [
+    { t: 'Same standard as anyone — address it directly, with care and a clear path forward', v: 2 },
+    { t: 'Handle it quietly and privately so you don’t risk losing them', v: 1 },
+    { t: 'Note it and watch closely for a pattern before acting', v: 0 },
+    { t: 'Have the whole team re-trained so no one feels singled out', v: 1 } ] },
+  { c: 'develop', s: 'A leader who reports to you keeps missing the mark. They’re well-liked and trying hard.', o: [
+    { t: 'Coach them directly with a clear plan, support, and a follow-up date', v: 2 },
+    { t: 'Have a frank talk and set a firm deadline with consequences', v: 1 },
+    { t: 'Lighten their load and give them more support for now', v: 1 },
+    { t: 'Quietly pick up the slack yourself so the team doesn’t suffer', v: 0 } ] },
+  { c: 'accountability', s: 'An initiative you personally championed failed and it cost real money.', o: [
+    { t: 'Own it openly, name the lesson, and fix the process', v: 2 },
+    { t: 'Acknowledge it to your team privately and quietly course-correct', v: 1 },
+    { t: 'Frame it as a calculated bet that didn’t land', v: 0 },
+    { t: 'Move fast to the next thing so it’s not dwelt on', v: 0 } ] },
+  { c: 'composure', s: 'Two emergencies hit at once and your rattled team is looking to you.', o: [
+    { t: 'Get visibly calm, name the top priority, and assign clear next steps', v: 2 },
+    { t: 'Jump in and personally handle the biggest fire yourself', v: 1 },
+    { t: 'Pull your most capable person and tackle them together', v: 1 },
+    { t: 'Match their urgency so they know you take it seriously', v: 0 } ] },
+  { c: 'listening', s: 'A frontline tech tells you, in front of others, that a policy you set is hurting clients.', o: [
+    { t: 'Thank them, hear them out fully, dig in, and change it if they’re right', v: 2 },
+    { t: 'Hear them now, then take it offline to look into it properly', v: 1 },
+    { t: 'Calmly explain the reasoning behind the policy', v: 0 },
+    { t: 'Thank them and tell them you’ll note it for review', v: 0 } ] },
+  { c: 'vision', s: 'The team is hitting every number, but the work has quietly gone transactional and a little cold.', o: [
+    { t: 'Re-anchor everyone on the purpose and raise the standard of care', v: 2 },
+    { t: 'Start telling client-impact stories in every huddle', v: 1 },
+    { t: 'Add recognition for warmth, not just output', v: 1 },
+    { t: 'Leave it — the numbers say it’s working', v: 0 } ] },
+  { c: 'decisiveness', s: 'You have about 70% of the information and the decision is already overdue.', o: [
+    { t: 'Decide now, communicate clearly, and adjust as you learn', v: 2 },
+    { t: 'Make a reversible first move and keep gathering information', v: 1 },
+    { t: 'Bring the team in to build consensus before committing', v: 1 },
+    { t: 'Wait for more certainty so you don’t decide wrong', v: 0 } ] },
 ];
 function empLead(uid) { try { const r = db.prepare(`SELECT leadership FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.leadership ? JSON.parse(r.leadership) : null; } catch { return null; } }
 function saveLead(uid, lead) {
@@ -3568,6 +3624,54 @@ app.post('/api/leadership/mirror/:id/coach', requireAuth, async (req, res) => {
   const q = `You are Horst Schulze, Ritz-Carlton co-founder, acting as the highest-level executive coach. You are giving ${self ? 'this leader, directly,' : 'the CEO, about one of their leaders,'} an HONEST read — the kind a great consultant gives behind closed doors. We lead the way we ask our people to serve: dignity, genuine care, uncompromising standards. Use ONLY the data provided; don't invent specifics. Be direct and warm — name the hard things kindly but clearly. Give five short labeled parts:\n1) WHERE YOU STRIVE — the real strengths (tie to the data).\n2) WHERE YOU STRUGGLE — the honest growth edges, named plainly (never cruel).\n3) THE BLIND SPOT — the one thing they likely can't see in themselves.\n4) HOW YOU LEAD BEST — the conditions and approach where this person is at their best.\n5) ONE MOVE THIS WEEK — a single concrete action to grow.\n${self ? 'Address them as "you".' : 'Refer to the leader by name.'}`;
   try { const brief = await askAssistant(q, ctx); res.json({ brief }); }
   catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* ───────────── GROWTH PLAN — every employee's own goals & monthly check-in ─────────────
+   This is THEIRS. Where do you want to be in 6 months, a year, 5 years, 10 years —
+   and every month, how are you tracking and how can we help you get closer? The
+   employee owns their goals and can see everything; leadership can support and log
+   check-ins from the employee profile. Growth, not surveillance. */
+function growthPlan(uid) { return db.prepare(`SELECT goal_6m, goal_1y, goal_5y, goal_10y, why, updated, updated_by FROM growth_plans WHERE user_id=?`).get(uid) || {}; }
+function growthCheckins(uid) { return db.prepare(`SELECT id, progress, support, by_name, self, substr(created_at,1,10) at FROM growth_checkins WHERE user_id=? ORDER BY id DESC LIMIT 36`).all(uid); }
+function growthHasGoals(p) { return !!(p && (p.goal_6m || p.goal_1y || p.goal_5y || p.goal_10y)); }
+function checkinDue(uid) {
+  const p = growthPlan(uid); if (!growthHasGoals(p)) return false;
+  const last = db.prepare(`SELECT created_at FROM growth_checkins WHERE user_id=? ORDER BY id DESC LIMIT 1`).get(uid);
+  if (!last) return true;
+  const r = db.prepare(`SELECT (julianday('now') - julianday(?)) d`).get(last.created_at);
+  return r && r.d >= 28;   // monthly cadence
+}
+function saveGrowthGoals(uid, b, byName) {
+  const v = ['goal_6m', 'goal_1y', 'goal_5y', 'goal_10y', 'why'].map((f) => (b[f] || '').trim().slice(0, 800) || null);
+  const ex = db.prepare(`SELECT user_id FROM growth_plans WHERE user_id=?`).get(uid);
+  if (ex) db.prepare(`UPDATE growth_plans SET goal_6m=?,goal_1y=?,goal_5y=?,goal_10y=?,why=?,updated=datetime('now'),updated_by=? WHERE user_id=?`).run(...v, byName, uid);
+  else db.prepare(`INSERT INTO growth_plans (user_id,goal_6m,goal_1y,goal_5y,goal_10y,why,updated,updated_by) VALUES (?,?,?,?,?,?,datetime('now'),?)`).run(uid, ...v, byName);
+}
+function addGrowthCheckin(uid, b, byName, isSelf) {
+  const progress = (b.progress || '').trim().slice(0, 1500), support = (b.support || '').trim().slice(0, 1500);
+  if (!progress && !support) return false;
+  db.prepare(`INSERT INTO growth_checkins (user_id, progress, support, by_name, self) VALUES (?,?,?,?,?)`).run(uid, progress || null, support || null, byName, isSelf ? 1 : 0);
+  return true;
+}
+// Every employee: their own growth plan.
+app.get('/api/growth/me', requireAuth, (req, res) => {
+  res.json({ plan: growthPlan(req.user.id), checkins: growthCheckins(req.user.id), due: checkinDue(req.user.id), self: true });
+});
+app.post('/api/growth/me', requireAuth, (req, res) => { saveGrowthGoals(req.user.id, req.body || {}, req.user.name); res.json({ ok: true }); });
+app.post('/api/growth/me/checkin', requireAuth, (req, res) => {
+  if (!addGrowthCheckin(req.user.id, req.body || {}, req.user.name, true)) return res.status(400).json({ error: 'Add your progress or what would help.' });
+  res.json({ ok: true });
+});
+// Leadership: support an employee's growth from their profile.
+app.get('/api/growth/:id', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const uid = +req.params.id;
+  res.json({ plan: growthPlan(uid), checkins: growthCheckins(uid), due: checkinDue(uid), self: false });
+});
+app.post('/api/growth/:id/checkin', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  if (!addGrowthCheckin(+req.params.id, req.body || {}, req.user.name, false)) return res.status(400).json({ error: 'Add a note.' });
+  res.json({ ok: true });
 });
 // "My Role" — every staff member can always see their own job description,
 // responsibilities, and what's out of their lane.

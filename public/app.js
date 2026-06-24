@@ -192,7 +192,7 @@ const GROUP_OF={
   // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
-  myrole:'team',mystats:'team',employees:'team',leadmirror:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
+  myrole:'team',mystats:'team',mygrowth:'team',employees:'team',leadmirror:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
@@ -272,7 +272,7 @@ Object.entries(HUBS).forEach(([k,h])=>h.items.forEach(([v])=>{ HUB_OF[v]=k; }));
 const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // The handful of shared pages housing staff still get (their own tasks/comms/learning) —
 // everything else clinical/detox stays hidden from them.
-const UNIVERSAL_VIEWS = ['myrole','mystats','mytasks','messages','team','training','library','standard'];
+const UNIVERSAL_VIEWS = ['myrole','mystats','mygrowth','mytasks','messages','team','training','library','standard'];
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
@@ -280,13 +280,13 @@ const ROLE_MENU = {
   // tab), Intake (the full arrival checklist — dignity bag lives there, no standalone
   // Dignity tab), then the day's work. My Tasks lives ON My Shift, not as a tab.
   // My Role is folded into My Shift (its own collapsible at the bottom) — no tab.
-  'BHT / Tech': ['dashboard','mystats','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','library'],
-  'Nurse':      ['dashboard','mystats','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
-  'Front Desk': ['dashboard','mystats','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','mystats','mygrowth','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','library'],
+  'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
+  'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
-  'Housing Director': ['housing','myrole','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
-  'House Manager':    ['housing','myrole','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
-  'Recovery Coach':   ['staffhub','myrole','housing','voice','activities','residents','houses','mytasks','messages'],
+  'Housing Director': ['housing','myrole','mygrowth','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
+  'House Manager':    ['housing','myrole','mygrowth','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
+  'Recovery Coach':   ['staffhub','myrole','mygrowth','housing','voice','activities','residents','houses','mytasks','messages'],
 };
 // Plain-language "how my shift flows" — the rhythm of the job in order, each step
 // linking to the tool. This is the train-a-new-hire-in-five-minutes layer.
@@ -482,6 +482,7 @@ function show(v){
   if(v==='clientvoice') loadClientVoice();
   if(v==='myrole') loadMyRole();
   if(v==='mystats') loadMyStats();
+  if(v==='mygrowth') loadMyGrowth();
   if(v==='employees') loadEmployees();
   if(v==='leadmirror') loadLeadMirror();
   if(v==='rounds') loadRounds();
@@ -5341,6 +5342,7 @@ async function openEmployeeProfile(id, name){
     ${big5Html}
     ${sjtHtml}
     ${discHtml}
+    <div id="epGrowth"></div>
     <h3 style="font-size:13px;margin-top:14px">Their profile <span class="hint" style="font-weight:400">— only leadership sees this</span></h3>
     ${fld('ep_likes','What they like / interests',p.likes,'coffee black, their dog Max, weekend fisherman…')}
     ${fld('ep_personality','Personality & style',p.personality,'quiet; takes feedback hard; leads by example…')}
@@ -5353,6 +5355,27 @@ async function openEmployeeProfile(id, name){
     <div style="margin-top:8px">${notes}</div>
    </div>
    <div class="toolbar" style="margin-top:12px"><button class="btn btn-ghost sans" onclick="closeHModal()">Close</button></div>`);
+  renderEmpGrowth(id);
+}
+async function renderEmpGrowth(id){
+  const host=$('epGrowth'); if(!host) return;
+  let d; try{ d=await api('/growth/'+id); }catch(e){ host.innerHTML=''; return; }
+  const p=d.plan||{};
+  const goal=(lbl,val)=>val?`<div style="margin:4px 0;font-size:13.5px"><b>${lbl}:</b> ${esc(val)}</div>`:'';
+  const has=p.goal_6m||p.goal_1y||p.goal_5y||p.goal_10y;
+  const checks=(d.checkins||[]).slice(0,6).map(c=>`<div class="pc-note" style="margin:5px 0"><div class="hint" style="margin-bottom:2px">${c.self?'🙋 '+esc(EMP_CUR&&EMP_CUR.name||'them'):'👤 '+esc(c.by_name||'')} · ${esc(c.at)}</div>${c.progress?`<div><b>Progress:</b> ${esc(c.progress)}</div>`:''}${c.support?`<div><b>Support:</b> ${esc(c.support)}</div>`:''}</div>`).join('');
+  host.innerHTML=`<div class="card" style="margin:10px 0 0;${has?'':'background:#f7f9f7;border-left:4px solid var(--good)'}"><div class="cmd-hero-row"><div><h3 style="margin:0">🌱 Their growth ${d.due?'<span class="badge-danger" style="font-size:11px">check-in due</span>':''}</h3><p class="sub sans" style="margin:0">Their own goals — support them toward where they want to go.</p></div></div>
+    ${has?`<div style="margin:6px 0">${goal('6 months',p.goal_6m)}${goal('1 year',p.goal_1y)}${goal('5 years',p.goal_5y)}${goal('10 years',p.goal_10y)}${p.why?`<div class="hint" style="margin-top:4px">💛 ${esc(p.why)}</div>`:''}</div>`:'<div class="hint" style="margin:6px 0">They haven\'t set goals yet — encourage them to open <b>My Growth</b>.</div>'}
+    <label style="font-weight:600;font-size:13px">Log a support check-in</label>
+    <textarea id="eg_prog" rows="2" placeholder="How are they tracking? (optional)"></textarea>
+    <textarea id="eg_sup" rows="2" placeholder="What support did you agree on to get them closer?"></textarea>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:4px"><button class="btn btn-gold btn-sm sans" onclick="addEmpCheckin(${id})">Save check-in</button></div>
+    ${checks?`<div style="margin-top:8px">${checks}</div>`:''}</div>`;
+}
+async function addEmpCheckin(id){
+  const progress=($('eg_prog')||{}).value||'', support=($('eg_sup')||{}).value||'';
+  if(!progress.trim()&&!support.trim()){ alert('Add a note.'); return; }
+  try{ await api('/growth/'+id+'/checkin',{method:'POST',body:JSON.stringify({progress,support})}); renderEmpGrowth(id); }catch(e){ alert(e.message); }
 }
 async function saveEmployeeProfile(id){ try{ await api('/employee/'+id+'/profile',{method:'POST',body:JSON.stringify({likes:$('ep_likes').value,personality:$('ep_personality').value,motivators:$('ep_motivators').value,recognition:$('ep_recognition').value,notes:$('ep_notes').value})}); if($('ep_msg'))$('ep_msg').textContent='✓ Saved'; }catch(e){ alert(e.message); } }
 async function addEmployeeNote(id){ const t=($('ep_note')||{}).value||''; if(!t.trim())return; try{ await api('/employee/'+id+'/note',{method:'POST',body:JSON.stringify({note:t.trim()})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); } }
@@ -5493,6 +5516,39 @@ async function lmSubmitJudge(id){
   try{ await api('/leadership/mirror/'+id+'/judgment',{method:'POST',body:JSON.stringify({answers})}); openLeadMirror(id, LM_CUR&&LM_CUR.name); }catch(e){ alert(e.message); }
 }
 async function lmCoach(id){ const el=$('lmCoach'); if(el)el.innerHTML='<span class="hint">✦ Thinking…</span>'; try{ const r=await api('/leadership/mirror/'+id+'/coach',{method:'POST'}); if(el)el.innerHTML=esc(r.brief).replace(/\n/g,'<br>'); }catch(e){ if(el)el.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+/* ───────── MY GROWTH — every employee's own goals + monthly check-in ───────── */
+async function loadMyGrowth(){
+  const host=$('mygrowth'); if(!host) return;
+  host.innerHTML='<div class="hint">Loading…</div>';
+  let d; try{ d=await api('/growth/me'); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  const p=d.plan||{};
+  const ta=(fid,lbl,val,ph)=>`<label style="font-weight:600">${lbl}</label><textarea id="${fid}" rows="2" placeholder="${esc(ph)}">${esc(val||'')}</textarea>`;
+  const dueBanner=d.due?`<div class="card" style="background:#fbf7f0;border-left:4px solid var(--gold);margin:0 0 10px"><b>🗓 Time for your monthly check-in.</b> <span class="sans">Take two minutes below — how are you tracking, and what would help?</span></div>`:'';
+  const checks=(d.checkins||[]).map(c=>`<div class="pc-note" style="margin:6px 0"><div class="hint" style="margin-bottom:2px">${c.self?'🙋 You':'👤 '+esc(c.by_name||'Leadership')} · ${esc(c.at)}</div>${c.progress?`<div><b>Progress:</b> ${esc(c.progress)}</div>`:''}${c.support?`<div><b>Support that would help:</b> ${esc(c.support)}</div>`:''}</div>`).join('')||'<div class="hint">No check-ins yet — your first one is below.</div>';
+  host.innerHTML=`<div class="card"><h3>🌱 My Growth</h3><p class="sub sans">This is yours. Where do you want to be — and every month, how are we helping you get there? Dream big; we're in your corner.</p></div>
+    ${dueBanner}
+    <div class="card"><h3 style="margin-top:0">My goals</h3>
+      ${ta('g_6m','📍 6-month goal',p.goal_6m,'e.g. get fully confident running intake on my own')}
+      ${ta('g_1y','🎯 1-year professional goal',p.goal_1y,'e.g. become a lead BHT / start my CDCA')}
+      ${ta('g_5y','🚀 5-year goal',p.goal_5y,'e.g. be a licensed counselor here')}
+      ${ta('g_10y','🌟 10-year goal',p.goal_10y,'e.g. run my own program / lead a team')}
+      ${ta('g_why','💛 Why it matters to me',p.why,'what this means for you and the people you love')}
+      <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold sans" onclick="saveMyGrowth()">Save my goals</button><span id="g_msg" class="hint" style="align-self:center"></span></div>
+      ${p.updated?`<div class="hint" style="margin-top:4px">Last updated ${esc(p.updated.slice(0,10))}</div>`:''}</div>
+    <div class="card"><h3 style="margin-top:0">Monthly check-in</h3><p class="sub sans">A quick, honest pulse — for you and the people supporting you.</p>
+      ${ta('g_prog','How am I tracking toward my goals?','','what\'s going well, what\'s been hard')}
+      ${ta('g_sup','What support would help me get closer?','','training, a mentor, a shift change, a stretch project…')}
+      <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold sans" onclick="addMyCheckin()">Add check-in</button></div></div>
+    <div class="card"><h3 style="margin-top:0">My check-in history</h3>${checks}</div>`;
+}
+async function saveMyGrowth(){
+  try{ await api('/growth/me',{method:'POST',body:JSON.stringify({goal_6m:$('g_6m').value,goal_1y:$('g_1y').value,goal_5y:$('g_5y').value,goal_10y:$('g_10y').value,why:$('g_why').value})}); if($('g_msg'))$('g_msg').textContent='✓ Saved'; }catch(e){ alert(e.message); }
+}
+async function addMyCheckin(){
+  const progress=($('g_prog')||{}).value||'', support=($('g_sup')||{}).value||'';
+  if(!progress.trim()&&!support.trim()){ alert('Add your progress or what would help.'); return; }
+  try{ await api('/growth/me/checkin',{method:'POST',body:JSON.stringify({progress,support})}); loadMyGrowth(); }catch(e){ alert(e.message); }
+}
 async function loadTeamStats(){
   const host=$('teamStats'); if(!host) return;
   let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML=''; return; }

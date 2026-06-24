@@ -1444,6 +1444,22 @@ addColumn('employee_profiles', 'disc', 'TEXT');   // DISC-style personality read
 addColumn('employee_profiles', 'bigfive', 'TEXT'); // Big Five + Honesty-Humility (HEXACO) scores (JSON)
 addColumn('employee_profiles', 'sjt', 'TEXT');     // Situational-judgment scores (JSON: competency %s)
 addColumn('employee_profiles', 'leadership', 'TEXT'); // Leadership Mirror: {style:{...}, judgment:{...}} (CEO + every leader)
+// GROWTH PLAN — every employee's own goals (6mo / 1yr / 5yr / 10yr) and a monthly
+// check-in: how they're tracking and how we can support them. Theirs to see & own.
+db.exec(`CREATE TABLE IF NOT EXISTS growth_plans (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  goal_6m TEXT, goal_1y TEXT, goal_5y TEXT, goal_10y TEXT,
+  why TEXT,
+  updated TEXT, updated_by TEXT
+);
+CREATE TABLE IF NOT EXISTS growth_checkins (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  progress TEXT,                 -- how they're moving toward the goal
+  support TEXT,                  -- what support would help them get closer
+  by_name TEXT, self INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // LAUNDRY — track every load through washing → drying → folding → done so nothing
 // sits wet or gets lost. Simple operational board (like bed turnover).
 db.exec(`CREATE TABLE IF NOT EXISTS laundry_loads (

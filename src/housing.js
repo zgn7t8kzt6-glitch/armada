@@ -861,7 +861,7 @@ function seedHousingSupplies() {
 const isLow = (it) => (it.qty ?? 0) <= (it.par ?? 0);
 
 // Activities & engagement — organized by SAMHSA's 8 Dimensions of Wellness, with
-// research-informed effectiveness (1–5) and the recovery-capital domain each
+// research-informed effectiveness (1–10) and the recovery-capital domain each
 // builds. Grounded in social-model recovery evidence: exercise lowers cravings,
 // peer connection is the top protective factor, service/"helper therapy" boosts
 // self-worth, mutual-aid attendance tracks with abstinence, and sober fun
@@ -944,7 +944,8 @@ function seedHousingActivities() {
     ['Rock climbing / paddleboarding', 'Recreational', 'coping', 4, '$$', 'outdoor', 150, 'Novel adventure activities boost mood and confidence.', 'Guided adventure outing.'],
   ];
   // columns: name,dimension,recovery_domain,description,effectiveness,cost,setting,duration_min,evidence
-  for (const a of A) ins.run(a[0], a[1], a[2], a[8], a[3], a[4], a[5], a[6], a[7]);
+  // effectiveness (a[3]) is authored on a 1–5 research scale; store on the app-wide 1–10 scale.
+  for (const a of A) ins.run(a[0], a[1], a[2], a[8], a[3] * 2, a[4], a[5], a[6], a[7]);
 }
 
 /* ───────────── Branded email shell (mobile-first, email-client-safe) ───────────── */
@@ -1276,6 +1277,9 @@ export function mountHousing(app) {
   try { seedHousingSurveys(); } catch (e) { console.error('[housing] survey seed:', e.message); }
   try { seedHousingSupplies(); } catch (e) { console.error('[housing] supply seed:', e.message); }
   try { seedHousingActivities(); } catch (e) { console.error('[housing] activity seed:', e.message); }
+  // One-time: convert pre-existing activity effectiveness from the old 1–5 scale to
+  // the app-wide 1–10 scale (×2). New seeds/inserts already store 1–10.
+  try { if (getState('eff_scale10') !== 'done') { db.prepare(`UPDATE housing_activity_catalog SET effectiveness = effectiveness * 2 WHERE effectiveness IS NOT NULL AND effectiveness <= 5`).run(); setState('eff_scale10', 'done'); } } catch (e) { console.error('[housing] eff migrate:', e.message); }
   // Default-on schedule: make sure this week (and next) always have a program.
   try { autoSeedActivityWeek(todayStr()); const nx = new Date(); nx.setDate(nx.getDate() + 7); autoSeedActivityWeek(nx.toISOString().slice(0, 10)); } catch (e) { console.error('[housing] activity autoseed:', e.message); }
 
@@ -1882,7 +1886,7 @@ export function mountHousing(app) {
     } else {
       if (!(b.name || '').trim()) return res.status(400).json({ error: 'Activity name?' });
       db.prepare(`INSERT INTO housing_activity_catalog (name,dimension,recovery_domain,description,effectiveness,cost,setting,duration_min,evidence) VALUES (?,?,?,?,?,?,?,?,?)`)
-        .run(b.name.trim(), b.dimension || 'Recreational', b.recovery_domain || 'support', b.description || null, num(b.effectiveness, 3), b.cost || 'free', b.setting || 'either', num(b.duration_min, 60), b.evidence || null);
+        .run(b.name.trim(), b.dimension || 'Recreational', b.recovery_domain || 'support', b.description || null, Math.max(1, Math.min(10, num(b.effectiveness, 6))), b.cost || 'free', b.setting || 'either', num(b.duration_min, 60), b.evidence || null);
     }
     res.json({ ok: true });
   });

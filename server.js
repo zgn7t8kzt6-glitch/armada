@@ -1014,7 +1014,7 @@ app.post('/api/meals/check', requireAuth, async (req, res) => {
   const received = (b.received === 0 || b.received) ? Math.max(0, parseInt(b.received, 10) || 0) : null;
   const expected = (b.expected === 0 || b.expected) ? Math.max(0, parseInt(b.expected, 10) || 0) : censusNow();
   const liked = ['Liked', 'OK', 'Disliked'].includes(b.liked) ? b.liked : null;
-  const quality = (b.quality === 0 || b.quality) ? Math.max(1, Math.min(5, parseInt(b.quality, 10) || 0)) : null;
+  const quality = (b.quality === 0 || b.quality) ? Math.max(1, Math.min(10, parseInt(b.quality, 10) || 0)) : null;
   const served_at = /^\d{1,2}:\d{2}$/.test(b.served_at || '') ? b.served_at : null;
   let photo = null; if (b.photo) { try { photo = validPhoto(b.photo); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const missing = requiredFor(meal).filter((g) => !groups.includes(g));
@@ -2544,7 +2544,7 @@ const BELONGING_PLAN = [
   { id: 'p3-scale', day: 90, phase: 3, week: 'Week 13 — 90-Day review & scale', owner: 'CEO', title: 'Decide what transfers to Dayton, Spark Indy, Wheatfield', detail: 'Lock in what worked; protect the anchors; scale the rhythm.' },
 ];
 const PHASE_LABEL = { 1: 'Phase 1 — Foundation', 2: 'Phase 2 — Activation', 3: 'Phase 3 — Embed', 4: 'Sustaining' };
-// Belonging pulse: average of the three 1-5 ratings over a window (the leading
+// Belonging pulse: average of the three 1-10 ratings over a window (the leading
 // indicator). Returns overall avg + per-question + count, plus the prior window
 // for a trend arrow.
 function belongingStats(days = 30) {
@@ -2602,7 +2602,7 @@ app.get('/api/plan', requireAuth, (req, res) => {
 // Anonymous 3-question belonging pulse — no user stored, by design.
 app.post('/api/belonging-pulse', requireAuth, (req, res) => {
   const b = req.body || {};
-  const v = (x) => { const n = parseInt(x, 10); return n >= 1 && n <= 5 ? n : null; };
+  const v = (x) => { const n = parseInt(x, 10); return n >= 1 && n <= 10 ? n : null; };
   const q1 = v(b.q1), q2 = v(b.q2), q3 = v(b.q3);
   if (q1 == null || q2 == null || q3 == null) return res.status(400).json({ error: 'Please answer all three.' });
   const weekend = [0, 6].includes(new Date().getDay()) ? 1 : 0;
@@ -2814,7 +2814,7 @@ app.get('/api/playbook', requireAuth, (req, res) => {
       P(13, 'Sacred onboarding (Day 1/21)', obDue ? 'watch' : 'on', obAll.length ? `${obAll.length} in, ${obDue} Day-21 due` : 'No one onboarding', 'onboarding'),
       P(14, 'Care for staff first', planDay ? 'on' : 'off', planDay ? '90-Day Plan: Day ' + planDay : 'Plan not started', 'plan'),
       P(15, 'Leadership vs management', 'on', 'Morale + belonging dashboards', 'workplace'),
-      P(16, 'Belonging — post wins', recog7 ? 'on' : 'watch', `${recog7} recognitions/wk · belonging ${bel.avg != null ? bel.avg + '/5' : '—'}`, 'workplace'),
+      P(16, 'Belonging — post wins', recog7 ? 'on' : 'watch', `${recog7} recognitions/wk · belonging ${bel.avg != null ? bel.avg + '/10' : '—'}`, 'workplace'),
     ] },
     { part: 'Excellence as a System', items: [
       P(17, 'Measure everything', 'on', `Wknd AMA ${ama.weekendRate ?? '—'}% · comfort ${comfort.avgMin ?? '—'}m`, 'excellence'),
@@ -3702,7 +3702,7 @@ app.post('/api/hiring/candidates/:id', requireAuth, (req, res) => {
   if (!canHire(req, c.side)) return res.status(403).json({ error: 'Leadership only.' });
   const b = req.body || {};
   const stage = HIRING_STAGES.includes(b.stage) ? b.stage : c.stage;
-  const rating = b.rating != null ? Math.max(0, Math.min(5, +b.rating)) : c.rating;
+  const rating = b.rating != null ? Math.max(0, Math.min(10, +b.rating)) : c.rating;
   const scores = b.scores != null ? JSON.stringify(b.scores) : c.scores;
   db.prepare(`UPDATE candidates SET stage=?,rating=?,scores=?,notes=?,email=?,phone=?,updated_at=datetime('now') WHERE id=?`)
     .run(stage, rating, scores, b.notes != null ? b.notes : c.notes, b.email != null ? b.email : c.email, b.phone != null ? b.phone : c.phone, c.id);
@@ -4827,8 +4827,9 @@ app.get('/api/saves/stats', requireAuth, (req, res) => {
 app.post('/api/client-experience', requireAuth, (req, res) => {
   const { client_id, cared, comment } = req.body || {};
   if (!client_id || !cared) return res.status(400).json({ error: 'Missing' });
+  const caredVal = Math.max(1, Math.min(10, parseInt(cared, 10) || 0));   // 1–10 scale
   db.prepare(`INSERT INTO client_experience (client_id, cared, comment, by_id, date) VALUES (?, ?, ?, ?, ?)`)
-    .run(client_id, +cared, comment || null, req.user.id, new Date().toISOString().slice(0, 10));
+    .run(client_id, caredVal, comment || null, req.user.id, new Date().toISOString().slice(0, 10));
   res.json({ ok: true });
 });
 
@@ -5539,12 +5540,12 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       sections.push({ key: 'mealtime', title: `🍽️ ${meal} serves at ${target} — be ready`,
         items: [{ name: 'Have it out on time.', sub: 'Respecting their time is respecting them. Plate up a few minutes early so no one waits.' }] });
     }
-    const ratedNote = (chk && chk.quality) ? ` · you rated it ${chk.quality}/5` : '';
+    const ratedNote = (chk && chk.quality) ? ` · you rated it ${chk.quality}/10` : '';
     tiles.push({ key: 'meal', label: `${meal} delivery`, n: needsCheck ? 'Check' : (chk.complete ? '✓' : '⚠'), sev: needsCheck ? 'warn' : (chk.complete ? 'ok' : 'high'), view: 'meals' });
     sections.push({ key: 'meal', title: `🍽️ ${meal} — inspect, rate & log the caterer's delivery`,
       cta: { label: 'Open meal check →', view: 'meals' },
       items: [needsCheck
-        ? { name: `${meal} not checked yet`, sub: `Confirm portions (${censusNow()} on the unit) + all food groups, rate the quality (1–5), then log the time served.`, badge: 'TO DO' }
+        ? { name: `${meal} not checked yet`, sub: `Confirm portions (${censusNow()} on the unit) + all food groups, rate the quality (1–10), then log the time served.`, badge: 'TO DO' }
         : (chk.complete ? { name: `${meal} ✓ inspected${ratedNote}`, sub: `${chk.received ?? '?'} of ${chk.expected ?? '?'} portions · complete${chk.served_at ? ' · served ' + chk.served_at : ''}` }
           : { name: `${meal} flagged`, sub: 'Short or missing a food group — see the meal check', badge: 'ISSUE' })] });
     // Snack station — are snacks, coffee & juice actually stocked?
@@ -6443,7 +6444,7 @@ app.get('/api/analytics/insights', requireAuth, async (req, res) => {
   const a = buildAnalytics(({ '90': 90, '180': 180, '365': 365, '730': 730 })[String(req.query.range)] || 365);
   if (a.sampleSize < 3) return res.json({ brief: `Only ${a.sampleSize} completed stays in this window — not enough to read patterns yet. The analysis turns on automatically as discharges accumulate (or once Kipu backfills history).` });
   const line = (rows) => rows.map((r) => `  - ${r.key}: ${r.n} stays, avg LOS ${r.avgLos ?? '—'}d, AMA ${r.amaRate}%`).join('\n');
-  const staffLine = (rows) => rows.map((r) => `  - ${r.key}: ${r.n} clients, avg LOS ${r.avgLos ?? '—'}d, AMA ${r.amaRate}%${r.exp != null ? `, experience ${r.exp}/5` : ''}`).join('\n');
+  const staffLine = (rows) => rows.map((r) => `  - ${r.key}: ${r.n} clients, avg LOS ${r.avgLos ?? '—'}d, AMA ${r.amaRate}%${r.exp != null ? `, experience ${r.exp}/10` : ''}`).join('\n');
   const ctx = `Length-of-stay (LOS) & AMA analytics, last ${a.rangeDays} days. ${a.totals.discharges} completed stays. Overall AMA ${a.totals.amaRate}%, avg LOS ${a.totals.avgLos}d.\n\n` +
     `By day of week admitted:\n${line(a.byDow)}\n\nBy time of admit:\n${line(a.byTime)}\n\nBy day-of-month admitted:\n${line(a.byDom)}\n\n` +
     `By therapist:\n${staffLine(a.byTherapist) || '  (no therapist attribution yet)'}\n\nBy case manager:\n${staffLine(a.byCaseManager) || '  (none)'}`;
@@ -7945,7 +7946,7 @@ function surveyRecovery(clientId, answers) {
   if (avg > +autoCfg('recovery_max', 6) && !low) return;
   const c = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(clientId);
   const nm = c ? (c.pref || c.name) : ('client ' + clientId);
-  createAlert(clientId, 'recovery', (avg <= 2 || low) ? 'High' : 'Elevated', `${nm} — low experience score (${avg.toFixed(1)}/5). Service recovery: a leader should check in now.`);
+  createAlert(clientId, 'recovery', (avg <= 4 || low) ? 'High' : 'Elevated', `${nm} — low experience score (${avg.toFixed(1)}/10). Service recovery: a leader should check in now.`);
 }
 
 // Surveys that are due: discharge survey after discharge, experience survey weekly.
@@ -8052,7 +8053,7 @@ app.get('/api/surveys/response/:rid', requireAuth, requireAdmin, (req, res) => {
   const r = db.prepare(`SELECT r.id, r.created_at, c.pref, c.name, c.room FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id WHERE r.id = ?`).get(req.params.rid);
   if (!r) return res.status(404).json({ error: 'Not found' });
   const answers = db.prepare(`SELECT q.text, q.type, a.value_num, a.value_text FROM survey_answers a JOIN survey_questions q ON q.id = a.question_id WHERE a.response_id = ? ORDER BY q.sort, q.id`).all(req.params.rid)
-    .map((a) => ({ q: a.text, val: a.value_num != null ? a.value_num + '/5' : (a.value_text || '') }));
+    .map((a) => ({ q: a.text, val: a.value_num != null ? a.value_num + '/10' : (a.value_text || '') }));
   res.json({ who: (r.pref || r.name) ? ((r.pref || r.name) + (r.room ? ' · ' + r.room : '')) : 'Anonymous', at: String(r.created_at).slice(0, 16), answers });
 });
 // Erase a survey's responses (admin) — for clearing trial/test data before going
@@ -8668,7 +8669,7 @@ app.get('/api/scorecard', requireAuth, (req, res) => {
   const ce = db.prepare(`SELECT cared FROM client_experience WHERE created_at >= datetime('now','-30 day')`).all();
   const sv = db.prepare(`SELECT a.value_num v FROM survey_answers a JOIN survey_questions q ON q.id=a.question_id JOIN survey_responses r ON r.id=a.response_id WHERE q.text LIKE 'I feel genuinely cared for%' AND r.created_at >= datetime('now','-30 day')`).all();
   const all = [...ce.map((x) => x.cared), ...sv.map((x) => x.v)].filter((x) => x != null);
-  const topbox = all.length ? Math.round(all.filter((x) => x >= 4).length / all.length * 100) : null;
+  const topbox = all.length ? Math.round(all.filter((x) => x >= 8).length / all.length * 100) : null;   // 1–10 scale: top-box = 8+
   push('"I felt cared for" top-box (30d)', topbox == null ? '—' : topbox, '%', '≥ 90%', topbox == null ? null : topbox >= 90, `${all.length} responses`);
   const sret = db.prepare(`SELECT outcome, COUNT(*) n FROM saves WHERE outcome != 'Pending' GROUP BY outcome`).all();
   const sgc = {}; sret.forEach((r) => { sgc[r.outcome] = r.n; }); const sden = (sgc.Stayed || 0) + (sgc.Left || 0);
@@ -9051,7 +9052,7 @@ setTimeout(runMealCount, msUntilLocalHour(mealHour()));
 // and a 6-month mini-trend — the Horst "read the direction" email.
 function buildSurveyScorecard() {
   const surveys = db.prepare(`SELECT id, title FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
-  const target = 4.5;
+  const target = 9;   // 1–10 scale (was 4.5/5)
   const e = htmlEsc;
   const monLabel = (ym) => { const [y, m] = ym.split('-'); return new Date(+y, +m - 1, 1).toLocaleDateString('en-US', { month: 'short' }); };
   const rows = surveys.map((s) => {
@@ -9066,10 +9067,10 @@ function buildSurveyScorecard() {
   const dt = new Date().toLocaleDateString('en-US', { timeZone: APP_TZ, month: 'long', year: 'numeric' });
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:600px">
     <h2 style="margin:0 0 2px">Survey Scorecard — ${dt}</h2>
-    <p style="color:#666;margin:0 0 14px">How clients rate us. Target ${target}/5. Score = last 30 days; arrow vs the 30 before.</p>
+    <p style="color:#666;margin:0 0 14px">How clients rate us. Target ${target}/10. Score = last 30 days; arrow vs the 30 before.</p>
     ${rows.map((r) => `<div style="border-top:1px solid #eee;padding:10px 0">
       <div style="font-size:16px"><b>${e(r.title)}</b></div>
-      <div style="font-size:26px;font-weight:700;color:${r.recent == null ? '#888' : r.recent < 3.5 ? '#b00' : r.recent < target ? '#a60' : '#2d7a4f'}">${r.recent != null ? r.recent + '/5' : '—'} <span style="font-size:15px">${arrow(r.trend)}</span> <span style="font-size:13px;color:#888">(${r.n} in 30d)</span></div>
+      <div style="font-size:26px;font-weight:700;color:${r.recent == null ? '#888' : r.recent < 7 ? '#b00' : r.recent < target ? '#a60' : '#2d7a4f'}">${r.recent != null ? r.recent + '/10' : '—'} <span style="font-size:15px">${arrow(r.trend)}</span> <span style="font-size:13px;color:#888">(${r.n} in 30d)</span></div>
       <div style="color:#777;font-size:13px;margin-top:2px">${sparkText(r.series)}</div>
     </div>`).join('')}
     <p style="color:#888;margin-top:16px;font-size:12px">Sent monthly by Armada Care Standards. Read it at the lineup — react to every ▼ and celebrate every ▲.</p>

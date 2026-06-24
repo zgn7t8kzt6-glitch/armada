@@ -104,7 +104,7 @@ export function renderReportHtml(d) {
       <table style="width:100%;border-collapse:separate;border-spacing:8px"><tr>
         ${kpi(d.amaRate + '%', 'AMA rate')}
         ${kpi(d.completionRate + '%', 'Completion')}
-        ${kpi(d.feltCare != null ? d.feltCare : '—', 'Felt-care /5')}
+        ${kpi(d.feltCare != null ? d.feltCare : '—', 'Felt-care /10')}
         ${kpi(d.active, 'Active clients')}
       </tr></table>
 

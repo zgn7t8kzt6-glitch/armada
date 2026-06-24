@@ -1744,7 +1744,7 @@ function carePanel(c){
     <summary>Moments, concerns &amp; client voice</summary>
     <div class="pulse-body">
       <label>How cared for does the client feel? (ask them)</label>
-      <div class="care-scale">${[1,2,3,4,5].map(n=>`<button class="care-btn" onclick="setCare(${c.id},${n})">${n}</button>`).join('')}<span class="hint" style="margin-left:8px">1 = not at all · 5 = deeply</span></div>
+      <div class="care-scale" style="flex-wrap:wrap">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button class="care-btn" onclick="setCare(${c.id},${n})">${n}</button>`).join('')}<span class="hint" style="margin-left:8px">1 = not at all · 10 = deeply</span></div>
       <label>♥ Log a delight ("whatever it takes")</label>
       <div class="handoff-add"><input id="dl_${c.id}" placeholder="e.g. arranged a call with her daughter"/><button class="btn btn-ghost btn-sm sans" onclick="logDelight(${c.id})">Add</button></div>
       <label>⚑ Raise a concern (you own it until it's resolved)</label>
@@ -1817,7 +1817,7 @@ async function loadOutcomes(){
   $('outKpis').innerHTML = `
     <div class="ret-card ${o.ama?'rc-high':''}"><div class="n">${o.amaRate}%</div><div class="l">AMA rate</div></div>
     <div class="ret-card"><div class="n">${o.completionRate}%</div><div class="l">Completion rate</div></div>
-    <div class="ret-card"><div class="n">${o.feltCare!=null?o.feltCare:'—'}</div><div class="l">Felt-care (avg/5, 30d)</div></div>
+    <div class="ret-card"><div class="n">${o.feltCare!=null?o.feltCare:'—'}</div><div class="l">Felt-care (avg/10, 30d)</div></div>
     <div class="ret-card ${o.openConcerns?'rc-warn':''}"><div class="n">${o.openConcerns}</div><div class="l">Open concerns</div></div>
     <div class="ret-card"><div class="n">${o.delights30}</div><div class="l">Delights (30d)</div></div>
     <div class="ret-card ${survCls(pct10(o.surveys?.recommend.avg))}"><div class="n">${o.surveys?.recommend.avg!=null?pct10(o.surveys.recommend.avg)+'%':'—'}</div><div class="l">Recommend (survey)</div></div>
@@ -2550,7 +2550,7 @@ async function loadAnalytics(){
   $('anDow').innerHTML = distTable(a.byDow, 'Day');
   $('anTime').innerHTML = distTable(a.byTime, 'Time');
   $('anDom').innerHTML = distTable(a.byDom, 'Part of month');
-  const staffTable = (rows) => rows.length ? `<table class="tbl"><tr><th>Staff</th><th>Clients</th><th>Avg LOS</th><th>AMA %</th><th>Exp /5</th></tr>`+
+  const staffTable = (rows) => rows.length ? `<table class="tbl"><tr><th>Staff</th><th>Clients</th><th>Avg LOS</th><th>AMA %</th><th>Exp /10</th></tr>`+
     rows.map(r=>`<tr><td><strong>${esc(r.key)}</strong></td><td>${r.n}</td><td>${r.avgLos??'—'}</td><td><span class="risk ${r.amaRate>=30?'risk-high':r.amaRate>=15?'risk-elev':'risk-low'}">${r.amaRate}%</span></td><td>${r.exp??'—'}</td></tr>`).join('')+`</table>`
     : '<div class="hint">No staff attribution yet — set Primary Therapist / Case Manager on Care Cards (or sync Kipu).</div>';
   $('anTher').innerHTML = staffTable(a.byTherapist);
@@ -2849,7 +2849,7 @@ async function loadPlan(){
     <div class="hint" style="margin-top:2px">${d.counts.done}/${d.counts.total} steps done · ${d.counts.openNow} open now</div>`;
   const bl=m.belonging||{};
   $('planMetrics').innerHTML=`
-    <div class="ret-card ${bl.avg!=null&&bl.avg<3.5?'rc-high':''}"><div class="n">${bl.avg==null?'—':bl.avg+'/5'}</div><div class="l">Belonging pulse${bl.n?' ('+bl.n+')':''}</div></div>
+    <div class="ret-card ${bl.avg!=null&&bl.avg<7?'rc-high':''}"><div class="n">${bl.avg==null?'—':bl.avg+'/10'}</div><div class="l">Belonging pulse${bl.n?' ('+bl.n+')':''}</div></div>
     <div class="ret-card ${m.weekendRate!=null&&m.weekdayRate!=null&&m.weekendRate>m.weekdayRate?'rc-high':''}"><div class="n">${m.weekendRate==null?'—':m.weekendRate+'%'}</div><div class="l">Weekend AMA rate (90d)</div></div>
     <div class="ret-card"><div class="n">${m.weekdayRate==null?'—':m.weekdayRate+'%'}</div><div class="l">Weekday AMA rate</div></div>
     <div class="ret-card"><div class="n">${m.census}</div><div class="l">Census (toward 30)</div></div>
@@ -4069,7 +4069,7 @@ async function openHireRole(roleEnc){
   const byStage={}; HIRE.stages.forEach(s=>byStage[s]=[]); HIRE.cands.forEach(c=>{ (byStage[c.stage]=byStage[c.stage]||[]).push(c); });
   const pipe=HIRE.stages.map(s=>{ const list=byStage[s]||[]; if(!list.length && s==='Passed') return '';
     return `<div style="margin-bottom:10px"><div style="font-weight:700;color:var(--navy);font-size:12.5px;border-bottom:1px solid var(--line);padding-bottom:3px;margin-bottom:5px">${esc(s)} <span class="hint">(${list.length})</span></div>
-    ${list.map(c=>`<div class="cmd-row" style="cursor:pointer" onclick="openCandidate(${c.id})"><div class="cmd-row-main"><b>${esc(c.name)}</b>${c.rating?` <span class="hint">· ${'★'.repeat(c.rating)}</span>`:''}${c.email?`<span class="hint"> · ${esc(c.email)}</span>`:''}</div></div>`).join('')||'<div class="hint" style="font-size:12px">—</div>'}</div>`;
+    ${list.map(c=>`<div class="cmd-row" style="cursor:pointer" onclick="openCandidate(${c.id})"><div class="cmd-row-main"><b>${esc(c.name)}</b>${c.rating?` <span class="hint">· ★ ${c.rating}/10</span>`:''}${c.email?`<span class="hint"> · ${esc(c.email)}</span>`:''}</div></div>`).join('')||'<div class="hint" style="font-size:12px">—</div>'}</div>`;
   }).join('');
   el.innerHTML=`
     <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-ghost btn-sm sans" onclick="loadHiring('${HIRE.side}','${HIRE.mount}')">← All roles</button></div>
@@ -4140,11 +4140,11 @@ function addCandidate(){
 function openCandidate(id){
   const c=(HIRE.cands||[]).find(x=>x.id===id); if(!c) return; const p=HIRE.profile; const scores=c.scores||{};
   const qRows=p.qualities.map(q=>`<div class="cmd-row"><div class="cmd-row-main">${esc(q.name)}</div>
-    <select class="cand-score" data-q="${esc(q.name)}" style="width:auto"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${String(scores[q.name])===String(n)?'selected':''}>${n}</option>`).join('')}</select></div>`).join('');
+    <select class="cand-score" data-q="${esc(q.name)}" style="width:auto"><option value="">—</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${String(scores[q.name])===String(n)?'selected':''}>${n}</option>`).join('')}</select></div>`).join('');
   const save=hmodal(`<h3>${esc(c.name)} <span class="hint" style="font-weight:400">· ${esc(c.role)}</span></h3>
     ${c.email?`<div class="hint">${esc(c.email)}${c.phone?' · '+esc(c.phone):''}${c.source?' · via '+esc(c.source):''}</div>`:''}
     <label style="margin-top:8px">Stage</label><select id="cd_stage">${HIRE.stages.map(s=>`<option ${c.stage===s?'selected':''}>${s}</option>`).join('')}</select>
-    <h3 style="margin-top:12px;font-size:13px">Score against the defining qualities (1–5)</h3>${qRows}
+    <h3 style="margin-top:12px;font-size:13px">Score against the defining qualities (1–10)</h3>${qRows}
     <label style="margin-top:10px">Interview notes</label><textarea id="cd_notes" rows="3">${esc(c.notes||'')}</textarea>
     <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-weight:500;margin-top:10px"><input type="checkbox" id="cd_invite" style="width:auto"/> On hire, email them a sign-up invite</label>
     <div class="toolbar" style="margin-top:6px;gap:6px"><button class="btn btn-danger btn-sm sans" onclick="delCandidate(${c.id})">Delete</button><button class="btn btn-primary btn-sm sans" onclick="hireCandidate(${c.id})">✓ Hire</button></div>`);
@@ -4605,8 +4605,8 @@ function mealCard(m,d){
       <div class="field"><label>Time served ⏰ — serve on time; respecting their time respects them${m.target?` (target ${esc(m.target)})`:''}</label><input type="time" id="meal_served_${m.meal}" value="${esc(m.served_at||'')}"/></div>
       <label>Food groups delivered <span class="hint">(* = required for a complete plate)</span></label>
       <div id="meal_grps_${m.meal}" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px">${groupChips}</div>
-      <label>Quality rating ⭐ — rate every meal so we hold quality</label>
-      <div id="meal_q_${m.meal}" class="meal-stars" data-val="${m.quality||''}" style="margin:4px 0 12px">${[1,2,3,4,5].map(star).join('')}</div>
+      <label>Quality rating ⭐ — rate every meal 1–10 so we hold quality</label>
+      <div id="meal_q_${m.meal}" class="meal-stars" data-val="${m.quality||''}" style="margin:4px 0 12px;flex-wrap:wrap">${[1,2,3,4,5,6,7,8,9,10].map(star).join('')}</div>
       <label>Did clients like it?</label>
       <div id="meal_like_${m.meal}" style="display:flex;gap:6px;margin:4px 0 12px">${likeBtn('Liked','👍 Liked')}${likeBtn('OK','😐 OK')}${likeBtn('Disliked','👎 No')}</div>
       <div class="field"><label>Issues / what was missing (optional)</label><textarea id="meal_iss_${m.meal}" rows="2" placeholder="e.g. only 18 trays for 22 · no vegetable · chicken undercooked">${esc(m.issues||'')}</textarea></div>
@@ -4656,7 +4656,7 @@ async function loadMealsScore(){
   $('mealsScore').innerHTML = `<div class="ret-cards">
       <div class="ret-card ${s.completePct!=null&&s.completePct<90?'rc-warn':''}"><div class="n">${s.completePct!=null?s.completePct+'%':'—'}</div><div class="l">Met the standard</div></div>
       <div class="ret-card ${s.onTimePct!=null&&s.onTimePct<90?'rc-warn':''}"><div class="n">${s.onTimePct!=null?s.onTimePct+'%':'—'}</div><div class="l">Served on time</div></div>
-      <div class="ret-card"><div class="n">${s.qualityAvg!=null?s.qualityAvg+'★':'—'}</div><div class="l">Avg quality (1–5)</div></div>
+      <div class="ret-card"><div class="n">${s.qualityAvg!=null?s.qualityAvg+'/10':'—'}</div><div class="l">Avg quality (1–10)</div></div>
       <div class="ret-card"><div class="n">${s.likedPct!=null?s.likedPct+'%':'—'}</div><div class="l">Clients liked it</div></div>
       <div class="ret-card ${s.shortCount?'rc-high':''}"><div class="n">${s.shortCount}</div><div class="l">Short deliveries</div></div>
       <div class="ret-card"><div class="n">${s.logged}</div><div class="l">Meals inspected</div></div>
@@ -5623,11 +5623,11 @@ async function loadClientVoice(){
   updateCvBadge(0);   // opening it clears the "new" badge
   const k=d.kpi||{};
   if($('cvKpis')) $('cvKpis').innerHTML=`<div class="ret-card ${k.openReach?'rc-warn':''}"><div class="n">${k.openReach}</div><div class="l">Open reach-outs</div></div>
-    <div class="ret-card"><div class="n">${k.expScore!=null?k.expScore+'/5':'—'}</div><div class="l">Experience (30d)</div></div>
+    <div class="ret-card"><div class="n">${k.expScore!=null?k.expScore+'/10':'—'}</div><div class="l">Experience (30d)</div></div>
     <div class="ret-card"><div class="n">${k.mealLiked!=null?k.mealLiked+'%':'—'}</div><div class="l">Liked meals (14d)</div></div>`;
   const reach=(d.reachouts||[]).map(r=>`<div class="todo ${r.status==='Done'?'done':''}"><div class="txt">${r.priority==='Urgent'?'🔴 ':'🗣 '}<strong>${esc(r.pref||r.name||'A client')}</strong> — ${esc(r.text)}<div class="hint">${esc(r.at)} · ${esc(r.status)}</div></div>${r.status!=='Done'?`<button class="btn btn-ghost btn-sm sans" onclick="show('concierge')">Open</button>`:''}</div>`).join('')||'<div class="hint">No kiosk reach-outs.</div>';
   const sugg=(d.suggestions||[]).map(s=>`<div class="pc-note">💡 ${esc(s.text)} <span class="hint">— ${esc(s.pref||'anonymous')}, ${esc(s.at)}</span></div>`).join('')||'<div class="hint">No suggestions yet.</div>';
-  const surv=(d.surveys||[]).map(s=>`<div class="pc-note">${s.score!=null?'⭐ <strong>'+s.score+'/5</strong> ':''}${s.comments?'“'+esc(s.comments)+'”':'<span class="hint">(no comment)</span>'} <span class="hint">— ${esc(s.pref||s.name||'a client')}, ${esc(s.at)}</span></div>`).join('')||'<div class="hint">No survey responses in 30 days.</div>';
+  const surv=(d.surveys||[]).map(s=>`<div class="pc-note">${s.score!=null?'⭐ <strong>'+s.score+'/10</strong> ':''}${s.comments?'“'+esc(s.comments)+'”':'<span class="hint">(no comment)</span>'} <span class="hint">— ${esc(s.pref||s.name||'a client')}, ${esc(s.at)}</span></div>`).join('')||'<div class="hint">No survey responses in 30 days.</div>';
   const meals=(d.meals||[]).map(m=>`<div class="pc-note">🍽 “${esc(m.comment)}” <span class="hint">— ${esc(m.pref||'a resident')} · ${esc(m.meal)} ${esc(m.meal_date)}${m.dish?' ('+esc(m.dish)+')':''}</span></div>`).join('')||'<div class="hint">No meal comments in 14 days.</div>';
   if($('cvBody')) $('cvBody').innerHTML=`<div class="card"><h3>🗣 Reach-outs &amp; requests</h3>${reach}</div>
     <div class="card"><h3>💡 Suggestions</h3>${sugg}</div>
@@ -6104,7 +6104,7 @@ async function loadWorkplace(){
   const bl=d.belonging||{};
   const blArrow = (bl.avg!=null&&bl.prevAvg!=null) ? (bl.avg>bl.prevAvg?' ↑':bl.avg<bl.prevAvg?' ↓':'') : '';
   $('wpKpis').innerHTML=`
-    <div class="ret-card ${bl.avg!=null&&bl.avg<3.5?'rc-high':''}"><div class="n">${bl.avg==null?'—':bl.avg+'/5'}${blArrow}</div><div class="l">Belonging${bl.n?' ('+bl.n+')':''}</div></div>
+    <div class="ret-card ${bl.avg!=null&&bl.avg<7?'rc-high':''}"><div class="n">${bl.avg==null?'—':bl.avg+'/10'}${blArrow}</div><div class="l">Belonging${bl.n?' ('+bl.n+')':''}</div></div>
     <div class="ret-card ${d.morale!=null&&d.morale<60?'rc-high':''}"><div class="n">${d.morale==null?'—':d.morale}</div><div class="l">Morale ${d.morale!=null?'('+moraleLabel+')':''}</div></div>
     <div class="ret-card"><div class="n">${d.recognitionsWeek}</div><div class="l">Recognitions this week</div></div>
     <div class="ret-card ${d.callOffsWeek?'rc-warn':''}"><div class="n">${d.callOffsWeek}</div><div class="l">Call-offs this week</div></div>
@@ -6190,7 +6190,7 @@ function renderBelonging(){
   BELONG={};
   box.innerHTML = BELONG_Q.map((q,i)=>{ const qi='q'+(i+1);
     return `<div style="margin:8px 0"><div class="sans" style="font-size:13px;margin-bottom:4px">${esc(q)}</div>
-      <div data-q="${qi}" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${[1,2,3,4,5].map(n=>`<button type="button" class="btn btn-ghost btn-sm sans bl-b" onclick="pickBelong('${qi}',${n},this)">${n}</button>`).join('')}<span class="hint" style="margin-left:6px">1 = strongly disagree · 5 = strongly agree</span></div></div>`;
+      <div data-q="${qi}" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button type="button" class="btn btn-ghost btn-sm sans bl-b" onclick="pickBelong('${qi}',${n},this)">${n}</button>`).join('')}<span class="hint" style="margin-left:6px">1 = strongly disagree · 10 = strongly agree</span></div></div>`;
   }).join('');
 }
 function pickBelong(q,n,btn){ BELONG[q]=n; [...btn.parentElement.querySelectorAll('.bl-b')].forEach(b=>b.classList.remove('btn-gold')); btn.classList.add('btn-gold'); }

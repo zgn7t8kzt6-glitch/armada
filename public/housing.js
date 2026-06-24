@@ -1156,7 +1156,7 @@ async function orderStatus(id,status){ if(status==='received'&&!confirm('Receive
 /* ============================ ACTIVITIES & ENGAGEMENT ============================ */
 let ACT_CAT=null;
 function setActTab(t){ HOUSING.actTab=t; document.querySelectorAll('#actSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); loadActivities(); }
-function actStars(n){ n=+n||0; return '★★★★★'.slice(0,n)+'<span style="color:#cdd5cf">'+'★★★★★'.slice(0,5-n)+'</span>'; }
+function actStars(n){ n=Math.max(0,Math.min(10,+n||0)); return `<b>★ ${n}/10</b>`; }
 const ACT_DIMCOLOR={Physical:'#5fb0c2',Social:'#c89b3c',Emotional:'#a86b8c',Spiritual:'#7d6ba8',Intellectual:'#5f86c2',Occupational:'#5fa37a',Environmental:'#7d9b6a',Financial:'#b3784a',Recreational:'#c06a52'};
 function actDimChip(d){ const c=ACT_DIMCOLOR[d]||'#6f7a75'; return d?`<span class="loc-pill" style="background:${c}">${esc(d)}</span>`:''; }
 async function loadActivities(){
@@ -1251,7 +1251,7 @@ async function actCatalog(){ if(!ACT_CAT){ try{ ACT_CAT=await api('/housing/acti
 async function openActPlan(catalogId){
   await actCatalog(); await hMeta();
   const houses=await api('/housing/houses').catch(()=>[]);
-  const catOpts=ACT_CAT.catalog.map(c=>`<option value="${c.id}" ${String(catalogId)===String(c.id)?'selected':''}>${esc(c.name)} — ${esc(c.dimension)} (${'★'.repeat(c.effectiveness)})</option>`).join('');
+  const catOpts=ACT_CAT.catalog.map(c=>`<option value="${c.id}" ${String(catalogId)===String(c.id)?'selected':''}>${esc(c.name)} — ${esc(c.dimension)} (★${c.effectiveness}/10)</option>`).join('');
   const houseOpts=houses.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('');
   const save=hmodal(`<h3>Plan an activity</h3>
     <label>From the idea library</label><select id="ap_cat"><option value="">— custom (type your own) —</option>${catOpts}</select>
@@ -1301,7 +1301,7 @@ function openActFeedback(id){
 async function loadActCatalog(){
   const d=await actCatalog();
   $('actKpis').innerHTML=`<div class="ret-card"><div class="n">${d.catalog.length}</div><div class="l">Activity ideas</div></div>
-    <div class="ret-card"><div class="n">${d.catalog.filter(c=>c.effectiveness>=5).length}</div><div class="l">Top-rated (★5)</div></div>`;
+    <div class="ret-card"><div class="n">${d.catalog.filter(c=>c.effectiveness>=8).length}</div><div class="l">Top-rated (8+/10)</div></div>`;
   const byDim={}; d.catalog.forEach(c=>{ (byDim[c.dimension]=byDim[c.dimension]||[]).push(c); });
   const body=Object.keys(byDim).map(dim=>`<div style="margin-bottom:16px"><div style="margin-bottom:6px">${actDimChip(dim)}</div>
     <div class="r360-grid">${byDim[dim].map(c=>`<div class="card" style="padding:12px">

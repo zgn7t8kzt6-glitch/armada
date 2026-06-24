@@ -264,11 +264,11 @@ CREATE TABLE IF NOT EXISTS plan_progress (
   done_by TEXT,
   note TEXT
 );
--- Belonging pulse (the plan's leading indicator): 3 anonymous 1-5 ratings —
+-- Belonging pulse (the plan's leading indicator): 3 anonymous 1-10 ratings —
 -- "I feel part of something here / My input is heard / I'm treated with respect."
 CREATE TABLE IF NOT EXISTS belonging_pulses (
   id INTEGER PRIMARY KEY,
-  q1 INTEGER, q2 INTEGER, q3 INTEGER,        -- 1-5 each
+  q1 INTEGER, q2 INTEGER, q3 INTEGER,        -- 1-10 each
   note TEXT,
   weekend INTEGER NOT NULL DEFAULT 0,        -- submitted on a weekend (weekend-staff signal)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -929,7 +929,7 @@ CREATE TABLE IF NOT EXISTS meal_checks (
   received INTEGER,                         -- portions actually delivered
   groups TEXT,                              -- JSON array of food groups present
   liked TEXT,                               -- Liked | OK | Disliked
-  quality INTEGER,                          -- 1–5 (optional)
+  quality INTEGER,                          -- 1–10 (optional)
   issues TEXT,                              -- what was wrong / missing
   photo TEXT,                               -- optional delivery photo (data URL)
   complete INTEGER NOT NULL DEFAULT 0,      -- 1 = met portions + all required groups
@@ -1461,6 +1461,29 @@ CREATE TABLE IF NOT EXISTS growth_checkins (
   by_name TEXT, self INTEGER DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// ── ONE-TIME MIGRATION: 1–5 rating scales → app-wide 1–10 scale ──
+// Every numeric rating moved from a five-point to a ten-point scale. Old data was
+// stored on 1–5, so we double it (×2) — this preserves every historical proportion
+// exactly (4/5 = 80% becomes 8/10 = 80%), so averages and trends stay correct.
+// Guarded by PRAGMA user_version so it runs exactly once per database.
+try {
+  const uvRow = db.prepare('PRAGMA user_version').get();
+  const uv = uvRow ? (uvRow.user_version != null ? uvRow.user_version : Object.values(uvRow)[0]) : 0;
+  if (!uv || uv < 1) {
+    const run = (sql) => { try { db.prepare(sql).run(); } catch (e) { console.error('[scale10]', e.message); } };
+    run(`UPDATE belonging_pulses SET q1=q1*2, q2=q2*2, q3=q3*2 WHERE q1<=5 OR q2<=5 OR q3<=5`);
+    run(`UPDATE meal_checks SET quality=quality*2 WHERE quality IS NOT NULL AND quality<=5`);
+    run(`UPDATE client_experience SET cared=cared*2 WHERE cared IS NOT NULL AND cared<=5`);
+    run(`UPDATE candidates SET rating=rating*2 WHERE rating IS NOT NULL AND rating<=5`);
+    // Candidate per-quality scores live in a JSON column — double each numeric value.
+    try {
+      const rows = db.prepare(`SELECT id, scores FROM candidates WHERE scores IS NOT NULL AND scores != ''`).all();
+      const upd = db.prepare(`UPDATE candidates SET scores=? WHERE id=?`);
+      for (const r of rows) { try { const o = JSON.parse(r.scores); let ch = false; for (const k in o) { if (typeof o[k] === 'number' && o[k] <= 5) { o[k] = o[k] * 2; ch = true; } } if (ch) upd.run(JSON.stringify(o), r.id); } catch {} }
+    } catch (e) { console.error('[scale10 scores]', e.message); }
+    db.exec('PRAGMA user_version = 1');
+  }
+} catch (e) { console.error('[scale10 migration]', e.message); }
 // LAUNDRY — track every load through washing → drying → folding → done so nothing
 // sits wet or gets lost. Simple operational board (like bed turnover).
 db.exec(`CREATE TABLE IF NOT EXISTS laundry_loads (

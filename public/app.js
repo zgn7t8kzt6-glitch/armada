@@ -5293,12 +5293,10 @@ async function loadEmployees(){
   let d; try{ d=await api('/team-stats'); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
   if(!d.team.length){ host.innerHTML='<div class="card"><div class="empty">No staff activity yet this week.</div></div>'; return; }
   const arrow=t=> t==null?'<span class="hint">–</span>':t>0?`<span style="color:var(--good)">▲ ${t}</span>`:t<0?`<span style="color:var(--danger)">▼ ${-t}</span>`:'<span class="hint">– even</span>';
-  const watch=d.team.filter(t=>t.integrityWatch);
-  const watchBanner = watch.length ? `<div class="card" style="border-left:4px solid var(--danger);background:#fff8f7"><h3 style="margin:0 0 4px;color:#b3382f">🔒 Integrity watch <span class="badge">${watch.length}</span></h3><p class="sub sans" style="margin:0">Low Honesty-Humility on their personality read — keep the dual-control cash/valuables rules tight with: <b>${watch.map(t=>esc(t.name)).join(', ')}</b>. Private to leadership; nothing shows on their end.</p></div>` : '';
-  host.innerHTML=watchBanner+`<div class="card"><div style="overflow-x:auto"><table class="tbl" style="width:100%">
+  host.innerHTML=`<div class="card"><div style="overflow-x:auto"><table class="tbl" style="width:100%">
     <tr><th>Employee</th><th>Role</th><th>Overall</th><th>Trend</th><th>💪 Excelling</th><th>🎯 Needs work</th><th>Shifts</th></tr>
     ${d.team.map(t=>`<tr style="cursor:pointer" onclick="openEmployeeProfile(${t.id}, ${JSON.stringify(t.name).replace(/"/g,'&quot;')})">
-      <td><strong>${esc(t.name)}</strong>${t.integrityWatch?' <span title="Integrity watch" style="color:var(--danger)">🔒</span>':''}</td><td class="hint">${esc(t.role||'')}</td>
+      <td><strong>${esc(t.name)}</strong></td><td class="hint">${esc(t.role||'')}</td>
       <td><strong style="color:${statCol(t.overall)}">${t.overall==null?'—':t.overall+'%'}</strong>${t.flagged7?' <span class="hint" title="rounds flagged">⚠'+t.flagged7+'</span>':''}</td>
       <td>${arrow(t.trend)}</td>
       <td style="color:var(--good);font-size:13px">${(t.strong||[]).join(', ')||'—'}</td>

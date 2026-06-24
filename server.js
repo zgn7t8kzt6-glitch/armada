@@ -3291,6 +3291,26 @@ const DISC_GUIDE = {
   C: { name: 'Conscientious (C)', blurb: 'Precise, analytical, high standards.', appreciate: 'Recognize the quality and accuracy of their work; specifics matter.', strengths: 'Thorough, accurate, holds a high bar.', watch: 'Perfectionist; can be slow to decide.', lead: 'Give clear expectations and the data/why; value their precision.' },
 };
 function empDisc(uid) { try { const r = db.prepare(`SELECT disc FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.disc ? JSON.parse(r.disc) : null; } catch { return null; } }
+// Big Five + Honesty-Humility (HEXACO) — the scientifically validated model, using
+// free public-domain (IPIP) markers. 24 items, 4 per trait (r=reverse-scored).
+// For development & recognition — NOT a hiring test.
+const BIG5_Q = [
+  { k: 'C', t: 'Follows through and gets things done', r: 0 }, { k: 'C', t: 'Pays attention to the details', r: 0 }, { k: 'C', t: 'Leaves tasks unfinished', r: 1 }, { k: 'C', t: 'Is reliable — can be counted on', r: 0 },
+  { k: 'ES', t: 'Stays calm under pressure', r: 0 }, { k: 'ES', t: 'Rarely gets rattled or stressed', r: 0 }, { k: 'ES', t: 'Gets upset or overwhelmed easily', r: 1 }, { k: 'ES', t: 'Bounces back quickly after a hard moment', r: 0 },
+  { k: 'A', t: 'Is warm and caring with people', r: 0 }, { k: 'A', t: 'Feels and shows empathy for others', r: 0 }, { k: 'A', t: 'Can be cold or blunt with people', r: 1 }, { k: 'A', t: 'Goes out of the way to help', r: 0 },
+  { k: 'E', t: 'Is outgoing and talkative', r: 0 }, { k: 'E', t: 'Is energized by being around people', r: 0 }, { k: 'E', t: 'Is quiet and reserved', r: 1 }, { k: 'E', t: 'Takes the lead in a group', r: 0 },
+  { k: 'O', t: 'Is open to new ideas and ways of doing things', r: 0 }, { k: 'O', t: 'Is curious and likes to learn', r: 0 }, { k: 'O', t: 'Prefers routine and dislikes change', r: 1 }, { k: 'O', t: 'Finds creative solutions', r: 0 },
+  { k: 'H', t: 'Is honest even when no one is watching', r: 0 }, { k: 'H', t: "Would never take what isn't theirs", r: 0 }, { k: 'H', t: 'Bends the rules when it benefits them', r: 1 }, { k: 'H', t: 'Is humble and not out for personal gain', r: 0 },
+];
+const BIG5_GUIDE = {
+  C: { name: 'Conscientiousness', high: 'Reliable, organized, follows through — the backbone of safety rounds.', low: 'May cut corners or miss follow-through — give checklists and firm deadlines.', tip: 'Trust them with ownership; recognize their reliability by name.' },
+  ES: { name: 'Emotional stability', high: 'Calm under pressure; burnout-resistant.', low: 'Feels stress hard — protect from overload, check in often, reassure.', tip: 'Lean on the calm ones in a crisis; support the reactive ones privately.' },
+  A: { name: 'Warmth (agreeableness)', high: 'Caring and empathetic — clients feel it.', low: 'Can be blunt — coach bedside warmth.', tip: 'Put the warmest people with anxious or brand-new clients.' },
+  E: { name: 'Extraversion', high: 'Outgoing; energizes the floor.', low: 'Quieter — excellent 1:1 and focused work; quiet ≠ disengaged.', tip: 'Give extraverts visible/social roles; give introverts focus and private praise.' },
+  O: { name: 'Openness', high: 'Curious; adapts to change and new ideas.', low: 'Prefers routine — roll out change gradually and explain the why.', tip: 'Bring open people into improving processes.' },
+  H: { name: 'Honesty-Humility', high: 'Strong integrity — low risk of cutting corners. Trust with cash & keys.', low: 'Be vigilant around money/valuables — never solo on cash, always verify.', tip: 'Your best integrity signal — weight it heavily for cash-handling roles.' },
+};
+function empBig5(uid) { try { const r = db.prepare(`SELECT bigfive FROM employee_profiles WHERE user_id=?`).get(uid); return r && r.bigfive ? JSON.parse(r.bigfive) : null; } catch { return null; } }
 function empProfile(uid) { const r = db.prepare(`SELECT likes, personality, motivators, recognition, notes, updated_by, updated FROM employee_profiles WHERE user_id=?`).get(uid); return r || {}; }
 app.get('/api/employee/:id/profile', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
@@ -3299,8 +3319,22 @@ app.get('/api/employee/:id/profile', requireAuth, (req, res) => {
   const s = userStats(u); const prev = prevOverall(u);
   const notes = db.prepare(`SELECT note, by_name, substr(created_at,1,16) at FROM employee_notes WHERE user_id=? ORDER BY id DESC LIMIT 50`).all(u.id);
   const wows90 = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize=? AND created_at>=datetime('now','-90 day')`).get(u.name).n;
-  const disc = empDisc(u.id);
-  res.json({ user: { id: u.id, name: u.name, role: u.job_role || '' }, profile: empProfile(u.id), notes, wows90, disc, discGuide: disc ? DISC_GUIDE[disc.primary] : null, discQuestions: DISC_Q, stats: { ...s, trend: (s.overall != null && prev != null) ? s.overall - prev : null }, aiReady: claudeConfigured() });
+  const disc = empDisc(u.id); const bigfive = empBig5(u.id);
+  res.json({ user: { id: u.id, name: u.name, role: u.job_role || '' }, profile: empProfile(u.id), notes, wows90, disc, discGuide: disc ? DISC_GUIDE[disc.primary] : null, discQuestions: DISC_Q, bigfive, big5Guide: BIG5_GUIDE, big5Questions: BIG5_Q, stats: { ...s, trend: (s.overall != null && prev != null) ? s.overall - prev : null }, aiReady: claudeConfigured() });
+});
+app.post('/api/employee/:id/bigfive', requireAuth, (req, res) => {
+  if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const ans = req.body?.answers || {}; const sum = {}, cnt = {};
+  ['C', 'ES', 'A', 'E', 'O', 'H'].forEach((k) => { sum[k] = 0; cnt[k] = 0; });
+  BIG5_Q.forEach((q, i) => { const v = +ans[i]; if (v >= 1 && v <= 5) { sum[q.k] += q.r ? (6 - v) : v; cnt[q.k]++; } });
+  if (Object.values(cnt).some((c) => c < 1)) return res.status(400).json({ error: 'Answer all the questions.' });
+  const out = { at: new Date().toISOString().slice(0, 10), by: req.user.name };
+  ['C', 'ES', 'A', 'E', 'O', 'H'].forEach((k) => { out[k] = Math.round(sum[k] / (cnt[k] * 5) * 100); });
+  const uid = +req.params.id;
+  const ex = db.prepare(`SELECT user_id FROM employee_profiles WHERE user_id=?`).get(uid);
+  if (ex) db.prepare(`UPDATE employee_profiles SET bigfive=? WHERE user_id=?`).run(JSON.stringify(out), uid);
+  else db.prepare(`INSERT INTO employee_profiles (user_id, bigfive) VALUES (?,?)`).run(uid, JSON.stringify(out));
+  res.json({ ok: true, bigfive: out });
 });
 app.post('/api/employee/:id/disc', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
@@ -3342,10 +3376,11 @@ app.post('/api/employee/:id/coach', requireAuth, async (req, res) => {
   const improve = s.required.filter((r) => r.pct != null && r.pct < 70).map((r) => r.label);
   const wows90 = db.prepare(`SELECT COUNT(*) n FROM wows WHERE recognize=? AND created_at>=datetime('now','-90 day')`).get(u.name).n;
   const log = db.prepare(`SELECT note FROM employee_notes WHERE user_id=? ORDER BY id DESC LIMIT 10`).all(u.id).map((n) => n.note);
-  const disc = empDisc(u.id);
+  const disc = empDisc(u.id); const b5 = empBig5(u.id);
   const ctx = [
     `Employee: ${u.name} — ${u.job_role || 'staff'}`,
     disc ? `Personality (DISC): ${DISC_GUIDE[disc.primary].name} primary / ${DISC_GUIDE[disc.secondary].name} secondary. They appreciate: ${DISC_GUIDE[disc.primary].appreciate}` : '',
+    b5 ? `Big Five + Honesty-Humility (0-100): Conscientiousness ${b5.C}, Emotional stability ${b5.ES}, Warmth ${b5.A}, Extraversion ${b5.E}, Openness ${b5.O}, Honesty-Humility ${b5.H}. Higher = stronger.` : '',
     `Overall performance this week: ${s.overall != null ? s.overall + '%' : 'n/a'} (trend ${prev != null && s.overall != null ? (s.overall - prev >= 0 ? '+' : '') + (s.overall - prev) : 'n/a'} vs last week)`,
     `Excelling at: ${strong.join(', ') || '—'}`,
     `Needs development: ${improve.join(', ') || '—'}`,

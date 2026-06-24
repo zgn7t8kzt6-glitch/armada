@@ -5308,8 +5308,13 @@ let EMP_CUR=null;
 async function openEmployeeProfile(id, name){
   EMP_CUR={id,name};
   let d; try{ d=await api('/employee/'+id+'/profile'); }catch(e){ alert(e.message); return; }
-  EMP_CUR.questions=d.discQuestions||[];
+  EMP_CUR.questions=d.discQuestions||[]; EMP_CUR.big5Questions=d.big5Questions||[];
   const s=d.stats||{}, p=d.profile||{};
+  const b5=d.bigfive, bg=d.big5Guide||{};
+  const trait=k=>{ const v=b5[k]; const g=bg[k]||{}; const read=v>=70?g.high:v<=40?g.low:''; return `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13.5px"><span>${esc(g.name||k)}</span><strong>${v}</strong></div><div class="res-track" style="height:7px;margin:3px 0"><div class="res-fill" style="width:${v}%"></div></div>${read?`<div class="hint" style="font-size:12.5px">${esc(read)}</div>`:''}</div>`; };
+  const big5Html = b5
+    ? `<div class="card" style="margin:10px 0 0"><div class="cmd-hero-row"><div><h3 style="margin:0">🔬 Personality (Big Five + Integrity)</h3><p class="sub sans" style="margin:0">The scientific read — for development &amp; recognition.</p></div><button class="btn btn-ghost btn-sm sans" onclick="big5Assess(${id})">Retake</button></div>${['C','ES','A','E','O','H'].map(trait).join('')}</div>`
+    : `<div class="card" style="margin:10px 0 0;background:#f4f8f4;border-left:4px solid var(--good)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔬 Personality (Big Five + Integrity)</h3><p class="sub sans" style="margin:0">The scientifically validated read — reliability, stability, warmth, openness, extraversion &amp; integrity.</p></div><button class="btn btn-gold btn-sm sans" onclick="big5Assess(${id})">Take assessment</button></div></div>`;
   const disc=d.disc, gg=d.discGuide;
   const discHtml = (disc&&gg)
     ? `<div class="card" style="margin:10px 0 0"><div class="cmd-hero-row"><div><h3 style="margin:0">🧭 Personality — ${esc(gg.name)}</h3><p class="sub sans" style="margin:0">${esc(gg.blurb)}</p></div><button class="btn btn-ghost btn-sm sans" onclick="discAssess(${id})">Retake</button></div>
@@ -5326,6 +5331,7 @@ async function openEmployeeProfile(id, name){
     <div style="text-align:center;margin:4px 0 8px"><div style="font-size:30px;font-weight:700;color:${statCol(s.overall)}">${s.overall==null?'—':s.overall+'%'}</div><div class="hint">${s.shifts7||0} shift${s.shifts7===1?'':'s'} this week${s.trend!=null?trendStr(s.trend):''} · ${d.wows90||0} Wows (90d)</div>
       ${strong.length?`<div class="pc-note" style="color:var(--good);margin-top:6px">💪 ${strong.map(esc).join(', ')}</div>`:''}${improve.length?`<div class="pc-note" style="color:var(--danger);margin-top:4px">🎯 ${improve.map(esc).join(', ')}</div>`:''}</div>
     <div class="card" style="background:#faf6ee;border-left:4px solid var(--gold);margin:0"><div class="cmd-hero-row"><div><h3 style="margin:0">✦ How Horst would lead ${first}</h3></div>${d.aiReady?`<button class="btn btn-gold btn-sm sans" onclick="coachEmployee(${id})">Generate</button>`:''}</div><div id="empCoach" class="sans" style="margin-top:8px;font-size:14px;line-height:1.5">${d.aiReady?'<span class="hint">Tap Generate for personalized coaching from their profile + numbers.</span>':'<span class="hint">AI not configured.</span>'}</div></div>
+    ${big5Html}
     ${discHtml}
     <h3 style="font-size:13px;margin-top:14px">Their profile <span class="hint" style="font-weight:400">— only leadership sees this</span></h3>
     ${fld('ep_likes','What they like / interests',p.likes,'coffee black, their dog Max, weekend fisherman…')}
@@ -5354,6 +5360,18 @@ async function submitDisc(id){
   (EMP_CUR.questions||[]).forEach((q,i)=>{ const v=($('disc_'+i)||{}).value; if(!v) missing=true; answers[i]=v; });
   if(missing){ alert('Please rate every statement.'); return; }
   try{ await api('/employee/'+id+'/disc',{method:'POST',body:JSON.stringify({answers})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); }
+}
+function big5Assess(id){
+  const qs=(EMP_CUR&&EMP_CUR.big5Questions)||[];
+  if(!qs.length){ alert('Reopen the profile and try again.'); return; }
+  const rows=qs.map((q,i)=>`<div style="display:flex;align-items:center;gap:10px;margin:8px 0"><div style="flex:1;font-size:14px">${esc(q.t)}</div><select id="b5_${i}" style="width:auto"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div>`).join('');
+  hmodalPlain(`<h3>Personality read — Big Five + Integrity</h3><p class="sub sans">Rate each 1 (not like them) – 5 (very like them). Most accurate if they self-rate. For development &amp; recognition — not a hiring test.</p><div style="max-height:60vh;overflow:auto">${rows}</div><div class="toolbar" style="margin-top:12px;justify-content:space-between"><button class="btn btn-ghost sans" onclick="openEmployeeProfile(${id}, EMP_CUR&&EMP_CUR.name)">Back</button><button class="btn btn-gold sans" onclick="submitBig5(${id})">See result</button></div>`);
+}
+async function submitBig5(id){
+  const answers={}; let missing=false;
+  (EMP_CUR.big5Questions||[]).forEach((q,i)=>{ const v=($('b5_'+i)||{}).value; if(!v) missing=true; answers[i]=v; });
+  if(missing){ alert('Please rate every statement.'); return; }
+  try{ await api('/employee/'+id+'/bigfive',{method:'POST',body:JSON.stringify({answers})}); openEmployeeProfile(id, EMP_CUR&&EMP_CUR.name); }catch(e){ alert(e.message); }
 }
 async function loadTeamStats(){
   const host=$('teamStats'); if(!host) return;

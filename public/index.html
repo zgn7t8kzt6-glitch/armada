@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624U" />
+<link rel="stylesheet" href="/styles.css?v=20260624V" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -70,7 +70,7 @@
     <button data-view="scorecard" data-subview>Scorecard</button>
     <button data-view="lineup" data-subview>Lineup</button>
     <button data-view="surveys" data-subview>Surveys</button>
-    <button data-view="clientvoice">Client Voice</button>
+    <button data-view="clientvoice">Client Voice <span id="cvBadge" class="badge-danger" style="display:none"></span></button>
     <button data-view="concierge">Concierge</button>
     <button data-view="dignity" data-subview>Dignity Kits</button>
     <button data-view="roundscan">Rounds</button>
@@ -981,7 +981,9 @@
     <!-- CASE MANAGEMENT -->
     <!-- DIGNITY KITS -->
     <section id="clientvoice" class="view">
-      <div class="card"><div class="cmd-hero-row"><div><h3>🗣 Client Voice</h3><p class="sub sans">Everything clients tell us from the kiosk — reach-outs, suggestions, experience surveys, and meal feedback — all in one place.</p></div><button class="btn btn-ghost sans" onclick="loadClientVoice()">Refresh</button></div><div id="cvKpis" class="ret-cards"></div></div>
+      <div class="card"><div class="cmd-hero-row"><div><h3>🗣 Client Voice</h3><p class="sub sans">Everything clients tell us from the kiosk — reach-outs, suggestions, experience surveys, and meal feedback — all in one place.</p></div>
+        <div class="toolbar" style="gap:6px"><div class="itabs" id="cvRange"><button class="itab" data-r="today" onclick="cvSetRange('today')">Today</button><button class="itab active" data-r="7" onclick="cvSetRange('7')">7 days</button><button class="itab" data-r="30" onclick="cvSetRange('30')">30 days</button><button class="itab" data-r="all" onclick="cvSetRange('all')">All</button></div></div></div>
+        <div id="cvKpis" class="ret-cards"></div></div>
       <div id="cvBody"></div>
     </section>
 
@@ -2559,7 +2561,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624U"></script>
-<script src="/housing.js?v=20260624U"></script>
+<script src="/app.js?v=20260624V"></script>
+<script src="/housing.js?v=20260624V"></script>
 </body>
 </html>

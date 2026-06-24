@@ -133,7 +133,10 @@ async function boot(){
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
   if(isLeadershipUser()){ pollWpBadge(); setInterval(pollWpBadge, 60000); }   // Best Place to Work attention badge
   if(canSeeView('concierge')){ if($('reqBell'))$('reqBell').style.display=''; pollReqBadge(); setInterval(pollReqBadge, 45000); }   // concierge request bell
+  if(canSeeView('clientvoice')){ pollCvBadge(); setInterval(pollCvBadge, 60000); }   // new kiosk feedback badge
 }
+function updateCvBadge(n){ const b=$('cvBadge'); if(!b) return; if(n>0){ b.textContent=n; b.style.display=''; } else { b.textContent=''; b.style.display='none'; } }
+async function pollCvBadge(){ try{ const {unseen}=await api('/client-voice/unseen'); updateCvBadge(unseen); }catch(e){} }
 // Hilltop and the detox/clinical side are two separate companies — never mix
 // their branding or tools. Hilltop-only staff see Hilltop branding and never the
 // detox client kiosk.
@@ -5325,8 +5328,11 @@ async function renderDashRole(){
     </div></details>`;
 }
 /* ---- Client Voice — all kiosk feedback in one place ---- */
+let CV_RANGE='7';
+function cvSetRange(r){ CV_RANGE=r; document.querySelectorAll('#cvRange .itab').forEach(b=>b.classList.toggle('active', b.dataset.r===r)); loadClientVoice(); }
 async function loadClientVoice(){
-  let d; try{ d=await api('/client-voice'); }catch(e){ if($('cvBody'))$('cvBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  let d; try{ d=await api('/client-voice?range='+CV_RANGE); }catch(e){ if($('cvBody'))$('cvBody').innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  updateCvBadge(0);   // opening it clears the "new" badge
   const k=d.kpi||{};
   if($('cvKpis')) $('cvKpis').innerHTML=`<div class="ret-card ${k.openReach?'rc-warn':''}"><div class="n">${k.openReach}</div><div class="l">Open reach-outs</div></div>
     <div class="ret-card"><div class="n">${k.expScore!=null?k.expScore+'/5':'—'}</div><div class="l">Experience (30d)</div></div>

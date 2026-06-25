@@ -2191,6 +2191,13 @@ async function renderArrivalChecklist(){
   const showAll = mgmt || ARR_SHOWALL || !myRoles.length;   // managers (or no role match) see the full checklist
   const roles = showAll ? d.roles : myRoles;
   const allItems=d.roles.flatMap(r=>r.items||[]); const overall=allItems.length?Math.round(allItems.filter(i=>i.done).length/allItems.length*100):0;
+  // "Done" should reflect THIS person's own arrival tasks — a front-desk worker is
+  // finished when their items are done, even if other roles' items are still open.
+  const myItems=myRoles.flatMap(r=>r.items||[]);
+  const worker=!mgmt && !showAll && myItems.length>0;
+  const scopeItems=worker?myItems:allItems;
+  const scopePct=scopeItems.length?Math.round(scopeItems.filter(i=>i.done).length/scopeItems.length*100):0;
+  const allDone=scopePct===100;
   const itemRow=(i)=>{
     if(i.gated){
       // Belongings — the critical one. No checkbox; only the signed form completes it.
@@ -2214,16 +2221,17 @@ async function renderArrivalChecklist(){
                    : `<button class="btn btn-ghost btn-sm sans no-print" onclick="ARR_SHOWALL=true;renderArrivalChecklist()">Show all roles</button>`) : '';
   $('arrDetail').innerHTML = `<div class="card">
     <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(d.client.name)}${d.client.room?' · '+esc(d.client.room):''}</h3>
-      <p class="sub sans" style="margin:2px 0 0">Arrival checklist · admitted ${esc(d.client.admit)} · <strong>${overall}% complete</strong></p></div>
-      <div class="toolbar" style="margin:0;gap:8px">${canSeeView('property')?`<button class="btn btn-gold btn-sm sans no-print" onclick="openBelongings(${d.client.id})">📦 Belongings form</button>`:''}${toggleBtn}<button class="btn btn-primary btn-sm sans no-print" onclick="closeArrival()">${overall===100?'✓ Done':'Done — back to arrivals'}</button></div></div>
-    <div class="res-track" style="height:7px;margin:8px 0 2px"><div class="res-fill" style="width:${overall}%"></div></div>
+      <p class="sub sans" style="margin:2px 0 0">Arrival checklist · admitted ${esc(d.client.admit)} · ${worker?`<strong>your tasks ${scopePct}%</strong> · overall ${overall}%`:`<strong>${overall}% complete</strong>`}</p></div>
+      <div class="toolbar" style="margin:0;gap:8px">${canSeeView('property')?`<button class="btn btn-gold btn-sm sans no-print" onclick="openBelongings(${d.client.id})">📦 Belongings form</button>`:''}${toggleBtn}<button class="btn btn-primary btn-sm sans no-print" onclick="closeArrival()">${allDone?'✓ Done — back':'Done — back to arrivals'}</button></div></div>
+    <div class="res-track" style="height:7px;margin:8px 0 2px"><div class="res-fill" style="width:${worker?scopePct:overall}%"></div></div>
     ${(!mgmt && !myRoles.length)?'<div class="pc-note" style="margin-top:8px">Nothing assigned to your role for this admit — showing the full checklist.</div>':''}
+    ${(allDone && worker)?`<div class="pc-note" style="margin-top:8px;color:var(--good);font-weight:600">✅ All your arrival tasks for ${esc((d.client.name||'').split(' ')[0]||'this client')} are done — tap Done to head back.</div>`:''}
     ${roles.map(roleBlock).join('')}
-    <div class="toolbar no-print" style="margin-top:14px"><button class="btn ${overall===100?'btn-primary':'btn-ghost'} sans" onclick="closeArrival()">${overall===100?'✓ Done — back to arrivals':'← Back to arrivals'}</button></div>
+    <div class="toolbar no-print" style="margin-top:14px"><button class="btn ${allDone?'btn-primary':'btn-ghost'} sans" style="${allDone?'font-size:16px;padding:12px 22px':''}" onclick="closeArrival()">${allDone?'✓ Done — back to arrivals':'← Back to arrivals'}</button></div>
   </div>`;
   $('arrDetail').scrollIntoView({behavior:'smooth',block:'start'});
 }
-function closeArrival(){ ARR_CID=null; const el=$('arrDetail'); if(el) el.innerHTML=''; const b=$('arrBoard'); if(b) b.scrollIntoView({behavior:'smooth',block:'start'}); }
+function closeArrival(){ ARR_CID=null; const el=$('arrDetail'); if(el) el.innerHTML=''; loadArrivalTasks(); const b=$('arrBoard'); if(b) b.scrollIntoView({behavior:'smooth',block:'start'}); }
 // Jump straight to a client's belongings (chain-of-custody) form.
 function openBelongings(cid){ show('property'); setTimeout(()=>openProperty(cid), 30); }
 async function toggleArrival(cid,iid,done){ try{ await api('/arrival/check',{method:'POST',body:JSON.stringify({client_id:cid,item_id:iid,done})}); renderArrivalChecklist(); loadArrivalTasks(); }catch(e){ alert(e.message); } }

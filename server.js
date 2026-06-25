@@ -4482,6 +4482,69 @@ function raffleWinnerLine() {
       <div style="margin-top:2px">Congratulations, ${htmlEsc(String(w.name).split(/\s+/)[0])}${prize}! Drawn from everyone who recognized a teammate — keep lifting each other up.</div>
     </div>`;
 }
+// A leadership-set "special recognition" spotlight for TODAY's lineup — recognize a
+// person by name with the specific moment they lived. Auto-clears the next day.
+function lineupSpotlightHtml() {
+  const text = (getState('lineup_spotlight') || '').trim();
+  if (!text || getState('lineup_spotlight_date') !== appToday()) return '';
+  const safe = htmlEsc(text).replace(/\n/g, '<br>');
+  return `<div style="margin:0 0 16px;padding:16px 18px;background:#fbf3da;border:2px solid #c8a44d;border-radius:6px">
+      <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#8a6d1f;font-weight:bold">🌟 Special recognition</div>
+      <div style="margin-top:6px;font-size:15px;line-height:1.55">${safe}</div>
+    </div>`;
+}
+// Client compliments — pulled automatically from every place clients speak (surveys,
+// the suggestion box, kiosk reach-outs, meal feedback), then filtered to ONLY the
+// genuinely kind, positive ones. The "purpose, made real" for the morning lineup.
+function complimentCandidates() {
+  const since = `datetime('now','-30 day')`;
+  const out = [];
+  const grab = (sql) => { try { db.prepare(sql).all().forEach((r) => { const t = String(r.t || '').trim(); if (t && t.length >= 4) out.push(t); }); } catch {} };
+  grab(`SELECT a.value_text t FROM survey_answers a JOIN survey_responses r ON r.id=a.response_id WHERE a.value_text IS NOT NULL AND TRIM(a.value_text)<>'' AND r.created_at>=${since} ORDER BY a.id DESC LIMIT 80`);
+  grab(`SELECT comment t FROM meal_feedback WHERE comment IS NOT NULL AND TRIM(comment)<>'' AND created_at>=${since} ORDER BY id DESC LIMIT 50`);
+  grab(`SELECT text t FROM requests WHERE created_by_name='Client (kiosk)' AND text IS NOT NULL AND TRIM(text)<>'' AND created_at>=${since} ORDER BY id DESC LIMIT 80`);
+  // De-dupe (case-insensitive), keep order, cap the pool.
+  const seen = new Set(), uniq = [];
+  for (const t of out) { const k = t.toLowerCase().slice(0, 80); if (!seen.has(k)) { seen.add(k); uniq.push(t); } }
+  return uniq.slice(0, 80);
+}
+// Fallback when AI isn't configured: keep only clearly positive lines, drop anything
+// that smells negative. Conservative on purpose — better to drop a good one than show a bad one.
+function heuristicCompliments(cands) {
+  const pos = /\b(thank|thanks|grateful|gratitude|appreciate|appreciated|amazing|wonderful|awesome|loved?|the best|kind(ness)?|caring|cares|compassion(ate)?|respect(ful)?|helpful|helped|saved|blessed|excellent|incredible|family|felt at home|comfortable|safe|changed my life|life ?saver)\b/i;
+  const neg = /\b(not|never|n't|rude|dirty|cold|nasty|worst|bad|horrible|awful|terrible|complain|complaint|waited|too long|slow|problem|issue|unfair|disrespect|ignored|hate|gross|uncomfortable|unsafe|disgusting|wish|should have|could have|lack|nobody|no one)\b/i;
+  return cands.filter((t) => pos.test(t) && !neg.test(t)).map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => t.length <= 200).slice(0, 10);
+}
+async function refreshLineupCompliments() {
+  const cands = complimentCandidates();
+  let items = [], aiOk = false;
+  if (cands.length && claudeConfigured()) {
+    try {
+      const ctx = cands.map((t, i) => `${i + 1}. ${t}`).join('\n');
+      const q = `Below are anonymous free-text comments clients left for an addiction-treatment center (from surveys, the suggestion box, meal feedback, and kiosk messages). Select ONLY the genuinely positive compliments and thank-yous about our staff, our care, or our home. STRICTLY EXCLUDE: complaints, criticism, anything negative or backhanded, neutral notes, requests/questions, and anything containing a client's own name or any private health detail. Lightly fix obvious typos and trim to one clean sentence each. Respond with ONLY a strict JSON array of strings (the cleaned compliment quotes), at most 8, each under 180 characters. If none qualify, respond with exactly [].`;
+      const raw = await askAssistant(q, ctx);
+      const m = String(raw || '').match(/\[[\s\S]*\]/);
+      if (m) { items = JSON.parse(m[0]).filter((s) => typeof s === 'string').map((s) => s.trim()).filter(Boolean).slice(0, 8); aiOk = true; }
+    } catch (e) { console.error('[compliments ai]', e.message); }
+  }
+  if (!aiOk) items = heuristicCompliments(cands);
+  setState('lineup_compliments', JSON.stringify({ date: appToday(), items }));
+  return items;
+}
+async function ensureComplimentsFresh() {
+  let c; try { c = JSON.parse(getState('lineup_compliments') || 'null'); } catch {}
+  if (!c || c.date !== appToday()) { try { await refreshLineupCompliments(); } catch (e) { console.error('[compliments]', e.message); } }
+}
+function lineupComplimentsHtml() {
+  let c; try { c = JSON.parse(getState('lineup_compliments') || 'null'); } catch {}
+  if (!c || c.date !== appToday() || !Array.isArray(c.items) || !c.items.length) return '';
+  const li = c.items.map((s) => `<li style="margin:5px 0">“${htmlEsc(String(s))}”</li>`).join('');
+  return `<div style="margin:16px 0;padding:12px 16px;background:#eef4fb;border-left:3px solid #2d6cb5;border-radius:4px">
+      <div style="font-weight:bold;color:#1f4e85;margin-bottom:4px">💬 In our clients' own words</div>
+      <ul style="margin:0;padding-left:20px;color:#333;font-style:italic">${li}</ul>
+      <div style="color:#999;font-size:11px;margin-top:6px;font-style:normal">Pulled automatically from this month's surveys, kiosk &amp; meal feedback — the purpose, made real.</div>
+    </div>`;
+}
 function buildLineupEmail() {
   const focus = effectiveFocus();
   const census = censusNow();
@@ -4494,6 +4557,8 @@ function buildLineupEmail() {
   const people = census === 1 ? 'person' : 'people';
   const chances = census === 1 ? 'chance' : 'chances';
   const recog = lineupRecognition();   // yesterday's shout-outs + extra-mile, by name
+  const spotlight = lineupSpotlightHtml();   // leadership's special recognition for today
+  const compliments = lineupComplimentsHtml();   // auto-pulled positive client compliments
   const winnerLine = raffleWinnerLine();   // this week's recognition-raffle winner
   const rewardLine = reward ? ` 🎁 Every teammate you recognize is an entry to win ${htmlEsc(reward)}.` : '';
   // One clear ask. While rolling out, the team REPLIES; once live, they log it in-app.
@@ -4511,6 +4576,7 @@ function buildLineupEmail() {
       <div style="font-family:Georgia,serif;font-size:17px;line-height:1.5;margin-top:6px">${htmlEsc(companyPurpose())}</div>
     </div>
     <div style="text-align:center;color:#8a6d1f;font-style:italic;margin:0 0 16px">Today's service value: “${htmlEsc(effectiveValue())}”</div>
+    ${spotlight}
     <p>Good morning, team — we're caring for <b>${clients}</b> today: ${census} ${chances} to be the reason someone stays.</p>
     <h2 style="margin:16px 0 2px;color:#0b2a4a">Today's focus: ${htmlEsc(focus.t)}</h2>
     <p style="font-style:italic;color:#555;margin:0 0 8px">${htmlEsc(focus.g)}</p>
@@ -4518,6 +4584,7 @@ function buildLineupEmail() {
     <p style="background:#faf6ee;border-left:3px solid #c8a44d;padding:12px 16px;margin:12px 0"><b>Your one move today:</b> ${pep.move}</p>
     ${winnerLine}
     ${recog}
+    ${compliments}
     <p style="margin:14px 0"><b>✨ Today's challenge:</b> ${ask}</p>
     <p style="margin:14px 0 0">You're the difference between a facility and a <i>home</i>. Let's have a great day. 💙</p>
     <p style="color:#999;font-size:12px;margin-top:18px">Sent from the Armada Daily Lineup. No client information is included in this message.</p>
@@ -4547,8 +4614,9 @@ function lineupFromIssue() {
   }
   return null;
 }
-app.get('/api/lineup/email-preview', requireAuth, (req, res) => {
+app.get('/api/lineup/email-preview', requireAuth, async (req, res) => {
   if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  await ensureComplimentsFresh();
   res.json({ ...buildLineupEmail(), to: lineupEmailTo(), emailReady: emailConfigured(), from: emailStatus().from || '', fromIssue: lineupFromIssue() });
 });
 // Shared sender used by the button AND the daily scheduler. replyTo must be a
@@ -4559,6 +4627,7 @@ async function deliverLineup(replyTo) {
   if (fromIssue) return { error: fromIssue };
   const recipients = lineupEmailTo();
   if (!recipients) return { error: 'Set the team email address first (Settings → Daily Lineup email).' };
+  await ensureComplimentsFresh();
   const e = buildLineupEmail();
   const rt = (replyTo || '').trim() || undefined;
   const list = recipients.split(',').map((s) => s.trim()).filter(Boolean);
@@ -4604,6 +4673,20 @@ setInterval(async () => {
     audit({ user: { name: 'System (auto-lineup)' }, action: 'LINEUP_EMAIL_AUTO', detail: r.error ? ('blocked: ' + r.error) : `${r.sent}/${r.total} · census ${r.census}`, ip: 'scheduler' });
   } catch (e) { console.error('[lineup auto]', e.message); }
 }, 60 * 1000).unref?.();
+// Today's special shout-out — any lineup-sender (not just admin) can set it.
+app.get('/api/lineup/spotlight', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const text = getState('lineup_spotlight_date') === appToday() ? (getState('lineup_spotlight') || '') : '';
+  res.json({ text });
+});
+app.post('/api/lineup/spotlight', requireAuth, (req, res) => {
+  if (!canSendLineup(req)) return res.status(403).json({ error: 'Leadership only.' });
+  const t = String(req.body?.text || '').trim().slice(0, 1500);
+  setState('lineup_spotlight', t);
+  setState('lineup_spotlight_date', t ? appToday() : '');
+  audit({ user: req.user, action: 'LINEUP_SPOTLIGHT', detail: t ? t.slice(0, 60) : 'cleared', ip: req.ip });
+  res.json({ ok: true });
+});
 app.post('/api/settings/lineup-email', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
   if (b.email != null) setState('lineup_email', String(b.email).trim());

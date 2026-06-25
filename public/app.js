@@ -3821,6 +3821,17 @@ async function previewLineupEmail(){
     if(msg) msg.textContent='';
   }catch(e){ if(msg) msg.textContent=e.message; }
 }
+async function saveLineupSpotlight(){
+  const m=$('spotlightMsg'); const text=($('lineupSpotlight')||{}).value||'';
+  try{ await api('/lineup/spotlight',{method:'POST',body:JSON.stringify({text})}); if(m) m.textContent='✓ Saved — it\'ll show at the top of today\'s lineup.'; }
+  catch(e){ if(m) m.textContent=e.message; }
+}
+async function clearLineupSpotlight(){
+  if($('lineupSpotlight')) $('lineupSpotlight').value='';
+  const m=$('spotlightMsg');
+  try{ await api('/lineup/spotlight',{method:'POST',body:JSON.stringify({text:''})}); if(m) m.textContent='Cleared.'; }
+  catch(e){ if(m) m.textContent=e.message; }
+}
 async function sendLineupEmail(){
   const msg=$('lineupEmailMsg');
   if(!confirm("Send today's Lineup email to the team now?")) return;
@@ -3911,6 +3922,7 @@ async function removeLineupRecog(type,id){
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
   if($('lineupCaptureCard')){ $('lineupCaptureCard').style.display = canSendLineup() ? '' : 'none'; if(canSendLineup()) loadLineupRecog(); }
+  if(canSendLineup() && $('lineupSpotlight')){ try{ const sp=await api('/lineup/spotlight'); $('lineupSpotlight').value=sp.text||''; }catch(e){} }
   if($('raffleCard')){ $('raffleCard').style.display = canSendLineup() ? '' : 'none'; if(canSendLineup()) loadRaffle(); }
   const d = await api('/lineup');
   const { value, wows, purpose } = d;

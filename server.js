@@ -4456,19 +4456,23 @@ function lineupRecognition() {
   // to include everything once the whole team is in the app.
   const live = getState('lineup_all_recognition') === 'on';
   const kFilter = live ? '' : 'AND from_id IS NULL';
-  const eFilter = live ? '' : `AND source = 'lineup'`;
+  // ONLY the kudos list. The Extra Mile "wall" moments were duplicating the very same
+  // recognitions in this email (the same shout-out is saved as both a kudo and a wall
+  // moment), so we no longer list them here — they still live on the Extra Mile wall.
   const kudos = db.prepare(`SELECT to_name, from_name, text FROM kudos WHERE created_at >= ? AND to_name IS NOT NULL AND to_name != '' ${kFilter} ORDER BY id DESC LIMIT 12`).all(since);
-  const moments = db.prepare(`SELECT person, story FROM extra_mile WHERE created_at >= ? ${eFilter} ORDER BY id DESC LIMIT 8`).all(since);
-  if (!kudos.length && !moments.length) return '';
+  if (!kudos.length) return '';
   const clean = (s) => htmlEsc(String(s || '').replace(/^🙌\s*/, ''));
   const li = (name, what, who) => `<li style="margin:3px 0"><b>${htmlEsc(name)}</b> — ${clean(what)}${who ? ` <span style="color:#999">— ${htmlEsc(who)}</span>` : ''}</li>`;
-  const lines = [
-    ...kudos.map((k) => li(k.to_name, k.text, k.from_name)),
-    ...moments.map((m) => li(m.person, m.story, '')),
-  ].join('');
+  // De-dupe identical shout-outs defensively (same person + same text).
+  const seen = new Set(); const lines = [];
+  for (const k of kudos) {
+    const key = (String(k.to_name || '') + '|' + String(k.text || '').replace(/^🙌\s*/, '')).toLowerCase().trim();
+    if (seen.has(key)) continue; seen.add(key);
+    lines.push(li(k.to_name, k.text, k.from_name));
+  }
   return `<div style="margin:16px 0;padding:12px 16px;background:#f4f8f4;border-left:3px solid #3f8c5a;border-radius:4px">
       <div style="font-weight:bold;color:#2f6b44;margin-bottom:4px">🌟 Caught being great yesterday</div>
-      <ul style="margin:0;padding-left:20px">${lines}</ul>
+      <ul style="margin:0;padding-left:20px">${lines.join('')}</ul>
     </div>`;
 }
 // The most recent recognition-raffle winner, celebrated on the lineup for a week.

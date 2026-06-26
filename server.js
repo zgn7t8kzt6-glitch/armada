@@ -1565,6 +1565,22 @@ app.get('/api/compliance', requireAuth, requireAdmin, (req, res) => {
   res.json({ clients: clients.length, score: totT ? Math.round(totC / totT * 100) : null, fields: out });
 });
 
+// "Did the person actually complete an admission, or were they referred out before
+// finishing intake?" A record discharged within ~a day of admit (or with no admit
+// at all) AND with no documentation (no therapist/diagnosis, no real discharge
+// write-up) is a referral-out / incomplete intake — NOT a real admit+discharge. We
+// keep those out of the real counts and label them honestly. Threshold is tunable.
+function incompleteStayDays() { const n = parseInt(getState('incomplete_stay_days') || '1', 10); return Number.isFinite(n) && n >= 0 ? n : 1; }
+function isReferredOut(c) {
+  const a = (c.admit || '').slice(0, 10), d = (c.discharge_date || '').slice(0, 10);
+  if (!d) return false;   // not discharged → still here / a normal active stay
+  const documented = [c.therapist, c.diagnosis].some((x) => x && String(x).trim())
+    || (c.discharge_reason && !/unable to determine|no documentation/i.test(String(c.discharge_reason)));
+  if (documented) return false;   // real documentation → treat as a genuine stay
+  if (!a) return true;            // discharged with no admit ever recorded → never truly admitted
+  const days = Math.round((Date.parse(d) - Date.parse(a)) / 86400000);
+  return days >= 0 && days <= incompleteStayDays();
+}
 // Build the nightly census (the in-app equal of the manual email) as HTML+text.
 // `reportDate` is the day being summarized — intakes/discharges/LOC-changes are
 // keyed to it. Defaults to today (manual mid-day sends); the midnight cutoff
@@ -1580,9 +1596,15 @@ function buildCensusReport(reportDate = appToday()) {
   const cnorm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
   const cKey = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || cnorm(c.name);
   const cDedupe = (rows) => { const seen = new Set(); const out = []; for (const c of rows) { const k = cKey(c); if (k && seen.has(k)) continue; if (k) seen.add(k); out.push(c); } return out; };
-  const intakes = cDedupe(db.prepare(`SELECT pref, name, kipu_id FROM clients WHERE substr(admit,1,10) = ?`).all(reportDate)).map((c) => c.pref || c.name);
-  const dcs = cDedupe(db.prepare(`SELECT pref, name, kipu_id, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?
+  // Split out referral-outs / incomplete intakes so they don't inflate Intakes/Discharges.
+  const refKeys = new Set(); const referredOut = [];
+  const intakeRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(admit,1,10) = ?`).all(reportDate));
+  const intakes = [];
+  for (const c of intakeRows) { if (isReferredOut(c)) { const k = cKey(c); if (!refKeys.has(k)) { refKeys.add(k); referredOut.push(c); } } else intakes.push(c.pref || c.name); }
+  const dcRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?
     ORDER BY (discharge_reason IS NOT NULL AND discharge_reason != '') DESC, id`).all(reportDate));
+  const dcs = [];
+  for (const c of dcRows) { if (isReferredOut(c)) { const k = cKey(c); if (!refKeys.has(k)) { refKeys.add(k); referredOut.push(c); } } else dcs.push(c); }
   const locChanges = db.prepare(`SELECT c.pref, c.name, e.from_loc, e.to_loc FROM flow_events e LEFT JOIN clients c ON c.id = e.client_id
     WHERE e.kind = 'loc_change' AND e.date = ? ORDER BY e.id`).all(reportDate);
   const sendouts = db.prepare(`SELECT client_name, destination, reason FROM medical_sendouts WHERE status = 'out'`).all();
@@ -1596,12 +1618,14 @@ function buildCensusReport(reportDate = appToday()) {
     <div style="border-top:2px solid #ccc;margin-top:6px;padding-top:6px"><strong>TOTAL CENSUS — ${active.length}</strong></div>
     <h3>Intakes</h3>${intakes.length ? intakes.map((n) => `<div>• ${esc(n)}</div>`).join('') : '<div>ZERO</div>'}
     <h3>Discharges</h3>${dcs.length ? dcs.map((d) => `<div>• ${esc(d.pref || d.name)} — ${esc(d.discharge_status || '')}${d.discharge_reason ? ' · ' + esc(d.discharge_reason) : ''}</div>`).join('') : '<div>ZERO</div>'}
+    ${referredOut.length ? `<h3>Referred out / didn't complete intake</h3><p style="color:#888;font-size:12px;margin:0 0 4px">Came in but were referred elsewhere before completing intake — not counted as admissions or discharges.</p>${referredOut.map((c) => `<div>• ${esc(c.pref || c.name)}${c.discharge_status && c.discharge_status !== 'Merged (duplicate)' ? ' — ' + esc(c.discharge_status) : ''}</div>`).join('')}` : ''}
     <h3>LOC changes</h3>${locChanges.length ? locChanges.map((x) => `<div>• ${locLine(x)}</div>`).join('') : '<div>ZERO</div>'}
     ${sendouts.length ? `<h3>Other (medical send-outs)</h3>${sendouts.map((s) => `<div>• ${esc(s.client_name)} — ${esc(s.destination || 'sent out')}${s.reason ? ': ' + esc(s.reason) : ''}</div>`).join('')}` : ''}
     <p style="color:#888;font-size:12px">Generated by Armada Care Standards.</p></div>`;
   const text = `Daily Census & Activity — ${dt}\n` + rows.map((r) => `${r.code}: ${r.n}`).join('\n') + `\nTOTAL: ${active.length}`
     + `\nIntakes: ${intakes.join(', ') || 'ZERO'}`
     + `\nDischarges: ${dcs.map((d) => (d.pref || d.name) + ' — ' + (d.discharge_status || '')).join('; ') || 'ZERO'}`
+    + (referredOut.length ? `\nReferred out / didn't complete intake: ${referredOut.map((c) => c.pref || c.name).join('; ')}` : '')
     + `\nLOC changes: ${locChanges.map((x) => (x.pref || x.name || 'A client') + ' ' + (x.from_loc || '?') + '→' + (x.to_loc || '?')).join('; ') || 'ZERO'}`;
   return { subject: `Daily Census — ${dt} (${active.length})`, html, text, total: active.length };
 }
@@ -2337,10 +2361,14 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     for (const c of rows) { const k = personKey(c) + '|' + keyExtra(c); if (seen.has(k)) continue; seen.add(k); out.push(c); }
     return out;
   };
-  const dtRaw = db.prepare(`SELECT id, pref, name, kipu_id, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?
+  const dtRaw = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?
     ORDER BY (discharge_reason IS NOT NULL AND discharge_reason != '') DESC, id`).all(today);
-  const dischargesTodayList = dedupeByPerson(dtRaw).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
+  const dtDeduped = dedupeByPerson(dtRaw);
+  // Referral-outs / incomplete intakes are not real discharges — split them out.
+  const dischargesTodayList = dtDeduped.filter((c) => !isReferredOut(c)).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
   const dischargesToday = dischargesTodayList.length;
+  const referredOutTodayList = dtDeduped.filter((c) => isReferredOut(c)).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '' }));
+  const referredOutToday = referredOutTodayList.length;
   // Recent discharges (3 days) so a just-after-midnight view still shows them.
   const drRaw = db.prepare(`SELECT id, pref, name, kipu_id, discharge_status, discharge_reason, substr(discharge_date,1,10) d
     FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-3 day') ORDER BY discharge_date DESC`).all();
@@ -2467,7 +2495,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   res.json({
     asOf: new Date().toISOString(),
     syncedAt,
-    flow: { census: active.length, admitsToday, dischargesToday, discharges7d, admitsTodayList, dischargesTodayList, dischargesRecentList, sendouts: sendoutsActive,
+    flow: { census: active.length, admitsToday, dischargesToday, discharges7d, admitsTodayList, dischargesTodayList, dischargesRecentList, referredOutToday, referredOutTodayList, sendouts: sendoutsActive,
       bedTotal: +(getState('detox_bed_count') || 40), bedsOpen: Math.max(0, (+(getState('detox_bed_count') || 40)) - active.length) },
     scheduled: scheduledArrivals,
     detox,
@@ -2538,8 +2566,8 @@ app.get('/api/diag/admit-discharge', requireAuth, requireAdmin, (req, res) => {
   const dischargedToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
   const admits = db.prepare(`SELECT pref, name, admit, admit_time, source, active, room FROM clients WHERE admit IS NOT NULL AND substr(admit,1,10) >= ? ORDER BY admit DESC, admit_time DESC LIMIT 50`).all(win)
     .map((c) => ({ name: c.pref || c.name || '—', admit: (c.admit || '').slice(0, 10), time: c.admit_time || '', source: c.source || 'manual', active: !!c.active, room: c.room || '', isToday: (c.admit || '').slice(0, 10) === today }));
-  const discharges = db.prepare(`SELECT pref, name, discharge_date, discharge_status, source FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? ORDER BY discharge_date DESC LIMIT 50`).all(win)
-    .map((c) => ({ name: c.pref || c.name || '—', date: (c.discharge_date || '').slice(0, 10), status: c.discharge_status || 'Discharged', source: c.source || 'manual', isToday: (c.discharge_date || '').slice(0, 10) === today }));
+  const discharges = db.prepare(`SELECT pref, name, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis, source FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? ORDER BY discharge_date DESC LIMIT 50`).all(win)
+    .map((c) => ({ name: c.pref || c.name || '—', date: (c.discharge_date || '').slice(0, 10), status: c.discharge_status || 'Discharged', source: c.source || 'manual', isToday: (c.discharge_date || '').slice(0, 10) === today, referredOut: isReferredOut(c) }));
   const scheduled = db.prepare(`SELECT preferred_name, first_name, last_name, scheduled_date, status FROM expected_arrivals WHERE scheduled_date >= ? ORDER BY scheduled_date DESC LIMIT 50`).all(win)
     .map((s) => ({ name: s.preferred_name || [s.first_name, s.last_name].filter(Boolean).join(' ') || '—', date: s.scheduled_date || '', status: s.status || '', isToday: s.scheduled_date === today }));
   res.json({ today, facility: { census, scheduledToday, admittedToday, dischargedToday }, admits, discharges, scheduled });
@@ -5470,11 +5498,16 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const atRisk = active.map((c) => ({ c, lvl: riskOf(c) })).filter((x) => x.lvl === 'High' || x.lvl === 'Elevated');
   const personalTouches = active.filter((c) => (c.touch && c.touch.trim()) || (c.prefs && c.prefs.trim()));
   // Facility-at-a-glance — the first thing on My Shift: who's here, who's coming/going today.
+  // Real discharges vs referral-outs (didn't complete intake) — count them apart.
+  const fDisch = db.prepare(`SELECT admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
+  let fReal = 0, fReferred = 0;
+  for (const c of fDisch) { if (isReferredOut(c)) fReferred++; else fReal++; }
   const facility = {
     census: active.length,
     scheduled: db.prepare(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).get(today).n,
     admitted: newAdmits.length,
-    discharged: db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n,
+    discharged: fReal,
+    referredOut: fReferred,
   };
 
   if (jr === 'Executive Director' || jr === 'Clinical Director') {

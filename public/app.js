@@ -3228,6 +3228,7 @@ async function loadCommand(){
     const locLine = lv.length ? lv.map(l=>`<div class="cmd-row"><div class="cmd-row-main"><strong>${esc(l.code||l.label)}</strong>${l.code?' <span class="hint">'+esc(l.label)+'</span>':''}</div><span class="risk risk-low">${l.count}</span></div>`).join('') : '<div class="hint">No level-of-care data — run a Kipu sync.</div>';
     const intakes=(f.admitsTodayList||[]);
     const dcs=(f.dischargesTodayList||[]);
+    const referredOut=(f.referredOutTodayList||[]);
     const dcRecent=(f.dischargesRecentList||[]);
     const sendouts=(f.sendouts||[]);
     const dcLine=(x,extra='')=>`<div class="pc-note"${x.id?` onclick="editClient(${x.id})" style="cursor:pointer" title="Open chart"`:''}>↗ <strong>${esc(x.name)}</strong> — ${esc(x.status)}${extra}${x.reason?' · '+esc(x.reason):''}${x.id?' <span class="hint">›</span>':''}</div>`;
@@ -3248,8 +3249,10 @@ async function loadCommand(){
         `<div class="ret-card" onclick="cmdFlowPanel('scheduled')" style="cursor:pointer"><div class="n">${sched.length}</div><div class="l">Scheduled ›</div></div>`+
         `<div class="ret-card" onclick="cmdFlowPanel('admits')" style="cursor:pointer"><div class="n">${intakes.length}</div><div class="l">Intakes ›</div></div>`+
         `<div class="ret-card" onclick="cmdFlowPanel('dcToday')" style="cursor:pointer"><div class="n">${dcs.length}</div><div class="l">Discharges ›</div></div>`+
+        (referredOut.length?`<div class="ret-card"><div class="n">${referredOut.length}</div><div class="l">Referred out (no intake)</div></div>`:'')+
         `<div class="ret-card ${sentN?'rc-warn':''}"><div class="n">${sentN}</div><div class="l">Out (ED/hospital)</div></div>`+
       `</div>`+
+      (referredOut.length?`<div class="cmd-sub">Referred out / didn't complete intake <span class="hint" style="font-weight:400">— not counted as admits or discharges</span></div>`+referredOut.map(x=>`<div class="pc-note">↪ <strong>${esc(x.name)}</strong>${x.status&&x.status!=='Merged (duplicate)'?' — '+esc(x.status):''}</div>`).join(''):'')+
       (sentN?`<div class="cmd-sub">Medical send-outs (ED / hospital)</div>${sendoutBlock}`:'')+
       `<div class="handoff-add no-print" style="margin-top:10px;flex-wrap:wrap">
          <input id="so_name" placeholder="Client" style="flex:1;min-width:120px"/>
@@ -5570,7 +5573,7 @@ async function loadAdmitCheck(){
   const box=(n,l)=>`<div class="ret-card"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   const flag=ok=>ok?'<span style="color:var(--good)">✓ today</span>':'<span class="hint">—</span>';
   const admitRows=(d.admits||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong>${a.room?' · '+esc(a.room):''}</td><td>${esc(a.admit)}${a.time?' <span class="hint">'+esc(a.time)+'</span>':''}</td><td class="hint">${esc(a.source)}</td><td>${a.active?'here':'<span class="hint">discharged</span>'}</td><td>${flag(a.isToday)}</td></tr>`).join('')||'<tr><td colspan="5" class="hint">No admits in the last few days.</td></tr>';
-  const dischRows=(d.discharges||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.date)}</td><td class="hint">${esc(a.status)}</td><td class="hint">${esc(a.source)}</td><td>${flag(a.isToday)}</td></tr>`).join('')||'<tr><td colspan="5" class="hint">No discharges in the last few days.</td></tr>';
+  const dischRows=(d.discharges||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong>${a.referredOut?' <span class="hint" style="color:#a60">↪ referred out / no intake</span>':''}</td><td>${esc(a.date)}</td><td class="hint">${esc(a.status)}</td><td class="hint">${esc(a.source)}</td><td>${flag(a.isToday)}</td></tr>`).join('')||'<tr><td colspan="5" class="hint">No discharges in the last few days.</td></tr>';
   const schedRows=(d.scheduled||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.date)}</td><td class="hint">${esc(a.status)}</td><td>${flag(a.isToday)}</td></tr>`).join('')||'<tr><td colspan="4" class="hint">No scheduled arrivals in range.</td></tr>';
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>Admit / Discharge check <span class="hint" style="font-weight:400">· detox</span></h3><p class="sub sans">Today is <strong>${esc(d.today)}</strong> (Eastern). These are the exact dates stored per patient — if an admit's date doesn't match the day they actually arrived, that's the glitch. Read-only.</p></div><button class="btn btn-ghost btn-sm sans" onclick="loadAdmitCheck()">Refresh</button></div>
     <div class="ret-cards">${box(f.census,'Patients here')}${box(f.scheduledToday,'Scheduled today')}${box(f.admittedToday,'Admitted today')}${box(f.dischargedToday,'Discharged today')}</div></div>
@@ -5825,7 +5828,8 @@ function renderFacility(f){
   host.innerHTML = box(f.census,'Patients here')
     + box(f.scheduled,'Scheduled today', f.scheduled?'rc-warn':'')
     + box(f.admitted,'Admitted today')
-    + box(f.discharged,'Discharged today');
+    + box(f.discharged,'Discharged today')
+    + (f.referredOut?box(f.referredOut,'Referred out (didn\'t complete intake)'):'');
 }
 // My Tasks, folded onto My Shift (no separate tab): your aftercare calls + anything
 // a teammate assigned you. Hidden when there's nothing, so the screen stays clean.

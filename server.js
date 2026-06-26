@@ -5513,7 +5513,10 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   if (jr === 'Executive Director' || jr === 'Clinical Director') {
     subtitle = 'The house at a glance — census, who\'s at risk, how we\'re serving, and what needs leadership.';
     const today2 = today;
-    const dToday = db.prepare(`SELECT pref, name, discharge_status FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today2);
+    // De-dupe by person and split real discharges from referral-outs (didn't complete intake).
+    const dRawLd = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today2);
+    const seenLd = new Set(); const dToday = []; const dReferred = [];
+    for (const c of dRawLd) { const k = dupKeyOf(c); if (k && seenLd.has(k)) continue; if (k) seenLd.add(k); (isReferredOut(c) ? dReferred : dToday).push(c); }
     const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
     const openIncidents = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'`).get().n;
     const incidentsRecent = db.prepare(`SELECT i.type, i.severity, i.description, c.pref, c.name FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE i.status = 'Open' ORDER BY (i.severity IN ('High','Critical')) DESC, i.id DESC LIMIT 8`).all();
@@ -5535,6 +5538,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'incidents', title: 'Open incidents', cta: { label: 'Open Incidents →', view: 'incidents' }, items: incidentsRecent.map((i) => ({ name: i.pref || i.name || 'House', sub: `${i.type} — ${i.description}`, badge: i.severity })) });
     sections.push({ key: 'newadmits', title: 'New admits today', items: newAdmits.map((c) => item(c, c.program || '', 'NEW')) });
     sections.push({ key: 'discharges', title: 'Discharges today', items: dToday.map((d) => ({ name: d.pref || d.name, sub: d.discharge_status || '' })) });
+    if (dReferred.length) sections.push({ key: 'referred', title: "Referred out / didn't complete intake", items: dReferred.map((d) => ({ name: d.pref || d.name, sub: 'not counted as an admission or discharge' })) });
   } else if (jr === 'Director of Operations') {
     subtitle = 'Does the building run when you\'re not in it? Run your systems in Facility → Operations. Measured by outcome, not effort.';
     const D = dooScorecard();
@@ -9077,7 +9081,9 @@ function buildMorningBrief() {
   const byLoc = {};
   for (const c of active) { const k = (c.loc && c.loc !== 'Unspecified') ? c.loc : (parseLoc(c.program) || 'Unspecified'); byLoc[k] = (byLoc[k] || 0) + 1; }
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
-  const dToday = db.prepare(`SELECT pref, name, discharge_status FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
+  const dRawMb = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
+  const seenMb = new Set(); const dToday = [];   // real discharges only (deduped, referral-outs excluded)
+  for (const c of dRawMb) { const k = dupKeyOf(c); if (k && seenMb.has(k)) continue; if (k) seenMb.add(k); if (!isReferredOut(c)) dToday.push(c); }
   const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
   const atRisk = active.map((c) => ({ c, a: latestAmaRead(c.id) })).filter((x) => x.a && (x.a.level === 'High' || x.a.level === 'Elevated'));
   const scheduled = db.prepare(`SELECT preferred_name, first_name, last_name FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).all(today);

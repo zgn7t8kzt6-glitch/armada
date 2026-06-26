@@ -2321,13 +2321,24 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
   const admitsTodayList = active.filter((c) => (c.admit || '').slice(0, 10) === today).map((c) => ({ name: c.pref || c.name, loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (parseLoc(c.program) || '') }));
   const discharges7d = db.prepare(`SELECT COUNT(*) n FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-7 day')`).get().n;
-  const dischargesToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
-  const dischargesTodayList = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today)
-    .map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
+  // De-dupe by person: the same patient can have several client rows (re-admission
+  // casefiles, or unmatched sync inserts) that all got stamped "discharged today"
+  // when they dropped off the census in one sync — show each person once.
+  const dnorm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+  const personKey = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || dnorm(c.name) || ('id' + c.id);
+  const dedupeByPerson = (rows, keyExtra = () => '') => {
+    const seen = new Set(); const out = [];
+    for (const c of rows) { const k = personKey(c) + '|' + keyExtra(c); if (seen.has(k)) continue; seen.add(k); out.push(c); }
+    return out;
+  };
+  const dtRaw = db.prepare(`SELECT id, pref, name, kipu_id, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?
+    ORDER BY (discharge_reason IS NOT NULL AND discharge_reason != '') DESC, id`).all(today);
+  const dischargesTodayList = dedupeByPerson(dtRaw).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
+  const dischargesToday = dischargesTodayList.length;
   // Recent discharges (3 days) so a just-after-midnight view still shows them.
-  const dischargesRecentList = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, substr(discharge_date,1,10) d
-    FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-3 day') ORDER BY discharge_date DESC`).all()
-    .map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '', date: c.d }));
+  const drRaw = db.prepare(`SELECT id, pref, name, kipu_id, discharge_status, discharge_reason, substr(discharge_date,1,10) d
+    FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-3 day') ORDER BY discharge_date DESC`).all();
+  const dischargesRecentList = dedupeByPerson(drRaw, (c) => c.d).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '', date: c.d }));
   const sendoutsActive = db.prepare(`SELECT client_name, destination, reason FROM medical_sendouts WHERE status = 'out' ORDER BY sent_at DESC`).all();
 
   // Per-client latest read, computed once.

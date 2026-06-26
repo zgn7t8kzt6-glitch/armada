@@ -196,7 +196,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -487,6 +487,7 @@ function show(v){
   if(v==='leadmirror') loadLeadMirror();
   if(v==='staffsignins') loadStaffSignins();
   if(v==='admitcheck') loadAdmitCheck();
+  if(v==='dupes') loadDupes();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5576,6 +5577,39 @@ async function loadAdmitCheck(){
     <div class="card"><h3 style="margin-top:0">Admits — last 3 days</h3><table class="tbl"><tr><th>Patient</th><th>Stored admit date</th><th>Source</th><th>Status</th><th>Counts today?</th></tr>${admitRows}</table></div>
     <div class="card"><h3 style="margin-top:0">Discharges — last 3 days</h3><table class="tbl"><tr><th>Patient</th><th>Stored discharge date</th><th>Status</th><th>Source</th><th>Counts today?</th></tr>${dischRows}</table></div>
     <div class="card"><h3 style="margin-top:0">Scheduled arrivals</h3><table class="tbl"><tr><th>Name</th><th>Scheduled date</th><th>Status</th><th>Is today?</th></tr>${schedRows}</table></div>`;
+}
+/* ───────── MERGE DUPLICATES (admin) — review-then-confirm, reversible ───────── */
+let DUPES=[];
+async function loadDupes(){
+  const host=$('dupes'); if(!host) return;
+  host.innerHTML='<div class="hint">Scanning for duplicate patient records…</div>';
+  let d; try{ d=await api('/diag/duplicates'); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  DUPES=d.groups||[];
+  const intro=`<div class="card"><h3>Merge Duplicates</h3><p class="sub sans">Suspected duplicate patient records — the same person showing up as more than one record. Pick the record to <strong>keep</strong> (the most complete one is pre-selected ✓), check the ones to merge into it, then Merge. Nothing is deleted: merged records are retired and kept for reversibility, and any linked notes, tasks &amp; history move to the record you keep. Uncheck any row that's actually a different person.</p></div>`;
+  if(!DUPES.length){ host.innerHTML=intro.replace('Suspected duplicate patient records','✓ No duplicate patient records found. Each person appears once. The check below'); return; }
+  host.innerHTML=intro + DUPES.map((g,gi)=>{
+    const rows=g.rows.map(r=>`<tr>
+      <td style="text-align:center"><input type="radio" name="keep_${gi}" value="${r.id}" ${r.id===g.suggestKeep?'checked':''} onchange="dupeKeepChanged(${gi})"/></td>
+      <td style="text-align:center"><input type="checkbox" class="dupe_chk_${gi}" data-id="${r.id}" ${r.id===g.suggestKeep?'disabled':'checked'}/></td>
+      <td><strong>${esc(r.name)}</strong>${r.room?' · '+esc(r.room):''}${r.id===g.suggestKeep?' <span class="hint">(suggested keep)</span>':''}</td>
+      <td>${esc(r.admit||'—')}</td><td>${esc(r.discharge_date||'—')}${r.discharge_status?' <span class="hint">'+esc(r.discharge_status)+'</span>':''}</td>
+      <td class="hint">${esc(r.source)}</td><td>${r.active?'here':'<span class="hint">disch.</span>'}</td><td>${r.children} linked</td></tr>`).join('');
+    return `<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(g.name)} <span class="hint" style="font-weight:400">· ${g.rows.length} records</span></h3></div><button class="btn btn-gold btn-sm sans" onclick="mergeDupes(${gi})">Merge selected →</button></div>
+      <table class="tbl"><tr><th>Keep</th><th>Merge</th><th>Patient</th><th>Admit</th><th>Discharge</th><th>Source</th><th>Status</th><th>Records</th></tr>${rows}</table></div>`;
+  }).join('');
+}
+function dupeKeepChanged(gi){
+  const keep=document.querySelector(`input[name="keep_${gi}"]:checked`); const keepId=keep?keep.value:null;
+  document.querySelectorAll('.dupe_chk_'+gi).forEach(chk=>{ if(chk.dataset.id===keepId){ chk.checked=false; chk.disabled=true; } else { chk.disabled=false; } });
+}
+async function mergeDupes(gi){
+  const keep=document.querySelector(`input[name="keep_${gi}"]:checked`); if(!keep){ alert('Pick a record to keep.'); return; }
+  const keepId=+keep.value;
+  const dupes=[...document.querySelectorAll('.dupe_chk_'+gi)].filter(c=>c.checked&&+c.dataset.id!==keepId).map(c=>+c.dataset.id);
+  if(!dupes.length){ alert('Check at least one record to merge into the kept one.'); return; }
+  const g=DUPES[gi];
+  if(!confirm(`Merge ${dupes.length} record(s) into "${g.name}"?\n\nLinked notes, tasks & history move to the kept record. The others are retired (recoverable, not deleted).`)) return;
+  try{ const r=await api('/diag/merge',{method:'POST',body:JSON.stringify({keep:keepId,dupes})}); loadDupes(); }catch(e){ alert(e.message); }
 }
 /* ───────── MY GROWTH — every employee's own goals + monthly check-in ───────── */
 async function loadMyGrowth(){

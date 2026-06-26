@@ -1843,6 +1843,15 @@ db.exec(`CREATE TABLE IF NOT EXISTS obs_checks (
 CREATE INDEX IF NOT EXISTS idx_obs_client_ts ON obs_checks(client_id, ts);`);
 addColumn('obs_checks', 'kipu_eval_id', 'TEXT');   // source eval id, so Kipu-charted rounds dedupe
 addColumn('clients', 'doc_forms', 'TEXT');          // JSON: which key Kipu forms exist on the chart
+addColumn('clients', 'merged_into', 'INTEGER');     // set when this row was merged into another (de-dupe); kept for reversibility
+// Audit trail for duplicate-client merges — a JSON snapshot of each retired row so a
+// merge can be reviewed or reversed.
+db.exec(`CREATE TABLE IF NOT EXISTS client_merges (
+  id INTEGER PRIMARY KEY,
+  kept_id INTEGER, dupe_id INTEGER,
+  snapshot TEXT, by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 
 // ---- Rounds scan verification: a QR at the FARTHEST point of each room/area, so a
 // "round" is only credited when staff physically walk there and scan it. Scanning a

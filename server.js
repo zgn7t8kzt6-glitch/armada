@@ -2539,6 +2539,67 @@ app.get('/api/diag/admit-discharge', requireAuth, requireAdmin, (req, res) => {
   res.json({ today, facility: { census, scheduledToday, admittedToday, dischargedToday }, admits, discharges, scheduled });
 });
 
+// ── Merge duplicate patient records (admin) — review-then-confirm, reversible. ──
+// Every table that references a client is reassigned to the kept record, blank
+// fields are backfilled, and the duplicate is RETIRED (not deleted) with a JSON
+// snapshot stored, so a merge can be reviewed or reversed.
+function clientChildTables() {
+  const tbls = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('clients','client_merges','sqlite_sequence')`).all();
+  const out = [];
+  for (const t of tbls) { try { if (db.prepare(`PRAGMA table_info(${t.name})`).all().some((c) => c.name === 'client_id')) out.push(t.name); } catch {} }
+  return out;
+}
+const dupNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+const dupKeyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || dupNorm(c.name);
+app.get('/api/diag/duplicates', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, room, admit, admit_time, discharge_date, discharge_status, source, active, therapist, diagnosis FROM clients WHERE merged_into IS NULL ORDER BY name, id`).all();
+  const groups = {};
+  for (const c of rows) { const k = dupKeyOf(c); if (!k) continue; (groups[k] = groups[k] || []).push(c); }
+  const childTbls = clientChildTables();
+  const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
+  const out = [];
+  for (const k of Object.keys(groups)) {
+    const g = groups[k]; if (g.length < 2) continue;
+    const items = g.map((c) => {
+      const children = childCount(c.id);
+      const fields = [c.admit, c.discharge_date, c.therapist, c.diagnosis, c.room].filter((x) => x && String(x).trim()).length;
+      return { id: c.id, name: c.pref || c.name, kipu_id: c.kipu_id || '', room: c.room || '', admit: (c.admit || '').slice(0, 10), discharge_date: (c.discharge_date || '').slice(0, 10), discharge_status: c.discharge_status || '', source: c.source || 'manual', active: !!c.active, children, richness: fields + children };
+    }).sort((a, b) => b.richness - a.richness || (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.id - b.id);
+    out.push({ key: k, name: items[0].name, rows: items, suggestKeep: items[0].id });
+  }
+  res.json({ groups: out, childTables: childTbls.length });
+});
+app.post('/api/diag/merge', requireAuth, requireAdmin, (req, res) => {
+  const keep = +req.body?.keep;
+  const dupes = Array.isArray(req.body?.dupes) ? [...new Set(req.body.dupes.map(Number))].filter((x) => x && x !== keep) : [];
+  if (!keep || !dupes.length) return res.status(400).json({ error: 'Pick a record to keep and at least one duplicate to merge.' });
+  const keepRow = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(keep);
+  if (!keepRow) return res.status(404).json({ error: 'Keep record not found.' });
+  const childTbls = clientChildTables();
+  // Backfill only STABLE identity/clinical fields onto the kept record when blank.
+  // Never copy discharge/location/stay-state fields — that could falsely mark an
+  // active patient as discharged or move them to an old room.
+  const fillFields = ['admit', 'admit_time', 'therapist', 'case_manager', 'diagnosis', 'allergies', 'medications', 'insurance', 'phone', 'dob', 'pronouns', 'language', 'mrn', 'payment_method', 'referral_source', 'kipu_id', 'photo'];
+  let merged = 0;
+  db.exec('BEGIN');
+  try {
+    for (const dupeId of dupes) {
+      const dupe = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(dupeId);
+      if (!dupe || dupe.merged_into) continue;
+      db.prepare(`INSERT INTO client_merges (kept_id, dupe_id, snapshot, by_name) VALUES (?,?,?,?)`).run(keep, dupeId, JSON.stringify(dupe), req.user.name);
+      for (const t of childTbls) { try { db.prepare(`UPDATE ${t} SET client_id = ? WHERE client_id = ?`).run(keep, dupeId); } catch {} }
+      for (const f of fillFields) {
+        try { const kv = keepRow[f], dv = dupe[f]; if ((kv == null || String(kv).trim() === '') && dv != null && String(dv).trim() !== '') { db.prepare(`UPDATE clients SET ${f} = ? WHERE id = ?`).run(dv, keep); keepRow[f] = dv; } } catch {}
+      }
+      db.prepare(`UPDATE clients SET active = 0, merged_into = ?, discharge_status = 'Merged (duplicate)', discharge_date = NULL, anticipated_dc = NULL WHERE id = ?`).run(keep, dupeId);
+      merged++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} return res.status(500).json({ error: e.message }); }
+  audit({ user: req.user, action: 'CLIENT_MERGE', detail: `kept ${keep}, merged ${merged} (${dupes.join(',')})`, ip: req.ip });
+  res.json({ ok: true, merged });
+});
+
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────
 // The curriculum lives here; plan_progress records what's done. Each task carries
 // the day it becomes active so the dashboard can tell leadership what to do today.

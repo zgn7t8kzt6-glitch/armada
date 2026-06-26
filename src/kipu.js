@@ -6,7 +6,7 @@
 // version; this implements the documented v3 pattern and is verified on first
 // connect via /api/kipu/test before any sync.
 import crypto from 'node:crypto';
-import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ, setState } from './db.js';
+import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ, setState, localDateOf } from './db.js';
 
 // Kipu timestamps are UTC; admit time-of-day only makes sense in local time.
 // Convert an ISO/timestamp to local HH:MM (24h). Module-level so both the sync
@@ -397,7 +397,7 @@ export async function kipuSyncRoster() {
     if (kid && seenKids.has(kid)) continue;   // same casefile twice in the feed — process it once
     if (kid) seenKids.add(kid);
     const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
-    const admit = admitRaw ? String(admitRaw).slice(0, 10) : null;
+    const admit = localDateOf(admitRaw);   // Eastern calendar day (UTC instants don't roll to "tomorrow")
     if (admitCutoff && admit && admit < admitCutoff) continue;   // opt-in recency filter
     // admission_date is stored at local midnight (date only); the real arrival
     // time is created_at (chart opened at intake). Both converted to local TZ.
@@ -495,7 +495,7 @@ export async function kipuSyncRoster() {
       if (newLoc) db.prepare(`UPDATE clients SET loc = ? WHERE id = ?`).run(newLoc, existing.id);
       // Discharge (or AMA) transition: only when they were active until now.
       if (discharged && existing.active === 1) {
-        evt.run(existing.id, kid || null, isAma(dischStatus) ? 'ama' : 'discharge', existing.loc || newLoc || null, null, (dischDate ? String(dischDate).slice(0, 10) : today), dischStatus ? String(dischStatus) : null);
+        evt.run(existing.id, kid || null, isAma(dischStatus) ? 'ama' : 'discharge', existing.loc || newLoc || null, null, (localDateOf(dischDate) || today), dischStatus ? String(dischStatus) : null);
         // Flag the vacated bed for turnover (RT bed board), unless already flagged.
         try {
           const cl = db.prepare(`SELECT room, pref, name FROM clients WHERE id = ?`).get(existing.id);
@@ -535,7 +535,7 @@ export async function kipuSyncRoster() {
           dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, paymentMethod,
           nextLoc, anticipatedDc,
           discharged ? (dischStatus ? String(dischStatus) : 'Discharged') : null,
-          discharged ? (dischDate ? String(dischDate).slice(0, 10) : null) : null,
+          discharged ? localDateOf(dischDate) : null,
           dischDest, dischReason, discharged ? 0 : 1, existing.id);
       matched++;
     } else if (!discharged) {
@@ -576,12 +576,12 @@ export async function kipuSyncRoster() {
         if (!dRaw || !String(dRaw).trim()) continue;
         const kraw = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'); if (!kraw) continue;
         const ks = String(kraw);
-        const dOnly = String(dRaw).slice(0, 10);
+        const dOnly = localDateOf(dRaw);
         dischargeDateByKid.set(ks, dOnly);
         dischargeDateByKid.set(ks.split(':')[0], dOnly);           // also by master id
         if (byKipu.get(ks)) continue;                              // already have this episode
         if (activeMasters.has(ks.split(':')[0])) continue;         // currently admitted under another casefile
-        toImport.push({ p, kid: ks, dDate: String(dRaw).slice(0, 10) });
+        toImport.push({ p, kid: ks, dDate: dOnly });
       }
       const enriched = await mapLimit(toImport, +(process.env.KIPU_CONCURRENCY || 6), async (x) => {
         let det = null; try { det = await kipuPatientDetail(x.kid); } catch { /* best-effort */ }
@@ -594,7 +594,7 @@ export async function kipuSyncRoster() {
         if (!name) continue;
         const g = (...keys) => { if (!det) return null; for (const k of keys) { const v = det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.join(', ') : String(v); } return null; };
         const cleanLoc = (v) => v == null ? null : String(v).replace(/^\s*UR\s*LOC\s*:?\s*/i, '').trim() || null;
-        const admit = (pick(p, 'admission_date', 'admit_date') || g('admission_date') || '').slice(0, 10) || null;
+        const admit = localDateOf(pick(p, 'admission_date', 'admit_date') || g('admission_date'));
         const admitTimeD = admitTimeFrom(pick(p, 'admission_date', 'admit_date', 'admitted_at') || g('admission_date'), pick(p, 'created_at', 'created_date') || g('created_at'));
         const program = cleanLoc(g('level_of_care', 'program'));
         const info = ins.run(name, p.first_name || name, g('bed_name', 'bed_number', 'room_name', 'room_number', 'room', 'bed'), program, realLoc(program), admit, admitTimeD, null, null,
@@ -620,7 +620,7 @@ export async function kipuSyncRoster() {
     // Use the real discharge date from the date-ranged feed when we have it;
     // only fall back to today when Kipu gives us nothing (truly unknown).
     const realDate = (g) => {
-      if (g.discharge_date && String(g.discharge_date).trim()) return String(g.discharge_date).slice(0, 10);
+      if (g.discharge_date && String(g.discharge_date).trim()) return localDateOf(g.discharge_date);
       const k = g.kipu_id ? String(g.kipu_id) : '';
       return dischargeDateByKid.get(k) || dischargeDateByKid.get(k.split(':')[0]) || today;
     };

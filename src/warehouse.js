@@ -13,6 +13,7 @@
 //
 // Inert until configured; the app's own data works without it.
 import sql from 'mssql';
+import { localDateOf } from './db.js';
 
 let _pool = null;
 
@@ -71,7 +72,7 @@ export async function whSyncRoster(db) {
   const rows = await query(censusSql);
   const pick = (r, ...keys) => { for (const k of keys) { for (const kk of [k, k.toLowerCase(), k.toUpperCase()]) { if (r[kk] != null && r[kk] !== '') return r[kk]; } } return null; };
   const dstr = (v) => v == null ? null : String(v instanceof Date ? v.toISOString() : v);
-  const dateOnly = (v) => { const s = dstr(v); return s ? s.slice(0, 10) : null; };
+  const dateOnly = (v) => localDateOf(dstr(v));   // Eastern calendar day (UTC instants don't roll to "tomorrow")
   const timeOf = (v) => { const s = dstr(v); if (!s) return null; const m = s.match(/[T ](\d{2}:\d{2})/); return m ? m[1] : null; };
 
   const byKipu = db.prepare(`SELECT id FROM clients WHERE kipu_id = ?`);

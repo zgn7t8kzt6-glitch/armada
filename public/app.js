@@ -196,7 +196,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -486,6 +486,7 @@ function show(v){
   if(v==='employees') loadEmployees();
   if(v==='leadmirror') loadLeadMirror();
   if(v==='staffsignins') loadStaffSignins();
+  if(v==='admitcheck') loadAdmitCheck();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5558,6 +5559,23 @@ async function loadStaffSignins(){
     return `<tr${u.active?'':' style="opacity:.5"'}><td><strong>${esc(u.name)}</strong>${u.active?'':' <span class="hint">(inactive)</span>'}</td><td class="hint">${esc(u.role||'')}</td><td style="${(!u.lastLogin||stale)?'color:var(--danger)':''}">${last}</td></tr>`; };
   host.innerHTML=`<div class="card"><h3>Staff sign-ins</h3><p class="sub sans">The last time each person signed in. Sorted by most recent; never-signed-in and 2+ weeks stale are flagged in red.</p>
     <table class="tbl"><tr><th>Staff</th><th>Role</th><th>Last sign-in</th></tr>${staff.map(row).join('')}</table></div>`;
+}
+/* ───────── ADMIT / DISCHARGE diagnostic (admin) — see the stored dates directly ───────── */
+async function loadAdmitCheck(){
+  const host=$('admitcheck'); if(!host) return;
+  host.innerHTML='<div class="hint">Loading…</div>';
+  let d; try{ d=await api('/diag/admit-discharge'); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const f=d.facility||{};
+  const box=(n,l)=>`<div class="ret-card"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const flag=ok=>ok?'<span style="color:var(--good)">✓ today</span>':'<span class="hint">—</span>';
+  const admitRows=(d.admits||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong>${a.room?' · '+esc(a.room):''}</td><td>${esc(a.admit)}${a.time?' <span class="hint">'+esc(a.time)+'</span>':''}</td><td class="hint">${esc(a.source)}</td><td>${a.active?'here':'<span class="hint">discharged</span>'}</td><td>${flag(a.isToday)}</td></tr>`).join('')||'<tr><td colspan="5" class="hint">No admits in the last few days.</td></tr>';
+  const dischRows=(d.discharges||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.date)}</td><td class="hint">${esc(a.status)}</td><td class="hint">${esc(a.source)}</td><td>${flag(a.isToday)}</td></tr>`).join('')||'<tr><td colspan="5" class="hint">No discharges in the last few days.</td></tr>';
+  const schedRows=(d.scheduled||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.date)}</td><td class="hint">${esc(a.status)}</td><td>${flag(a.isToday)}</td></tr>`).join('')||'<tr><td colspan="4" class="hint">No scheduled arrivals in range.</td></tr>';
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>Admit / Discharge check <span class="hint" style="font-weight:400">· detox</span></h3><p class="sub sans">Today is <strong>${esc(d.today)}</strong> (Eastern). These are the exact dates stored per patient — if an admit's date doesn't match the day they actually arrived, that's the glitch. Read-only.</p></div><button class="btn btn-ghost btn-sm sans" onclick="loadAdmitCheck()">Refresh</button></div>
+    <div class="ret-cards">${box(f.census,'Patients here')}${box(f.scheduledToday,'Scheduled today')}${box(f.admittedToday,'Admitted today')}${box(f.dischargedToday,'Discharged today')}</div></div>
+    <div class="card"><h3 style="margin-top:0">Admits — last 3 days</h3><table class="tbl"><tr><th>Patient</th><th>Stored admit date</th><th>Source</th><th>Status</th><th>Counts today?</th></tr>${admitRows}</table></div>
+    <div class="card"><h3 style="margin-top:0">Discharges — last 3 days</h3><table class="tbl"><tr><th>Patient</th><th>Stored discharge date</th><th>Status</th><th>Source</th><th>Counts today?</th></tr>${dischRows}</table></div>
+    <div class="card"><h3 style="margin-top:0">Scheduled arrivals</h3><table class="tbl"><tr><th>Name</th><th>Scheduled date</th><th>Status</th><th>Is today?</th></tr>${schedRows}</table></div>`;
 }
 /* ───────── MY GROWTH — every employee's own goals + monthly check-in ───────── */
 async function loadMyGrowth(){

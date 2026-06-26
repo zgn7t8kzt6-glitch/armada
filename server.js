@@ -2509,6 +2509,25 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+// ── Admit / Discharge diagnostic — read-only. Shows today's facility counts and the
+// last few days of admits/discharges/scheduled with each one's STORED date + source,
+// so a leader can see the off-by-a-day (or any miscount) directly. Changes nothing.
+app.get('/api/diag/admit-discharge', requireAuth, requireAdmin, (req, res) => {
+  const today = appToday();
+  const win = addDays(today, -3);
+  const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n;
+  const scheduledToday = db.prepare(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).get(today).n;
+  const admittedToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) = ?`).get(today).n;
+  const dischargedToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
+  const admits = db.prepare(`SELECT pref, name, admit, admit_time, source, active, room FROM clients WHERE admit IS NOT NULL AND substr(admit,1,10) >= ? ORDER BY admit DESC, admit_time DESC LIMIT 50`).all(win)
+    .map((c) => ({ name: c.pref || c.name || '—', admit: (c.admit || '').slice(0, 10), time: c.admit_time || '', source: c.source || 'manual', active: !!c.active, room: c.room || '', isToday: (c.admit || '').slice(0, 10) === today }));
+  const discharges = db.prepare(`SELECT pref, name, discharge_date, discharge_status, source FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? ORDER BY discharge_date DESC LIMIT 50`).all(win)
+    .map((c) => ({ name: c.pref || c.name || '—', date: (c.discharge_date || '').slice(0, 10), status: c.discharge_status || 'Discharged', source: c.source || 'manual', isToday: (c.discharge_date || '').slice(0, 10) === today }));
+  const scheduled = db.prepare(`SELECT preferred_name, first_name, last_name, scheduled_date, status FROM expected_arrivals WHERE scheduled_date >= ? ORDER BY scheduled_date DESC LIMIT 50`).all(win)
+    .map((s) => ({ name: s.preferred_name || [s.first_name, s.last_name].filter(Boolean).join(' ') || '—', date: s.scheduled_date || '', status: s.status || '', isToday: s.scheduled_date === today }));
+  res.json({ today, facility: { census, scheduledToday, admittedToday, dischargedToday }, admits, discharges, scheduled });
+});
+
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────
 // The curriculum lives here; plan_progress records what's done. Each task carries
 // the day it becomes active so the dashboard can tell leadership what to do today.

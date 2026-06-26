@@ -1784,6 +1784,20 @@ export function addDays(dateStr, n) {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
+// Kipu/Salesforce timestamps are UTC. A real-time UTC instant (e.g. an evening-ET
+// admit at 9pm = 1am UTC the next day) must be read as the EASTERN calendar day, or
+// it lands on "tomorrow". But a bare date ("2026-06-26") or a midnight marker
+// ("…T00:00:00") is just a date — trust it as-is so we never shift a correct day.
+export function localDateOf(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2})?)?/);
+  if (!m) return s.slice(0, 10) || null;
+  if (m[2] == null || (m[2] === '00' && m[3] === '00')) return m[1];   // bare date / midnight marker
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? m[1] : appToday(d);                      // real instant → Eastern day
+}
 // UTC [start, end) datetime strings ("YYYY-MM-DD HH:MM:SS") bounding one APP_TZ
 // calendar day. Lets UTC-stored timestamps (clock punches) be matched to the
 // local (Eastern) business day without relying on the server process timezone.

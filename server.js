@@ -1575,8 +1575,14 @@ function buildCensusReport(reportDate = appToday()) {
   const byLoc = {};
   for (const c of active) { const k = (c.loc && c.loc !== 'Unspecified') ? c.loc : (parseLoc(c.program) || 'Unspecified'); byLoc[k] = (byLoc[k] || 0) + 1; }
   const rows = Object.entries(byLoc).map(([code, n]) => ({ code, label: LOC_LABEL[code] || code, n })).sort((a, b) => (LOC_RANK[b.code] ?? -1) - (LOC_RANK[a.code] ?? -1));
-  const intakes = db.prepare(`SELECT pref, name FROM clients WHERE substr(admit,1,10) = ?`).all(reportDate).map((c) => c.pref || c.name);
-  const dcs = db.prepare(`SELECT pref, name, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?`).all(reportDate);
+  // De-dupe by person: the same patient can have multiple client rows (re-admission
+  // casefiles or unmatched sync inserts) — show each person once in the email.
+  const cnorm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+  const cKey = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || cnorm(c.name);
+  const cDedupe = (rows) => { const seen = new Set(); const out = []; for (const c of rows) { const k = cKey(c); if (k && seen.has(k)) continue; if (k) seen.add(k); out.push(c); } return out; };
+  const intakes = cDedupe(db.prepare(`SELECT pref, name, kipu_id FROM clients WHERE substr(admit,1,10) = ?`).all(reportDate)).map((c) => c.pref || c.name);
+  const dcs = cDedupe(db.prepare(`SELECT pref, name, kipu_id, discharge_status, discharge_reason FROM clients WHERE substr(discharge_date,1,10) = ?
+    ORDER BY (discharge_reason IS NOT NULL AND discharge_reason != '') DESC, id`).all(reportDate));
   const locChanges = db.prepare(`SELECT c.pref, c.name, e.from_loc, e.to_loc FROM flow_events e LEFT JOIN clients c ON c.id = e.client_id
     WHERE e.kind = 'loc_change' AND e.date = ? ORDER BY e.id`).all(reportDate);
   const sendouts = db.prepare(`SELECT client_name, destination, reason FROM medical_sendouts WHERE status = 'out'`).all();
@@ -2551,6 +2557,67 @@ function clientChildTables() {
 }
 const dupNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
 const dupKeyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || dupNorm(c.name);
+// Shared merge core (used by the manual tool AND the automatic de-dupe). Reassigns
+// every client-linked table to the kept record, backfills only stable identity/
+// clinical fields when blank (never discharge/location state), and RETIRES the
+// duplicates (kept for reversibility via the client_merges snapshot). Transactional.
+function mergeClients(keep, dupeIds, byName) {
+  const keepRow = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(keep);
+  if (!keepRow) return { error: 'Keep record not found.' };
+  const childTbls = clientChildTables();
+  const fillFields = ['admit', 'admit_time', 'therapist', 'case_manager', 'diagnosis', 'allergies', 'medications', 'insurance', 'phone', 'dob', 'pronouns', 'language', 'mrn', 'payment_method', 'referral_source', 'kipu_id', 'photo'];
+  let merged = 0;
+  db.exec('BEGIN');
+  try {
+    for (const dupeId of dupeIds) {
+      if (dupeId === keep) continue;
+      const dupe = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(dupeId);
+      if (!dupe || dupe.merged_into) continue;
+      db.prepare(`INSERT INTO client_merges (kept_id, dupe_id, snapshot, by_name) VALUES (?,?,?,?)`).run(keep, dupeId, JSON.stringify(dupe), byName);
+      for (const t of childTbls) { try { db.prepare(`UPDATE ${t} SET client_id = ? WHERE client_id = ?`).run(keep, dupeId); } catch {} }
+      for (const f of fillFields) { try { const kv = keepRow[f], dv = dupe[f]; if ((kv == null || String(kv).trim() === '') && dv != null && String(dv).trim() !== '') { db.prepare(`UPDATE clients SET ${f} = ? WHERE id = ?`).run(dv, keep); keepRow[f] = dv; } } catch {} }
+      db.prepare(`UPDATE clients SET active = 0, merged_into = ?, discharge_status = 'Merged (duplicate)', discharge_date = NULL, anticipated_dc = NULL WHERE id = ?`).run(keep, dupeId);
+      merged++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} return { error: e.message }; }
+  return { merged };
+}
+// A record is a CLEARLY-accidental shell (safe to auto-merge): no linked records,
+// no real clinical data, and no real discharge write-up ("unable to determine / no
+// documentation" doesn't count). Anything with substance is left for human review.
+function isShellDuplicate(c, childCountFn) {
+  if (childCountFn(c.id) > 0) return false;
+  if ([c.therapist, c.diagnosis, c.allergies, c.medications, c.admit_time].some((x) => x && String(x).trim())) return false;
+  const reason = String(c.discharge_reason || '').toLowerCase();
+  if (reason && !/unable to determine|no documentation/.test(reason)) return false;
+  return true;
+}
+// Automatic, conservative de-dupe — runs after each sync. ONLY collapses shell
+// duplicates that share the SAME Kipu person id (master id); name-only matches and
+// records with real data are never auto-merged (legitimate re-admission stays stay
+// intact). Off via setState('auto_dedupe','off').
+function autoMergeShellDuplicates() {
+  if (getState('auto_dedupe') === 'off') return 0;
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, admit, admit_time, discharge_reason, therapist, diagnosis, allergies, medications, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
+  const childTbls = clientChildTables();
+  const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
+  const groups = {};
+  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; (groups[k] = groups[k] || []).push(c); }
+  let total = 0;
+  for (const k of Object.keys(groups)) {
+    const g = groups[k]; if (g.length < 2) continue;
+    const ranked = g.map((c) => ({ c, rich: childCount(c.id) + [c.admit, c.therapist, c.diagnosis, c.admit_time].filter((x) => x && String(x).trim()).length, active: c.active ? 1 : 0 }))
+      .sort((a, b) => b.rich - a.rich || b.active - a.active || a.c.id - b.c.id);
+    const keep = ranked[0].c;
+    const shells = ranked.slice(1).map((x) => x.c).filter((c) => isShellDuplicate(c, childCount));
+    if (!shells.length) continue;
+    const r = mergeClients(keep.id, shells.map((s) => s.id), 'System (auto-dedupe)');
+    if (r.merged) total += r.merged;
+  }
+  if (total) { try { audit({ user: { name: 'System (auto-dedupe)' }, action: 'CLIENT_MERGE_AUTO', detail: `${total} shell duplicate(s) merged`, ip: 'sync' }); } catch {} }
+  return total;
+}
 app.get('/api/diag/duplicates', requireAuth, requireAdmin, (req, res) => {
   const rows = db.prepare(`SELECT id, pref, name, kipu_id, room, admit, admit_time, discharge_date, discharge_status, source, active, therapist, diagnosis FROM clients WHERE merged_into IS NULL ORDER BY name, id`).all();
   const groups = {};
@@ -2573,31 +2640,10 @@ app.post('/api/diag/merge', requireAuth, requireAdmin, (req, res) => {
   const keep = +req.body?.keep;
   const dupes = Array.isArray(req.body?.dupes) ? [...new Set(req.body.dupes.map(Number))].filter((x) => x && x !== keep) : [];
   if (!keep || !dupes.length) return res.status(400).json({ error: 'Pick a record to keep and at least one duplicate to merge.' });
-  const keepRow = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(keep);
-  if (!keepRow) return res.status(404).json({ error: 'Keep record not found.' });
-  const childTbls = clientChildTables();
-  // Backfill only STABLE identity/clinical fields onto the kept record when blank.
-  // Never copy discharge/location/stay-state fields — that could falsely mark an
-  // active patient as discharged or move them to an old room.
-  const fillFields = ['admit', 'admit_time', 'therapist', 'case_manager', 'diagnosis', 'allergies', 'medications', 'insurance', 'phone', 'dob', 'pronouns', 'language', 'mrn', 'payment_method', 'referral_source', 'kipu_id', 'photo'];
-  let merged = 0;
-  db.exec('BEGIN');
-  try {
-    for (const dupeId of dupes) {
-      const dupe = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(dupeId);
-      if (!dupe || dupe.merged_into) continue;
-      db.prepare(`INSERT INTO client_merges (kept_id, dupe_id, snapshot, by_name) VALUES (?,?,?,?)`).run(keep, dupeId, JSON.stringify(dupe), req.user.name);
-      for (const t of childTbls) { try { db.prepare(`UPDATE ${t} SET client_id = ? WHERE client_id = ?`).run(keep, dupeId); } catch {} }
-      for (const f of fillFields) {
-        try { const kv = keepRow[f], dv = dupe[f]; if ((kv == null || String(kv).trim() === '') && dv != null && String(dv).trim() !== '') { db.prepare(`UPDATE clients SET ${f} = ? WHERE id = ?`).run(dv, keep); keepRow[f] = dv; } } catch {}
-      }
-      db.prepare(`UPDATE clients SET active = 0, merged_into = ?, discharge_status = 'Merged (duplicate)', discharge_date = NULL, anticipated_dc = NULL WHERE id = ?`).run(keep, dupeId);
-      merged++;
-    }
-    db.exec('COMMIT');
-  } catch (e) { try { db.exec('ROLLBACK'); } catch {} return res.status(500).json({ error: e.message }); }
-  audit({ user: req.user, action: 'CLIENT_MERGE', detail: `kept ${keep}, merged ${merged} (${dupes.join(',')})`, ip: req.ip });
-  res.json({ ok: true, merged });
+  const r = mergeClients(keep, dupes, req.user.name);
+  if (r.error) return res.status(r.error === 'Keep record not found.' ? 404 : 500).json({ error: r.error });
+  audit({ user: req.user, action: 'CLIENT_MERGE', detail: `kept ${keep}, merged ${r.merged} (${dupes.join(',')})`, ip: req.ip });
+  res.json({ ok: true, merged: r.merged });
 });
 
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────
@@ -4336,6 +4382,7 @@ async function autoWelcomePlans() {
 }
 function afterSyncAssess(user) {
   try { chartCache.clear(); } catch { /* cache may not be ready */ }
+  try { const n = autoMergeShellDuplicates(); if (n) console.log(`[auto-dedupe] merged ${n} shell duplicate(s)`); } catch (e) { console.error('[auto-dedupe]:', e.message); }
   try { ensureDignityKits(); } catch (e) { console.error('[dignity] ensure:', e.message); }
   try { reconcileArrivals(); } catch (e) { console.error('[arrivals] reconcile:', e.message); } // new admits auto-arrive
   try { runFlowAutomations(); } catch (e) { console.error('[automations]:', e.message); }
@@ -8899,6 +8946,7 @@ if (kipuConfigured()) {
       try {
         const r = await kipuSyncRoster();
         console.log(`[kipu] auto-sync: ${r.activeNow} active (${r.created} new, ${r.deactivated} discharged)`);
+        try { const n = autoMergeShellDuplicates(); if (n) console.log(`[auto-dedupe] merged ${n} shell duplicate(s)`); } catch (e) { console.error('[auto-dedupe]:', e.message); }
         try { ensureDignityKits(); } catch (e) { /* non-fatal */ }
         // Re-assess the census automatically (clears stale alerts + refreshes every
         // client's clean read/snapshot). Disable with KIPU_AUTO_ASSESS=false.

@@ -2522,9 +2522,15 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   const schedMap = Object.fromEntries(scheduled.map((r) => [r.status, r.n]));
   const schedTotal = scheduled.reduce((s, r) => s + r.n, 0);
 
-  const admitted = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`).get(since, end).n;
-  const dischRows = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist
-    FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ? ORDER BY discharge_date DESC`).all(since, end);
+  // Exclude retired duplicates (merged_into) and referral-outs (didn't complete intake)
+  // from the real counts. Do NOT de-dupe by person here — legitimate re-admissions in
+  // the period are separate, real admits/discharges.
+  const admitRows = db.prepare(`SELECT admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`).all(since, end);
+  const admitted = admitRows.filter((c) => !isReferredOut(c)).length;
+  const dischAll = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist, diagnosis
+    FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ? ORDER BY discharge_date DESC`).all(since, end);
+  const referredList = dischAll.filter((d) => isReferredOut(d)).map((d) => ({ id: d.id, name: d.pref || d.name, date: (d.discharge_date || '').slice(0, 10), status: d.discharge_status || '' }));
+  const dischRows = dischAll.filter((d) => !isReferredOut(d));
   const byStatus = {};
   for (const d of dischRows) { const s = d.discharge_status || 'Discharged'; byStatus[s] = (byStatus[s] || 0) + 1; }
   const losOf = (a, d) => { if (!a || !d) return null; const n = Math.round((Date.parse(d) - Date.parse(a)) / 864e5); return n >= 0 ? n : null; };
@@ -2551,6 +2557,7 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
     admitted,
     discharged: { total: dischRows.length, byStatus, avgLos, amaRate: dischRows.length ? Math.round(amaCount / dischRows.length * 100) : 0, list: dischList },
     ama: { count: amaCount, list: amaList },
+    referredOut: { count: referredList.length, list: referredList },
   });
 });
 

@@ -2739,7 +2739,8 @@ async function loadCommandPeriod(){
     `<div class="ret-card"><div class="n">${p.admitted||0}</div><div class="l">Admitted</div></div>`+
     `<div class="ret-card"><div class="n">${dc.total||0}</div><div class="l">Discharged</div></div>`+
     `<div class="ret-card ${dc.amaRate>=20?'rc-high':(p.ama&&p.ama.count?'rc-warn':'')}"><div class="n">${(p.ama&&p.ama.count)||0}</div><div class="l">AMA · ${dc.amaRate||0}%</div></div>`+
-    `<div class="ret-card"><div class="n">${dc.avgLos!=null?dc.avgLos:'—'}</div><div class="l">Avg LOS (days)</div></div>`;
+    `<div class="ret-card"><div class="n">${dc.avgLos!=null?dc.avgLos:'—'}</div><div class="l">Avg LOS (days)</div></div>`+
+    ((p.referredOut&&p.referredOut.count)?`<div class="ret-card"><div class="n">${p.referredOut.count}</div><div class="l">Referred out (no intake)</div></div>`:'');
   const sb=Object.entries(dc.byStatus||{}).map(([k,n])=>`<span class="risk ${/ama/i.test(k)?'risk-warn':'risk-low'}" style="margin-right:6px">${esc(k)}: ${n}</span>`).join('');
   const row=(a)=>`<tr onclick="editClient(${a.id})" style="cursor:pointer" title="Open full chart">`+
     `<td><strong>${esc(a.name)}</strong>${a.therapist?`<div class="hint">${esc(a.therapist)}</div>`:''}</td>`+
@@ -2748,11 +2749,14 @@ async function loadCommandPeriod(){
     `<td>${esc(a.reason||'')||'<span class=hint>—</span>'}</td>`+
     `<td>${a.hasRead?'<span class="risk risk-low">read ✓</span>':'<span class="hint">›</span>'}</td></tr>`;
   const dlist=(dc.list||[]);
+  const ref=(p.referredOut&&p.referredOut.list)||[];
   $('periodDetail').innerHTML =
     (sb?`<div style="margin:10px 0">${sb}</div>`:'')+
     (dlist.length?`<div class="cmd-sub">All discharges — click any patient to open the full chart and review the notes</div>`+
       `<table class="tbl"><tr><th>Client</th><th>Type</th><th>Left</th><th>LOS</th><th>Reason / what we'd improve</th><th></th></tr>${dlist.map(row).join('')}</table>`
-      :'<div class="hint" style="margin-top:8px">No discharges in this period.</div>');
+      :'<div class="hint" style="margin-top:8px">No discharges in this period.</div>')+
+    (ref.length?`<div class="cmd-sub" style="margin-top:12px">Referred out / didn't complete intake <span class="hint" style="font-weight:400">— not counted as admissions or discharges</span></div>`+
+      ref.map(r=>`<div class="pc-note">↪ <strong>${esc(r.name)}</strong> <span class="hint">${esc(r.date||'')}${r.status&&r.status!=='Merged (duplicate)'?' · '+esc(r.status):''}</span></div>`).join(''):'');
 }
 let COMMAND_DATA=null;
 async function cmdFlowPanel(key){

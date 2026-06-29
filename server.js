@@ -2657,6 +2657,32 @@ function autoMergeShellDuplicates() {
   if (total) { try { audit({ user: { name: 'System (auto-dedupe)' }, action: 'CLIENT_MERGE_AUTO', detail: `${total} shell duplicate(s) merged`, ip: 'sync' }); } catch {} }
   return total;
 }
+// One-time historical cleanup of the census-churn phantoms. Groups by Kipu MASTER id
+// (definitively the same person) and retires any row that has ZERO staff-created
+// records — it was never a real cared-for stay, just a phantom created/discharged by
+// the sync bug — into the row that DOES have the real activity. Rows with real linked
+// records (rounds, notes, incidents…) are kept as genuine stays. Reversible.
+function cleanupChurnDuplicates() {
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, admit, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
+  const childTbls = clientChildTables();
+  const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
+  const groups = {};
+  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; (groups[k] = groups[k] || []).push(c); }
+  let total = 0;
+  for (const k of Object.keys(groups)) {
+    const g = groups[k]; if (g.length < 2) continue;
+    const withCounts = g.map((c) => ({ c, children: childCount(c.id), active: c.active ? 1 : 0 }));
+    withCounts.sort((a, b) => b.children - a.children || b.active - a.active || a.c.id - b.c.id);
+    const keep = withCounts[0].c;
+    // Retire same-person rows that have NO staff-created records (never a real stay).
+    const dups = withCounts.slice(1).filter((x) => x.children === 0).map((x) => x.c.id);
+    if (!dups.length) continue;
+    const r = mergeClients(keep.id, dups, 'System (churn cleanup)');
+    if (r.merged) total += r.merged;
+  }
+  if (total) { try { audit({ user: { name: 'System (churn cleanup)' }, action: 'CLIENT_MERGE_CLEANUP', detail: `${total} phantom/duplicate record(s) retired`, ip: 'cleanup' }); } catch {} }
+  return total;
+}
 app.get('/api/diag/duplicates', requireAuth, requireAdmin, (req, res) => {
   const rows = db.prepare(`SELECT id, pref, name, kipu_id, room, admit, admit_time, discharge_date, discharge_status, source, active, therapist, diagnosis FROM clients WHERE merged_into IS NULL ORDER BY name, id`).all();
   const groups = {};
@@ -2683,6 +2709,16 @@ app.post('/api/diag/merge', requireAuth, requireAdmin, (req, res) => {
   if (r.error) return res.status(r.error === 'Keep record not found.' ? 404 : 500).json({ error: r.error });
   audit({ user: req.user, action: 'CLIENT_MERGE', detail: `kept ${keep}, merged ${r.merged} (${dupes.join(',')})`, ip: req.ip });
   res.json({ ok: true, merged: r.merged });
+});
+// Clean up everything — retire the census-churn phantom/duplicate records in one pass.
+app.post('/api/diag/cleanup', requireAuth, requireAdmin, (req, res) => {
+  let churn = 0, shells = 0;
+  try { churn = cleanupChurnDuplicates(); } catch (e) { return res.status(500).json({ error: e.message }); }
+  try { shells = autoMergeShellDuplicates(); } catch {}
+  const merged = churn + shells;
+  setState('churn_cleanup_last', `${new Date().toISOString().slice(0, 19).replace('T', ' ')} — ${merged} retired`);
+  audit({ user: req.user, action: 'CLIENT_CLEANUP_RUN', detail: `${merged} retired (${churn} churn + ${shells} shells)`, ip: req.ip });
+  res.json({ ok: true, merged, churn, shells });
 });
 
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────
@@ -9447,4 +9483,15 @@ setTimeout(roundsEscalationSweep, 90000);
 
 const PORT = process.env.PORT || 3000;
 try { ensureDignityKits(); } catch (e) { /* dignity kits are best-effort at boot */ }
+// One-time historical cleanup of the census-churn phantom/duplicate records (runs
+// once per database; reversible via client_merges snapshots).
+try {
+  if (getState('churn_cleanup_v1') !== 'done') {
+    let n = 0;
+    try { n += cleanupChurnDuplicates(); } catch (e) { console.error('[cleanup churn]', e.message); }
+    setState('churn_cleanup_v1', 'done');
+    setState('churn_cleanup_last', `${new Date().toISOString().slice(0, 19).replace('T', ' ')} — ${n} retired (auto, on deploy)`);
+    if (n) console.log(`[cleanup] retired ${n} phantom/duplicate patient records (census-churn backlog)`);
+  }
+} catch (e) { console.error('[cleanup boot]', e.message); }
 app.listen(PORT, () => console.log(`Armada Care Standards running on http://localhost:${PORT}`));

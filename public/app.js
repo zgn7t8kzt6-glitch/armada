@@ -5592,7 +5592,9 @@ async function loadDupes(){
   host.innerHTML='<div class="hint">Scanning for duplicate patient records…</div>';
   let d; try{ d=await api('/diag/duplicates'); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
   DUPES=d.groups||[];
-  const intro=`<div class="card"><h3>Merge Duplicates</h3><p class="sub sans">Suspected duplicate patient records — the same person showing up as more than one record. Pick the record to <strong>keep</strong> (the most complete one is pre-selected ✓), check the ones to merge into it, then Merge. Nothing is deleted: merged records are retired and kept for reversibility, and any linked notes, tasks &amp; history move to the record you keep. Uncheck any row that's actually a different person.</p></div>`;
+  const intro=`<div class="card"><h3>Merge Duplicates</h3><p class="sub sans">Suspected duplicate patient records — the same person showing up as more than one record. Pick the record to <strong>keep</strong> (the most complete one is pre-selected ✓), check the ones to merge into it, then Merge. Nothing is deleted: merged records are retired and kept for reversibility, and any linked notes, tasks &amp; history move to the record you keep. Uncheck any row that's actually a different person.</p>
+    <div class="toolbar" style="justify-content:flex-start;gap:8px;margin-top:6px"><button class="btn btn-gold btn-sm sans" onclick="runCleanup(this)">🧹 Clean up phantom records now</button><span id="cleanupMsg" class="hint" style="align-self:center"></span></div>
+    <p class="hint" style="margin-top:4px">Auto-retires the census-churn phantoms (same person by Kipu ID, with no real activity) in one pass. Safe &amp; reversible.</p></div>`;
   if(!DUPES.length){ host.innerHTML=intro.replace('Suspected duplicate patient records','✓ No duplicate patient records found. Each person appears once. The check below'); return; }
   host.innerHTML=intro + DUPES.map((g,gi)=>{
     const rows=g.rows.map(r=>`<tr>
@@ -5608,6 +5610,11 @@ async function loadDupes(){
 function dupeKeepChanged(gi){
   const keep=document.querySelector(`input[name="keep_${gi}"]:checked`); const keepId=keep?keep.value:null;
   document.querySelectorAll('.dupe_chk_'+gi).forEach(chk=>{ if(chk.dataset.id===keepId){ chk.checked=false; chk.disabled=true; } else { chk.disabled=false; } });
+}
+async function runCleanup(btn){
+  const m=$('cleanupMsg'); if(btn) btn.disabled=true; if(m) m.textContent='Cleaning…';
+  try{ const r=await api('/diag/cleanup',{method:'POST'}); if(m) m.textContent=`✓ Retired ${r.merged} phantom/duplicate record${r.merged===1?'':'s'}.`; loadDupes(); }
+  catch(e){ if(m) m.textContent=e.message; if(btn) btn.disabled=false; }
 }
 async function mergeDupes(gi){
   const keep=document.querySelector(`input[name="keep_${gi}"]:checked`); if(!keep){ alert('Pick a record to keep.'); return; }

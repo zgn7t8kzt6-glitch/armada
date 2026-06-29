@@ -1598,10 +1598,10 @@ function buildCensusReport(reportDate = appToday()) {
   const cDedupe = (rows) => { const seen = new Set(); const out = []; for (const c of rows) { const k = cKey(c); if (k && seen.has(k)) continue; if (k) seen.add(k); out.push(c); } return out; };
   // Split out referral-outs / incomplete intakes so they don't inflate Intakes/Discharges.
   const refKeys = new Set(); const referredOut = [];
-  const intakeRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(admit,1,10) = ?`).all(reportDate));
+  const intakeRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, admit_time, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(admit,1,10) = ?`).all(reportDate));
   const intakes = [];
   for (const c of intakeRows) { if (isReferredOut(c)) { const k = cKey(c); if (!refKeys.has(k)) { refKeys.add(k); referredOut.push(c); } } else intakes.push(c.pref || c.name); }
-  const dcRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?
+  const dcRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, admit_time, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?
     ORDER BY (discharge_reason IS NOT NULL AND discharge_reason != '') DESC, id`).all(reportDate));
   const dcs = [];
   for (const c of dcRows) { if (isReferredOut(c)) { const k = cKey(c); if (!refKeys.has(k)) { refKeys.add(k); referredOut.push(c); } } else dcs.push(c); }
@@ -1612,6 +1612,9 @@ function buildCensusReport(reportDate = appToday()) {
   const dt = new Date(reportDate + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
   const locLine = (x) => `${esc(x.pref || x.name || 'A client')} — ${esc(x.from_loc || '?')} → ${esc(x.to_loc || '?')}`;
   const losDays = (a, d) => { a = (a || '').slice(0, 10); d = (d || '').slice(0, 10); if (!a || !d) return null; const n = Math.round((Date.parse(d) - Date.parse(a)) / 864e5); return n >= 0 ? n : null; };
+  const t12 = (hhmm) => { const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})/); if (!m) return ''; let h = +m[1]; const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${h}:${m[2]} ${ap}`; };
+  // "In & out" for a referral-out: when they arrived + how long before they left.
+  const inOut = (c) => { const t = t12(c.admit_time), l = losDays(c.admit, c.discharge_date); const parts = []; if (t) parts.push(`in ${t}`); if (l != null) parts.push(l === 0 ? 'out same day' : `${l} day${l === 1 ? '' : 's'}`); return parts.join(' · '); };
   const html = `<div style="font-family:Georgia,serif;color:#1b2825;max-width:560px">
     <h2 style="font-family:Georgia,serif">Daily Census &amp; Activity</h2>
     <p style="color:#666;margin:0 0 10px">End-of-day summary for <strong>${dt}</strong></p>
@@ -1619,14 +1622,14 @@ function buildCensusReport(reportDate = appToday()) {
     <div style="border-top:2px solid #ccc;margin-top:6px;padding-top:6px"><strong>TOTAL CENSUS — ${active.length}</strong></div>
     <h3>Intakes</h3>${intakes.length ? intakes.map((n) => `<div>• ${esc(n)}</div>`).join('') : '<div>ZERO</div>'}
     <h3>Discharges</h3>${dcs.length ? dcs.map((d) => { const l = losDays(d.admit, d.discharge_date); return `<div>• ${esc(d.pref || d.name)} — ${esc(d.discharge_status || '')}${l != null ? ` · LOS ${l} day${l === 1 ? '' : 's'}` : ''}${d.discharge_reason ? ' · ' + esc(d.discharge_reason) : ''}</div>`; }).join('') : '<div>ZERO</div>'}
-    ${referredOut.length ? `<h3>Referred out / didn't complete intake</h3><p style="color:#888;font-size:12px;margin:0 0 4px">Came in but were referred elsewhere before completing intake — not counted as admissions or discharges.</p>${referredOut.map((c) => `<div>• ${esc(c.pref || c.name)}${c.discharge_status && c.discharge_status !== 'Merged (duplicate)' ? ' — ' + esc(c.discharge_status) : ''}</div>`).join('')}` : ''}
+    ${referredOut.length ? `<h3>Referred out / didn't complete intake</h3><p style="color:#888;font-size:12px;margin:0 0 4px">Came in but were referred elsewhere before completing intake — not counted as admissions or discharges.</p>${referredOut.map((c) => { const io = inOut(c); return `<div>• ${esc(c.pref || c.name)}${io ? ` — ${esc(io)}` : ''}${c.discharge_status && c.discharge_status !== 'Merged (duplicate)' ? ` (${esc(c.discharge_status)})` : ''}</div>`; }).join('')}` : ''}
     <h3>LOC changes</h3>${locChanges.length ? locChanges.map((x) => `<div>• ${locLine(x)}</div>`).join('') : '<div>ZERO</div>'}
     ${sendouts.length ? `<h3>Other (medical send-outs)</h3>${sendouts.map((s) => `<div>• ${esc(s.client_name)} — ${esc(s.destination || 'sent out')}${s.reason ? ': ' + esc(s.reason) : ''}</div>`).join('')}` : ''}
     <p style="color:#888;font-size:12px">Generated by Armada Care Standards.</p></div>`;
   const text = `Daily Census & Activity — ${dt}\n` + rows.map((r) => `${r.code}: ${r.n}`).join('\n') + `\nTOTAL: ${active.length}`
     + `\nIntakes: ${intakes.join(', ') || 'ZERO'}`
     + `\nDischarges: ${dcs.map((d) => { const l = losDays(d.admit, d.discharge_date); return (d.pref || d.name) + ' — ' + (d.discharge_status || '') + (l != null ? ` (LOS ${l}d)` : ''); }).join('; ') || 'ZERO'}`
-    + (referredOut.length ? `\nReferred out / didn't complete intake: ${referredOut.map((c) => c.pref || c.name).join('; ')}` : '')
+    + (referredOut.length ? `\nReferred out / didn't complete intake: ${referredOut.map((c) => { const io = inOut(c); return (c.pref || c.name) + (io ? ` (${io})` : ''); }).join('; ')}` : '')
     + `\nLOC changes: ${locChanges.map((x) => (x.pref || x.name || 'A client') + ' ' + (x.from_loc || '?') + '→' + (x.to_loc || '?')).join('; ') || 'ZERO'}`;
   return { subject: `Daily Census — ${dt} (${active.length})`, html, text, total: active.length };
 }

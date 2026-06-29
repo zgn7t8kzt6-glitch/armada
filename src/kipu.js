@@ -508,7 +508,7 @@ export async function kipuSyncRoster() {
       // Kipu is the source of truth: set source, backfill blank descriptive
       // fields, and authoritatively set active/discharge from the census.
       db.prepare(`UPDATE clients SET source='kipu',
-        kipu_id = COALESCE(kipu_id, ?),
+        kipu_id = COALESCE(?, kipu_id),
         admit = COALESCE(NULLIF(admit,''), ?),
         admit_time = COALESCE(NULLIF(admit_time,''), ?),
         therapist = COALESCE(NULLIF(?,''), NULLIF(therapist,'')),
@@ -542,6 +542,7 @@ export async function kipuSyncRoster() {
       // Only create rows for currently-active patients.
       const info = ins.run(name, p.first_name || name, room, program, newLoc, admit, admitTime, therapist, caseMgr, refSource,
         dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, paymentMethod, nextLoc, anticipatedDc, kid || null);
+      claimedRows.add(info.lastInsertRowid);   // brand-new active row — seen this sync, never sweep it
       // Record an admission event only for genuinely new intakes (admitted today
       // or yesterday) — never for the initial baseline import of the standing
       // census, which would inflate past days with a one-time spike.
@@ -609,29 +610,43 @@ export async function kipuSyncRoster() {
     } catch (e) { /* discharge feed optional */ }
   }
 
-  // Authoritative roster: any Kipu-sourced client NOT in the current active
-  // census is no longer here — deactivate it (discharged/transferred elsewhere).
+  // Authoritative roster: any Kipu-sourced client we did NOT see in this census is
+  // no longer here — deactivate it. We key on "claimed this sync" (matched to a
+  // census patient by id OR name, or newly inserted), NOT on kipu_id string matching
+  // — otherwise a patient whose casefile id changed (re-admission) looks "gone" even
+  // though they're standing right there in the census, which churns phantom
+  // discharges + re-admits and skews the weekly counts.
   let deactivated = 0;
   if (activeKids.length) {
-    const ph = activeKids.map(() => '?').join(',');
-    // Capture a discharge event for each one BEFORE we deactivate it.
-    const gone = db.prepare(`SELECT id, kipu_id, loc, discharge_date FROM clients
-      WHERE source='kipu' AND active = 1 AND (kipu_id IS NULL OR kipu_id NOT IN (${ph}))`).all(...activeKids);
-    // Use the real discharge date from the date-ranged feed when we have it;
-    // only fall back to today when Kipu gives us nothing (truly unknown).
-    const realDate = (g) => {
-      if (g.discharge_date && String(g.discharge_date).trim()) return localDateOf(g.discharge_date);
-      const k = g.kipu_id ? String(g.kipu_id) : '';
-      return dischargeDateByKid.get(k) || dischargeDateByKid.get(k.split(':')[0]) || today;
-    };
-    const setGone = db.prepare(`UPDATE clients SET active = 0,
-      discharge_status = COALESCE(NULLIF(discharge_status,''), 'Discharged'),
-      discharge_date = COALESCE(NULLIF(discharge_date,''), ?) WHERE id = ?`);
-    for (const g of gone) {
-      const dd = realDate(g);
-      evt.run(g.id, g.kipu_id || null, 'discharge', g.loc || null, null, dd, 'left census');
-      setGone.run(dd, g.id);
-      deactivated++;
+    const activeRows = db.prepare(`SELECT id, kipu_id, loc, discharge_date FROM clients WHERE source='kipu' AND active = 1`).all();
+    const gone = activeRows.filter((g) => !claimedRows.has(g.id));
+    // SAFEGUARD: a partial / failed census pull (pagination, location filter, network)
+    // would make almost everyone look "gone". Never mass-discharge — if we'd drop more
+    // than half the roster (and more than a handful), treat the census as incomplete,
+    // skip the sweep, and flag it for review.
+    const ratio = activeRows.length ? gone.length / activeRows.length : 0;
+    const maxPct = (+(process.env.KIPU_MAX_DEACTIVATE_PCT || 50)) / 100;
+    if (gone.length > 8 && ratio > maxPct) {
+      const warn = `${new Date().toISOString().slice(0, 19).replace('T', ' ')} — skipped deactivating ${gone.length}/${activeRows.length} (${Math.round(ratio * 100)}%); census looked partial`;
+      setState('kipu_census_warn', warn);
+      console.warn('[kipu] ' + warn);
+    } else {
+      // Use the real discharge date from the date-ranged feed when we have it;
+      // only fall back to today when Kipu gives us nothing (truly unknown).
+      const realDate = (g) => {
+        if (g.discharge_date && String(g.discharge_date).trim()) return localDateOf(g.discharge_date);
+        const k = g.kipu_id ? String(g.kipu_id) : '';
+        return dischargeDateByKid.get(k) || dischargeDateByKid.get(k.split(':')[0]) || today;
+      };
+      const setGone = db.prepare(`UPDATE clients SET active = 0,
+        discharge_status = COALESCE(NULLIF(discharge_status,''), 'Discharged'),
+        discharge_date = COALESCE(NULLIF(discharge_date,''), ?) WHERE id = ?`);
+      for (const g of gone) {
+        const dd = realDate(g);
+        evt.run(g.id, g.kipu_id || null, 'discharge', g.loc || null, null, dd, 'left census');
+        setGone.run(dd, g.id);
+        deactivated++;
+      }
     }
   }
   // Pull patient photos for face-matching — active clients missing one, in

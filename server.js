@@ -2526,15 +2526,24 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   const schedMap = Object.fromEntries(scheduled.map((r) => [r.status, r.n]));
   const schedTotal = scheduled.reduce((s, r) => s + r.n, 0);
 
-  // Exclude retired duplicates (merged_into) and referral-outs (didn't complete intake)
-  // from the real counts. Do NOT de-dupe by person here — legitimate re-admissions in
-  // the period are separate, real admits/discharges.
-  const admitRows = db.prepare(`SELECT admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`).all(since, end);
-  const admitted = admitRows.filter((c) => !isReferredOut(c)).length;
-  const dischAll = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist, diagnosis
+  // Count distinct STAYS, not rows. A stay = one person (Kipu master id, else name) +
+  // one admit date. This collapses every duplicate/phantom row of the same stay while
+  // still counting a genuine re-admission (same person, a DIFFERENT admit date) as its
+  // own admit/discharge. Also excludes retired duplicates and referral-outs.
+  const stayKey = (c) => dupKeyOf(c) + '|' + (c.admit || '').slice(0, 10);
+  const admitRows = db.prepare(`SELECT pref, name, kipu_id, admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`).all(since, end);
+  const seenA = new Set(); let admitted = 0;
+  for (const c of admitRows) { if (isReferredOut(c)) continue; const k = stayKey(c); if (seenA.has(k)) continue; seenA.add(k); admitted++; }
+  // People who are CURRENTLY here. A "discharge" for someone who is still an active
+  // patient is a phantom (the census-churn bug) — they never actually left.
+  const activeKeys = new Set(db.prepare(`SELECT kipu_id, name, pref FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map((c) => dupKeyOf(c)));
+  const dischRaw = db.prepare(`SELECT id, pref, name, kipu_id, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist, diagnosis
     FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ? ORDER BY discharge_date DESC`).all(since, end);
+  const seenD = new Set(); const dischAll = [];
+  for (const c of dischRaw) { const k = stayKey(c); if (seenD.has(k)) continue; seenD.add(k); dischAll.push(c); }
   const referredList = dischAll.filter((d) => isReferredOut(d)).map((d) => ({ id: d.id, name: d.pref || d.name, date: (d.discharge_date || '').slice(0, 10), status: d.discharge_status || '' }));
-  const dischRows = dischAll.filter((d) => !isReferredOut(d));
+  const phantomList = dischAll.filter((d) => !isReferredOut(d) && activeKeys.has(dupKeyOf(d))).map((d) => ({ id: d.id, name: d.pref || d.name, date: (d.discharge_date || '').slice(0, 10), status: d.discharge_status || '' }));
+  const dischRows = dischAll.filter((d) => !isReferredOut(d) && !activeKeys.has(dupKeyOf(d)));   // real discharges only
   const byStatus = {};
   for (const d of dischRows) { const s = d.discharge_status || 'Discharged'; byStatus[s] = (byStatus[s] || 0) + 1; }
   const losOf = (a, d) => { if (!a || !d) return null; const n = Math.round((Date.parse(d) - Date.parse(a)) / 864e5); return n >= 0 ? n : null; };
@@ -2562,6 +2571,7 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
     discharged: { total: dischRows.length, byStatus, avgLos, amaRate: dischRows.length ? Math.round(amaCount / dischRows.length * 100) : 0, list: dischList },
     ama: { count: amaCount, list: amaList },
     referredOut: { count: referredList.length, list: referredList },
+    phantom: { count: phantomList.length, list: phantomList },
   });
 });
 

@@ -2750,13 +2750,16 @@ async function loadCommandPeriod(){
     `<td>${a.hasRead?'<span class="risk risk-low">read ✓</span>':'<span class="hint">›</span>'}</td></tr>`;
   const dlist=(dc.list||[]);
   const ref=(p.referredOut&&p.referredOut.list)||[];
+  const phantom=(p.phantom&&p.phantom.list)||[];
   $('periodDetail').innerHTML =
     (sb?`<div style="margin:10px 0">${sb}</div>`:'')+
     (dlist.length?`<div class="cmd-sub">All discharges — click any patient to open the full chart and review the notes</div>`+
       `<table class="tbl"><tr><th>Client</th><th>Type</th><th>Left</th><th>LOS</th><th>Reason / what we'd improve</th><th></th></tr>${dlist.map(row).join('')}</table>`
       :'<div class="hint" style="margin-top:8px">No discharges in this period.</div>')+
     (ref.length?`<div class="cmd-sub" style="margin-top:12px">Referred out / didn't complete intake <span class="hint" style="font-weight:400">— not counted as admissions or discharges</span></div>`+
-      ref.map(r=>`<div class="pc-note">↪ <strong>${esc(r.name)}</strong> <span class="hint">${esc(r.date||'')}${r.status&&r.status!=='Merged (duplicate)'?' · '+esc(r.status):''}</span></div>`).join(''):'');
+      ref.map(r=>`<div class="pc-note">↪ <strong>${esc(r.name)}</strong> <span class="hint">${esc(r.date||'')}${r.status&&r.status!=='Merged (duplicate)'?' · '+esc(r.status):''}</span></div>`).join(''):'')+
+    (phantom.length?`<div class="cmd-sub" style="margin-top:12px">⚠ Excluded as phantom discharges <span class="hint" style="font-weight:400">— these people are still active patients (census-sync artifact), so not counted as discharges</span></div>`+
+      phantom.map(r=>`<div class="pc-note">👻 <strong>${esc(r.name)}</strong> <span class="hint">marked ${esc(r.date||'')} but still here</span></div>`).join(''):'');
 }
 let COMMAND_DATA=null;
 async function cmdFlowPanel(key){

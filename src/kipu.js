@@ -1402,6 +1402,62 @@ export async function kipuGroupProbe() {
 // usually charted per casefile, so we grab a couple of real casefile ids first and
 // probe both account-level and per-patient endpoints. For anything that responds we
 // deep-scan for level + date fields that look like authorization periods. Read-only.
+// Discovery: find a Kipu endpoint that returns ADMISSIONS over a date range,
+// INCLUDING patients who have since discharged — so admit counts capture fast
+// in-and-out people the live census snapshot never caught. For each candidate we
+// report row count, how many rows carry a discharge_date (proof it includes
+// discharged people), and how many admissions land in the window at this location.
+export async function kipuAdtProbe(locationName, days = 30) {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  let locId = null;
+  try {
+    const want = String(locationName || '').trim().toLowerCase();
+    const loc = await kipuGet('/api/locations');
+    const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
+    const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
+    const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
+    if (hit) locId = hit.id;
+  } catch (e) { return { error: 'locations: ' + e.message }; }
+  // Date window (Eastern calendar days), passed both as start/end and created_at style params.
+  const end = appToday();
+  const start = addDays(end, -(days - 1));
+  const qd = `start_date=${start}&end_date=${end}`;
+  const locQ = locId != null ? `&location_id=${encodeURIComponent(locId)}` : '';
+  const tries = [
+    `/api/patients/census?${qd}${locQ}`,
+    `/api/patients/admissions?${qd}${locQ}`,
+    `/api/admissions?${qd}${locQ}`,
+    `/api/patients/occupancy?${qd}${locQ}`,
+    `/api/patients/latest?${qd}${locQ}`,
+    `/api/patients/discharges?${qd}${locQ}`,
+    `/api/patients/scheduled_admissions?${qd}${locQ}`,
+    `/api/patients/scheduled_discharges?${qd}${locQ}`,
+    `/api/patients?${qd}${locQ}`,
+    `/api/care_episodes?${qd}${locQ}`,
+  ];
+  const dayOf = (raw) => localDateOf(raw) || (raw ? String(raw).slice(0, 10) : '');
+  const out = [];
+  for (const path of tries) {
+    try {
+      const d = await kipuGet(path);
+      const arr = Array.isArray(d) ? d : (d?.patients || d?.census || d?.admissions || d?.discharges || Object.values(d || {}).find((v) => Array.isArray(v)) || []);
+      const rows = Array.isArray(arr) ? arr : [];
+      let withDischarge = 0, admitsInWin = 0, atLoc = 0;
+      for (const p of rows) {
+        const dd = pick(p, 'discharge_date', 'discharged_at');
+        if (dd) withDischarge++;
+        const ad = dayOf(pick(p, 'admission_date', 'admit_date', 'admitted_at'));
+        const lid = pick(p, 'location_id', 'location');
+        const here = locId == null || lid == null || String(lid) === String(locId);
+        if (here) atLoc++;
+        if (here && ad && ad >= start && ad <= end) admitsInWin++;
+      }
+      out.push({ path, ok: true, count: rows.length, withDischarge, atLoc, admitsInWindow: admitsInWin, sampleKeys: rows[0] && typeof rows[0] === 'object' ? Object.keys(rows[0]).slice(0, 22) : [] });
+    } catch (e) { out.push({ path, ok: false, error: String(e.message).slice(0, 120) }); }
+  }
+  return { locationId: locId, window: { start, end, days }, probes: out };
+}
+
 export async function kipuUrProbe(locationName) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
   // Resolve location + a few sample casefile ids from the census.

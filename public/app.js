@@ -5615,9 +5615,10 @@ async function loadOutpatient(){
       <div class="ret-cards" style="margin-top:8px">${box(c.PHP||0,'In PHP now','rc-elev')}${box(c.IOP||0,'In IOP now')}${box(c.OP||0,'OP')}${box(c.total||0,'Total enrolled')}</div>
       ${lbHtml}
       <span id="opMsg" class="hint"></span></div>
-    ${d.isAdmin?`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔍 Find the right level &amp; authorization fields</h3><p class="sub sans" style="margin:0">OP shows as IOP because OP has no UR auth (UR LOC = last authorized level). This dumps each chart's level/UR/auth fields so I can read the <b>actual current level</b> and the <b>PHP authorization period</b> (for PHP length of stay).</p></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-gold btn-sm sans" onclick="inspectOpFields(this)">Inspect Kipu fields</button><button class="btn btn-ghost btn-sm sans" onclick="probeUr(this)">Probe UR history</button></div></div>
+    ${d.isAdmin?`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔍 Find the right level &amp; authorization fields</h3><p class="sub sans" style="margin:0">OP shows as IOP because OP has no UR auth (UR LOC = last authorized level). This dumps each chart's level/UR/auth fields so I can read the <b>actual current level</b> and the <b>PHP authorization period</b> (for PHP length of stay).</p></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-gold btn-sm sans" onclick="inspectOpFields(this)">Inspect Kipu fields</button><button class="btn btn-ghost btn-sm sans" onclick="probeUr(this)">Probe UR history</button><button class="btn btn-ghost btn-sm sans" onclick="probeAdt(this)">Probe admit history</button></div></div>
       <div id="opFieldInspect" class="hint">Tap “Inspect Kipu fields,” then send me what it shows — I’ll wire OP/IOP correctly and compute PHP→IOP length of stay from the authorization dates.</div>
-      <div id="opUrProbe" class="hint" style="margin-top:6px"></div></div>`:''}
+      <div id="opUrProbe" class="hint" style="margin-top:6px"></div>
+      <div id="opAdtProbe" class="hint" style="margin-top:6px"></div></div>`:''}
     <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Group attendance today</h3><p class="sub sans" style="margin:0">Of the people enrolled at each level, the share who attended at least one group today — live from Kipu group sessions.</p></div>
       <div class="toolbar" style="gap:6px;margin:0"><label class="hint">Date <input type="date" id="op_grpdate" value="${esc(today())}" onchange="loadOutpatientGroups()"/></label>${d.isAdmin?'<button class="btn btn-ghost btn-sm sans" onclick="probeGroups(this)">Probe Kipu</button>':''}</div></div>
       <div id="opGroups"><div class="hint">Loading attendance…</div></div>
@@ -5667,6 +5668,16 @@ async function inspectOpFields(btn){
   try{ const r=await api('/outpatient/field-inspect');
     if(r.error){ if(el)el.textContent=r.error; }
     else if(el) el.innerHTML=(r.sample||[]).map(s=>`<div style="margin:8px 0;border-top:1px solid var(--line);padding-top:6px"><strong>${esc(s.name)}</strong>${Object.keys(s.fields||{}).length?Object.entries(s.fields).map(([k,v])=>`<div class="hint" style="font-family:monospace;font-size:11px">${esc(k)} = ${esc(v)}</div>`).join(''):'<div class="hint">no level/auth fields found</div>'}</div>`).join('')+'<div class="hint" style="margin-top:6px">Send me these — I’ll pick the real current-level field and the PHP auth dates.</div>';
+  }catch(e){ if(el)el.textContent=e.message; }
+  if(btn)btn.disabled=false;
+}
+async function probeAdt(btn){
+  const el=$('opAdtProbe'); if(btn)btn.disabled=true; if(el)el.innerHTML='Probing Kipu for an admissions-by-date endpoint (incl. discharged)…';
+  try{ const r=await api('/outpatient/adt-probe?days=30');
+    if(r.error){ if(el)el.textContent=r.error; if(btn)btn.disabled=false; return; }
+    const w=r.window||{};
+    const rows=(r.probes||[]).map(p=>`<tr><td class="hint" style="font-family:monospace;font-size:11px">${esc(p.path)}</td><td>${p.ok?('<span style="color:var(--good)">✓ '+p.count+' rows</span>'):('<span class="hint">'+esc(p.error||'—')+'</span>')}</td><td>${p.ok?p.withDischarge:''}</td><td>${p.ok?('<strong>'+p.admitsInWindow+'</strong>'):''}</td><td class="hint" style="font-size:10px">${esc((p.sampleKeys||[]).join(', '))}</td></tr>`).join('');
+    if(el)el.innerHTML=`<div class="hint">Window: ${esc(w.start||'')} → ${esc(w.end||'')} (${w.days}d). “Has discharge” &gt; 0 means the endpoint returns discharged people too — that’s the one we want.</div><table class="tbl"><tr><th>Endpoint</th><th>Rows</th><th>Has discharge</th><th>Admits in window</th><th>Fields</th></tr>${rows}</table><div class="hint" style="margin-top:6px">Send me the table — I’ll switch admit/discharge counts to whichever endpoint returns discharged patients, so fast in-and-out people stop getting missed.</div>`;
   }catch(e){ if(el)el.textContent=e.message; }
   if(btn)btn.disabled=false;
 }

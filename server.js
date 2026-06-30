@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -2927,6 +2927,13 @@ app.get('/api/outpatient/group-probe', requireAuth, requireOutpatient, async (re
 app.get('/api/outpatient/ur-probe', requireAuth, requireOutpatient, async (req, res) => {
   if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
   try { res.json(await kipuUrProbe(outpatientLocationName())); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Probe for an admissions-over-a-date-range endpoint that includes discharged
+// patients, so admit counts catch fast in-and-out people the live census misses.
+app.get('/api/outpatient/adt-probe', requireAuth, requireOutpatient, async (req, res) => {
+  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
+  const days = Math.min(120, Math.max(1, +req.query.days || 30));
+  try { res.json(await kipuAdtProbe(outpatientLocationName(), days)); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Dump level/UR/authorization fields from a few patients so we can find the real
 // current-level field (OP vs IOP) and the PHP authorization period (for PHP LOS).

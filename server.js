@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -2800,21 +2800,31 @@ app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
   const access = req.user.role === 'admin'
     ? db.prepare(`SELECT id, name, username, job_role FROM users WHERE id IN (${outpatientAllowlist().map(() => '?').join(',') || 'NULL'})`).all(...outpatientAllowlist())
     : [];
+  // Raw level-of-care text → count + how we classified it, so a 61-vs-40 mismatch is
+  // diagnosable at a glance (e.g. everyone's level text reading the same value).
+  const lb = {};
+  for (const r of db.prepare(`SELECT level, loc_class, COUNT(*) n FROM outpatient_clients WHERE active = 1 GROUP BY level, loc_class`).all()) {
+    lb[(r.level || '(blank)') + '  →  ' + r.loc_class] = r.n;
+  }
   res.json({
     location: outpatientLocationName(),
     kipuReady: kipuConfigured(),
     asOf: getState('outpatient_synced_at') || null,
     counts,
+    levelBreakdown: lb,
     roster: rows.map((r) => ({ name: r.pref || r.name, level: r.level, locClass: r.loc_class, admit: r.admit, therapist: r.therapist, mrn: r.mrn, payer: r.payer || '' })),
     isAdmin: req.user.role === 'admin',
     access: access.map((u) => ({ id: u.id, name: u.name, username: u.username, role: u.job_role || '' })),
     staff: req.user.role === 'admin' ? db.prepare(`SELECT id, name, job_role FROM users WHERE active=1 AND role!='admin' ORDER BY name`).all() : [],
   });
 });
-app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, res) => {
-  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
-  let r; try { r = await kipuOutpatientCensus(outpatientLocationName()); } catch (e) { return res.status(502).json({ error: e.message }); }
-  if (r.error) return res.status(404).json({ error: r.error });
+// Pull the outpatient census and update the history (admit = PHP start, detect
+// PHP→IOP transition, mark drop-offs as discharged). Shared by the manual button
+// AND the daily scheduler. Returns { error } or { location, counts }.
+async function syncOutpatient() {
+  if (!kipuConfigured()) return { error: 'Kipu isn’t connected.' };
+  let r; try { r = await kipuOutpatientCensus(outpatientLocationName()); } catch (e) { return { error: e.message }; }
+  if (r.error) return { error: r.error };
   const today = appToday();
   const get = db.prepare(`SELECT kipu_id, iop_start, admit FROM outpatient_clients WHERE kipu_id = ?`);
   const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id,name,pref,level,loc_class,admit,mrn,therapist,payer,php_start,iop_start,first_seen,last_seen,active,updated_at)
@@ -2829,9 +2839,6 @@ app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, 
       const kid = p.kipuId || ('row' + (++i)); seen.add(kid);
       const ex = get.get(kid);
       if (!ex) {
-        // Everyone admits at PHP, so php_start = admit. We only KNOW iop_start once we
-        // watch them transition — so a client first seen already in IOP keeps it null
-        // (their PHP duration is unknown, not falsely zero).
         ins.run(kid, p.name, p.pref, p.level, p.loc_class, p.admit || null, p.mrn, p.therapist, p.payer, p.admit || today, null, today, today);
       } else {
         let iopStart = ex.iop_start;
@@ -2843,10 +2850,15 @@ app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, 
     const setGone = db.prepare(`UPDATE outpatient_clients SET active=0, discharged_at=?, discharge_loc=? WHERE kipu_id=?`);
     for (const g of goneRows) { if (!seen.has(g.kipu_id)) setGone.run(today, g.loc_class, g.kipu_id); }
     db.exec('COMMIT');
-  } catch (e) { try { db.exec('ROLLBACK'); } catch {} return res.status(500).json({ error: e.message }); }
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} return { error: e.message }; }
   setState('outpatient_synced_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
-  audit({ user: req.user, action: 'OUTPATIENT_SYNC', detail: `${r.counts.total} at ${r.locationName} (PHP ${r.counts.PHP}, IOP ${r.counts.IOP})`, ip: req.ip });
-  res.json({ ok: true, location: r.locationName, counts: r.counts });
+  return { location: r.locationName, counts: r.counts };
+}
+app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, res) => {
+  const r = await syncOutpatient();
+  if (r.error) return res.status(/not found/i.test(r.error) ? 404 : 502).json({ error: r.error });
+  audit({ user: req.user, action: 'OUTPATIENT_SYNC', detail: `${r.counts.total} at ${r.location} (PHP ${r.counts.PHP}, IOP ${r.counts.IOP})`, ip: req.ip });
+  res.json({ ok: true, location: r.location, counts: r.counts });
 });
 // The diagnostic dashboard: admits/discharges over an adjustable period, census by
 // level, LOS per level (+ trend), per-payer breakdown, and the "quick movers".
@@ -2897,6 +2909,12 @@ app.post('/api/outpatient/settings', requireAuth, requireAdmin, (req, res) => {
   if (b.location != null) setState('outpatient_location', String(b.location).trim().slice(0, 120));
   if (Array.isArray(b.access)) setState('outpatient_access', JSON.stringify(b.access.map(Number).filter(Boolean)));
   res.json({ ok: true });
+});
+// Discover how this Kipu account exposes group sessions/attendance, so group metrics
+// can be wired to the real data shape.
+app.get('/api/outpatient/group-probe', requireAuth, requireOutpatient, async (req, res) => {
+  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
+  try { res.json(await kipuGroupProbe()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────
@@ -9222,6 +9240,15 @@ if (kipuConfigured()) {
     setTimeout(autoSync, 30000);                 // first run shortly after boot
     setInterval(autoSync, hrs * 3600 * 1000);    // then on the interval
   }
+  // Daily automated outpatient refresh — builds the PHP→IOP movement & LOS history
+  // on its own (once the owner has used it at least once / configured the location).
+  const runOutpatient = async () => {
+    if (!getState('outpatient_synced_at') && !getState('outpatient_location')) return;   // not in use yet
+    try { const r = await syncOutpatient(); if (r.error) console.warn('[outpatient] auto-refresh:', r.error); else console.log(`[outpatient] auto-refresh: ${r.counts.total} (PHP ${r.counts.PHP}, IOP ${r.counts.IOP})`); }
+    catch (e) { console.error('[outpatient] auto-refresh failed:', e.message); }
+  };
+  setTimeout(runOutpatient, 90000);                // shortly after boot
+  setInterval(runOutpatient, 24 * 3600 * 1000);    // daily
 }
 
 // ---- Daily cutoff: at LOCAL midnight, finalize the day just ended and open a

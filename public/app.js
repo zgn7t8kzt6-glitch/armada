@@ -5607,11 +5607,16 @@ async function loadOutpatient(){
   const group=(lc)=>{ const r=roster.filter(x=>x.locClass===lc); if(!r.length) return ''; return `<div class="card"><h3 style="margin-top:0">${lc==='PHP'?'PHP — Partial Hospitalization':lc==='IOP'?'IOP — Intensive Outpatient':lc} <span class="hint" style="font-weight:400">· ${r.length}</span></h3>
     <table class="tbl"><tr><th>Client</th><th>Payer</th><th>Level</th><th>Admit</th><th>Therapist</th></tr>${r.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.payer||'—')}</td><td class="hint">${esc(x.level||'')}</td><td>${esc(x.admit||'—')}</td><td class="hint">${esc(x.therapist||'')}</td></tr>`).join('')}</table></div>`; };
   const other=roster.filter(x=>!['PHP','IOP'].includes(x.locClass));
-  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>🏥 Akron Outpatient <span class="hint" style="font-weight:400">· ${esc(d.location||'')}</span></h3><p class="sub sans">Live from Kipu — your outpatient census &amp; movement, by level of care and payer. ${esc(asOf)}.</p></div>
+  const lb=d.levelBreakdown||{};
+  const lbHtml=Object.keys(lb).length?`<details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Level-of-care breakdown — what Kipu returned per person (tap to diagnose counts)</summary><div style="margin-top:4px">${Object.entries(lb).map(([k,n])=>`<div class="hint" style="font-family:monospace;font-size:12px">${esc(k)} — <strong>${n}</strong></div>`).join('')}</div></details>`:'';
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>🏥 Akron Outpatient <span class="hint" style="font-weight:400">· ${esc(d.location||'')}</span></h3><p class="sub sans">Live from Kipu — your outpatient census &amp; movement, by level of care and payer. ${esc(asOf)} · auto-refreshes daily.</p></div>
       <button class="btn btn-gold btn-sm sans" onclick="refreshOutpatient(this)">↻ Refresh from Kipu</button></div>
       ${d.kipuReady?'':'<div class="pc-note" style="color:var(--danger)">Kipu isn’t connected — set it up in Settings → Integrations.</div>'}
       <div class="ret-cards" style="margin-top:8px">${box(c.PHP||0,'In PHP now','rc-elev')}${box(c.IOP||0,'In IOP now')}${box(c.OP||0,'OP')}${box(c.total||0,'Total enrolled')}</div>
+      ${lbHtml}
       <span id="opMsg" class="hint"></span></div>
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Group attendance</h3><p class="sub sans" style="margin:0">% of each level attending groups today, and groups-attended-before-IOP. Needs your Kipu group-session data.</p></div>${d.isAdmin?'<button class="btn btn-ghost btn-sm sans" onclick="probeGroups(this)">Find group data in Kipu</button>':''}</div>
+      <div id="opGroupProbe" class="hint">Coming next — I first need to confirm how your Kipu records group sessions/attendance. ${d.isAdmin?'Tap “Find group data in Kipu” and I’ll wire the real attendance numbers from whatever responds.':''}</div></div>
     <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">📊 Movement &amp; length of stay</h3><p class="sub sans" style="margin:0">Adjust the window — admits, discharges, PHP→IOP moves, and LOS per level.</p></div>
       <div class="toolbar" style="gap:6px;margin:0"><div class="itabs" id="opPresets"><button class="itab" onclick="opPreset(7)">7d</button><button class="itab" onclick="opPreset(30)">30d</button><button class="itab" onclick="opPreset(90)">90d</button></div></div></div>
       <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="hint">From <input type="date" id="op_since" value="${esc(OP_PERIOD.since)}" onchange="opPeriodChange()"/></label><label class="hint">To <input type="date" id="op_end" value="${esc(OP_PERIOD.end)}" onchange="opPeriodChange()"/></label></div>
@@ -5638,6 +5643,13 @@ async function loadOutpatientAnalytics(){
     <h3 style="font-size:14px;margin:14px 0 4px">⚡ Quick movers <span class="hint" style="font-weight:400">— PHP→IOP in ≤ ${a.quickThresh} days (short authorizations to look into)</span></h3>
     ${quick.length?`<table class="tbl"><tr><th>Client</th><th>Payer</th><th>Days in PHP</th><th>Admit</th><th>Moved to IOP</th></tr>${quick.map(q=>`<tr><td><strong>${esc(q.name)}</strong>${q.active?'':' <span class="hint">(disch.)</span>'}</td><td class="hint">${esc(q.payer||'—')}</td><td><strong style="color:var(--danger)">${q.phpDays}d</strong></td><td>${esc(q.admit||'—')}</td><td>${esc(q.iopStart||'—')}</td></tr>`).join('')}</table>`:'<div class="hint">None yet — quick movers appear here as people transition to IOP.</div>'}
     ${a.tracking?'':'<div class="pc-note" style="margin-top:10px;color:#a60">⏳ Movement &amp; LOS build up as the app watches the census daily. Admits/census/payer are accurate now; PHP→IOP timing and trends fill in from the first refresh forward (people who already moved before today show LOS as “—”).</div>'}`;
+}
+async function probeGroups(btn){
+  const el=$('opGroupProbe'); if(btn)btn.disabled=true; if(el)el.innerHTML='Probing Kipu…';
+  try{ const r=await api('/outpatient/group-probe');
+    if(el)el.innerHTML='<table class="tbl"><tr><th>Endpoint</th><th>Result</th><th>Sample fields</th></tr>'+(r.probes||[]).map(p=>`<tr><td class="hint" style="font-family:monospace;font-size:12px">${esc(p.path)}</td><td>${p.ok?('<span style="color:var(--good)">✓ '+(p.count!=null?p.count+' rows':'ok')+'</span>'):('<span class="hint">'+esc(p.error||'—')+'</span>')}</td><td class="hint" style="font-size:11px">${esc((p.sampleKeys||[]).join(', '))}</td></tr>`).join('')+'</table><div class="hint" style="margin-top:6px">Tell me which row returned rows + its fields and I’ll wire the real group attendance.</div>';
+  }catch(e){ if(el)el.textContent=e.message; }
+  if(btn)btn.disabled=false;
 }
 function opPreset(days){ const e=today(); const d=new Date(e+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-(days-1)); OP_PERIOD={since:d.toISOString().slice(0,10),end:e}; if($('op_since'))$('op_since').value=OP_PERIOD.since; if($('op_end'))$('op_end').value=OP_PERIOD.end; loadOutpatientAnalytics(); }
 function opPeriodChange(){ OP_PERIOD={since:($('op_since')||{}).value||OP_PERIOD.since, end:($('op_end')||{}).value||OP_PERIOD.end}; loadOutpatientAnalytics(); }

@@ -1333,3 +1333,23 @@ export async function kipuOutpatientCensus(locationName) {
   for (const p of patients) counts[p.loc_class] = (counts[p.loc_class] || 0) + 1;
   return { locationId: locId, locationName: locName, counts, patients };
 }
+
+// Discovery: find how THIS Kipu account exposes group sessions / attendance, so the
+// outpatient group metrics can be wired to the real shape. Tries the likely endpoints
+// and reports what responds (status, row count, sample keys). Read-only.
+export async function kipuGroupProbe() {
+  const tries = [
+    '/api/groups', '/api/group_sessions', '/api/group_session_notes', '/api/groups/sessions',
+    '/api/scheduler/groups', '/api/scheduler/appointments', '/api/care_levels', '/api/levels_of_care',
+    '/api/patient_appointments', '/api/appointments',
+  ];
+  const out = [];
+  for (const path of tries) {
+    try {
+      const d = await kipuGet(path);
+      const arr = Array.isArray(d) ? d : (d?.groups || d?.group_sessions || d?.sessions || d?.appointments || d?.care_levels || Object.values(d || {}).find((v) => Array.isArray(v)) || []);
+      out.push({ path, ok: true, count: Array.isArray(arr) ? arr.length : null, topKeys: Object.keys(d || {}).slice(0, 14), sampleKeys: (Array.isArray(arr) && arr[0] && typeof arr[0] === 'object') ? Object.keys(arr[0]).slice(0, 24) : [] });
+    } catch (e) { out.push({ path, ok: false, error: String(e.message).slice(0, 140) }); }
+  }
+  return { probes: out };
+}

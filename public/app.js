@@ -5660,7 +5660,7 @@ async function loadOutpatientAnalytics(){
     <table class="tbl"><tr><th>Payer</th><th>Total</th><th>PHP</th><th>IOP</th><th>Avg PHP LOS</th><th>Avg IOP LOS</th></tr>${payerRows}</table>
     <h3 style="font-size:14px;margin:14px 0 4px">⚡ Quick movers <span class="hint" style="font-weight:400">— PHP→IOP in ≤ ${a.quickThresh} days (short authorizations to look into)</span></h3>
     ${quick.length?`<table class="tbl"><tr><th>Client</th><th>Payer</th><th>Days in PHP</th><th>Admit</th><th>Moved to IOP</th></tr>${quick.map(q=>`<tr><td><strong>${esc(q.name)}</strong>${q.active?'':' <span class="hint">(disch.)</span>'}</td><td class="hint">${esc(q.payer||'—')}</td><td><strong style="color:var(--danger)">${q.phpDays}d</strong></td><td>${esc(q.admit||'—')}</td><td>${esc(q.iopStart||'—')}</td></tr>`).join('')}</table>`:'<div class="hint">None yet — quick movers appear here as people transition to IOP.</div>'}
-    ${a.tracking?'':'<div class="pc-note" style="margin-top:10px;color:#a60">⏳ Movement &amp; LOS build up as the app watches the census daily. Admits/census/payer are accurate now; PHP→IOP timing and trends fill in from the first refresh forward (people who already moved before today show LOS as “—”).</div>'}`;
+    ${a.tracking?'':'<div class="pc-note" style="margin-top:10px;color:#a60">⏳ Tap “↻ Refresh from Kipu” to pull the census and each person’s program history — PHP→IOP length of stay is reconstructed from past step-downs, so it’s accurate retroactively, not just from today forward.</div>'}`;
 }
 async function inspectOpFields(btn){
   const el=$('opFieldInspect'); if(btn)btn.disabled=true; if(el)el.innerHTML='Reading a few charts from Kipu…';

@@ -309,6 +309,35 @@ async function kipuPatientDetail(casefileId) {
   }
   return null;
 }
+// Dated program timeline for a patient (SA PHP → SA IOP 5 → …), each entry carrying
+// { program, start_date }. This is how we reconstruct the actual PHP→IOP step-down
+// date — and therefore retroactive PHP length of stay — for stays that pre-date the
+// app. Best-effort: returns [] if the program_history route isn't available.
+async function kipuProgramHistory(casefileId) {
+  const phi = process.env.KIPU_PHI_LEVEL || 'high';
+  const s = String(casefileId);
+  const master = s.split(':')[0];
+  const uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+  try {
+    const d = await kipuGet(`/api/patients/${master}/program_history?phi_level=${phi}&patient_master_id=${encodeURIComponent(uuid)}`);
+    const arr = d?.patient?.program_history || d?.program_history || (Array.isArray(d) ? d : []);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+// From a program timeline + admission day, derive the first PHP start and the first
+// IOP start on/after admission (the step-down). `classify` maps "SA IOP 5" → IOP etc.
+function deriveLevelDates(history, admit, classify, localDateOf) {
+  const admitDay = admit ? String(admit).slice(0, 10) : '';
+  const items = (history || []).map((h) => {
+    const raw = h.start_date || h.started_at || h.date || h.effective_date;
+    const day = localDateOf(raw) || (raw ? String(raw).slice(0, 10) : '');
+    return { cls: classify(h.program || h.program_name || h.name || ''), day };
+  }).filter((x) => x.day).sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+  const afterAdmit = (x) => !admitDay || x.day >= admitDay;
+  const php = items.find((x) => x.cls === 'PHP' && afterAdmit(x)) || items.find((x) => x.cls === 'PHP');
+  const iop = items.find((x) => x.cls === 'IOP' && afterAdmit(x)) || items.find((x) => x.cls === 'IOP');
+  return { phpStart: php ? php.day : '', iopStart: iop ? iop.day : '' };
+}
 
 // Pull the roster and upsert into clients. Idempotent on the Kipu id (falls back
 // to name). Non-destructive: only fills blank fields on existing clients so it
@@ -1309,8 +1338,9 @@ export async function kipuOutpatientCensus(locationName) {
   // Second pass: pull each patient's detail to get level of care + insurance (the
   // census doesn't include them). Bounded concurrency, best-effort per patient.
   const enriched = await mapLimit(basics, +(process.env.KIPU_CONCURRENCY || 6), async (x) => {
-    let det = null; try { det = x.ks ? await kipuPatientDetail(x.ks) : null; } catch { /* best-effort */ }
-    return { ...x, det };
+    let det = null, history = []; try { det = x.ks ? await kipuPatientDetail(x.ks) : null; } catch { /* best-effort */ }
+    try { history = x.ks ? await kipuProgramHistory(x.ks) : []; } catch { /* best-effort */ }
+    return { ...x, det, history };
   });
   const patients = [];
   for (const x of enriched) {
@@ -1330,10 +1360,13 @@ export async function kipuOutpatientCensus(locationName) {
     const payer = pick(x.p, 'insurance_company', 'insurance', 'payer', 'payor', 'insurance_name', 'primary_insurance')
       || g('insurance_company', 'insurance', 'payer', 'payor', 'insurance_name', 'primary_insurance', 'insurances');
     const therapist = pick(x.p, 'primary_therapist', 'therapist', 'counselor') || g('primary_therapist', 'therapist', 'counselor', 'clinician');
+    // Reconstruct the real PHP→IOP step-down from the program timeline (so PHP
+    // length of stay is correct retroactively, not just from the day we first saw them).
+    const { phpStart, iopStart } = deriveLevelDates(x.history, x.admit, classify, localDateOf);
     patients.push({
       kipuId: x.ks, name: x.name, pref: x.first,
       level: level ? String(level) : '', loc_class: cls,
-      admit: x.admit,
+      admit: x.admit, phpStart, iopStart,
       mrn: String(pick(x.p, 'mr_number', 'mrn') || g('mr_number', 'mrn') || ''),
       therapist: String(therapist || ''),
       payer: String(payer || ''),

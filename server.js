@@ -2832,7 +2832,7 @@ async function syncOutpatient() {
   // Prefer the LATEST admission date Kipu has (the most recent stay), per the rule
   // "last admission date → first IOP date".
   const upd = db.prepare(`UPDATE outpatient_clients SET name=?,pref=?,level=?,loc_class=?,admit=COALESCE(NULLIF(?,''),admit),mrn=?,therapist=?,
-    payer=COALESCE(NULLIF(payer,''),?),iop_start=?,last_seen=?,active=1,discharged_at=NULL,discharge_loc=NULL,updated_at=datetime('now') WHERE kipu_id=?`);
+    payer=COALESCE(NULLIF(payer,''),?),php_start=COALESCE(NULLIF(?,''),php_start),iop_start=?,last_seen=?,active=1,discharged_at=NULL,discharge_loc=NULL,updated_at=datetime('now') WHERE kipu_id=?`);
   const seen = new Set();
   db.exec('BEGIN');
   try {
@@ -2840,12 +2840,16 @@ async function syncOutpatient() {
     for (const p of r.patients) {
       const kid = p.kipuId || ('row' + (++i)); seen.add(kid);
       const ex = get.get(kid);
+      // PHP→IOP step-down date comes straight from Kipu's program timeline now
+      // (p.iopStart), so PHP length of stay is correct retroactively. Fall back to
+      // forward-detection (first day we see them in IOP) only if Kipu has no history.
+      const phpStart = p.phpStart || p.admit || today;
       if (!ex) {
-        ins.run(kid, p.name, p.pref, p.level, p.loc_class, p.admit || null, p.mrn, p.therapist, p.payer, p.admit || today, null, today, today);
+        ins.run(kid, p.name, p.pref, p.level, p.loc_class, p.admit || null, p.mrn, p.therapist, p.payer, phpStart, p.iopStart || null, today, today);
       } else {
-        let iopStart = ex.iop_start;
-        if (p.loc_class === 'IOP' && !iopStart && ex.admit) iopStart = today;   // just moved PHP→IOP
-        upd.run(p.name, p.pref, p.level, p.loc_class, p.admit || null, p.mrn, p.therapist, p.payer, iopStart, today, kid);
+        let iopStart = p.iopStart || ex.iop_start;
+        if (!iopStart && p.loc_class === 'IOP' && ex.admit) iopStart = today;   // just moved PHP→IOP, no history
+        upd.run(p.name, p.pref, p.level, p.loc_class, p.admit || null, p.mrn, p.therapist, p.payer, p.phpStart || '', iopStart, today, kid);
       }
     }
     const goneRows = db.prepare(`SELECT kipu_id, loc_class FROM outpatient_clients WHERE active = 1`).all();

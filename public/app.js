@@ -5617,8 +5617,10 @@ async function loadOutpatient(){
       <span id="opMsg" class="hint"></span></div>
     ${d.isAdmin?`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔍 Find the right level &amp; authorization fields</h3><p class="sub sans" style="margin:0">OP shows as IOP because OP has no UR auth (UR LOC = last authorized level). This dumps each chart's level/UR/auth fields so I can read the <b>actual current level</b> and the <b>PHP authorization period</b> (for PHP length of stay).</p></div><button class="btn btn-gold btn-sm sans" onclick="inspectOpFields(this)">Inspect Kipu fields</button></div>
       <div id="opFieldInspect" class="hint">Tap “Inspect Kipu fields,” then send me what it shows — I’ll wire OP/IOP correctly and compute PHP→IOP length of stay from the authorization dates.</div></div>`:''}
-    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Group attendance</h3><p class="sub sans" style="margin:0">% of each level attending groups today, and groups-attended-before-IOP. Needs your Kipu group-session data.</p></div>${d.isAdmin?'<button class="btn btn-ghost btn-sm sans" onclick="probeGroups(this)">Find group data in Kipu</button>':''}</div>
-      <div id="opGroupProbe" class="hint">Coming next — I first need to confirm how your Kipu records group sessions/attendance. ${d.isAdmin?'Tap “Find group data in Kipu” and I’ll wire the real attendance numbers from whatever responds.':''}</div></div>
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Group attendance today</h3><p class="sub sans" style="margin:0">Of the people enrolled at each level, the share who attended at least one group today — live from Kipu group sessions.</p></div>
+      <div class="toolbar" style="gap:6px;margin:0"><label class="hint">Date <input type="date" id="op_grpdate" value="${esc(today())}" onchange="loadOutpatientGroups()"/></label>${d.isAdmin?'<button class="btn btn-ghost btn-sm sans" onclick="probeGroups(this)">Probe Kipu</button>':''}</div></div>
+      <div id="opGroups"><div class="hint">Loading attendance…</div></div>
+      <div id="opGroupProbe"></div></div>
     <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">📊 Movement &amp; length of stay</h3><p class="sub sans" style="margin:0">Adjust the window — admits, discharges, PHP→IOP moves, and LOS per level.</p></div>
       <div class="toolbar" style="gap:6px;margin:0"><div class="itabs" id="opPresets"><button class="itab" onclick="opPreset(7)">7d</button><button class="itab" onclick="opPreset(30)">30d</button><button class="itab" onclick="opPreset(90)">90d</button></div></div></div>
       <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="hint">From <input type="date" id="op_since" value="${esc(OP_PERIOD.since)}" onchange="opPeriodChange()"/></label><label class="hint">To <input type="date" id="op_end" value="${esc(OP_PERIOD.end)}" onchange="opPeriodChange()"/></label></div>
@@ -5626,6 +5628,19 @@ async function loadOutpatient(){
     ${roster.length?group('PHP')+group('IOP')+(other.length?`<div class="card"><h3 style="margin-top:0">Other / unclassified <span class="hint" style="font-weight:400">· ${other.length}</span></h3><table class="tbl"><tr><th>Client</th><th>Payer</th><th>Level (raw)</th><th>Admit</th></tr>${other.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.payer||'—')}</td><td class="hint">${esc(x.level||'(blank)')}</td><td>${esc(x.admit||'—')}</td></tr>`).join('')}</table></div>`:''):'<div class="card"><div class="hint">No outpatient census yet — tap “Refresh from Kipu” to pull from '+esc(d.location||'your outpatient location')+'.</div></div>'}
     ${d.isAdmin?opSettingsHtml(d):''}`;
   loadOutpatientAnalytics();
+  loadOutpatientGroups();
+}
+async function loadOutpatientGroups(){
+  const host=$('opGroups'); if(!host) return;
+  const date=($('op_grpdate')||{}).value||today();
+  host.innerHTML='<div class="hint">Loading attendance…</div>';
+  let a; try{ a=await api('/outpatient/group-attendance?date='+encodeURIComponent(date)); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  if(a.error){ host.innerHTML='<div class="hint">'+esc(a.error)+'</div>'; return; }
+  const by=a.byLevel||{};
+  const card=(lv,label)=>{ const r=by[lv]||{}; if(!r.enrolled) return ''; const pct=r.pct; const col=pct==null?'':pct>=80?'var(--good)':pct>=50?'var(--gold)':'var(--danger)'; return `<div class="ret-card"><div class="n"${col?' style="color:'+col+'"':''}>${pct!=null?pct+'%':'—'}</div><div class="l">${label}<br><span class="hint">${r.attended}/${r.enrolled}</span></div></div>`; };
+  const cards=card('PHP','PHP attended')+card('IOP','IOP attended')+card('OP','OP attended');
+  host.innerHTML=`<div class="ret-cards" style="margin-top:8px">${cards||'<div class="hint">No one enrolled at PHP/IOP to measure.</div>'}</div>
+    <div class="hint" style="margin-top:6px">${a.sessions||0} group session${a.sessions===1?'':'s'} on ${esc(a.date)}.${a.attendanceIsPresence?'':' <b>Note:</b> Kipu returned group enrollment but not a present/absent flag for this date, so this counts who was <i>scheduled</i> in a group, not confirmed present. '+(ME.role==='admin'?'Tap “Probe Kipu” to see the attendee fields so I can wire true present/absent.':'')}</div>`;
 }
 async function loadOutpatientAnalytics(){
   const host=$('opAnalytics'); if(!host) return;
@@ -5657,7 +5672,8 @@ async function inspectOpFields(btn){
 async function probeGroups(btn){
   const el=$('opGroupProbe'); if(btn)btn.disabled=true; if(el)el.innerHTML='Probing Kipu…';
   try{ const r=await api('/outpatient/group-probe');
-    if(el)el.innerHTML='<table class="tbl"><tr><th>Endpoint</th><th>Result</th><th>Sample fields</th></tr>'+(r.probes||[]).map(p=>`<tr><td class="hint" style="font-family:monospace;font-size:12px">${esc(p.path)}</td><td>${p.ok?('<span style="color:var(--good)">✓ '+(p.count!=null?p.count+' rows':'ok')+'</span>'):('<span class="hint">'+esc(p.error||'—')+'</span>')}</td><td class="hint" style="font-size:11px">${esc((p.sampleKeys||[]).join(', '))}</td></tr>`).join('')+'</table><div class="hint" style="margin-top:6px">Tell me which row returned rows + its fields and I’ll wire the real group attendance.</div>';
+    let attSample=''; try{ const g=await api('/outpatient/group-attendance?date='+encodeURIComponent(today())); if(g&&g.sample){ attSample='<div style="margin-top:8px"><div class="hint">Attendee fields on a group session (for present/absent):</div><div class="hint" style="font-family:monospace;font-size:11px">'+esc((g.sample.patientKeys||[]).join(', '))+'</div></div>'; } }catch(_e){}
+    if(el)el.innerHTML='<table class="tbl"><tr><th>Endpoint</th><th>Result</th><th>Sample fields</th></tr>'+(r.probes||[]).map(p=>`<tr><td class="hint" style="font-family:monospace;font-size:12px">${esc(p.path)}</td><td>${p.ok?('<span style="color:var(--good)">✓ '+(p.count!=null?p.count+' rows':'ok')+'</span>'):('<span class="hint">'+esc(p.error||'—')+'</span>')}</td><td class="hint" style="font-size:11px">${esc((p.sampleKeys||[]).join(', '))}</td></tr>`).join('')+'</table>'+attSample;
   }catch(e){ if(el)el.textContent=e.message; }
   if(btn)btn.disabled=false;
 }

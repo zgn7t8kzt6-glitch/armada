@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -2923,6 +2923,34 @@ app.get('/api/outpatient/group-probe', requireAuth, requireOutpatient, async (re
 app.get('/api/outpatient/field-inspect', requireAuth, requireOutpatient, async (req, res) => {
   if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
   try { res.json(await kipuOutpatientFieldInspect(outpatientLocationName(), 6)); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Group attendance for a given day: of the people enrolled at each level, what
+// percentage attended at least one group. Matches Kipu group-session attendees
+// (by casefile id) to our active roster, so the denominator is who's actually
+// enrolled — not just who happened to have a session on the calendar.
+app.get('/api/outpatient/group-attendance', requireAuth, requireOutpatient, async (req, res) => {
+  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  let g; try { g = await kipuGroupAttendance(outpatientLocationName(), date, date); } catch (e) { return res.status(502).json({ error: e.message }); }
+  if (g.error) return res.status(502).json(g);
+  const attendedKey = (kid) => g.patients[String(kid)] && g.patients[String(kid)].attended > 0;
+  const listedKey = (kid) => !!g.patients[String(kid)];
+  const roster = db.prepare(`SELECT kipu_id, loc_class FROM outpatient_clients WHERE active = 1`).all();
+  // Did Kipu give us usable present/absent flags, or only enrollment? (affects wording)
+  const anyAttendedFlag = Object.values(g.patients).some((p) => p.attended > 0);
+  const levels = ['PHP', 'IOP', 'OP'];
+  const byLevel = {};
+  for (const lv of levels) {
+    const enrolled = roster.filter((r) => r.loc_class === lv);
+    const present = enrolled.filter((r) => anyAttendedFlag ? attendedKey(r.kipu_id) : listedKey(r.kipu_id));
+    byLevel[lv] = { enrolled: enrolled.length, attended: present.length, pct: enrolled.length ? Math.round((present.length / enrolled.length) * 100) : null };
+  }
+  res.json({
+    date, location: g.locationName, sessions: g.sessionsConsidered,
+    attendanceIsPresence: anyAttendedFlag,   // false ⇒ we could only confirm enrollment in a session, not present/absent
+    byLevel,
+    sample: g.sample || null,                // raw attendee shape, so we can confirm the present/absent field
+  });
 });
 
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────

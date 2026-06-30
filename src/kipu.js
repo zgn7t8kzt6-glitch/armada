@@ -1364,6 +1364,73 @@ export async function kipuGroupProbe() {
   return { probes: out };
 }
 
+// Group attendance via /api/group_sessions (the endpoint that actually exists on
+// this account — it carries session_start_time + a `patients` attendee list).
+// Returns, for the given date window, who attended at least one group each day and
+// the per-patient session count, keyed by casefile id so the app can match it to
+// the enrolled roster. `sample` exposes the raw attendee shape for verification.
+export async function kipuGroupAttendance(locationName, startDate, endDate) {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const want = String(locationName || '').trim().toLowerCase();
+  if (!want) return { error: 'No outpatient location name configured.' };
+  let locId = null, locName = null;
+  try {
+    const loc = await kipuGet('/api/locations');
+    const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
+    const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
+    const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
+    if (hit) { locId = hit.id; locName = hit.name; }
+  } catch (e) { return { error: 'Could not read Kipu locations: ' + e.message }; }
+  if (locId == null) return { error: `Location "${locationName}" not found in Kipu.` };
+  const sd = String(startDate || '').slice(0, 10);
+  const ed = String(endDate || startDate || '').slice(0, 10);
+  // Pull all group sessions in the window (paginated). Kipu accepts start_date/end_date.
+  const sessions = [];
+  for (let page = 1; page <= 20; page++) {
+    let path = '/api/group_sessions?page=' + page + '&per=100';
+    if (sd) path += '&start_date=' + encodeURIComponent(sd);
+    if (ed) path += '&end_date=' + encodeURIComponent(ed);
+    let d; try { d = await kipuGet(path); } catch (e) { if (page === 1) return { error: 'group_sessions: ' + e.message }; break; }
+    const arr = d?.group_sessions || d?.sessions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []);
+    if (!Array.isArray(arr) || arr.length === 0) break;
+    sessions.push(...arr);
+    if (arr.length < 100) break;
+  }
+  const dayOf = (raw) => localDateOf(raw) || (raw ? String(raw).slice(0, 10) : '');
+  const attendedFlag = (pt) => {
+    const v = pick(pt, 'attended', 'present', 'attendance', 'status', 'attendance_status', 'patient_attended');
+    if (v == null) return null;                       // unknown → treat as enrolled-only
+    const s = String(v).toLowerCase();
+    if (/present|attended|yes|true|complete|show/.test(s)) return true;
+    if (/no.?show|absent|no|false|cancel|excused/.test(s)) return false;
+    return v === true ? true : (v === false ? false : null);
+  };
+  // per casefile id, per day: { enrolled:Set<sessionId>, attended:Set<sessionId> }
+  const byPatient = new Map();
+  let sample = null, considered = 0;
+  for (const s of sessions) {
+    if (locId != null && s.location_id != null && String(s.location_id) !== String(locId)) continue;
+    const day = dayOf(pick(s, 'session_start_time', 'start_time', 'session_date', 'date'));
+    if (sd && day && (day < sd || day > ed)) continue;
+    considered++;
+    const sid = String(pick(s, 'id', 'gs_group_session_id', 'group_session_id') || considered);
+    const pts = s.patients || s.attendees || s.patient_attendances || [];
+    if (!sample && Array.isArray(pts) && pts[0] && typeof pts[0] === 'object') sample = { sessionKeys: Object.keys(s).slice(0, 24), patientKeys: Object.keys(pts[0]).slice(0, 24), patientExample: pts[0] };
+    for (const pt of (Array.isArray(pts) ? pts : [])) {
+      const kid = String(pick(pt, 'casefile_id', 'patient_id', 'id', 'mr_number', 'mrn') || '');
+      if (!kid) continue;
+      const rec = byPatient.get(kid) || { name: String(pick(pt, 'name', 'patient_name', 'full_name') || ''), enrolled: new Set(), attended: new Set() };
+      rec.enrolled.add(sid);
+      const f = attendedFlag(pt);
+      if (f === true) rec.attended.add(sid);
+      byPatient.set(kid, rec);
+    }
+  }
+  const patients = {};
+  for (const [kid, rec] of byPatient) patients[kid] = { name: rec.name, enrolled: rec.enrolled.size, attended: rec.attended.size };
+  return { locationId: locId, locationName: locName, start: sd, end: ed, sessionsPulled: sessions.length, sessionsConsidered: considered, patients, sample };
+}
+
 // Field discovery for outpatient: dump the level / UR / authorization / care fields
 // from a few patients' charts, so we can find (a) the ACTUAL current level (to split
 // OP from IOP — UR LOC is the authorized level, which lags) and (b) the PHP

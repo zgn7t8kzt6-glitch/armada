@@ -1353,3 +1353,46 @@ export async function kipuGroupProbe() {
   }
   return { probes: out };
 }
+
+// Field discovery for outpatient: dump the level / UR / authorization / care fields
+// from a few patients' charts, so we can find (a) the ACTUAL current level (to split
+// OP from IOP — UR LOC is the authorized level, which lags) and (b) the PHP
+// authorization period (PHP auth end ≈ step-down to IOP) to compute PHP LOS.
+export async function kipuOutpatientFieldInspect(locationName, sampleN = 6) {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const want = String(locationName || '').trim().toLowerCase();
+  let locId = null;
+  try {
+    const loc = await kipuGet('/api/locations');
+    const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
+    const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
+    const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
+    if (hit) locId = hit.id;
+  } catch (e) { return { error: 'locations: ' + e.message }; }
+  if (locId == null) return { error: `Location "${locationName}" not found.` };
+  let path = (process.env.KIPU_ROSTER_PATH || '/api/patients/census');
+  path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
+  const data = await kipuGet(path);
+  const list = (data?.patients || data?.census || (Array.isArray(data) ? data : [])).slice(0, sampleN * 2);
+  const interesting = (k) => /level|loc|\bur\b|authoriz|\bauth|program|care|partial|intensive|outpat|\bphp\b|\biop\b|\bop\b|step|frequenc|session|begin|start|end|expir|through|admit|discharge|date/i.test(k);
+  const flat = {};
+  const scan = (obj, depth, prefix) => {
+    if (!obj || typeof obj !== 'object' || depth > 2) return;
+    for (const [k, v] of Object.entries(obj)) {
+      if (v == null) continue;
+      if (typeof v === 'object') {
+        if (Array.isArray(v)) { if (interesting(k) || /authoriz|\bur\b|level|care/i.test(k)) { (v.slice(0, 2)).forEach((it, i) => scan(it, depth + 1, `${prefix}${k}[${i}].`)); } }
+        else scan(v, depth + 1, `${prefix}${k}.`);
+      } else if (interesting(k)) { flat[prefix + k] = String(v).slice(0, 90); }
+    }
+  };
+  const out = [];
+  for (const p of list.slice(0, sampleN)) {
+    const ks = String(pick(p, 'casefile_id', 'id', 'patient_id', 'mrn') || '');
+    let det = null; try { det = ks ? await kipuPatientDetail(ks) : null; } catch { /* best-effort */ }
+    Object.keys(flat).forEach((k) => delete flat[k]);
+    scan(p, 0, 'census.'); scan(det, 0, '');
+    out.push({ name: [p.first_name, p.last_name].filter(Boolean).join(' ') || p.name || ks, fields: { ...flat } });
+  }
+  return { sample: out };
+}

@@ -5615,6 +5615,8 @@ async function loadOutpatient(){
       <div class="ret-cards" style="margin-top:8px">${box(c.PHP||0,'In PHP now','rc-elev')}${box(c.IOP||0,'In IOP now')}${box(c.OP||0,'OP')}${box(c.total||0,'Total enrolled')}</div>
       ${lbHtml}
       <span id="opMsg" class="hint"></span></div>
+    ${d.isAdmin?`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔍 Find the right level &amp; authorization fields</h3><p class="sub sans" style="margin:0">OP shows as IOP because OP has no UR auth (UR LOC = last authorized level). This dumps each chart's level/UR/auth fields so I can read the <b>actual current level</b> and the <b>PHP authorization period</b> (for PHP length of stay).</p></div><button class="btn btn-gold btn-sm sans" onclick="inspectOpFields(this)">Inspect Kipu fields</button></div>
+      <div id="opFieldInspect" class="hint">Tap “Inspect Kipu fields,” then send me what it shows — I’ll wire OP/IOP correctly and compute PHP→IOP length of stay from the authorization dates.</div></div>`:''}
     <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Group attendance</h3><p class="sub sans" style="margin:0">% of each level attending groups today, and groups-attended-before-IOP. Needs your Kipu group-session data.</p></div>${d.isAdmin?'<button class="btn btn-ghost btn-sm sans" onclick="probeGroups(this)">Find group data in Kipu</button>':''}</div>
       <div id="opGroupProbe" class="hint">Coming next — I first need to confirm how your Kipu records group sessions/attendance. ${d.isAdmin?'Tap “Find group data in Kipu” and I’ll wire the real attendance numbers from whatever responds.':''}</div></div>
     <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">📊 Movement &amp; length of stay</h3><p class="sub sans" style="margin:0">Adjust the window — admits, discharges, PHP→IOP moves, and LOS per level.</p></div>
@@ -5643,6 +5645,14 @@ async function loadOutpatientAnalytics(){
     <h3 style="font-size:14px;margin:14px 0 4px">⚡ Quick movers <span class="hint" style="font-weight:400">— PHP→IOP in ≤ ${a.quickThresh} days (short authorizations to look into)</span></h3>
     ${quick.length?`<table class="tbl"><tr><th>Client</th><th>Payer</th><th>Days in PHP</th><th>Admit</th><th>Moved to IOP</th></tr>${quick.map(q=>`<tr><td><strong>${esc(q.name)}</strong>${q.active?'':' <span class="hint">(disch.)</span>'}</td><td class="hint">${esc(q.payer||'—')}</td><td><strong style="color:var(--danger)">${q.phpDays}d</strong></td><td>${esc(q.admit||'—')}</td><td>${esc(q.iopStart||'—')}</td></tr>`).join('')}</table>`:'<div class="hint">None yet — quick movers appear here as people transition to IOP.</div>'}
     ${a.tracking?'':'<div class="pc-note" style="margin-top:10px;color:#a60">⏳ Movement &amp; LOS build up as the app watches the census daily. Admits/census/payer are accurate now; PHP→IOP timing and trends fill in from the first refresh forward (people who already moved before today show LOS as “—”).</div>'}`;
+}
+async function inspectOpFields(btn){
+  const el=$('opFieldInspect'); if(btn)btn.disabled=true; if(el)el.innerHTML='Reading a few charts from Kipu…';
+  try{ const r=await api('/outpatient/field-inspect');
+    if(r.error){ if(el)el.textContent=r.error; }
+    else if(el) el.innerHTML=(r.sample||[]).map(s=>`<div style="margin:8px 0;border-top:1px solid var(--line);padding-top:6px"><strong>${esc(s.name)}</strong>${Object.keys(s.fields||{}).length?Object.entries(s.fields).map(([k,v])=>`<div class="hint" style="font-family:monospace;font-size:11px">${esc(k)} = ${esc(v)}</div>`).join(''):'<div class="hint">no level/auth fields found</div>'}</div>`).join('')+'<div class="hint" style="margin-top:6px">Send me these — I’ll pick the real current-level field and the PHP auth dates.</div>';
+  }catch(e){ if(el)el.textContent=e.message; }
+  if(btn)btn.disabled=false;
 }
 async function probeGroups(btn){
   const el=$('opGroupProbe'); if(btn)btn.disabled=true; if(el)el.innerHTML='Probing Kipu…';

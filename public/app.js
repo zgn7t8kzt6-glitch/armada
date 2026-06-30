@@ -5615,8 +5615,9 @@ async function loadOutpatient(){
       <div class="ret-cards" style="margin-top:8px">${box(c.PHP||0,'In PHP now','rc-elev')}${box(c.IOP||0,'In IOP now')}${box(c.OP||0,'OP')}${box(c.total||0,'Total enrolled')}</div>
       ${lbHtml}
       <span id="opMsg" class="hint"></span></div>
-    ${d.isAdmin?`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔍 Find the right level &amp; authorization fields</h3><p class="sub sans" style="margin:0">OP shows as IOP because OP has no UR auth (UR LOC = last authorized level). This dumps each chart's level/UR/auth fields so I can read the <b>actual current level</b> and the <b>PHP authorization period</b> (for PHP length of stay).</p></div><button class="btn btn-gold btn-sm sans" onclick="inspectOpFields(this)">Inspect Kipu fields</button></div>
-      <div id="opFieldInspect" class="hint">Tap “Inspect Kipu fields,” then send me what it shows — I’ll wire OP/IOP correctly and compute PHP→IOP length of stay from the authorization dates.</div></div>`:''}
+    ${d.isAdmin?`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🔍 Find the right level &amp; authorization fields</h3><p class="sub sans" style="margin:0">OP shows as IOP because OP has no UR auth (UR LOC = last authorized level). This dumps each chart's level/UR/auth fields so I can read the <b>actual current level</b> and the <b>PHP authorization period</b> (for PHP length of stay).</p></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-gold btn-sm sans" onclick="inspectOpFields(this)">Inspect Kipu fields</button><button class="btn btn-ghost btn-sm sans" onclick="probeUr(this)">Probe UR history</button></div></div>
+      <div id="opFieldInspect" class="hint">Tap “Inspect Kipu fields,” then send me what it shows — I’ll wire OP/IOP correctly and compute PHP→IOP length of stay from the authorization dates.</div>
+      <div id="opUrProbe" class="hint" style="margin-top:6px"></div></div>`:''}
     <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Group attendance today</h3><p class="sub sans" style="margin:0">Of the people enrolled at each level, the share who attended at least one group today — live from Kipu group sessions.</p></div>
       <div class="toolbar" style="gap:6px;margin:0"><label class="hint">Date <input type="date" id="op_grpdate" value="${esc(today())}" onchange="loadOutpatientGroups()"/></label>${d.isAdmin?'<button class="btn btn-ghost btn-sm sans" onclick="probeGroups(this)">Probe Kipu</button>':''}</div></div>
       <div id="opGroups"><div class="hint">Loading attendance…</div></div>
@@ -5666,6 +5667,15 @@ async function inspectOpFields(btn){
   try{ const r=await api('/outpatient/field-inspect');
     if(r.error){ if(el)el.textContent=r.error; }
     else if(el) el.innerHTML=(r.sample||[]).map(s=>`<div style="margin:8px 0;border-top:1px solid var(--line);padding-top:6px"><strong>${esc(s.name)}</strong>${Object.keys(s.fields||{}).length?Object.entries(s.fields).map(([k,v])=>`<div class="hint" style="font-family:monospace;font-size:11px">${esc(k)} = ${esc(v)}</div>`).join(''):'<div class="hint">no level/auth fields found</div>'}</div>`).join('')+'<div class="hint" style="margin-top:6px">Send me these — I’ll pick the real current-level field and the PHP auth dates.</div>';
+  }catch(e){ if(el)el.textContent=e.message; }
+  if(btn)btn.disabled=false;
+}
+async function probeUr(btn){
+  const el=$('opUrProbe'); if(btn)btn.disabled=true; if(el)el.innerHTML='Probing Kipu UR / authorization endpoints…';
+  try{ const r=await api('/outpatient/ur-probe');
+    if(r.error){ if(el)el.textContent=r.error; if(btn)btn.disabled=false; return; }
+    const rows=(r.probes||[]).map(p=>{ const f=p.fields&&Object.keys(p.fields).length?Object.entries(p.fields).slice(0,12).map(([k,v])=>esc(k)+'='+esc(v)).join(' · '):''; return `<tr><td class="hint" style="font-family:monospace;font-size:11px">${esc(p.path)}</td><td>${p.ok?('<span style="color:var(--good)">✓ '+(p.count!=null?p.count+' rows':'ok')+'</span>'):('<span class="hint">'+esc(p.error||'—')+'</span>')}</td><td class="hint" style="font-size:11px">${f}</td></tr>`; }).join('');
+    if(el)el.innerHTML=`<div class="hint">Probed against <strong>${esc(r.sampleName||r.sampleCasefile||'')}</strong>:</div><table class="tbl"><tr><th>Endpoint</th><th>Result</th><th>Level / date fields found</th></tr>${rows}</table><div class="hint" style="margin-top:6px">Send me which row has authorization periods (a level + start/end date) and I’ll reconstruct past PHP→IOP step-downs from it.</div>`;
   }catch(e){ if(el)el.textContent=e.message; }
   if(btn)btn.disabled=false;
 }

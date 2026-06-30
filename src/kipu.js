@@ -1364,6 +1364,69 @@ export async function kipuGroupProbe() {
   return { probes: out };
 }
 
+// Discovery: find how this Kipu account exposes utilization-review / authorization
+// HISTORY, so PHP→IOP step-down dates can be reconstructed for past stays. UR is
+// usually charted per casefile, so we grab a couple of real casefile ids first and
+// probe both account-level and per-patient endpoints. For anything that responds we
+// deep-scan for level + date fields that look like authorization periods. Read-only.
+export async function kipuUrProbe(locationName) {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  // Resolve location + a few sample casefile ids from the census.
+  let locId = null;
+  const samples = [];
+  try {
+    const want = String(locationName || '').trim().toLowerCase();
+    const loc = await kipuGet('/api/locations');
+    const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
+    const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
+    const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
+    if (hit) locId = hit.id;
+    let path = (process.env.KIPU_ROSTER_PATH || '/api/patients/census');
+    if (locId != null) path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
+    const data = await kipuGet(path);
+    const list = (data?.patients || data?.census || (Array.isArray(data) ? data : [])).slice(0, 4);
+    for (const p of list) {
+      const cf = String(pick(p, 'casefile_id', 'id', 'patient_id') || '');
+      if (cf) samples.push({ cf, name: [p.first_name, p.last_name].filter(Boolean).join(' ') || p.name || cf });
+    }
+  } catch (e) { return { error: 'setup: ' + e.message }; }
+  if (!samples.length) return { error: 'No sample patients found to probe UR endpoints against.' };
+  const cf = samples[0].cf;
+  // Account-level + per-patient endpoint candidates for UR / authorizations / level history.
+  const tries = [
+    '/api/utilization_reviews', '/api/ur_reviews', '/api/urs', '/api/ur',
+    '/api/authorizations', '/api/insurance_authorizations', '/api/patient_authorizations',
+    '/api/care_levels', '/api/level_of_care_changes', '/api/level_changes',
+    `/api/patients/${cf}/utilization_reviews`, `/api/patients/${cf}/ur`, `/api/patients/${cf}/urs`,
+    `/api/patients/${cf}/authorizations`, `/api/patients/${cf}/insurance_authorizations`,
+    `/api/patients/${cf}/care_levels`, `/api/patients/${cf}/levels_of_care`, `/api/patients/${cf}/level_of_care`,
+    `/api/patients/${cf}/level_changes`, `/api/patients/${cf}/program_history`, `/api/patients/${cf}/admissions`,
+    `/api/patients/${cf}`,
+  ];
+  // Pull the level/date-ish fields out of any object, recursively, so we can see if
+  // an authorization period (start/end + level) actually lives in the payload.
+  const interesting = (k) => /level|loc|\bur\b|authoriz|\bauth|care|program|partial|intensive|outpat|\bphp\b|\biop\b|\bop\b|step|begin|start|end|expir|through|effective|from|to|admit|discharge|date|period|review/i.test(k);
+  const dig = (obj, depth, prefix, bag) => {
+    if (!obj || typeof obj !== 'object' || depth > 3) return;
+    for (const [k, v] of Object.entries(obj)) {
+      if (v == null) continue;
+      if (typeof v === 'object') { if (Array.isArray(v)) v.slice(0, 3).forEach((it, i) => dig(it, depth + 1, `${prefix}${k}[${i}].`, bag)); else dig(v, depth + 1, `${prefix}${k}.`, bag); }
+      else if (interesting(k)) bag[prefix + k] = String(v).slice(0, 80);
+    }
+  };
+  const out = [];
+  for (const path of tries) {
+    try {
+      const d = await kipuGet(path);
+      const arr = Array.isArray(d) ? d : (Object.values(d || {}).find((v) => Array.isArray(v)) || null);
+      const first = arr && arr[0] && typeof arr[0] === 'object' ? arr[0] : (d && typeof d === 'object' ? d : null);
+      const bag = {}; dig(first, 0, '', bag);
+      out.push({ path, ok: true, count: Array.isArray(arr) ? arr.length : null, topKeys: Object.keys(d || {}).slice(0, 16), fields: bag });
+    } catch (e) { out.push({ path, ok: false, error: String(e.message).slice(0, 120) }); }
+  }
+  return { sampleCasefile: cf, sampleName: samples[0].name, probes: out };
+}
+
 // Group attendance via /api/group_sessions (the endpoint that actually exists on
 // this account — it carries session_start_time + a `patients` attendee list).
 // Returns, for the given date window, who attended at least one group each day and

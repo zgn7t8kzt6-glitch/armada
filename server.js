@@ -2829,7 +2829,9 @@ async function syncOutpatient() {
   const get = db.prepare(`SELECT kipu_id, iop_start, admit FROM outpatient_clients WHERE kipu_id = ?`);
   const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id,name,pref,level,loc_class,admit,mrn,therapist,payer,php_start,iop_start,first_seen,last_seen,active,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'))`);
-  const upd = db.prepare(`UPDATE outpatient_clients SET name=?,pref=?,level=?,loc_class=?,admit=COALESCE(NULLIF(admit,''),?),mrn=?,therapist=?,
+  // Prefer the LATEST admission date Kipu has (the most recent stay), per the rule
+  // "last admission date → first IOP date".
+  const upd = db.prepare(`UPDATE outpatient_clients SET name=?,pref=?,level=?,loc_class=?,admit=COALESCE(NULLIF(?,''),admit),mrn=?,therapist=?,
     payer=COALESCE(NULLIF(payer,''),?),iop_start=?,last_seen=?,active=1,discharged_at=NULL,discharge_loc=NULL,updated_at=datetime('now') WHERE kipu_id=?`);
   const seen = new Set();
   db.exec('BEGIN');

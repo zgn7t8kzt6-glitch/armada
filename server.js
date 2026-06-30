@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -2866,9 +2866,24 @@ app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, 
   audit({ user: req.user, action: 'OUTPATIENT_SYNC', detail: `${r.counts.total} at ${r.location} (PHP ${r.counts.PHP}, IOP ${r.counts.IOP})`, ip: req.ip });
   res.json({ ok: true, location: r.location, counts: r.counts });
 });
+// Live admit/discharge source, cached briefly so toggling the dashboard window
+// doesn't hammer Kipu. Pulls /api/patients/admissions with a 365-day lookback so a
+// single fetch covers admits in-window AND discharges in-window (people admitted
+// earlier who left during the window). Best-effort: null if Kipu is down.
+const _opAdmCache = new Map();   // key `${since}|${end}` → { at, data }
+async function outpatientAdmissionsCached(since, end) {
+  const key = `${since}|${end}`;
+  const hit = _opAdmCache.get(key);
+  if (hit && (Date.now() - hit.at) < 5 * 60 * 1000) return hit.data;
+  if (!kipuConfigured()) return null;
+  let r; try { r = await kipuOutpatientAdmissions(outpatientLocationName(), addDays(since, -365), end); } catch { return null; }
+  if (!r || r.error || !Array.isArray(r.admissions)) return null;
+  _opAdmCache.set(key, { at: Date.now(), data: r.admissions });
+  return r.admissions;
+}
 // The diagnostic dashboard: admits/discharges over an adjustable period, census by
 // level, LOS per level (+ trend), per-payer breakdown, and the "quick movers".
-app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, (req, res) => {
+app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req, res) => {
   const today = appToday();
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : addDays(today, -7);
   const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;
@@ -2879,8 +2894,25 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, (req, res) 
   const activeRows = all.filter((c) => c.active);
   const counts = { total: activeRows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
   for (const c of activeRows) counts[c.loc_class] = (counts[c.loc_class] || 0) + 1;
-  const admits = all.filter((c) => inR(c.admit, since, end));
-  const discharges = all.filter((c) => inR(c.discharged_at, since, end));
+  // Admits/discharges come from Kipu's admissions record (catches in-and-out people the
+  // census snapshot never saw); fall back to the snapshot table if Kipu is unreachable.
+  const liveAdm = await outpatientAdmissionsCached(since, end);
+  const prevAdm = liveAdm ? await outpatientAdmissionsCached(prevSince, prevEnd) : null;
+  const levelByKid = new Map(all.map((c) => [String(c.kipu_id), c.loc_class]));
+  let admits, discharges, admitRows, dischargeRows, source;
+  if (liveAdm) {
+    source = 'kipu-admissions';
+    admitRows = liveAdm.filter((a) => inR(a.admit, since, end));
+    admits = admitRows;
+    dischargeRows = liveAdm.filter((a) => inR(a.discharge, since, end));
+    discharges = dischargeRows;
+  } else {
+    source = 'snapshot';
+    admitRows = all.filter((c) => inR(c.admit, since, end)).map((c) => ({ kipuId: String(c.kipu_id), name: c.pref || c.name, admit: c.admit, discharge: c.discharged_at, payer: c.payer }));
+    admits = admitRows;
+    dischargeRows = all.filter((c) => inR(c.discharged_at, since, end)).map((c) => ({ kipuId: String(c.kipu_id), name: c.pref || c.name, admit: c.admit, discharge: c.discharged_at, payer: c.payer }));
+    discharges = dischargeRows;
+  }
   const movedToIop = all.filter((c) => inR(c.iop_start, since, end));   // PHP→IOP this period
   // PHP LOS = admit→iop_start, for those who MOVED in the window (so it's period-bound & trendable)
   const phpLosWin = (s, e) => avg1(all.filter((c) => inR(c.iop_start, s, e) && c.admit).map((c) => opDays(c.admit, c.iop_start)).filter((n) => n != null));
@@ -2901,13 +2933,20 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, (req, res) 
   const quick = all.map((c) => { const pd = (c.iop_start && c.admit) ? opDays(c.admit, c.iop_start) : null; return pd != null && pd <= quickThresh ? { name: c.pref || c.name, payer: c.payer || '', phpDays: pd, admit: (c.admit || '').slice(0, 10), iopStart: (c.iop_start || '').slice(0, 10), active: !!c.active } : null; }).filter(Boolean).sort((a, b) => a.phpDays - b.phpDays);
   const tracking = !!getState('outpatient_synced_at');
   // The exact admits we counted — so a real-vs-app gap can be diagnosed by name.
-  const admitList = admits.map((c) => ({ name: c.pref || c.name, admit: (c.admit || '').slice(0, 10), discharged: (c.discharged_at || '').slice(0, 10), level: c.loc_class, sameDay: c.admit && c.discharged_at && String(c.admit).slice(0, 10) === String(c.discharged_at).slice(0, 10) }))
+  const admitList = admitRows.map((a) => ({ name: a.pref || a.name, admit: (a.admit || '').slice(0, 10), discharged: (a.discharge || '').slice(0, 10), level: levelByKid.get(String(a.kipuId)) || '', sameDay: a.admit && a.discharge && String(a.admit).slice(0, 10) === String(a.discharge).slice(0, 10) }))
     .sort((a, b) => (a.admit < b.admit ? 1 : a.admit > b.admit ? -1 : 0));
+  // The exact discharges in the window, with length of stay (admit→discharge).
+  const dischargeList = dischargeRows.map((a) => {
+    const admit = (a.admit || '').slice(0, 10), disch = (a.discharge || '').slice(0, 10);
+    const los = (admit && disch) ? opDays(admit, disch) : null;
+    return { name: a.pref || a.name, admit, discharged: disch, level: levelByKid.get(String(a.kipuId)) || '', los, sameDay: admit && disch && admit === disch };
+  }).sort((a, b) => (a.discharged < b.discharged ? 1 : a.discharged > b.discharged ? -1 : 0));
+  const admitsPrev = prevAdm ? prevAdm.filter((a) => inR(a.admit, prevSince, prevEnd)).length : null;
   res.json({
     since, end, spanDays, perWeek: +(admits.length / (spanDays / 7)).toFixed(1),
     counts,
     admits: admits.length, discharges: discharges.length, movedToIop: movedToIop.length,
-    admitList,
+    admitsPrev, admitList, dischargeList, source,
     los: { php: avgPhpLos, phpPrev: avgPhpPrev, iop: avgIopLos, iopPrev: avgIopPrev, curPhpDays, curIopDays },
     payers: payerList,
     quick, quickThresh,

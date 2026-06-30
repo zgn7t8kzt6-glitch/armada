@@ -5653,12 +5653,18 @@ async function loadOutpatientAnalytics(){
   const payerRows=(a.payers||[]).map(p=>`<tr><td><strong>${esc(p.payer)}</strong></td><td>${p.total}</td><td>${p.php}</td><td>${p.iop}</td><td>${p.avgPhpLos!=null?p.avgPhpLos+'d':'—'}</td><td>${p.avgIopLos!=null?p.avgIopLos+'d':'—'}</td></tr>`).join('')||'<tr><td colspan="6" class="hint">No payer data yet.</td></tr>';
   const quick=(a.quick||[]);
   const al=(a.admitList||[]);
-  const admitDetail=al.length?`<details style="margin:6px 0 4px"><summary class="hint" style="cursor:pointer">See the ${al.length} admit${al.length===1?'':'s'} the app counted in this window (compare to your real number)</summary>
+  const liveSrc=a.source==='kipu-admissions';
+  const srcNote=liveSrc?'<span class="hint" style="color:var(--good)">✓ live from Kipu admissions (includes people already discharged)</span>':'<span class="hint" style="color:#a60">⚠ from census snapshots — Kipu admissions unreachable, fast in-and-out people may be missed</span>';
+  const admitDetail=al.length?`<details style="margin:6px 0 4px"><summary class="hint" style="cursor:pointer">See the ${al.length} admit${al.length===1?'':'s'} in this window — by name</summary>
     <table class="tbl" style="margin-top:4px"><tr><th>Client</th><th>Admit</th><th>Discharged</th><th>Level</th></tr>${al.map(x=>`<tr><td><strong>${esc(x.name)}</strong>${x.sameDay?' <span class="hint" style="color:#a60">same-day</span>':''}</td><td>${esc(x.admit||'—')}</td><td class="hint">${esc(x.discharged||'—')}</td><td class="hint">${esc(x.level||'')}</td></tr>`).join('')}</table>
-    <div class="hint" style="margin-top:4px">If your real count is higher, the missing people likely never appeared in a Kipu census snapshot we pulled (admitted &amp; discharged between daily syncs). Tap “Probe admit history” in the diagnostics card to pull them from Kipu’s full record.</div></details>`:'';
+    <div class="hint" style="margin-top:4px">${liveSrc?'Pulled straight from Kipu’s admissions record for this window — including anyone admitted and discharged the same week. If a name you expected is missing, check the From/To dates match the exact week.':'Kipu admissions couldn’t be reached, so this is the census-snapshot count, which can miss fast in-and-out people. Try again in a moment.'}</div></details>`:'';
+  const dl=(a.dischargeList||[]);
+  const dischDetail=dl.length?`<details style="margin:2px 0 4px"><summary class="hint" style="cursor:pointer">See the ${dl.length} discharge${dl.length===1?'':'s'} in this window — by name, with length of stay</summary>
+    <table class="tbl" style="margin-top:4px"><tr><th>Client</th><th>Admit</th><th>Discharged</th><th>Length of stay</th><th>Level</th></tr>${dl.map(x=>`<tr><td><strong>${esc(x.name)}</strong>${x.sameDay?' <span class="hint" style="color:#a60">same-day</span>':''}</td><td class="hint">${esc(x.admit||'—')}</td><td>${esc(x.discharged||'—')}</td><td>${x.los!=null?'<strong>'+x.los+'d</strong>':'—'}</td><td class="hint">${esc(x.level||'')}</td></tr>`).join('')}</table></details>`:'';
   host.innerHTML=`<div class="ret-cards" style="margin-top:8px">
       ${box(a.admits||0,'Admits in window')}${box(a.perWeek!=null?a.perWeek:'—','Admits / week')}${box(a.movedToIop||0,'Moved PHP→IOP')}${box(a.discharges||0,'Discharges')}</div>
-    ${admitDetail}
+    <div style="margin:4px 0 0">${srcNote}</div>
+    ${admitDetail}${dischDetail}
     <div class="ret-cards" style="margin-top:6px">
       ${box((l.php!=null?l.php+'d':'—'),'Avg PHP length of stay'+'')}${box((l.iop!=null?l.iop+'d':'—'),'Avg IOP length of stay')}${box((l.curPhpDays!=null?l.curPhpDays+'d':'—'),'Avg days in PHP (current)')}${box((l.curIopDays!=null?l.curIopDays+'d':'—'),'Avg days in IOP (current)')}</div>
     <div class="hint" style="margin:4px 0 10px">PHP LOS${arrow(l.php,l.phpPrev)} · IOP LOS${arrow(l.iop,l.iopPrev)} <span style="margin-left:6px">vs the previous ${a.spanDays} days</span></div>

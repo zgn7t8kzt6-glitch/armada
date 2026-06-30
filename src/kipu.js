@@ -1296,6 +1296,50 @@ export async function kipuFixDischargeDates() {
 // Read-only census for a SECOND Kipu location, kept completely apart from the detox
 // roster — never writes to `clients`. Resolves the location by name, pulls its active
 // census, and classifies each patient's level of care as PHP / IOP / OP / Other.
+// True admissions over a date range — INCLUDING patients who have since discharged.
+// /api/patients/admissions filters by admission_date, so to also catch discharges in
+// a window we pull with a generous lookback and let the caller filter by discharge.
+// This is the authoritative admit/discharge source: the live census only shows who's
+// enrolled right now, so fast in-and-out people never appear in it.
+export async function kipuOutpatientAdmissions(locationName, startDate, endDate) {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const want = String(locationName || '').trim().toLowerCase();
+  if (!want) return { error: 'No outpatient location name configured.' };
+  let locId = null, locName = null;
+  try {
+    const loc = await kipuGet('/api/locations');
+    const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
+    const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
+    const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
+    if (hit) { locId = hit.id; locName = hit.name; }
+  } catch (e) { return { error: 'Could not read Kipu locations: ' + e.message }; }
+  if (locId == null) return { error: `Location "${locationName}" not found in Kipu.` };
+  const start = String(startDate || '').slice(0, 10);
+  const end = String(endDate || appToday()).slice(0, 10);
+  const rows = [];
+  for (let page = 1; page <= 50; page++) {
+    let path = `/api/patients/admissions?start_date=${start}&end_date=${end}&page=${page}&per=100&location_id=${encodeURIComponent(locId)}`;
+    let d; try { d = await kipuGet(path); } catch (e) { if (page === 1) return { error: 'admissions: ' + e.message }; break; }
+    const arr = d?.patients || d?.admissions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []);
+    if (!Array.isArray(arr) || arr.length === 0) break;
+    rows.push(...arr);
+    if (arr.length < 100) break;
+  }
+  const admissions = rows.map((p) => {
+    const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name || '';
+    return {
+      kipuId: String(pick(p, 'casefile_id', 'id', 'patient_id') || ''),
+      name, pref: p.first_name || name,
+      admit: localDateOf(pick(p, 'admission_date', 'admit_date', 'admitted_at')) || '',
+      discharge: localDateOf(pick(p, 'discharge_date', 'discharged_at')) || '',
+      payer: String(pick(p, 'insurance_company', 'insurance', 'payer', 'payor', 'insurance_name') || ''),
+      mrn: String(pick(p, 'mr_number', 'mrn') || ''),
+      locationId: pick(p, 'location_id'),
+    };
+  }).filter((r) => r.kipuId && r.name && (locId == null || r.locationId == null || String(r.locationId) === String(locId)));
+  return { locationId: locId, locationName: locName, start, end, admissions };
+}
+
 export async function kipuOutpatientCensus(locationName) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();

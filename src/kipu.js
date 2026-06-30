@@ -1392,16 +1392,24 @@ export async function kipuUrProbe(locationName) {
   } catch (e) { return { error: 'setup: ' + e.message }; }
   if (!samples.length) return { error: 'No sample patients found to probe UR endpoints against.' };
   const cf = samples[0].cf;
+  // The casefile id is composite: "<integerPatientId>:<patient_master_uuid>". Kipu's
+  // per-patient routes want the INTEGER id in the path plus phi_level + patient_master_id
+  // as query params (passing the composite string is what made the real routes 500).
+  const phi = process.env.KIPU_PHI_LEVEL || 'high';
+  const master = cf.split(':')[0];
+  const uuid = cf.includes(':') ? cf.slice(cf.indexOf(':') + 1) : cf;
+  const q = `?phi_level=${phi}&patient_master_id=${encodeURIComponent(uuid)}`;
+  const pp = (sub) => `/api/patients/${master}/${sub}${q}`;
   // Account-level + per-patient endpoint candidates for UR / authorizations / level history.
   const tries = [
     '/api/utilization_reviews', '/api/ur_reviews', '/api/urs', '/api/ur',
     '/api/authorizations', '/api/insurance_authorizations', '/api/patient_authorizations',
     '/api/care_levels', '/api/level_of_care_changes', '/api/level_changes',
-    `/api/patients/${cf}/utilization_reviews`, `/api/patients/${cf}/ur`, `/api/patients/${cf}/urs`,
-    `/api/patients/${cf}/authorizations`, `/api/patients/${cf}/insurance_authorizations`,
-    `/api/patients/${cf}/care_levels`, `/api/patients/${cf}/levels_of_care`, `/api/patients/${cf}/level_of_care`,
-    `/api/patients/${cf}/level_changes`, `/api/patients/${cf}/program_history`, `/api/patients/${cf}/admissions`,
-    `/api/patients/${cf}`,
+    pp('utilization_reviews'), pp('ur'), pp('urs'),
+    pp('authorizations'), pp('insurance_authorizations'),
+    pp('care_levels'), pp('levels_of_care'), pp('level_of_care'),
+    pp('level_changes'), pp('program_history'), pp('admissions'),
+    `/api/patients/${master}${q}`,
   ];
   // Pull the level/date-ish fields out of any object, recursively, so we can see if
   // an authorization period (start/end + level) actually lives in the payload.

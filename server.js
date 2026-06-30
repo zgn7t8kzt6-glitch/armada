@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -290,8 +290,14 @@ app.post('/api/mfa/disable', requireAuth, (req, res) => { mfaDisable(req.user.id
 
 app.post('/api/logout', (req, res) => { logout(req, res); res.json({ ok: true }); });
 
+// Outpatient (Akron House Recovery) is owner-only: the admin, plus any user ids the
+// owner explicitly grants. Walled off from everyone else.
+function outpatientAllowlist() { try { const a = JSON.parse(getState('outpatient_access') || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
+function canSeeOutpatient(user) { return !!user && (user.role === 'admin' || outpatientAllowlist().includes(user.id)); }
+function requireOutpatient(req, res, next) { if (!canSeeOutpatient(req.user)) return res.status(403).json({ error: 'Owner only.' }); next(); }
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
+  if (user) user.outpatientAccess = canSeeOutpatient(user);
   res.json({ user: user || null });
 });
 
@@ -2780,6 +2786,56 @@ app.post('/api/diag/cleanup', requireAuth, requireAdmin, (req, res) => {
   setState('churn_cleanup_last', `${new Date().toISOString().slice(0, 19).replace('T', ' ')} — ${merged} retired`);
   audit({ user: req.user, action: 'CLIENT_CLEANUP_RUN', detail: `${merged} retired (${churn} churn + ${phantom} phantom + ${shells} shells)`, ip: req.ip });
   res.json({ ok: true, merged, churn, phantom, shells });
+});
+
+/* ───────────── AKRON OUTPATIENT (owner-only, separate Kipu location) ───────────── */
+const OUTPATIENT_DEFAULT_LOCATION = 'Akron House Recovery';
+function outpatientLocationName() { return (getState('outpatient_location') || OUTPATIENT_DEFAULT_LOCATION).trim(); }
+function outpatientRoster() {
+  return db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist FROM outpatient_clients ORDER BY loc_class, name`).all();
+}
+function outpatientCounts(rows) {
+  const c = { total: rows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
+  for (const r of rows) c[r.loc_class] = (c[r.loc_class] || 0) + 1;
+  return c;
+}
+app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
+  const rows = outpatientRoster();
+  const access = req.user.role === 'admin'
+    ? db.prepare(`SELECT id, name, username, job_role FROM users WHERE id IN (${outpatientAllowlist().map(() => '?').join(',') || 'NULL'})`).all(...outpatientAllowlist())
+    : [];
+  res.json({
+    location: outpatientLocationName(),
+    kipuReady: kipuConfigured(),
+    asOf: getState('outpatient_synced_at') || null,
+    counts: outpatientCounts(rows),
+    roster: rows.map((r) => ({ name: r.pref || r.name, level: r.level, locClass: r.loc_class, admit: r.admit, therapist: r.therapist, mrn: r.mrn })),
+    isAdmin: req.user.role === 'admin',
+    access: access.map((u) => ({ id: u.id, name: u.name, username: u.username, role: u.job_role || '' })),
+    staff: req.user.role === 'admin' ? db.prepare(`SELECT id, name, job_role FROM users WHERE active=1 AND role!='admin' ORDER BY name`).all() : [],
+  });
+});
+app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, res) => {
+  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
+  let r; try { r = await kipuOutpatientCensus(outpatientLocationName()); } catch (e) { return res.status(502).json({ error: e.message }); }
+  if (r.error) return res.status(404).json({ error: r.error });
+  const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id, name, pref, level, loc_class, admit, mrn, therapist, updated_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))`);
+  db.exec('BEGIN');
+  try {
+    db.exec('DELETE FROM outpatient_clients');
+    let i = 0;
+    for (const p of r.patients) { ins.run(p.kipuId || ('row' + (++i)), p.name, p.pref, p.level, p.loc_class, p.admit, p.mrn, p.therapist); }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} return res.status(500).json({ error: e.message }); }
+  setState('outpatient_synced_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
+  audit({ user: req.user, action: 'OUTPATIENT_SYNC', detail: `${r.counts.total} at ${r.locationName} (PHP ${r.counts.PHP}, IOP ${r.counts.IOP})`, ip: req.ip });
+  res.json({ ok: true, location: r.locationName, counts: r.counts });
+});
+app.post('/api/outpatient/settings', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.location != null) setState('outpatient_location', String(b.location).trim().slice(0, 120));
+  if (Array.isArray(b.access)) setState('outpatient_access', JSON.stringify(b.access.map(Number).filter(Boolean)));
+  res.json({ ok: true });
 });
 
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────

@@ -1844,6 +1844,15 @@ CREATE INDEX IF NOT EXISTS idx_obs_client_ts ON obs_checks(client_id, ts);`);
 addColumn('obs_checks', 'kipu_eval_id', 'TEXT');   // source eval id, so Kipu-charted rounds dedupe
 addColumn('clients', 'doc_forms', 'TEXT');          // JSON: which key Kipu forms exist on the chart
 addColumn('clients', 'merged_into', 'INTEGER');     // set when this row was merged into another (de-dupe); kept for reversibility
+// OUTPATIENT — a separate Kipu location (e.g. Akron House Recovery), owner-only.
+// Read-only snapshot of the current census, classified by level of care. Kept apart
+// from the detox `clients` table entirely.
+db.exec(`CREATE TABLE IF NOT EXISTS outpatient_clients (
+  kipu_id TEXT PRIMARY KEY,
+  name TEXT, pref TEXT, level TEXT, loc_class TEXT,
+  admit TEXT, mrn TEXT, therapist TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // Audit trail for duplicate-client merges — a JSON snapshot of each retired row so a
 // merge can be reviewed or reversed.
 db.exec(`CREATE TABLE IF NOT EXISTS client_merges (

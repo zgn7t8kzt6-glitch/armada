@@ -196,7 +196,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -327,6 +327,9 @@ function flatMenu(){
 function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role==='Director of Operations')); }
 function canSeeView(v){
   if(!ME) return true;
+  // Akron Outpatient is owner-only: the admin, plus anyone the owner explicitly grants.
+  // Even Exec/Ops directors don't see it unless granted — so this check comes first.
+  if(v==='outpatient') return !!(ME.role==='admin' || ME.outpatientAccess);
   // Recovery Housing is walled off: only the owner/admin and housing staff see it.
   // Nobody on the clinical/detox side does — not even the broad-leadership roles below.
   if(HOUSING_VIEWS.includes(v)) return ME.role==='admin' || ME.job_role==='Executive Director' || HOUSING_ROLES.includes(ME.job_role);
@@ -488,6 +491,7 @@ function show(v){
   if(v==='staffsignins') loadStaffSignins();
   if(v==='admitcheck') loadAdmitCheck();
   if(v==='dupes') loadDupes();
+  if(v==='outpatient') loadOutpatient();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5587,6 +5591,50 @@ async function loadAdmitCheck(){
     <div class="card"><h3 style="margin-top:0">Admits — last 3 days</h3><table class="tbl"><tr><th>Patient</th><th>Stored admit date</th><th>Source</th><th>Status</th><th>Counts today?</th></tr>${admitRows}</table></div>
     <div class="card"><h3 style="margin-top:0">Discharges — last 3 days</h3><table class="tbl"><tr><th>Patient</th><th>Stored discharge date</th><th>Status</th><th>Source</th><th>Counts today?</th></tr>${dischRows}</table></div>
     <div class="card"><h3 style="margin-top:0">Scheduled arrivals</h3><table class="tbl"><tr><th>Name</th><th>Scheduled date</th><th>Status</th><th>Is today?</th></tr>${schedRows}</table></div>`;
+}
+/* ───────── AKRON OUTPATIENT (owner-only, separate Kipu location) ───────── */
+let OP_DATA=null;
+async function loadOutpatient(){
+  const host=$('outpatient'); if(!host) return;
+  host.innerHTML='<div class="hint">Loading…</div>';
+  let d; try{ d=await api('/outpatient'); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  OP_DATA=d;
+  const c=d.counts||{};
+  const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const asOf=d.asOf?('Kipu · as of '+esc(d.asOf)):'Not pulled yet';
+  const roster=(d.roster||[]);
+  const lvlBadge=(lc)=>`<span class="risk ${lc==='PHP'?'risk-elev':lc==='IOP'?'risk-low':'risk-warn'}">${esc(lc||'—')}</span>`;
+  const group=(lc)=>{ const r=roster.filter(x=>x.locClass===lc); if(!r.length) return ''; return `<div class="card"><h3 style="margin-top:0">${lc==='PHP'?'PHP — Partial Hospitalization':lc==='IOP'?'IOP — Intensive Outpatient':lc} <span class="hint" style="font-weight:400">· ${r.length}</span></h3>
+    <table class="tbl"><tr><th>Client</th><th>Level</th><th>Admit</th><th>Therapist</th></tr>${r.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.level||'')}</td><td>${esc(x.admit||'—')}</td><td class="hint">${esc(x.therapist||'')}</td></tr>`).join('')}</table></div>`; };
+  const other=roster.filter(x=>!['PHP','IOP'].includes(x.locClass));
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>🏥 Akron Outpatient <span class="hint" style="font-weight:400">· ${esc(d.location||'')}</span></h3><p class="sub sans">Live from Kipu — your outpatient census, split by level of care. ${esc(asOf)}.</p></div>
+      <button class="btn btn-gold btn-sm sans" onclick="refreshOutpatient(this)">↻ Refresh from Kipu</button></div>
+      ${d.kipuReady?'':'<div class="pc-note" style="color:var(--danger)">Kipu isn’t connected — set it up in Settings → Integrations.</div>'}
+      <div class="ret-cards" style="margin-top:8px">${box(c.PHP||0,'In PHP today','rc-elev')}${box(c.IOP||0,'In IOP today')}${box(c.OP||0,'Outpatient (OP)')}${box(c.total||0,'Total enrolled')}</div>
+      <span id="opMsg" class="hint"></span></div>
+    ${roster.length?group('PHP')+group('IOP')+(other.length?`<div class="card"><h3 style="margin-top:0">Other levels <span class="hint" style="font-weight:400">· ${other.length}</span></h3><table class="tbl"><tr><th>Client</th><th>Level</th><th>Admit</th></tr>${other.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.level||'')}</td><td>${esc(x.admit||'—')}</td></tr>`).join('')}</table></div>`:''):'<div class="card"><div class="hint">No outpatient census yet — tap “Refresh from Kipu” to pull the latest from '+esc(d.location||'your outpatient location')+'.</div></div>'}
+    ${d.isAdmin?opSettingsHtml(d):''}`;
+}
+function opSettingsHtml(d){
+  const acc=(d.access||[]);
+  const staff=(d.staff||[]);
+  return `<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">⚙️ Outpatient settings <span class="hint" style="font-weight:400">— owner only</span></h3>
+    <label>Kipu location name</label><input id="op_loc" value="${esc(d.location||'')}" placeholder="Akron House Recovery"/>
+    <label style="margin-top:8px">Who else can see this (besides you)</label>
+    <div id="op_access" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0">${staff.map(s=>{ const on=acc.find(a=>a.id===s.id); return `<button type="button" class="btn btn-sm sans ${on?'btn-gold':'btn-ghost'}" data-uid="${s.id}" onclick="this.classList.toggle('btn-gold');this.classList.toggle('btn-ghost')">${esc(s.name)}</button>`; }).join('')||'<span class="hint">No other staff yet.</span>'}</div>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold btn-sm sans" onclick="saveOutpatientSettings()">Save</button><span id="opSetMsg" class="hint" style="align-self:center"></span></div></div>`;
+}
+async function refreshOutpatient(btn){
+  const m=$('opMsg'); if(btn)btn.disabled=true; if(m)m.textContent='Pulling from Kipu…';
+  try{ const r=await api('/outpatient/refresh',{method:'POST'}); if(m)m.textContent=`✓ ${r.counts.total} enrolled at ${r.location} — PHP ${r.counts.PHP}, IOP ${r.counts.IOP}.`; loadOutpatient(); }
+  catch(e){ if(m)m.textContent=e.message; if(btn)btn.disabled=false; }
+}
+async function saveOutpatientSettings(){
+  const loc=($('op_loc')||{}).value||'';
+  const access=[...document.querySelectorAll('#op_access button.btn-gold')].map(b=>+b.dataset.uid);
+  const m=$('opSetMsg');
+  try{ await api('/outpatient/settings',{method:'POST',body:JSON.stringify({location:loc,access})}); if(m)m.textContent='✓ Saved'; loadOutpatient(); }
+  catch(e){ if(m)m.textContent=e.message; }
 }
 /* ───────── MERGE DUPLICATES (admin) — review-then-confirm, reversible ───────── */
 let DUPES=[];

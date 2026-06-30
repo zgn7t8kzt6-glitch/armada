@@ -1262,3 +1262,55 @@ export async function kipuFixDischargeDates() {
   for (const d of affected) rollupDailyMetrics(d);
   return { checked: clients.length, fixed, reactivated, admitTimes, daysRerolled: affected.size };
 }
+
+// ── OUTPATIENT (separate location, e.g. "Akron House Recovery") ──────────────
+// Read-only census for a SECOND Kipu location, kept completely apart from the detox
+// roster — never writes to `clients`. Resolves the location by name, pulls its active
+// census, and classifies each patient's level of care as PHP / IOP / OP / Other.
+export async function kipuOutpatientCensus(locationName) {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const want = String(locationName || '').trim().toLowerCase();
+  if (!want) return { error: 'No outpatient location name configured.' };
+  let locId = null, locName = null, locations = [];
+  try {
+    const loc = await kipuGet('/api/locations');
+    const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
+    locations = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
+    const hit = locations.find((l) => l.name.toLowerCase() === want) || locations.find((l) => l.name.toLowerCase().includes(want));
+    if (hit) { locId = hit.id; locName = hit.name; }
+  } catch (e) { return { error: 'Could not read Kipu locations: ' + e.message }; }
+  if (locId == null) return { error: `Location "${locationName}" not found in Kipu.`, locations };
+  let path = (process.env.KIPU_ROSTER_PATH || '/api/patients/census');
+  path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
+  const data = await kipuGet(path);
+  const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
+  const classify = (lvl) => {
+    const s = String(lvl || '').toLowerCase();
+    if (/\bphp\b|partial hospital/.test(s)) return 'PHP';
+    if (/\biop\b|intensive outpatient/.test(s)) return 'IOP';
+    if (/\bop\b|outpatient/.test(s)) return 'OP';
+    return 'Other';
+  };
+  const seen = new Set(); const patients = [];
+  for (const p of list) {
+    const kid = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'); const ks = kid != null ? String(kid) : null;
+    if (ks && seen.has(ks)) continue; if (ks) seen.add(ks);
+    const dischDate = pick(p, 'discharge_date', 'discharged_at'); const dischStatus = pick(p, 'discharge_type', 'discharge_status');
+    const discharged = Boolean((dischDate && String(dischDate).trim()) || (dischStatus && !['active', 'admitted', 'current'].includes(String(dischStatus).toLowerCase())));
+    if (discharged) continue;
+    const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name || '';
+    if (!name) continue;
+    const level = pick(p, 'level_of_care', 'levelOfCare', 'level_of_care_name', 'loc', 'level', 'program');
+    const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
+    patients.push({
+      kipuId: ks, name, pref: p.first_name || name,
+      level: level ? String(level) : '', loc_class: classify(level),
+      admit: admitRaw ? String(admitRaw).slice(0, 10) : '',
+      mrn: String(pick(p, 'mr_number', 'mrn') || ''),
+      therapist: String(pick(p, 'primary_therapist', 'therapist', 'counselor') || ''),
+    });
+  }
+  const counts = { total: patients.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
+  for (const p of patients) counts[p.loc_class] = (counts[p.loc_class] || 0) + 1;
+  return { locationId: locId, locationName: locName, counts, patients };
+}

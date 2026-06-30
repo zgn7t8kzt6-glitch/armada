@@ -2980,12 +2980,14 @@ app.get('/api/outpatient/php-outcomes', requireAuth, requireOutpatient, async (r
   const stillIn = people.filter((p) => !p.discharged && !p.hasIop).length;
   // Didn't complete PHP = discharged and never reached IOP.
   const nonComplete = people.filter((p) => p.discharged && !p.hasIop);
-  const rightAway = nonComplete.filter((p) => p.los != null && p.los <= 1);
-  const leftDuringPhp = nonComplete.filter((p) => !(p.los != null && p.los <= 1));
-  const list = nonComplete.map((p) => ({ name: p.name, payer: p.payer || '', admit: (p.admit || '').slice(0, 10), discharged: (p.discharge || '').slice(0, 10), los: p.los, bucket: (p.los != null && p.los <= 1) ? 'right away' : 'left during PHP' }))
+  const rightAwayDays = +(getState('outpatient_rightaway_days') || 3);
+  const isRightAway = (p) => p.los != null && p.los <= rightAwayDays;
+  const rightAway = nonComplete.filter(isRightAway);
+  const leftDuringPhp = nonComplete.filter((p) => !isRightAway(p));
+  const list = nonComplete.map((p) => ({ name: p.name, payer: p.payer || '', admit: (p.admit || '').slice(0, 10), discharged: (p.discharge || '').slice(0, 10), los: p.los, bucket: isRightAway(p) ? 'right away' : 'left during PHP' }))
     .sort((a, b) => ((a.los ?? 99) - (b.los ?? 99)));
   res.json({
-    since: r.since, end: r.end, admitted, reachedIop, stillIn,
+    since: r.since, end: r.end, admitted, reachedIop, stillIn, rightAwayDays,
     didNotCompletePhp: nonComplete.length, rightAway: rightAway.length, leftDuringPhp: leftDuringPhp.length,
     completionRate: (reachedIop + nonComplete.length) ? Math.round((reachedIop / (reachedIop + nonComplete.length)) * 100) : null,
     list,

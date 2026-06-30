@@ -2866,19 +2866,19 @@ app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, 
   audit({ user: req.user, action: 'OUTPATIENT_SYNC', detail: `${r.counts.total} at ${r.location} (PHP ${r.counts.PHP}, IOP ${r.counts.IOP})`, ip: req.ip });
   res.json({ ok: true, location: r.location, counts: r.counts });
 });
-// Live admit/discharge source, cached briefly so toggling the dashboard window
-// doesn't hammer Kipu. Pulls /api/patients/admissions with a 365-day lookback so a
-// single fetch covers admits in-window AND discharges in-window (people admitted
-// earlier who left during the window). Best-effort: null if Kipu is down.
-const _opAdmCache = new Map();   // key `${since}|${end}` → { at, data }
-async function outpatientAdmissionsCached(since, end) {
-  const key = `${since}|${end}`;
-  const hit = _opAdmCache.get(key);
-  if (hit && (Date.now() - hit.at) < 5 * 60 * 1000) return hit.data;
-  if (!kipuConfigured()) return null;
-  let r; try { r = await kipuOutpatientAdmissions(outpatientLocationName(), addDays(since, -365), end); } catch { return null; }
-  if (!r || r.error || !Array.isArray(r.admissions)) return null;
-  _opAdmCache.set(key, { at: Date.now(), data: r.admissions });
+// Live admit/discharge source. ONE Kipu pull (admissions over the last ~400 days)
+// serves every dashboard window — we just re-filter the array in memory — so toggling
+// 7d/30d/90d never triggers a fetch and can't flip the number. Cached 5 min, but the
+// last good result is retained and served if a later fetch fails, so a transient Kipu
+// hiccup never silently downgrades the count back to the census snapshot.
+let _opAdmAll = null;   // { day, at, data: [admissions] }
+async function outpatientAllAdmissions() {
+  const today = appToday();
+  if (_opAdmAll && _opAdmAll.day === today && (Date.now() - _opAdmAll.at) < 5 * 60 * 1000) return _opAdmAll.data;
+  if (!kipuConfigured()) return _opAdmAll ? _opAdmAll.data : null;
+  let r; try { r = await kipuOutpatientAdmissions(outpatientLocationName(), addDays(today, -400), today); } catch { return _opAdmAll ? _opAdmAll.data : null; }
+  if (!r || r.error || !Array.isArray(r.admissions)) return _opAdmAll ? _opAdmAll.data : null;
+  _opAdmAll = { day: today, at: Date.now(), data: r.admissions };
   return r.admissions;
 }
 // The diagnostic dashboard: admits/discharges over an adjustable period, census by
@@ -2896,8 +2896,7 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req,
   for (const c of activeRows) counts[c.loc_class] = (counts[c.loc_class] || 0) + 1;
   // Admits/discharges come from Kipu's admissions record (catches in-and-out people the
   // census snapshot never saw); fall back to the snapshot table if Kipu is unreachable.
-  const liveAdm = await outpatientAdmissionsCached(since, end);
-  const prevAdm = liveAdm ? await outpatientAdmissionsCached(prevSince, prevEnd) : null;
+  const liveAdm = await outpatientAllAdmissions();
   const levelByKid = new Map(all.map((c) => [String(c.kipu_id), c.loc_class]));
   let admits, discharges, admitRows, dischargeRows, source;
   if (liveAdm) {
@@ -2941,7 +2940,7 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req,
     const los = (admit && disch) ? opDays(admit, disch) : null;
     return { name: a.pref || a.name, admit, discharged: disch, level: levelByKid.get(String(a.kipuId)) || '', los, sameDay: admit && disch && admit === disch };
   }).sort((a, b) => (a.discharged < b.discharged ? 1 : a.discharged > b.discharged ? -1 : 0));
-  const admitsPrev = prevAdm ? prevAdm.filter((a) => inR(a.admit, prevSince, prevEnd)).length : null;
+  const admitsPrev = liveAdm ? liveAdm.filter((a) => inR(a.admit, prevSince, prevEnd)).length : null;
   res.json({
     since, end, spanDays, perWeek: +(admits.length / (spanDays / 7)).toFixed(1),
     counts,

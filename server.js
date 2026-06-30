@@ -2900,10 +2900,14 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, (req, res) 
   const quickThresh = +(getState('outpatient_quick_days') || 7);
   const quick = all.map((c) => { const pd = (c.iop_start && c.admit) ? opDays(c.admit, c.iop_start) : null; return pd != null && pd <= quickThresh ? { name: c.pref || c.name, payer: c.payer || '', phpDays: pd, admit: (c.admit || '').slice(0, 10), iopStart: (c.iop_start || '').slice(0, 10), active: !!c.active } : null; }).filter(Boolean).sort((a, b) => a.phpDays - b.phpDays);
   const tracking = !!getState('outpatient_synced_at');
+  // The exact admits we counted — so a real-vs-app gap can be diagnosed by name.
+  const admitList = admits.map((c) => ({ name: c.pref || c.name, admit: (c.admit || '').slice(0, 10), discharged: (c.discharged_at || '').slice(0, 10), level: c.loc_class, sameDay: c.admit && c.discharged_at && String(c.admit).slice(0, 10) === String(c.discharged_at).slice(0, 10) }))
+    .sort((a, b) => (a.admit < b.admit ? 1 : a.admit > b.admit ? -1 : 0));
   res.json({
     since, end, spanDays, perWeek: +(admits.length / (spanDays / 7)).toFixed(1),
     counts,
     admits: admits.length, discharges: discharges.length, movedToIop: movedToIop.length,
+    admitList,
     los: { php: avgPhpLos, phpPrev: avgPhpPrev, iop: avgIopLos, iopPrev: avgIopPrev, curPhpDays, curIopDays },
     payers: payerList,
     quick, quickThresh,

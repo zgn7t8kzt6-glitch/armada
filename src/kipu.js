@@ -1315,14 +1315,24 @@ export async function kipuOutpatientCensus(locationName) {
   const patients = [];
   for (const x of enriched) {
     const g = (...keys) => { if (!x.det) return null; for (const k of keys) { const v = x.det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.filter(Boolean).join(', ') : String(v); } return null; };
-    const level = pick(x.p, 'level_of_care', 'levelOfCare', 'level_of_care_name', 'loc', 'level', 'program')
-      || g('level_of_care', 'levelOfCare', 'level_of_care_name', 'current_level_of_care', 'program', 'loc', 'level');
+    // `program` (e.g. "SA OP", "SA IOP 5", "SA PHP") is the patient's ACTUAL
+    // current level of care. `level_of_care` is the UR-authorized level ("UR
+    // LOC: IOP") which lags — OP patients have no authorization, so it stays at
+    // the last authorized level and mislabels them as IOP. Prefer program; fall
+    // back to the UR level only when program can't be classified.
+    const program = pick(x.p, 'program', 'program_name', 'treatment_program')
+      || g('program', 'program_name', 'treatment_program', 'census_program');
+    const urloc = pick(x.p, 'level_of_care', 'levelOfCare', 'level_of_care_name', 'current_level_of_care', 'loc', 'level')
+      || g('level_of_care', 'levelOfCare', 'level_of_care_name', 'current_level_of_care', 'loc', 'level');
+    let cls = classify(program);
+    if (cls === 'Other') cls = classify(urloc);
+    const level = program || urloc;
     const payer = pick(x.p, 'insurance_company', 'insurance', 'payer', 'payor', 'insurance_name', 'primary_insurance')
       || g('insurance_company', 'insurance', 'payer', 'payor', 'insurance_name', 'primary_insurance', 'insurances');
     const therapist = pick(x.p, 'primary_therapist', 'therapist', 'counselor') || g('primary_therapist', 'therapist', 'counselor', 'clinician');
     patients.push({
       kipuId: x.ks, name: x.name, pref: x.first,
-      level: level ? String(level) : '', loc_class: classify(level),
+      level: level ? String(level) : '', loc_class: cls,
       admit: x.admit,
       mrn: String(pick(x.p, 'mr_number', 'mrn') || g('mr_number', 'mrn') || ''),
       therapist: String(therapist || ''),

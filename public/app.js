@@ -5623,6 +5623,9 @@ async function loadOutpatient(){
       <div class="toolbar" style="gap:6px;margin:0"><label class="hint">Date <input type="date" id="op_grpdate" value="${esc(today())}" onchange="loadOutpatientGroups()"/></label>${d.isAdmin?'<button class="btn btn-ghost btn-sm sans" onclick="probeGroups(this)">Probe Kipu</button>':''}</div></div>
       <div id="opGroups"><div class="hint">Loading attendance…</div></div>
       <div id="opGroupProbe"></div></div>
+    <div class="card" style="border-left:4px solid var(--gold)"><div class="cmd-hero-row"><div><h3 style="margin:0">🎯 PHP completion</h3><p class="sub sans" style="margin:0">Of everyone admitted in the window, who discharged <b>without ever reaching IOP</b> — they didn’t complete PHP. Split into “right away” (≤1 day, usually a referral-out) and “left during PHP.”</p></div>
+      <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:0"><label class="hint">From <input type="date" id="op_php_since" value="${esc(today().slice(0,8)+'01')}" onchange="loadOutpatientPhp()"/></label><label class="hint">To <input type="date" id="op_php_end" value="${esc(today())}" onchange="loadOutpatientPhp()"/></label></div></div>
+      <div id="opPhp"><div class="hint">Reading program histories from Kipu…</div></div></div>
     <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">📊 Movement &amp; length of stay</h3><p class="sub sans" style="margin:0">Adjust the window — admits, discharges, PHP→IOP moves, and LOS per level.</p></div>
       <div class="toolbar" style="gap:6px;margin:0"><div class="itabs" id="opPresets"><button class="itab" onclick="opPreset(7)">7d</button><button class="itab" onclick="opPreset(30)">30d</button><button class="itab" onclick="opPreset(90)">90d</button></div></div></div>
       <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="hint">From <input type="date" id="op_since" value="${esc(OP_PERIOD.since)}" onchange="opPeriodChange()"/></label><label class="hint">To <input type="date" id="op_end" value="${esc(OP_PERIOD.end)}" onchange="opPeriodChange()"/></label></div>
@@ -5631,6 +5634,23 @@ async function loadOutpatient(){
     ${d.isAdmin?opSettingsHtml(d):''}`;
   loadOutpatientAnalytics();
   loadOutpatientGroups();
+  loadOutpatientPhp();
+}
+async function loadOutpatientPhp(){
+  const host=$('opPhp'); if(!host) return;
+  const since=($('op_php_since')||{}).value||today().slice(0,8)+'01';
+  const end=($('op_php_end')||{}).value||today();
+  host.innerHTML='<div class="hint">Reading program histories from Kipu…</div>';
+  let a; try{ a=await api('/outpatient/php-outcomes?since='+encodeURIComponent(since)+'&end='+encodeURIComponent(end)); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  if(a.error){ host.innerHTML='<div class="hint">'+esc(a.error)+'</div>'; return; }
+  const box=(n,l,col)=>`<div class="ret-card"><div class="n"${col?' style="color:'+col+'"':''}>${n}</div><div class="l">${l}</div></div>`;
+  const lst=(a.list||[]);
+  const detail=lst.length?`<details style="margin-top:6px"><summary class="hint" style="cursor:pointer">See the ${lst.length} who didn’t complete PHP — by name</summary>
+    <table class="tbl" style="margin-top:4px"><tr><th>Client</th><th>Payer</th><th>Admit</th><th>Discharged</th><th>Days in PHP</th><th></th></tr>${lst.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.payer||'—')}</td><td class="hint">${esc(x.admit||'—')}</td><td>${esc(x.discharged||'—')}</td><td><strong>${x.los!=null?x.los+'d':'—'}</strong></td><td class="hint">${x.bucket==='right away'?'<span style="color:var(--danger)">right away</span>':'left during PHP'}</td></tr>`).join('')}</table></details>`:'<div class="hint" style="margin-top:6px">🎉 Everyone admitted in this window either reached IOP or is still in PHP — no early PHP drop-offs.</div>';
+  host.innerHTML=`<div class="ret-cards" style="margin-top:8px">
+      ${box(a.didNotCompletePhp||0,'Didn’t complete PHP',a.didNotCompletePhp?'var(--danger)':'')}${box(a.rightAway||0,'…left right away (≤1d)')}${box(a.leftDuringPhp||0,'…left during PHP')}${box(a.reachedIop||0,'Reached IOP',a.reachedIop?'var(--good)':'')}</div>
+    <div class="hint" style="margin-top:6px">${a.admitted||0} admitted in window · ${a.stillIn||0} still in PHP · completion rate (of those with an outcome): <strong>${a.completionRate!=null?a.completionRate+'%':'—'}</strong></div>
+    ${detail}`;
 }
 async function loadOutpatientGroups(){
   const host=$('opGroups'); if(!host) return;

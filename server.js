@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -2950,6 +2950,45 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req,
     payers: payerList,
     quick, quickThresh,
     tracking,
+  });
+});
+// PHP completion: of everyone admitted in the window, how many discharged WITHOUT
+// ever reaching IOP (didn't complete PHP) — split into "right away" (≤1 day, usually
+// a referral-out) and "left during PHP" (≥2 days but before the IOP step-down).
+// Defaults to the current calendar month. Cached 5 min (it fetches program history
+// per admit). Retains last good result so a Kipu hiccup doesn't blank it.
+let _phpOutCache = new Map();   // key `${since}|${end}` → { at, data }
+app.get('/api/outpatient/php-outcomes', requireAuth, requireOutpatient, async (req, res) => {
+  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
+  const today = appToday();
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : today.slice(0, 8) + '01';
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;
+  const key = `${since}|${end}`;
+  const hit = _phpOutCache.get(key);
+  let r;
+  if (hit && (Date.now() - hit.at) < 5 * 60 * 1000) r = hit.data;
+  else {
+    try { r = await kipuOutpatientPhpOutcomes(outpatientLocationName(), since, end); } catch (e) { r = hit ? hit.data : { error: e.message }; }
+    if (r && !r.error) _phpOutCache.set(key, { at: Date.now(), data: r });
+    else if (hit) r = hit.data;
+  }
+  if (!r || r.error) return res.status(502).json({ error: (r && r.error) || 'Could not read PHP outcomes.' });
+  const losOf = (a, d) => (a && d) ? opDays(String(a).slice(0, 10), String(d).slice(0, 10)) : null;
+  const people = (r.people || []).map((p) => ({ ...p, los: losOf(p.admit, p.discharge) }));
+  const admitted = people.length;
+  const reachedIop = people.filter((p) => p.hasIop).length;
+  const stillIn = people.filter((p) => !p.discharged && !p.hasIop).length;
+  // Didn't complete PHP = discharged and never reached IOP.
+  const nonComplete = people.filter((p) => p.discharged && !p.hasIop);
+  const rightAway = nonComplete.filter((p) => p.los != null && p.los <= 1);
+  const leftDuringPhp = nonComplete.filter((p) => !(p.los != null && p.los <= 1));
+  const list = nonComplete.map((p) => ({ name: p.name, payer: p.payer || '', admit: (p.admit || '').slice(0, 10), discharged: (p.discharge || '').slice(0, 10), los: p.los, bucket: (p.los != null && p.los <= 1) ? 'right away' : 'left during PHP' }))
+    .sort((a, b) => ((a.los ?? 99) - (b.los ?? 99)));
+  res.json({
+    since: r.since, end: r.end, admitted, reachedIop, stillIn,
+    didNotCompletePhp: nonComplete.length, rightAway: rightAway.length, leftDuringPhp: leftDuringPhp.length,
+    completionRate: (reachedIop + nonComplete.length) ? Math.round((reachedIop / (reachedIop + nonComplete.length)) * 100) : null,
+    list,
   });
 });
 app.post('/api/outpatient/settings', requireAuth, requireAdmin, (req, res) => {

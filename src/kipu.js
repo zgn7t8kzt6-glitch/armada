@@ -1340,6 +1340,30 @@ export async function kipuOutpatientAdmissions(locationName, startDate, endDate)
   return { locationId: locId, locationName: locName, start, end, admissions };
 }
 
+// PHP completion outcomes for everyone admitted in a window. For each admit we read
+// the program timeline and flag whether they ever reached an IOP-class program. A
+// person who was discharged but never reached IOP "didn't complete PHP" — either they
+// left right away (same/next day, often a referral-out) or after some PHP days but
+// before the IOP step-down. Returns one row per admit so the caller can bucket them.
+export async function kipuOutpatientPhpOutcomes(locationName, since, end) {
+  const adm = await kipuOutpatientAdmissions(locationName, since, end);
+  if (adm.error) return adm;
+  const classify = (lvl) => {
+    const s = String(lvl || '').toLowerCase();
+    if (/\bphp\b|partial hospital/.test(s)) return 'PHP';
+    if (/\biop\b|intensive outpatient/.test(s)) return 'IOP';
+    if (/\bop\b|outpatient/.test(s)) return 'OP';
+    return 'Other';
+  };
+  const people = await mapLimit(adm.admissions, +(process.env.KIPU_CONCURRENCY || 6), async (a) => {
+    let hist = []; try { hist = a.kipuId ? await kipuProgramHistory(a.kipuId) : []; } catch { /* best-effort */ }
+    let hasPhp = false, hasIop = false;
+    for (const h of hist) { const c = classify(h.program || h.program_name || h.name || ''); if (c === 'PHP') hasPhp = true; if (c === 'IOP') hasIop = true; }
+    return { name: a.pref || a.name, payer: a.payer, admit: a.admit, discharge: a.discharge, discharged: !!a.discharge, hasPhp, hasIop };
+  });
+  return { locationId: adm.locationId, locationName: adm.locationName, since: adm.start, end: adm.end, people };
+}
+
 export async function kipuOutpatientCensus(locationName) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();

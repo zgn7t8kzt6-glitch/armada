@@ -2717,6 +2717,32 @@ function cleanupChurnDuplicates() {
   if (total) { try { audit({ user: { name: 'System (churn cleanup)' }, action: 'CLIENT_MERGE_CLEANUP', detail: `${total} phantom/duplicate record(s) retired`, ip: 'cleanup' }); } catch {} }
   return total;
 }
+// Retire PHANTOM DISCHARGES: a "discharged" row for a person who is CURRENTLY an
+// active patient (they're still here) and whose discharge has no real outcome and no
+// staff activity — a census-churn artifact. Documented prior stays (Completed/AMA/
+// Transferred with a real reason, or any row with linked records) are kept. This fixes
+// every discharge metric at the source, not query-by-query. Reversible.
+function cleanupPhantomDischarges() {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+  const keyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || norm(c.name);
+  const childTbls = clientChildTables();
+  const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
+  const activeByKey = {};
+  for (const a of db.prepare(`SELECT id, kipu_id, name FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all()) { const k = keyOf(a); if (k && !activeByKey[k]) activeByKey[k] = a; }
+  const disch = db.prepare(`SELECT id, kipu_id, name, discharge_status, discharge_reason FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL`).all();
+  let total = 0;
+  for (const d of disch) {
+    const k = keyOf(d); const act = activeByKey[k]; if (!act || act.id === d.id) continue;   // person not currently here → leave it
+    const st = String(d.discharge_status || '').toLowerCase();
+    const documented = /complete|\bama\b|against medical|transfer|graduat|detox complete|step/.test(st) && d.discharge_reason && !/unable to determine|no documentation/i.test(String(d.discharge_reason));
+    if (documented) continue;            // a real, documented prior stay → keep
+    if (childCount(d.id) > 0) continue;  // had real staff activity → keep for manual review
+    const r = mergeClients(act.id, [d.id], 'System (phantom-discharge cleanup)');
+    if (r.merged) total += r.merged;
+  }
+  if (total) { try { audit({ user: { name: 'System (phantom cleanup)' }, action: 'CLIENT_MERGE_PHANTOM', detail: `${total} phantom discharge(s) of active patients retired`, ip: 'cleanup' }); } catch {} }
+  return total;
+}
 app.get('/api/diag/duplicates', requireAuth, requireAdmin, (req, res) => {
   const rows = db.prepare(`SELECT id, pref, name, kipu_id, room, admit, admit_time, discharge_date, discharge_status, source, active, therapist, diagnosis FROM clients WHERE merged_into IS NULL ORDER BY name, id`).all();
   const groups = {};
@@ -2746,13 +2772,14 @@ app.post('/api/diag/merge', requireAuth, requireAdmin, (req, res) => {
 });
 // Clean up everything — retire the census-churn phantom/duplicate records in one pass.
 app.post('/api/diag/cleanup', requireAuth, requireAdmin, (req, res) => {
-  let churn = 0, shells = 0;
+  let churn = 0, shells = 0, phantom = 0;
   try { churn = cleanupChurnDuplicates(); } catch (e) { return res.status(500).json({ error: e.message }); }
+  try { phantom = cleanupPhantomDischarges(); } catch {}
   try { shells = autoMergeShellDuplicates(); } catch {}
-  const merged = churn + shells;
+  const merged = churn + phantom + shells;
   setState('churn_cleanup_last', `${new Date().toISOString().slice(0, 19).replace('T', ' ')} — ${merged} retired`);
-  audit({ user: req.user, action: 'CLIENT_CLEANUP_RUN', detail: `${merged} retired (${churn} churn + ${shells} shells)`, ip: req.ip });
-  res.json({ ok: true, merged, churn, shells });
+  audit({ user: req.user, action: 'CLIENT_CLEANUP_RUN', detail: `${merged} retired (${churn} churn + ${phantom} phantom + ${shells} shells)`, ip: req.ip });
+  res.json({ ok: true, merged, churn, phantom, shells });
 });
 
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────
@@ -9520,10 +9547,11 @@ try { ensureDignityKits(); } catch (e) { /* dignity kits are best-effort at boot
 // One-time historical cleanup of the census-churn phantom/duplicate records (runs
 // once per database; reversible via client_merges snapshots).
 try {
-  if (getState('churn_cleanup_v1') !== 'done') {
+  if (getState('churn_cleanup_v2') !== 'done') {
     let n = 0;
     try { n += cleanupChurnDuplicates(); } catch (e) { console.error('[cleanup churn]', e.message); }
-    setState('churn_cleanup_v1', 'done');
+    try { n += cleanupPhantomDischarges(); } catch (e) { console.error('[cleanup phantom]', e.message); }
+    setState('churn_cleanup_v2', 'done');
     setState('churn_cleanup_last', `${new Date().toISOString().slice(0, 19).replace('T', ' ')} — ${n} retired (auto, on deploy)`);
     if (n) console.log(`[cleanup] retired ${n} phantom/duplicate patient records (census-churn backlog)`);
   }

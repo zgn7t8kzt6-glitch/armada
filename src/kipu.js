@@ -1291,7 +1291,10 @@ export async function kipuOutpatientCensus(locationName) {
     if (/\bop\b|outpatient/.test(s)) return 'OP';
     return 'Other';
   };
-  const seen = new Set(); const patients = [];
+  // First pass: the active census rows (names/ids/admit). The census usually does NOT
+  // carry level of care or insurance — those live on each patient's chart — so we
+  // collect the basics here, then enrich from the per-patient detail below.
+  const seen = new Set(); const basics = [];
   for (const p of list) {
     const kid = pick(p, 'casefile_id', 'id', 'patient_id', 'mrn'); const ks = kid != null ? String(kid) : null;
     if (ks && seen.has(ks)) continue; if (ks) seen.add(ks);
@@ -1300,14 +1303,30 @@ export async function kipuOutpatientCensus(locationName) {
     if (discharged) continue;
     const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name || '';
     if (!name) continue;
-    const level = pick(p, 'level_of_care', 'levelOfCare', 'level_of_care_name', 'loc', 'level', 'program');
     const admitRaw = pick(p, 'admission_date', 'admit_date', 'admitted_at');
+    basics.push({ p, ks, name, first: p.first_name || name, admit: admitRaw ? String(admitRaw).slice(0, 10) : '' });
+  }
+  // Second pass: pull each patient's detail to get level of care + insurance (the
+  // census doesn't include them). Bounded concurrency, best-effort per patient.
+  const enriched = await mapLimit(basics, +(process.env.KIPU_CONCURRENCY || 6), async (x) => {
+    let det = null; try { det = x.ks ? await kipuPatientDetail(x.ks) : null; } catch { /* best-effort */ }
+    return { ...x, det };
+  });
+  const patients = [];
+  for (const x of enriched) {
+    const g = (...keys) => { if (!x.det) return null; for (const k of keys) { const v = x.det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.filter(Boolean).join(', ') : String(v); } return null; };
+    const level = pick(x.p, 'level_of_care', 'levelOfCare', 'level_of_care_name', 'loc', 'level', 'program')
+      || g('level_of_care', 'levelOfCare', 'level_of_care_name', 'current_level_of_care', 'program', 'loc', 'level');
+    const payer = pick(x.p, 'insurance_company', 'insurance', 'payer', 'payor', 'insurance_name', 'primary_insurance')
+      || g('insurance_company', 'insurance', 'payer', 'payor', 'insurance_name', 'primary_insurance', 'insurances');
+    const therapist = pick(x.p, 'primary_therapist', 'therapist', 'counselor') || g('primary_therapist', 'therapist', 'counselor', 'clinician');
     patients.push({
-      kipuId: ks, name, pref: p.first_name || name,
+      kipuId: x.ks, name: x.name, pref: x.first,
       level: level ? String(level) : '', loc_class: classify(level),
-      admit: admitRaw ? String(admitRaw).slice(0, 10) : '',
-      mrn: String(pick(p, 'mr_number', 'mrn') || ''),
-      therapist: String(pick(p, 'primary_therapist', 'therapist', 'counselor') || ''),
+      admit: x.admit,
+      mrn: String(pick(x.p, 'mr_number', 'mrn') || g('mr_number', 'mrn') || ''),
+      therapist: String(therapist || ''),
+      payer: String(payer || ''),
     });
   }
   const counts = { total: patients.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };

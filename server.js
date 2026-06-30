@@ -2791,16 +2791,12 @@ app.post('/api/diag/cleanup', requireAuth, requireAdmin, (req, res) => {
 /* ───────────── AKRON OUTPATIENT (owner-only, separate Kipu location) ───────────── */
 const OUTPATIENT_DEFAULT_LOCATION = 'Akron House Recovery';
 function outpatientLocationName() { return (getState('outpatient_location') || OUTPATIENT_DEFAULT_LOCATION).trim(); }
-function outpatientRoster() {
-  return db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist FROM outpatient_clients ORDER BY loc_class, name`).all();
-}
-function outpatientCounts(rows) {
-  const c = { total: rows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
-  for (const r of rows) c[r.loc_class] = (c[r.loc_class] || 0) + 1;
-  return c;
-}
+const opDays = (a, b) => { if (!a || !b) return null; const n = Math.round((Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / 864e5); return Number.isFinite(n) && n >= 0 ? n : null; };
+const avg1 = (arr) => arr.length ? +(arr.reduce((x, y) => x + y, 0) / arr.length).toFixed(1) : null;
 app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
-  const rows = outpatientRoster();
+  const rows = db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist, payer FROM outpatient_clients WHERE active = 1 ORDER BY loc_class, name`).all();
+  const counts = { total: rows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
+  for (const r of rows) counts[r.loc_class] = (counts[r.loc_class] || 0) + 1;
   const access = req.user.role === 'admin'
     ? db.prepare(`SELECT id, name, username, job_role FROM users WHERE id IN (${outpatientAllowlist().map(() => '?').join(',') || 'NULL'})`).all(...outpatientAllowlist())
     : [];
@@ -2808,8 +2804,8 @@ app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
     location: outpatientLocationName(),
     kipuReady: kipuConfigured(),
     asOf: getState('outpatient_synced_at') || null,
-    counts: outpatientCounts(rows),
-    roster: rows.map((r) => ({ name: r.pref || r.name, level: r.level, locClass: r.loc_class, admit: r.admit, therapist: r.therapist, mrn: r.mrn })),
+    counts,
+    roster: rows.map((r) => ({ name: r.pref || r.name, level: r.level, locClass: r.loc_class, admit: r.admit, therapist: r.therapist, mrn: r.mrn, payer: r.payer || '' })),
     isAdmin: req.user.role === 'admin',
     access: access.map((u) => ({ id: u.id, name: u.name, username: u.username, role: u.job_role || '' })),
     staff: req.user.role === 'admin' ? db.prepare(`SELECT id, name, job_role FROM users WHERE active=1 AND role!='admin' ORDER BY name`).all() : [],
@@ -2819,17 +2815,82 @@ app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, 
   if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
   let r; try { r = await kipuOutpatientCensus(outpatientLocationName()); } catch (e) { return res.status(502).json({ error: e.message }); }
   if (r.error) return res.status(404).json({ error: r.error });
-  const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id, name, pref, level, loc_class, admit, mrn, therapist, updated_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))`);
+  const today = appToday();
+  const get = db.prepare(`SELECT kipu_id, iop_start, admit FROM outpatient_clients WHERE kipu_id = ?`);
+  const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id,name,pref,level,loc_class,admit,mrn,therapist,payer,php_start,iop_start,first_seen,last_seen,active,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'))`);
+  const upd = db.prepare(`UPDATE outpatient_clients SET name=?,pref=?,level=?,loc_class=?,admit=COALESCE(NULLIF(admit,''),?),mrn=?,therapist=?,
+    payer=COALESCE(NULLIF(payer,''),?),iop_start=?,last_seen=?,active=1,discharged_at=NULL,discharge_loc=NULL,updated_at=datetime('now') WHERE kipu_id=?`);
+  const seen = new Set();
   db.exec('BEGIN');
   try {
-    db.exec('DELETE FROM outpatient_clients');
     let i = 0;
-    for (const p of r.patients) { ins.run(p.kipuId || ('row' + (++i)), p.name, p.pref, p.level, p.loc_class, p.admit, p.mrn, p.therapist); }
+    for (const p of r.patients) {
+      const kid = p.kipuId || ('row' + (++i)); seen.add(kid);
+      const ex = get.get(kid);
+      if (!ex) {
+        // Everyone admits at PHP, so php_start = admit. We only KNOW iop_start once we
+        // watch them transition — so a client first seen already in IOP keeps it null
+        // (their PHP duration is unknown, not falsely zero).
+        ins.run(kid, p.name, p.pref, p.level, p.loc_class, p.admit || null, p.mrn, p.therapist, p.payer, p.admit || today, null, today, today);
+      } else {
+        let iopStart = ex.iop_start;
+        if (p.loc_class === 'IOP' && !iopStart && ex.admit) iopStart = today;   // just moved PHP→IOP
+        upd.run(p.name, p.pref, p.level, p.loc_class, p.admit || null, p.mrn, p.therapist, p.payer, iopStart, today, kid);
+      }
+    }
+    const goneRows = db.prepare(`SELECT kipu_id, loc_class FROM outpatient_clients WHERE active = 1`).all();
+    const setGone = db.prepare(`UPDATE outpatient_clients SET active=0, discharged_at=?, discharge_loc=? WHERE kipu_id=?`);
+    for (const g of goneRows) { if (!seen.has(g.kipu_id)) setGone.run(today, g.loc_class, g.kipu_id); }
     db.exec('COMMIT');
   } catch (e) { try { db.exec('ROLLBACK'); } catch {} return res.status(500).json({ error: e.message }); }
   setState('outpatient_synced_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
   audit({ user: req.user, action: 'OUTPATIENT_SYNC', detail: `${r.counts.total} at ${r.locationName} (PHP ${r.counts.PHP}, IOP ${r.counts.IOP})`, ip: req.ip });
   res.json({ ok: true, location: r.locationName, counts: r.counts });
+});
+// The diagnostic dashboard: admits/discharges over an adjustable period, census by
+// level, LOS per level (+ trend), per-payer breakdown, and the "quick movers".
+app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, (req, res) => {
+  const today = appToday();
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : addDays(today, -7);
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;
+  const spanDays = Math.max(1, (opDays(since, end) || 0) + 1);
+  const prevSince = addDays(since, -spanDays), prevEnd = addDays(since, -1);
+  const inR = (d, s, e) => { const x = d ? String(d).slice(0, 10) : ''; return x && x >= s && x <= e; };
+  const all = db.prepare(`SELECT * FROM outpatient_clients`).all();
+  const activeRows = all.filter((c) => c.active);
+  const counts = { total: activeRows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
+  for (const c of activeRows) counts[c.loc_class] = (counts[c.loc_class] || 0) + 1;
+  const admits = all.filter((c) => inR(c.admit, since, end));
+  const discharges = all.filter((c) => inR(c.discharged_at, since, end));
+  const movedToIop = all.filter((c) => inR(c.iop_start, since, end));   // PHP→IOP this period
+  // PHP LOS = admit→iop_start, for those who MOVED in the window (so it's period-bound & trendable)
+  const phpLosWin = (s, e) => avg1(all.filter((c) => inR(c.iop_start, s, e) && c.admit).map((c) => opDays(c.admit, c.iop_start)).filter((n) => n != null));
+  const iopLosWin = (s, e) => avg1(all.filter((c) => inR(c.discharged_at, s, e) && c.iop_start).map((c) => opDays(c.iop_start, c.discharged_at)).filter((n) => n != null));
+  const avgPhpLos = phpLosWin(since, end), avgPhpPrev = phpLosWin(prevSince, prevEnd);
+  const avgIopLos = iopLosWin(since, end), avgIopPrev = iopLosWin(prevSince, prevEnd);
+  // current "days in level" for people still here (a live read, not completed LOS)
+  const curPhpDays = avg1(activeRows.filter((c) => c.loc_class === 'PHP' && c.admit).map((c) => opDays(c.admit, today)).filter((n) => n != null));
+  const curIopDays = avg1(activeRows.filter((c) => c.loc_class === 'IOP' && c.iop_start).map((c) => opDays(c.iop_start, today)).filter((n) => n != null));
+  // per-payer
+  const payers = {};
+  const pk = (c) => (c.payer && c.payer.trim()) || 'Unknown';
+  for (const c of activeRows) { const k = pk(c); (payers[k] = payers[k] || { payer: k, php: 0, iop: 0, total: 0, phpLos: [], iopLos: [] }); payers[k].total++; if (c.loc_class === 'PHP') payers[k].php++; else if (c.loc_class === 'IOP') payers[k].iop++; }
+  for (const c of all) { const k = pk(c); payers[k] = payers[k] || { payer: k, php: 0, iop: 0, total: 0, phpLos: [], iopLos: [] }; const pd = (c.iop_start && c.admit) ? opDays(c.admit, c.iop_start) : null; if (pd != null) payers[k].phpLos.push(pd); const id = (c.iop_start && c.discharged_at) ? opDays(c.iop_start, c.discharged_at) : null; if (id != null) payers[k].iopLos.push(id); }
+  const payerList = Object.values(payers).map((p) => ({ payer: p.payer, php: p.php, iop: p.iop, total: p.total, avgPhpLos: avg1(p.phpLos), avgIopLos: avg1(p.iopLos) })).sort((a, b) => b.total - a.total);
+  // quick movers — moved PHP→IOP unusually fast (short PHP authorization)
+  const quickThresh = +(getState('outpatient_quick_days') || 7);
+  const quick = all.map((c) => { const pd = (c.iop_start && c.admit) ? opDays(c.admit, c.iop_start) : null; return pd != null && pd <= quickThresh ? { name: c.pref || c.name, payer: c.payer || '', phpDays: pd, admit: (c.admit || '').slice(0, 10), iopStart: (c.iop_start || '').slice(0, 10), active: !!c.active } : null; }).filter(Boolean).sort((a, b) => a.phpDays - b.phpDays);
+  const tracking = !!getState('outpatient_synced_at');
+  res.json({
+    since, end, spanDays, perWeek: +(admits.length / (spanDays / 7)).toFixed(1),
+    counts,
+    admits: admits.length, discharges: discharges.length, movedToIop: movedToIop.length,
+    los: { php: avgPhpLos, phpPrev: avgPhpPrev, iop: avgIopLos, iopPrev: avgIopPrev, curPhpDays, curIopDays },
+    payers: payerList,
+    quick, quickThresh,
+    tracking,
+  });
 });
 app.post('/api/outpatient/settings', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};

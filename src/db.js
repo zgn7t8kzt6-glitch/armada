@@ -1853,6 +1853,15 @@ db.exec(`CREATE TABLE IF NOT EXISTS outpatient_clients (
   admit TEXT, mrn TEXT, therapist TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// History tracking so we can measure PHP→IOP movement, LOS per level, and trends.
+addColumn('outpatient_clients', 'payer', 'TEXT');          // insurance / payer
+addColumn('outpatient_clients', 'php_start', 'TEXT');      // PHP start (≈ admit; everyone admits at PHP)
+addColumn('outpatient_clients', 'iop_start', 'TEXT');      // date we first saw them move to IOP
+addColumn('outpatient_clients', 'first_seen', 'TEXT');     // first refresh we saw them
+addColumn('outpatient_clients', 'last_seen', 'TEXT');      // most recent refresh we saw them
+addColumn('outpatient_clients', 'discharged_at', 'TEXT');  // date they dropped off the census
+addColumn('outpatient_clients', 'discharge_loc', 'TEXT');  // level they were at when they left
+addColumn('outpatient_clients', 'active', 'INTEGER');      // 1 = currently on census
 // Audit trail for duplicate-client merges — a JSON snapshot of each retired row so a
 // merge can be reviewed or reversed.
 db.exec(`CREATE TABLE IF NOT EXISTS client_merges (

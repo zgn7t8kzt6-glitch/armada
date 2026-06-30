@@ -5593,28 +5593,54 @@ async function loadAdmitCheck(){
     <div class="card"><h3 style="margin-top:0">Scheduled arrivals</h3><table class="tbl"><tr><th>Name</th><th>Scheduled date</th><th>Status</th><th>Is today?</th></tr>${schedRows}</table></div>`;
 }
 /* ───────── AKRON OUTPATIENT (owner-only, separate Kipu location) ───────── */
-let OP_DATA=null;
+let OP_DATA=null, OP_PERIOD=null;
+function opDefaultPeriod(){ const e=today(); const d=new Date(e+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-6); return {since:d.toISOString().slice(0,10), end:e}; }
 async function loadOutpatient(){
   const host=$('outpatient'); if(!host) return;
   host.innerHTML='<div class="hint">Loading…</div>';
   let d; try{ d=await api('/outpatient'); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
-  OP_DATA=d;
+  OP_DATA=d; if(!OP_PERIOD) OP_PERIOD=opDefaultPeriod();
   const c=d.counts||{};
   const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   const asOf=d.asOf?('Kipu · as of '+esc(d.asOf)):'Not pulled yet';
   const roster=(d.roster||[]);
-  const lvlBadge=(lc)=>`<span class="risk ${lc==='PHP'?'risk-elev':lc==='IOP'?'risk-low':'risk-warn'}">${esc(lc||'—')}</span>`;
   const group=(lc)=>{ const r=roster.filter(x=>x.locClass===lc); if(!r.length) return ''; return `<div class="card"><h3 style="margin-top:0">${lc==='PHP'?'PHP — Partial Hospitalization':lc==='IOP'?'IOP — Intensive Outpatient':lc} <span class="hint" style="font-weight:400">· ${r.length}</span></h3>
-    <table class="tbl"><tr><th>Client</th><th>Level</th><th>Admit</th><th>Therapist</th></tr>${r.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.level||'')}</td><td>${esc(x.admit||'—')}</td><td class="hint">${esc(x.therapist||'')}</td></tr>`).join('')}</table></div>`; };
+    <table class="tbl"><tr><th>Client</th><th>Payer</th><th>Level</th><th>Admit</th><th>Therapist</th></tr>${r.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.payer||'—')}</td><td class="hint">${esc(x.level||'')}</td><td>${esc(x.admit||'—')}</td><td class="hint">${esc(x.therapist||'')}</td></tr>`).join('')}</table></div>`; };
   const other=roster.filter(x=>!['PHP','IOP'].includes(x.locClass));
-  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>🏥 Akron Outpatient <span class="hint" style="font-weight:400">· ${esc(d.location||'')}</span></h3><p class="sub sans">Live from Kipu — your outpatient census, split by level of care. ${esc(asOf)}.</p></div>
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>🏥 Akron Outpatient <span class="hint" style="font-weight:400">· ${esc(d.location||'')}</span></h3><p class="sub sans">Live from Kipu — your outpatient census &amp; movement, by level of care and payer. ${esc(asOf)}.</p></div>
       <button class="btn btn-gold btn-sm sans" onclick="refreshOutpatient(this)">↻ Refresh from Kipu</button></div>
       ${d.kipuReady?'':'<div class="pc-note" style="color:var(--danger)">Kipu isn’t connected — set it up in Settings → Integrations.</div>'}
-      <div class="ret-cards" style="margin-top:8px">${box(c.PHP||0,'In PHP today','rc-elev')}${box(c.IOP||0,'In IOP today')}${box(c.OP||0,'Outpatient (OP)')}${box(c.total||0,'Total enrolled')}</div>
+      <div class="ret-cards" style="margin-top:8px">${box(c.PHP||0,'In PHP now','rc-elev')}${box(c.IOP||0,'In IOP now')}${box(c.OP||0,'OP')}${box(c.total||0,'Total enrolled')}</div>
       <span id="opMsg" class="hint"></span></div>
-    ${roster.length?group('PHP')+group('IOP')+(other.length?`<div class="card"><h3 style="margin-top:0">Other levels <span class="hint" style="font-weight:400">· ${other.length}</span></h3><table class="tbl"><tr><th>Client</th><th>Level</th><th>Admit</th></tr>${other.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.level||'')}</td><td>${esc(x.admit||'—')}</td></tr>`).join('')}</table></div>`:''):'<div class="card"><div class="hint">No outpatient census yet — tap “Refresh from Kipu” to pull the latest from '+esc(d.location||'your outpatient location')+'.</div></div>'}
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">📊 Movement &amp; length of stay</h3><p class="sub sans" style="margin:0">Adjust the window — admits, discharges, PHP→IOP moves, and LOS per level.</p></div>
+      <div class="toolbar" style="gap:6px;margin:0"><div class="itabs" id="opPresets"><button class="itab" onclick="opPreset(7)">7d</button><button class="itab" onclick="opPreset(30)">30d</button><button class="itab" onclick="opPreset(90)">90d</button></div></div></div>
+      <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="hint">From <input type="date" id="op_since" value="${esc(OP_PERIOD.since)}" onchange="opPeriodChange()"/></label><label class="hint">To <input type="date" id="op_end" value="${esc(OP_PERIOD.end)}" onchange="opPeriodChange()"/></label></div>
+      <div id="opAnalytics"><div class="hint">Loading…</div></div></div>
+    ${roster.length?group('PHP')+group('IOP')+(other.length?`<div class="card"><h3 style="margin-top:0">Other / unclassified <span class="hint" style="font-weight:400">· ${other.length}</span></h3><table class="tbl"><tr><th>Client</th><th>Payer</th><th>Level (raw)</th><th>Admit</th></tr>${other.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.payer||'—')}</td><td class="hint">${esc(x.level||'(blank)')}</td><td>${esc(x.admit||'—')}</td></tr>`).join('')}</table></div>`:''):'<div class="card"><div class="hint">No outpatient census yet — tap “Refresh from Kipu” to pull from '+esc(d.location||'your outpatient location')+'.</div></div>'}
     ${d.isAdmin?opSettingsHtml(d):''}`;
+  loadOutpatientAnalytics();
 }
+async function loadOutpatientAnalytics(){
+  const host=$('opAnalytics'); if(!host) return;
+  let a; try{ a=await api('/outpatient/analytics?since='+encodeURIComponent(OP_PERIOD.since)+'&end='+encodeURIComponent(OP_PERIOD.end)); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const arrow=(cur,prev)=>{ if(cur==null||prev==null) return ''; const d=+(cur-prev).toFixed(1); return d>0?` <span style="color:var(--danger)">▲${d}</span>`:d<0?` <span style="color:var(--good)">▼${-d}</span>`:' <span class="hint">→</span>'; };
+  const l=a.los||{};
+  const payerRows=(a.payers||[]).map(p=>`<tr><td><strong>${esc(p.payer)}</strong></td><td>${p.total}</td><td>${p.php}</td><td>${p.iop}</td><td>${p.avgPhpLos!=null?p.avgPhpLos+'d':'—'}</td><td>${p.avgIopLos!=null?p.avgIopLos+'d':'—'}</td></tr>`).join('')||'<tr><td colspan="6" class="hint">No payer data yet.</td></tr>';
+  const quick=(a.quick||[]);
+  host.innerHTML=`<div class="ret-cards" style="margin-top:8px">
+      ${box(a.admits||0,'Admits in window')}${box(a.perWeek!=null?a.perWeek:'—','Admits / week')}${box(a.movedToIop||0,'Moved PHP→IOP')}${box(a.discharges||0,'Discharges')}</div>
+    <div class="ret-cards" style="margin-top:6px">
+      ${box((l.php!=null?l.php+'d':'—'),'Avg PHP length of stay'+'')}${box((l.iop!=null?l.iop+'d':'—'),'Avg IOP length of stay')}${box((l.curPhpDays!=null?l.curPhpDays+'d':'—'),'Avg days in PHP (current)')}${box((l.curIopDays!=null?l.curIopDays+'d':'—'),'Avg days in IOP (current)')}</div>
+    <div class="hint" style="margin:4px 0 10px">PHP LOS${arrow(l.php,l.phpPrev)} · IOP LOS${arrow(l.iop,l.iopPrev)} <span style="margin-left:6px">vs the previous ${a.spanDays} days</span></div>
+    <h3 style="font-size:14px;margin:10px 0 4px">By payer</h3>
+    <table class="tbl"><tr><th>Payer</th><th>Total</th><th>PHP</th><th>IOP</th><th>Avg PHP LOS</th><th>Avg IOP LOS</th></tr>${payerRows}</table>
+    <h3 style="font-size:14px;margin:14px 0 4px">⚡ Quick movers <span class="hint" style="font-weight:400">— PHP→IOP in ≤ ${a.quickThresh} days (short authorizations to look into)</span></h3>
+    ${quick.length?`<table class="tbl"><tr><th>Client</th><th>Payer</th><th>Days in PHP</th><th>Admit</th><th>Moved to IOP</th></tr>${quick.map(q=>`<tr><td><strong>${esc(q.name)}</strong>${q.active?'':' <span class="hint">(disch.)</span>'}</td><td class="hint">${esc(q.payer||'—')}</td><td><strong style="color:var(--danger)">${q.phpDays}d</strong></td><td>${esc(q.admit||'—')}</td><td>${esc(q.iopStart||'—')}</td></tr>`).join('')}</table>`:'<div class="hint">None yet — quick movers appear here as people transition to IOP.</div>'}
+    ${a.tracking?'':'<div class="pc-note" style="margin-top:10px;color:#a60">⏳ Movement &amp; LOS build up as the app watches the census daily. Admits/census/payer are accurate now; PHP→IOP timing and trends fill in from the first refresh forward (people who already moved before today show LOS as “—”).</div>'}`;
+}
+function opPreset(days){ const e=today(); const d=new Date(e+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-(days-1)); OP_PERIOD={since:d.toISOString().slice(0,10),end:e}; if($('op_since'))$('op_since').value=OP_PERIOD.since; if($('op_end'))$('op_end').value=OP_PERIOD.end; loadOutpatientAnalytics(); }
+function opPeriodChange(){ OP_PERIOD={since:($('op_since')||{}).value||OP_PERIOD.since, end:($('op_end')||{}).value||OP_PERIOD.end}; loadOutpatientAnalytics(); }
 function opSettingsHtml(d){
   const acc=(d.access||[]);
   const staff=(d.staff||[]);

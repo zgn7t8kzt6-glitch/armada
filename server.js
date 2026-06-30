@@ -2347,6 +2347,27 @@ function daysSince(s) {
 }
 const isDetoxProgram = (p) => /detox|withdrawal|\bwm\b|3\.?2|3\.?7/i.test(p || '');
 
+// REAL discharge count over a window: distinct stays (person + admit date), excluding
+// retired duplicates, referral-outs, and phantoms (a "discharge" for someone who is
+// still an active patient never happened). Shared by every discharge tile/metric so
+// none of them can show the census-churn inflation.
+function realDischargeCount(sinceDate) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+  const keyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || norm(c.name);
+  const activeKeys = new Set(db.prepare(`SELECT kipu_id, name FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map(keyOf));
+  const rows = db.prepare(`SELECT pref, name, kipu_id, admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients
+    WHERE merged_into IS NULL AND COALESCE(discharge_status,'') != 'Merged (duplicate)' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ?`).all(sinceDate);
+  const seen = new Set(); let n = 0;
+  for (const c of rows) {
+    const k = keyOf(c) + '|' + (c.admit || '').slice(0, 10);
+    if (seen.has(k)) continue; seen.add(k);
+    if (isReferredOut(c)) continue;            // didn't complete intake
+    if (activeKeys.has(keyOf(c))) continue;    // phantom — person is still here
+    n++;
+  }
+  return n;
+}
+
 app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
   const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, next_loc, anticipated_dc, interests FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
@@ -2354,7 +2375,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   // Flow
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
   const admitsTodayList = active.filter((c) => (c.admit || '').slice(0, 10) === today).map((c) => ({ name: c.pref || c.name, loc: c.loc && c.loc !== 'Unspecified' ? c.loc : (parseLoc(c.program) || '') }));
-  const discharges7d = db.prepare(`SELECT COUNT(*) n FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-7 day')`).get().n;
+  const discharges7d = realDischargeCount(addDays(today, -7));
   // De-dupe by person: the same patient can have several client rows (re-admission
   // casefiles, or unmatched sync inserts) that all got stamped "discharged today"
   // when they dropped off the census in one sync — show each person once.
@@ -2365,11 +2386,14 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     for (const c of rows) { const k = personKey(c) + '|' + keyExtra(c); if (seen.has(k)) continue; seen.add(k); out.push(c); }
     return out;
   };
-  const dtRaw = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?
+  const dtRaw = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients
+    WHERE merged_into IS NULL AND substr(discharge_date,1,10) = ?
     ORDER BY (discharge_reason IS NOT NULL AND discharge_reason != '') DESC, id`).all(today);
   const dtDeduped = dedupeByPerson(dtRaw);
-  // Referral-outs / incomplete intakes are not real discharges — split them out.
-  const dischargesTodayList = dtDeduped.filter((c) => !isReferredOut(c)).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
+  // People currently here — a "discharge" for one of them is a phantom (still active).
+  const activeKeySet = new Set(db.prepare(`SELECT kipu_id, name FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map((c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || dnorm(c.name)));
+  // Referral-outs and phantoms are not real discharges — split them out.
+  const dischargesTodayList = dtDeduped.filter((c) => !isReferredOut(c) && !activeKeySet.has(personKey(c))).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '' }));
   const dischargesToday = dischargesTodayList.length;
   const referredOutTodayList = dtDeduped.filter((c) => isReferredOut(c)).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '' }));
   const referredOutToday = referredOutTodayList.length;

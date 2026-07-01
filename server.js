@@ -3370,20 +3370,34 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
   let parsed = null;
   if (claudeConfigured()) { try { parsed = await extractOrderItems(msg.subject, msg.text); } catch { parsed = null; } }
   let created = 0;
+  const itemNames = [];
   const insert = db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, vendor, link, priority, status, notes, requested_by, source) VALUES (?,?,?,?,?,?,?, 'requested', ?, ?, 'email')`);
   const pris = ['Low', 'Normal', 'High', 'Urgent'];
   if (parsed && parsed.is_order && Array.isArray(parsed.items) && parsed.items.length) {
     for (const it of parsed.items) {
       if (!String(it.item_name || '').trim()) continue;
       insert.run(entity, String(it.item_name).slice(0, 200), String(it.qty || '').slice(0, 40), String(it.category || '').slice(0, 60), String(it.vendor || '').slice(0, 80), String(it.link || '').slice(0, 500), pris.includes(it.priority) ? it.priority : 'Normal', `via email from ${requester}${it.notes ? ' — ' + it.notes : ''}`.slice(0, 1000), requester);
+      itemNames.push(`${it.item_name}${it.qty ? ' — ' + it.qty : ''}`);
       created++;
     }
   }
   if (!created) {   // couldn't parse (or AI off) — capture the whole email as one order to review
     insert.run(entity, (msg.subject || 'Emailed order').slice(0, 200), '', 'Other', '', '', 'Normal', `via email from ${requester}. Original:\n${msg.text}`.slice(0, 1000), requester);
+    itemNames.push(msg.subject || 'Emailed order');
     created = 1;
   }
   console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}`);
+  // Confirmation reply to the sender ("✓ Got it") — best-effort, never blocks intake.
+  if (emailConfigured() && getState('order_intake_confirm') !== 'off' && /@/.test(msg.from)) {
+    const esc = htmlEsc;
+    const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:520px">
+      <p>✓ Got it — <strong>${created} item${created === 1 ? '' : 's'}</strong> queued for <strong>${esc(entity)}</strong>:</p>
+      ${itemNames.map((n) => `<div>• ${esc(n)}</div>`).join('')}
+      <p style="color:#555;margin-top:12px">Corporate will place the order and you'll hear if anything needs clarifying. No need to reply.</p>
+      <p style="color:#888;font-size:12px">Armada Care Standards — automated order intake.</p></div>`;
+    sendEmail({ to: msg.from, subject: `✓ Order received — ${created} item${created === 1 ? '' : 's'} for ${entity}`, html, suppressCc: true })
+      .catch((e) => console.error('[intake] confirm email:', e.message));
+  }
   res.json({ ok: true, entity, created });
 });
 app.get('/api/corp/intake', requireAuth, requireCorp, (req, res) => {
@@ -3394,6 +3408,7 @@ app.get('/api/corp/intake', requireAuth, requireCorp, (req, res) => {
     token: req.user.role === 'admin' ? orderIntakeToken() : undefined,
     webhookUrl: req.user.role === 'admin' ? `${base || '(your app URL)'}/api/inbound/order?t=${orderIntakeToken()}` : undefined,
     routes, recent, locations: orgLocations(), defaultEntity: getState('order_intake_default') || DETOX_LOCATION,
+    confirmOn: getState('order_intake_confirm') !== 'off',
   });
 });
 app.post('/api/corp/intake/route', requireAuth, requireAdmin, (req, res) => {
@@ -3407,6 +3422,7 @@ app.post('/api/corp/intake/settings', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
   if (b.defaultEntity != null) setState('order_intake_default', String(b.defaultEntity).slice(0, 120));
   if (b.baseUrl != null) setState('public_base_url', String(b.baseUrl).trim().slice(0, 200));
+  if (b.confirm != null) setState('order_intake_confirm', b.confirm ? 'on' : 'off');
   if (b.regenerate) { setState('order_intake_token', crypto.randomBytes(18).toString('base64url')); }
   res.json({ ok: true, token: orderIntakeToken() });
 });

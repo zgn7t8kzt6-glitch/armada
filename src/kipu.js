@@ -822,7 +822,11 @@ export async function kipuDischargeNotes(casefileId) {
     if (r.content && r.content.length > 10 && texts.length < want) { texts.push(`[${r.date ? r.date + ' · ' : ''}${nm.trim() || 'Note'}]\n${r.content}`); used.push(nm.trim() || 'Note'); }
   }
   const hasDischargeDoc = used.some((n) => isDischarge(n));
-  const onlyIntake = texts.length > 0 && used.every((n) => isIntake(n) && !isDischarge(n) && !isExperience(n));
+  // A "departure-relevant" doc is a discharge/AMA note or a PURE progress/group note
+  // (not an intake-flavored one like "Nursing Assessment", which matches both). If
+  // nothing used is departure-relevant, the chart can't explain why they left.
+  const departureRelevant = (n) => isDischarge(n) || (isExperience(n) && !isIntake(n));
+  const onlyIntake = texts.length > 0 && !used.some(departureRelevant);
   return { text: texts.join('\n\n').slice(0, +(process.env.KIPU_NOTES_CHARS || 9000)), used, hasDischargeDoc, onlyIntake, empty: texts.length === 0 };
 }
 

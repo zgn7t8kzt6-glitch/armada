@@ -481,14 +481,19 @@ what the team can learn — so the next client like this stays.
   the warm gesture). Constructive and systemic — never blame an individual.
 - summary: one or two sentences for leadership.
 CRITICAL — ground the reason in what happened DURING the stay and at discharge
-(progress, group, counseling, nursing notes, and any discharge/AMA documentation).
-Do NOT infer the reason from intake or demographic facts (housing status,
-employment, arrival substance history) — those describe who the person was on
-arrival, not why they left, and produce the same generic answer for everyone.
-If the documentation is only intake paperwork with no progress or discharge notes,
-set reason to "Not documented — no in-stay or discharge notes found", leave
-evidence empty, and say so in the summary. Never manufacture a reason from intake
-facts. Do not invent. Person-first language.`;
+(progress, group, counseling, nursing PROGRESS notes, and any discharge/AMA
+documentation). Do NOT infer the reason from intake or demographic facts (housing
+status, employment, income, children, marital status, stage-of-change, arrival
+substance history) — those describe who the person was on arrival, not why they
+left, and produce the same generic answer for everyone.
+Do NOT construct a psychological or theoretical narrative (e.g. "motivation dip,"
+"the wave," "felt fine after withdrawal," "Contemplation stage," "no anchor")
+UNLESS a note in this stay actually documents it. If no note records the departure,
+the client's own stated reason, or a specific in-stay event, then the reason is NOT
+KNOWN — set reason to "Not documented in the chart — no progress or discharge note
+explains the departure", leave evidence empty, and say so plainly in the summary.
+A short honest "not documented" is REQUIRED over a plausible-sounding guess.
+Never manufacture a reason from intake facts. Do not invent. Person-first language.`;
 const DEBRIEF_SCHEMA = {
   type: 'object',
   properties: {

@@ -295,6 +295,29 @@ app.post('/api/logout', (req, res) => { logout(req, res); res.json({ ok: true })
 function outpatientAllowlist() { try { const a = JSON.parse(getState('outpatient_access') || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
 function canSeeOutpatient(user) { return !!user && (user.role === 'admin' || outpatientAllowlist().includes(user.id)); }
 function requireOutpatient(req, res, next) { if (!canSeeOutpatient(req.user)) return res.status(403).json({ error: 'Owner only.' }); next(); }
+
+// ── Facilities registry (all 6 locations) for the consolidated ownership view ──
+// Two Kipu connections: 'armada' (the existing login — Akron detox, Akron House,
+// Dayton) and 'spark' (a separate login for Spark Recovery Indianapolis/Greenwood
+// and Armada of Wheatfield, added when its credentials are provided). Each facility
+// maps to a Kipu location name; the seed is editable by the owner.
+const FACILITY_SEED = [
+  { key: 'akron-detox', label: 'Armada Detox of Akron', brand: 'Armada', connection: 'armada', type: 'detox', locationName: '' },
+  { key: 'akron-house', label: 'Armada Recovery of Akron', brand: 'Armada', connection: 'armada', type: 'outpatient', locationName: 'Akron House Recovery' },
+  { key: 'dayton', label: 'Armada Recovery of Dayton', brand: 'Armada', connection: 'armada', type: 'outpatient', locationName: 'Dayton' },
+  { key: 'indianapolis', label: 'Spark Recovery of Indianapolis', brand: 'Spark', connection: 'spark', type: 'outpatient', locationName: 'Indianapolis' },
+  { key: 'greenwood', label: 'Spark Recovery of Greenwood', brand: 'Spark', connection: 'spark', type: 'outpatient', locationName: 'Greenwood' },
+  { key: 'wheatfield', label: 'Armada Recovery of Wheatfield', brand: 'Spark', connection: 'spark', type: 'outpatient', locationName: 'Wheatfield' },
+];
+function getFacilities() {
+  const s = getState('facilities_config');
+  if (s) { try { const a = JSON.parse(s); if (Array.isArray(a) && a.length) return a; } catch { /* fall through */ } }
+  return FACILITY_SEED;
+}
+// The Spark Kipu connection isn't wired yet — credentials come later. Until then its
+// facilities show as "pending" in the ownership view rather than erroring.
+function sparkConfigured() { return false; }
+function connectionReachable(conn) { return conn === 'spark' ? sparkConfigured() : kipuConfigured(); }
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
   if (user) user.outpatientAccess = canSeeOutpatient(user);
@@ -2367,7 +2390,7 @@ const isDetoxProgram = (p) => /detox|withdrawal|\bwm\b|3\.?2|3\.?7/i.test(p || '
 // retired duplicates, referral-outs, and phantoms (a "discharge" for someone who is
 // still an active patient never happened). Shared by every discharge tile/metric so
 // none of them can show the census-churn inflation.
-function realDischargeCount(sinceDate) {
+function realDischargeCount(sinceDate, untilDate) {
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
   const keyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || norm(c.name);
   const activeKeys = new Set(db.prepare(`SELECT kipu_id, name FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map(keyOf));
@@ -2375,6 +2398,7 @@ function realDischargeCount(sinceDate) {
     WHERE merged_into IS NULL AND COALESCE(discharge_status,'') != 'Merged (duplicate)' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ?`).all(sinceDate);
   const seen = new Set(); let n = 0;
   for (const c of rows) {
+    if (untilDate && (c.discharge_date || '').slice(0, 10) > untilDate) continue;   // window end
     const k = keyOf(c) + '|' + (c.admit || '').slice(0, 10);
     if (seen.has(k)) continue; seen.add(k);
     if (isReferredOut(c)) continue;            // didn't complete intake
@@ -3017,6 +3041,81 @@ app.post('/api/outpatient/settings', requireAuth, requireAdmin, (req, res) => {
   if (b.location != null) setState('outpatient_location', String(b.location).trim().slice(0, 120));
   if (Array.isArray(b.access)) setState('outpatient_access', JSON.stringify(b.access.map(Number).filter(Boolean)));
   res.json({ ok: true });
+});
+
+// ── Consolidated OWNERSHIP view across all facilities ──────────────────────────
+// One call per outpatient location (admissions over a 400-day lookback), cached, so
+// current census + admits/discharges for the window come from a single fast pull.
+// Detox comes from the local clients table. Spark facilities show "pending" until
+// their Kipu connection is added.
+const _facAdmCache = new Map();   // locationName(lower) → { at, data:[admissions] }
+async function facilityAdmissions(locName) {
+  const key = String(locName || '').toLowerCase();
+  const hit = _facAdmCache.get(key);
+  if (hit && (Date.now() - hit.at) < 5 * 60 * 1000) return hit.data;
+  if (!kipuConfigured()) return hit ? hit.data : null;
+  let r; try { r = await kipuOutpatientAdmissions(locName, addDays(appToday(), -400), appToday()); } catch { return hit ? hit.data : null; }
+  if (!r || r.error || !Array.isArray(r.admissions)) return hit ? hit.data : null;
+  _facAdmCache.set(key, { at: Date.now(), data: r.admissions });
+  return r.admissions;
+}
+let _locBedsCache = null;
+async function locationBeds() {
+  if (_locBedsCache && (Date.now() - _locBedsCache.at) < 30 * 60 * 1000) return _locBedsCache.map;
+  const map = {};
+  if (kipuConfigured()) { try { const r = await kipuListLocations(); for (const l of (r.locations || [])) if (l.beds != null) map[l.name.toLowerCase()] = l.beds; } catch { /* best-effort */ } }
+  _locBedsCache = { at: Date.now(), map };
+  return map;
+}
+app.get('/api/ownership', requireAuth, requireOutpatient, async (req, res) => {
+  const today = appToday();
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : addDays(today, -7);
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;
+  const inR = (d, s, e) => { const x = d ? String(d).slice(0, 10) : ''; return x && x >= s && x <= e; };
+  const facilities = getFacilities();
+  const beds = await locationBeds();
+  const out = [];
+  for (const f of facilities) {
+    const base = { key: f.key, label: f.label, brand: f.brand, connection: f.connection, type: f.type, locationName: f.locationName };
+    if (!connectionReachable(f.connection)) { out.push({ ...base, pending: true, note: f.connection === 'spark' ? 'Connect Spark Kipu to include' : 'Kipu not connected' }); continue; }
+    if (f.type === 'detox') {
+      const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).get().n;
+      const admitRows = db.prepare(`SELECT DISTINCT kipu_id, name FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`).all(since, end);
+      out.push({ ...base, census: { total: census }, admits: admitRows.length, discharges: realDischargeCount(since, end), beds: beds[(f.locationName || '').toLowerCase()] || null });
+    } else {
+      const adm = await facilityAdmissions(f.locationName);
+      if (!adm) { out.push({ ...base, pending: true, note: 'No data from Kipu — check the location name' }); continue; }
+      const census = adm.filter((a) => !a.discharge).length;
+      out.push({ ...base, census: { total: census }, admits: adm.filter((a) => inR(a.admit, since, end)).length, discharges: adm.filter((a) => inR(a.discharge, since, end)).length, beds: beds[(f.locationName || '').toLowerCase()] || null });
+    }
+  }
+  const live = out.filter((f) => !f.pending);
+  const sum = (k) => live.reduce((a, f) => a + (k === 'census' ? (f.census?.total || 0) : (f[k] || 0)), 0);
+  const byBrand = {};
+  for (const f of live) { const b = byBrand[f.brand] = byBrand[f.brand] || { brand: f.brand, census: 0, admits: 0, discharges: 0 }; b.census += f.census?.total || 0; b.admits += f.admits || 0; b.discharges += f.discharges || 0; }
+  res.json({
+    window: { since, end },
+    facilities: out,
+    totals: { census: sum('census'), admits: sum('admits'), discharges: sum('discharges'), facilities: live.length },
+    byBrand: Object.values(byBrand),
+    sparkPending: facilities.some((f) => f.connection === 'spark') && !sparkConfigured(),
+  });
+});
+app.get('/api/facilities', requireAuth, requireOutpatient, (req, res) => res.json({ facilities: getFacilities(), sparkConfigured: sparkConfigured() }));
+app.post('/api/facilities', requireAuth, requireAdmin, (req, res) => {
+  const list = Array.isArray(req.body?.facilities) ? req.body.facilities : null;
+  if (!list) return res.status(400).json({ error: 'facilities array required' });
+  const clean = list.map((f) => ({
+    key: String(f.key || '').slice(0, 40) || Math.random().toString(36).slice(2, 8),
+    label: String(f.label || '').slice(0, 80),
+    brand: String(f.brand || '').slice(0, 40),
+    connection: f.connection === 'spark' ? 'spark' : 'armada',
+    type: f.type === 'detox' ? 'detox' : 'outpatient',
+    locationName: String(f.locationName || '').slice(0, 120),
+  })).filter((f) => f.label);
+  setState('facilities_config', JSON.stringify(clean));
+  _facAdmCache.clear();
+  res.json({ ok: true, facilities: clean });
 });
 // Discover how this Kipu account exposes group sessions/attendance, so group metrics
 // can be wired to the real data shape.

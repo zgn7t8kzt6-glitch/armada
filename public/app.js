@@ -196,7 +196,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',ownership:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -329,7 +329,7 @@ function canSeeView(v){
   if(!ME) return true;
   // Akron Outpatient is owner-only: the admin, plus anyone the owner explicitly grants.
   // Even Exec/Ops directors don't see it unless granted — so this check comes first.
-  if(v==='outpatient') return !!(ME.role==='admin' || ME.outpatientAccess);
+  if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
   // Recovery Housing is walled off: only the owner/admin and housing staff see it.
   // Nobody on the clinical/detox side does — not even the broad-leadership roles below.
   if(HOUSING_VIEWS.includes(v)) return ME.role==='admin' || ME.job_role==='Executive Director' || HOUSING_ROLES.includes(ME.job_role);
@@ -492,6 +492,7 @@ function show(v){
   if(v==='admitcheck') loadAdmitCheck();
   if(v==='dupes') loadDupes();
   if(v==='outpatient') loadOutpatient();
+  if(v==='ownership') loadOwnership();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5599,6 +5600,48 @@ async function loadAdmitCheck(){
 /* ───────── AKRON OUTPATIENT (owner-only, separate Kipu location) ───────── */
 let OP_DATA=null, OP_PERIOD=null;
 function opDefaultPeriod(){ const e=today(); const d=new Date(e+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-6); return {since:d.toISOString().slice(0,10), end:e}; }
+let OWN_PERIOD=null;
+async function loadOwnership(){
+  const host=$('ownership'); if(!host) return;
+  if(!OWN_PERIOD) OWN_PERIOD={since:today().slice(0,8)+'01', end:today()};
+  host.innerHTML='<div class="hint">Loading all locations…</div>';
+  let d; try{ d=await api('/ownership?since='+encodeURIComponent(OWN_PERIOD.since)+'&end='+encodeURIComponent(OWN_PERIOD.end)); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const t=d.totals||{};
+  const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const facRow=(f)=>{
+    if(f.pending) return `<tr style="opacity:.6"><td><strong>${esc(f.label)}</strong><div class="hint">${esc(f.brand)} · ${esc(f.type)}</div></td><td colspan="4" class="hint">⏳ ${esc(f.note||'pending')}</td></tr>`;
+    const occ=(f.beds!=null)?`${f.census.total}/${f.beds}`:`${f.census.total}`;
+    return `<tr><td><strong>${esc(f.label)}</strong><div class="hint">${esc(f.brand)} · ${esc(f.type)}${f.locationName?' · '+esc(f.locationName):''}</div></td><td><strong>${f.census.total}</strong></td><td>${f.admits}</td><td>${f.discharges}</td><td class="hint">${f.beds!=null?occ:'—'}</td></tr>`;
+  };
+  const armada=(d.facilities||[]).filter(f=>f.connection==='armada');
+  const spark=(d.facilities||[]).filter(f=>f.connection==='spark');
+  const tbl=(rows)=>`<table class="tbl"><tr><th>Facility</th><th>Census</th><th>Admits</th><th>Discharges</th><th>Occupancy</th></tr>${rows.map(facRow).join('')}</table>`;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🏛️ Ownership — all locations</h3><p class="sub sans" style="margin:0">Consolidated census, admits &amp; discharges across every facility. Owner-only.</p></div>
+      <div class="toolbar" style="gap:6px;margin:0"><div class="itabs"><button class="itab" onclick="ownPreset('mtd')">MTD</button><button class="itab" onclick="ownPreset(7)">7d</button><button class="itab" onclick="ownPreset(30)">30d</button></div></div></div>
+      <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="hint">From <input type="date" id="own_since" value="${esc(OWN_PERIOD.since)}" onchange="ownPeriodChange()"/></label><label class="hint">To <input type="date" id="own_end" value="${esc(OWN_PERIOD.end)}" onchange="ownPeriodChange()"/></label></div>
+      <div class="ret-cards" style="margin-top:8px">${box(t.census||0,'Total census',(t.census?'rc-elev':''))}${box(t.admits||0,'Admits in window')}${box(t.discharges||0,'Discharges')}${box(t.facilities||0,'Live facilities')}</div>
+      ${(d.byBrand||[]).length>1?`<div class="hint" style="margin-top:6px">${(d.byBrand||[]).map(b=>`<strong>${esc(b.brand)}</strong>: ${b.census} census · ${b.admits} admits · ${b.discharges} disch.`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>
+    <div class="card"><h3 style="margin-top:0">Armada — Kipu <span class="hint" style="font-weight:400">· live</span></h3>${tbl(armada)}</div>
+    <div class="card"><h3 style="margin-top:0">Spark${d.sparkPending?' <span class="hint" style="font-weight:400;color:#a60">· connection pending</span>':''}</h3>${d.sparkPending?'<div class="pc-note" style="color:#a60;margin-bottom:6px">These come online the moment you give me the Spark Kipu credentials — the rows are already wired.</div>':''}${tbl(spark)}</div>
+    ${ME.role==='admin'?`<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">⚙️ Facility mapping <span class="hint" style="font-weight:400">— owner only</span></h3><p class="sub sans">If a facility shows no data, its Kipu location name here may not match Kipu. Use “List locations” in Akron Outpatient settings to see exact names, then fix them here.</p><div id="ownFacilities" class="hint">Loading…</div></div>`:''}`;
+  if(ME.role==='admin') loadFacilityEditor();
+}
+function ownPreset(p){ const e=today(); if(p==='mtd'){ OWN_PERIOD={since:e.slice(0,8)+'01',end:e}; } else { const d=new Date(e+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-(p-1)); OWN_PERIOD={since:d.toISOString().slice(0,10),end:e}; } loadOwnership(); }
+function ownPeriodChange(){ OWN_PERIOD={since:($('own_since')||{}).value||OWN_PERIOD.since, end:($('own_end')||{}).value||OWN_PERIOD.end}; loadOwnership(); }
+async function loadFacilityEditor(){
+  const host=$('ownFacilities'); if(!host) return;
+  let d; try{ d=await api('/facilities'); }catch(e){ host.textContent=e.message; return; }
+  const fs=d.facilities||[];
+  host.innerHTML=fs.map((f,i)=>`<div class="pc-note" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><strong style="min-width:180px">${esc(f.label)}</strong><span class="hint">${esc(f.connection)}·${esc(f.type)}</span> <label class="hint">Kipu location <input data-fi="${i}" class="ownLoc" value="${esc(f.locationName||'')}" placeholder="exact Kipu name" style="min-width:180px"/></label></div>`).join('')
+    +`<div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold btn-sm sans" onclick="saveFacilities()">Save mapping</button><span id="ownFacMsg" class="hint" style="align-self:center"></span></div>`;
+  host._facs=fs;
+}
+async function saveFacilities(){
+  const host=$('ownFacilities'); const fs=(host._facs||[]).map((f,i)=>({...f, locationName:(document.querySelector('.ownLoc[data-fi="'+i+'"]')||{}).value||''}));
+  const m=$('ownFacMsg'); if(m)m.textContent='Saving…';
+  try{ await api('/facilities',{method:'POST',body:JSON.stringify({facilities:fs})}); if(m)m.textContent='✓ Saved'; loadOwnership(); }
+  catch(e){ if(m)m.textContent=e.message; }
+}
 async function loadOutpatient(){
   const host=$('outpatient'); if(!host) return;
   host.innerHTML='<div class="hint">Loading…</div>';

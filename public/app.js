@@ -5642,24 +5642,51 @@ let HR_SHOW_SAL=false;
 async function loadHrRoster(){
   const host=$('ownHr'); if(!host) return;
   let d; try{ d=await api('/hr/employees'); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  HR_DATA=d; renderHr();
+}
+let HR_DATA=null, HR_FILTER={location:'',position:'',search:'',groupBy:'location',sort:'name'};
+function hrFilterChange(){ HR_FILTER={location:($('hrfLoc')||{}).value||'',position:($('hrfPos')||{}).value||'',search:(($('hrfSearch')||{}).value||'').toLowerCase(),groupBy:($('hrfGroup')||{}).value||'location',sort:($('hrfSort')||{}).value||'name'}; renderHr(true); }
+function renderHr(keepControls){
+  const host=$('ownHr'); if(!host||!HR_DATA) return;
   const money=(n)=>n==null?'':'$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0});
-  const t=d.totals||{};
-  const grp=(g)=>{
-    const rows=g.people.map(p=>`<tr>
-      <td><strong>${esc((p.first_name||'')+' '+(p.last_name||''))}</strong></td>
+  const all=[]; for(const g of (HR_DATA.groups||[])) for(const p of g.people) all.push({...p, entity:g.entity});
+  const locations=[...new Set(all.map(p=>p.entity))].sort();
+  const positions=[...new Set(all.map(p=>(p.job_title||'').trim()).filter(Boolean))].sort();
+  const f=HR_FILTER;
+  let rows=all.filter(p=>
+    (!f.location||p.entity===f.location) &&
+    (!f.position||(p.job_title||'')===f.position) &&
+    (!f.search||((p.first_name+' '+p.last_name).toLowerCase().includes(f.search)||(p.job_title||'').toLowerCase().includes(f.search))));
+  const salOf=(p)=>p.salary==null?null:(p.pay_type==='hourly'?p.salary*2080:p.salary);
+  rows.sort((a,b)=> f.sort==='salary' ? ((salOf(b)||0)-(salOf(a)||0)) : f.sort==='position' ? (a.job_title||'~').localeCompare(b.job_title||'~') : ((a.last_name||'').localeCompare(b.last_name||'')));
+  const rowHtml=(p,showLoc)=>`<tr>
+      <td><strong>${esc((p.first_name||'')+' '+(p.last_name||''))}</strong>${showLoc?`<div class="hint">${esc(p.entity)}</div>`:''}</td>
       <td><input class="hrTitle" data-id="${p.id}" value="${esc(p.job_title||'')}" placeholder="job title" style="min-width:150px"/></td>
       <td><input class="hrSal" data-id="${p.id}" type="${HR_SHOW_SAL?'number':'password'}" value="${p.salary!=null?p.salary:''}" placeholder="salary" style="width:110px"/></td>
       <td><select class="hrPay" data-id="${p.id}"><option value="annual" ${p.pay_type!=='hourly'?'selected':''}>annual</option><option value="hourly" ${p.pay_type==='hourly'?'selected':''}>hourly</option></select></td>
-      <td><button class="btn btn-ghost btn-sm sans" onclick="saveHr(${p.id})">Save</button></td></tr>`).join('');
-    return `<details style="margin:6px 0"><summary style="cursor:pointer"><strong>${esc(g.entity)}</strong> <span class="hint">· ${g.count} people${g.annual?' · payroll '+money(g.annual)+'/yr'+(g.withSalary<g.count?' ('+g.withSalary+'/'+g.count+' entered)':''):''}</span></summary>
-      <table class="tbl" style="margin-top:4px"><tr><th>Name</th><th>Job title</th><th>Salary</th><th>Type</th><th></th></tr>${rows}</table></details>`;
-  };
+      <td><button class="btn btn-ghost btn-sm sans" onclick="saveHr(${p.id})">Save</button></td></tr>`;
+  const tableFor=(list,showLoc)=>`<table class="tbl" style="margin-top:4px"><tr><th>Name</th><th>Job title</th><th>Salary</th><th>Type</th><th></th></tr>${list.map(p=>rowHtml(p,showLoc)).join('')}</table>`;
+  const groupSum=(list)=>{ const ann=list.reduce((a,p)=>a+(salOf(p)||0),0); const withSal=list.filter(p=>p.salary>0).length; return `${list.length} people${ann?' · payroll '+money(ann)+'/yr'+(withSal<list.length?' ('+withSal+'/'+list.length+' entered)':''):''}`; };
+  let listHtml='';
+  if(f.groupBy==='none'){ listHtml=tableFor(rows,true); }
+  else{ const key=f.groupBy==='position'?(p=>p.job_title||'(no title)'):(p=>p.entity); const gm={}; for(const p of rows)(gm[key(p)]=gm[key(p)]||[]).push(p);
+    listHtml=Object.keys(gm).sort().map(k=>`<details ${f.location||f.position||f.search?'open':''} style="margin:6px 0"><summary style="cursor:pointer"><strong>${esc(k)}</strong> <span class="hint">· ${groupSum(gm[k])}</span></summary>${tableFor(gm[k], f.groupBy==='position')}</details>`).join(''); }
+  const filteredAnnual=rows.reduce((a,p)=>a+(salOf(p)||0),0);
+  const opt=(v,cur)=>`<option value="${esc(v)}" ${v===cur?'selected':''}>${esc(v||'')}</option>`;
   host.innerHTML=`<div class="ret-cards" style="margin-top:4px">
-      <div class="ret-card"><div class="n">${t.headcount||0}</div><div class="l">Total headcount</div></div>
-      <div class="ret-card"><div class="n">${HR_SHOW_SAL?money(t.annual||0):'•••'}</div><div class="l">Annual payroll ${t.withSalary!=null?'('+t.withSalary+' entered)':''}</div></div>
-      <div class="ret-card"><div class="n">${(d.groups||[]).length}</div><div class="l">Locations</div></div></div>
-    <div class="toolbar" style="justify-content:flex-start;gap:8px;margin:6px 0"><button class="btn btn-ghost btn-sm sans" onclick="HR_SHOW_SAL=!HR_SHOW_SAL;loadHrRoster()">${HR_SHOW_SAL?'🙈 Hide salaries':'👁 Show salaries'}</button><span class="hint">Type a salary + Save to fill it in. Salaries are owner-only.</span></div>
-    ${(d.groups||[]).map(grp).join('')}`;
+      <div class="ret-card"><div class="n">${rows.length}${rows.length!==all.length?'<span class="hint" style="font-size:12px">/'+all.length+'</span>':''}</div><div class="l">Headcount${rows.length!==all.length?' (filtered)':''}</div></div>
+      <div class="ret-card"><div class="n">${HR_SHOW_SAL?money(filteredAnnual):'•••'}</div><div class="l">Annual payroll</div></div>
+      <div class="ret-card"><div class="n">${locations.length}</div><div class="l">Locations</div></div>
+      <div class="ret-card"><div class="n">${positions.length}</div><div class="l">Distinct titles</div></div></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin:6px 0">
+      <label class="hint">Location <select id="hrfLoc" onchange="hrFilterChange()"><option value="">All</option>${locations.map(l=>opt(l,f.location)).join('')}</select></label>
+      <label class="hint">Position <select id="hrfPos" onchange="hrFilterChange()"><option value="">All</option>${positions.map(p=>opt(p,f.position)).join('')}</select></label>
+      <input id="hrfSearch" placeholder="Search name or title (Enter)" value="${esc(f.search)}" onchange="hrFilterChange()" style="min-width:150px"/>
+      <label class="hint">Group by <select id="hrfGroup" onchange="hrFilterChange()"><option value="location" ${f.groupBy==='location'?'selected':''}>Location</option><option value="position" ${f.groupBy==='position'?'selected':''}>Position</option><option value="none" ${f.groupBy==='none'?'selected':''}>None (flat)</option></select></label>
+      <label class="hint">Sort <select id="hrfSort" onchange="hrFilterChange()"><option value="name" ${f.sort==='name'?'selected':''}>Name</option><option value="position" ${f.sort==='position'?'selected':''}>Position</option><option value="salary" ${f.sort==='salary'?'selected':''}>Salary</option></select></label>
+      <button class="btn btn-ghost btn-sm sans" onclick="HR_SHOW_SAL=!HR_SHOW_SAL;renderHr()">${HR_SHOW_SAL?'🙈 Hide salaries':'👁 Show salaries'}</button>
+      ${(f.location||f.position||f.search)?`<button class="btn btn-ghost btn-sm sans" onclick="HR_FILTER={location:'',position:'',search:'',groupBy:'${f.groupBy}',sort:'${f.sort}'};renderHr()">Clear</button>`:''}</div>
+    ${rows.length?listHtml:'<div class="hint">No employees match these filters.</div>'}`;
 }
 async function saveHr(id){
   const b={ job_title:(document.querySelector('.hrTitle[data-id="'+id+'"]')||{}).value, salary:(document.querySelector('.hrSal[data-id="'+id+'"]')||{}).value, pay_type:(document.querySelector('.hrPay[data-id="'+id+'"]')||{}).value };

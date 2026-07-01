@@ -1596,15 +1596,19 @@ async function pollDebrief(){
   }catch(e){ $('debriefProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 async function loadDischargeLearnings(){
-  try{ const { discharges } = await api('/discharge-learnings');
+  try{ const { discharges, docGap, total } = await api('/discharge-learnings');
     if(!discharges.length){ $('learnCard').style.display='none'; return; }
     $('learnCard').style.display='block';
-    $('dischargeLearnings').innerHTML = discharges.map(d=>{
+    const banner = docGap ? `<div class="pc-note" style="color:#a60;margin-bottom:6px">⚠ ${docGap} of ${total} discharges had <strong>no in-stay documentation</strong> — only intake paperwork (or nothing) was in the chart, so their reason couldn’t be determined. These need progress/discharge notes charted in Kipu.</div>` : '';
+    $('dischargeLearnings').innerHTML = banner + discharges.map(d=>{
       const ama = d.discharge_status==='AMA';
+      const gap = !!d.discharge_doc_gap;
       return `<div class="todo"><div class="txt">
         <span class="risk ${ama?'risk-high':'risk-low'}">${esc(d.discharge_status||'Discharged')}</span>
+        ${gap?'<span class="risk risk-elev" title="No progress or discharge notes were in the chart — only intake paperwork">⚠ No in-stay notes</span> ':''}
         <strong>${esc(d.pref||d.name||'')}</strong> <span class="hint">· ${esc(d.discharge_date||'')}</span>
         ${d.discharge_reason?`<div class="pc-note">Why: ${esc(d.discharge_reason)}</div>`:''}
+        ${d.discharge_evidence?`<div class="pc-note" style="font-style:italic">Based on: ${esc(d.discharge_evidence)}</div>`:''}
         ${d.discharge_improve?`<div class="pc-note" style="color:var(--gold)">Could do better: ${esc(d.discharge_improve)}</div>`:''}
       </div></div>`;
     }).join('');

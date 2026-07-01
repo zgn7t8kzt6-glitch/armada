@@ -2205,11 +2205,10 @@ async function runDischargeDebriefs(user, redo = false) {
       let notes = '', meta = { empty: true };
       if (c.kipu_id && kipuConfigured()) { try { const dn = await kipuDischargeNotes(c.kipu_id); notes = dn.text; meta = { empty: dn.empty, onlyIntake: dn.onlyIntake, hasDischargeDoc: dn.hasDischargeDoc }; } catch { /* care card only */ } }
       const d = await generateDischargeDebrief(c, notes, meta);
-      // Keep the concrete in-stay evidence attached to the reason so it stays specific.
-      const reasonOut = d.reason ? (d.evidence ? `${d.reason} — ${d.evidence}` : d.reason) : null;
-      db.prepare(`UPDATE clients SET discharge_status = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
+      const docGap = (meta.empty || meta.onlyIntake) ? 1 : 0;
+      db.prepare(`UPDATE clients SET discharge_status = ?, discharge_reason = ?, discharge_evidence = ?, discharge_doc_gap = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
         .run(d.type && d.type !== 'Unknown' ? d.type : (c.discharge_status || 'Discharged'),
-          reasonOut, (d.warning_signs || []).join('; ') || null, (d.could_do_better || []).join('; ') || null, c.id);
+          d.reason || null, d.evidence || null, docGap, (d.warning_signs || []).join('; ') || null, (d.could_do_better || []).join('; ') || null, c.id);
       if (d.type === 'AMA') { debriefJob.ama++; createAlert(c.id, 'concern', 'Elevated', `${c.pref || c.name} left AMA — learn: ${d.summary || 'see debrief'}`); }
       audit({ user, action: 'DISCHARGE_DEBRIEF', entity: 'client', entity_id: c.id, detail: d.type, ip: '0.0.0.0' });
     } catch { debriefJob.errors++; }
@@ -2338,10 +2337,11 @@ app.get('/api/detox-watch', requireAuth, (req, res) => {
   res.json({ watch });
 });
 app.get('/api/discharge-learnings', requireAuth, (req, res) => {
-  const rows = db.prepare(`SELECT id, pref, name, discharge_status, discharge_date, discharge_reason, discharge_improve
+  const rows = db.prepare(`SELECT id, pref, name, discharge_status, discharge_date, discharge_reason, discharge_evidence, discharge_doc_gap, discharge_improve
     FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-60 day')
     ORDER BY discharge_date DESC LIMIT 60`).all();
-  res.json({ discharges: rows });
+  const docGap = rows.filter((r) => r.discharge_doc_gap).length;
+  res.json({ discharges: rows, docGap, total: rows.length });
 });
 
 // ---- Leadership Command Center (admin/leadership only) ----

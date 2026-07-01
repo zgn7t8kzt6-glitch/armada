@@ -1232,6 +1232,8 @@ addColumn('clients', 'departure_steps', 'TEXT');
 addColumn('clients', 'discharge_reason', 'TEXT');
 addColumn('clients', 'discharge_followthrough', 'TEXT');
 addColumn('clients', 'discharge_improve', 'TEXT');
+addColumn('clients', 'discharge_evidence', 'TEXT');       // the specific in-stay note the reason is grounded in
+addColumn('clients', 'discharge_doc_gap', 'INTEGER');     // 1 = only intake/no in-stay notes were available to debrief
 addColumn('followups', 'assignee_id', 'INTEGER');
 addColumn('followups', 'assignee_name', 'TEXT');
 addColumn('users', 'mfa_secret', 'TEXT');

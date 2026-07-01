@@ -325,6 +325,49 @@ RULES:
   need to confirm with the landlord or broker. Never guess.
 - Be concise and practical. This is guidance from the document, not legal advice —
   end anything ambiguous with a one-line suggestion to confirm with counsel/broker.`;
+// ---- Parse an emailed order into structured line items ----
+const ORDER_ITEMS_SCHEMA = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      description: 'Each distinct thing to order. Split a list/bullets into separate items.',
+      items: {
+        type: 'object',
+        properties: {
+          item_name: { type: 'string' },
+          qty: { type: 'string', description: 'Quantity + unit if given (e.g. "2 cases"), else empty.' },
+          category: { type: 'string', description: 'Best guess: Supplies | Housekeeping | Medical | Office | Marketing Materials | Swag / Merch | Maintenance / Repair | Other. Empty if unclear.' },
+          vendor: { type: 'string', description: 'Preferred vendor / store if mentioned, else empty.' },
+          priority: { type: 'string', description: 'Low | Normal | High | Urgent — Urgent/High only if the email says so, else Normal.' },
+          link: { type: 'string', description: 'A product URL if included, else empty.' },
+          notes: { type: 'string', description: 'Any detail (size, color, brand) — brief. Empty if none.' },
+        },
+        required: ['item_name', 'qty', 'category', 'vendor', 'priority', 'link', 'notes'],
+        additionalProperties: false,
+      },
+    },
+    facility_hint: { type: 'string', description: 'The location/facility the email says the order is for, if any (verbatim). Empty if not stated.' },
+    is_order: { type: 'boolean', description: 'True only if this email is actually requesting supplies/items to be ordered. False for unrelated email.' },
+  },
+  required: ['items', 'facility_hint', 'is_order'],
+  additionalProperties: false,
+};
+export async function extractOrderItems(subject, body) {
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 2000,
+    system: G + 'You turn a staff member\'s emailed supply request into a clean list of order line-items. Only include things they are actually asking to be ordered. Do not invent items, vendors, or quantities that aren\'t in the email.',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: ORDER_ITEMS_SCHEMA } },
+    messages: [{ role: 'user', content: `Parse this order email.\n\nSUBJECT: ${subject || '(none)'}\n\nBODY:\n${String(body || '').slice(0, 12000)}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) throw new Error('Could not parse the email.');
+  return JSON.parse(t.text);
+}
+
 // ---- Document extraction: read an uploaded PDF/image and pull structured fields ----
 async function extractFromDoc(base64, mediaType, system, schema, instruction) {
   const client = await getClient();

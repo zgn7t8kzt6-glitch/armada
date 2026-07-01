@@ -1866,6 +1866,19 @@ db.exec(`CREATE TABLE IF NOT EXISTS order_requests (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_order_req ON order_requests(status, facility);`);
+// Email-in order intake: routes that map an inbound email (by sender or by the
+// to-address / +tag) to an entity, so an office manager's emailed order becomes
+// order_requests for the right location.
+db.exec(`CREATE TABLE IF NOT EXISTS order_intake_routes (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,              -- 'sender' (from email) | 'address' (to-address or +tag)
+  value TEXT NOT NULL,             -- the email/tag to match (lowercased)
+  entity TEXT NOT NULL,
+  label TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_intake_route ON order_intake_routes(kind, value);`);
 // Payment methods & vendor account info per location. NOTE: never store full card
 // numbers or CVV here (PCI risk) — hold reference info (last 4, which card) and keep
 // raw numbers in a vault. account_number is for vendor/ACH accounts, not cards.

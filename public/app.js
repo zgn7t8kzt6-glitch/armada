@@ -5807,7 +5807,8 @@ async function renderCorpOrders(body){
     <td><div style="display:flex;gap:4px;flex-wrap:wrap">${actions(o)}</div></td></tr>`;
   const open=orders.filter(o=>o.status==='requested'||o.status==='ordered');
   const doneList=orders.filter(o=>o.status==='received'||o.status==='cancelled').slice(0,30);
-  body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add an order request</h3>
+  body.innerHTML=`<div id="intakePanel"></div>
+    <div class="card"><h3 style="margin-top:0">Add an order request</h3>
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
         <select id="oFac">${locs.map(l=>`<option ${(CORP_FAC||'Armada Detox of Akron')===l?'selected':''}>${esc(l)}</option>`).join('')}</select>
         <input id="oItem" placeholder="What to order" style="min-width:170px"/>
@@ -5820,10 +5821,35 @@ async function renderCorpOrders(body){
       <input id="oLink" placeholder="Amazon / supplier link (optional)" style="width:100%;margin-top:6px"/>
       <span id="oMsg" class="hint"></span></div>
     <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Open queue <span class="hint" style="font-weight:400">· ${open.length}</span></h3></div>
-      <label class="hint">Location <select id="ordFilter" onchange="ORD_FILTER=this.value;renderCorpOrders($('corpBody'))"><option value="">All</option>${locs.map(l=>`<option ${ORD_FILTER===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label></div>
+      <label class="hint">Location <select onchange="CORP_FAC=this.value;renderCorpOrders($('corpBody'))"><option value="">All</option>${locs.map(l=>`<option ${CORP_FAC===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label></div>
       ${open.length?`<table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${open.map(rowH).join('')}</table>`:'<div class="hint">Nothing open. Detox auto-flags land here automatically; add other locations above.</div>'}</div>
     ${doneList.length?`<div class="card"><h3 style="margin-top:0">Recently completed</h3><table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${doneList.map(rowH).join('')}</table></div>`:''}`;
+  loadIntakePanel();
 }
+async function loadIntakePanel(){
+  const host=$('intakePanel'); if(!host) return;
+  let d; try{ d=await api('/corp/intake'); }catch(e){ host.innerHTML=''; return; }
+  const routes=d.routes||[], recent=d.recent||[], locs=d.locations||[];
+  const senders=routes.filter(r=>r.kind==='sender'), addrs=routes.filter(r=>r.kind==='address');
+  const isAdmin=ME.role==='admin';
+  host.innerHTML=`<div class="card" style="border-left:4px solid var(--aqua)"><details ${recent.length?'':''}><summary style="cursor:pointer"><strong>📧 Email-in ordering</strong> <span class="hint">· office managers email an order → it lands here automatically${recent.length?` · ${recent.length} recent`:''}</span></summary>
+    <div style="padding:8px 0 2px">
+      <p class="sub sans" style="margin:0 0 6px">An office manager emails an order (a list, bullets, whatever) to your intake address; the app reads it and creates the orders on this queue, tagged to their location.</p>
+      ${isAdmin?`<div class="pc-note" style="font-family:monospace;font-size:11px;word-break:break-all"><strong>Webhook URL</strong> (give this to your email provider's inbound/route):<br>${esc(d.webhookUrl||'')}</div>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px"><label class="hint">Your app URL <input id="inBase" placeholder="https://yourapp.com" value="${esc((d.webhookUrl||'').split('/api/')[0]||'')}" style="min-width:180px"/></label><label class="hint">Default location <select id="inDef">${locs.map(l=>`<option ${d.defaultEntity===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label><button class="btn btn-ghost btn-sm sans" onclick="saveIntakeSettings()">Save</button><span id="inMsg" class="hint" style="align-self:center"></span></div>`:''}
+      <h3 style="font-size:13px;margin:10px 0 4px">Who can email orders (sender → location)</h3>
+      ${isAdmin?`<div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><input id="inSender" placeholder="manager@…" style="min-width:150px"/><select id="inSenderEnt">${locs.map(l=>`<option>${esc(l)}</option>`).join('')}</select><button class="btn btn-gold btn-sm sans" onclick="addRoute('sender')">Add</button></div>`:''}
+      ${senders.length?senders.map(r=>`<div class="pc-note" style="font-size:12px">✉️ <strong>${esc(r.value)}</strong> → ${esc(r.entity)}${isAdmin?` <button class="btn btn-ghost btn-sm sans" onclick="delRoute(${r.id})">🗑</button>`:''}</div>`).join(''):'<div class="hint">No senders yet — add each office manager\'s email so their orders route to the right location.</div>'}
+      ${isAdmin?`<h3 style="font-size:13px;margin:10px 0 4px">Or per-location address / +tag</h3><div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><input id="inAddr" placeholder="e.g. dayton  (for orders+dayton@ or dayton-orders@)" style="min-width:180px"/><select id="inAddrEnt">${locs.map(l=>`<option>${esc(l)}</option>`).join('')}</select><button class="btn btn-gold btn-sm sans" onclick="addRoute('address')">Add</button></div>
+      ${addrs.map(r=>`<div class="pc-note" style="font-size:12px">🏷️ <strong>${esc(r.value)}</strong> → ${esc(r.entity)} <button class="btn btn-ghost btn-sm sans" onclick="delRoute(${r.id})">🗑</button></div>`).join('')}`:''}
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="testIntake()">✎ Test with a sample email</button><span id="inTestMsg" class="hint" style="align-self:center"></span></div>
+      ${recent.length?`<h3 style="font-size:13px;margin:10px 0 4px">Recent email orders</h3>${recent.map(r=>`<div class="hint">• ${esc(r.item_name)} <span style="color:var(--muted)">· ${esc(r.facility)} · from ${esc(r.requested_by||'')} · ${esc((r.created_at||'').slice(0,16))}</span></div>`).join('')}`:''}
+    </div></details></div>`;
+}
+async function saveIntakeSettings(){ const b={baseUrl:($('inBase')||{}).value||'',defaultEntity:($('inDef')||{}).value||''}; try{ await api('/corp/intake/settings',{method:'POST',body:JSON.stringify(b)}); if($('inMsg'))$('inMsg').textContent='✓ Saved'; loadIntakePanel(); }catch(e){ if($('inMsg'))$('inMsg').textContent=e.message; } }
+async function addRoute(kind){ const val=(kind==='sender'?($('inSender')||{}).value:($('inAddr')||{}).value)||''; const ent=(kind==='sender'?($('inSenderEnt')||{}).value:($('inAddrEnt')||{}).value)||''; if(!val.trim())return; try{ await api('/corp/intake/route',{method:'POST',body:JSON.stringify({kind,value:val,entity:ent})}); loadIntakePanel(); }catch(e){ alert(e.message); } }
+async function delRoute(id){ try{ await api('/corp/intake/route/'+id,{method:'DELETE'}); loadIntakePanel(); }catch(e){ alert(e.message); } }
+async function testIntake(){ const text=prompt('Paste a sample order email body (e.g. "Please order 2 cases of gloves and a box of pens for Dayton"):'); if(!text)return; if($('inTestMsg'))$('inTestMsg').textContent='Parsing…'; try{ const r=await api('/corp/intake/test',{method:'POST',body:JSON.stringify({text})}); if($('inTestMsg'))$('inTestMsg').textContent=`✓ Created ${r.created} order(s) for ${r.entity}.`; renderCorpOrders($('corpBody')); }catch(e){ if($('inTestMsg'))$('inTestMsg').textContent=e.message; } }
 async function addOrder(){
   const b={facility:($('oFac')||{}).value,item_name:($('oItem')||{}).value||'',category:($('oCat')||{}).value||'',qty:($('oQty')||{}).value||'',vendor:($('oVendor')||{}).value||'',priority:($('oPri')||{}).value,est_cost:($('oCost')||{}).value||'',link:($('oLink')||{}).value||''};
   if(!b.item_name.trim()){ if($('oMsg'))$('oMsg').textContent='What are we ordering?'; return; }

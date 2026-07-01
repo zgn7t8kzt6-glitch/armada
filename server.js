@@ -19,7 +19,7 @@ import {
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -3339,6 +3339,86 @@ app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
   res.json({ ok: true });
 });
 app.delete('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM order_requests WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// ── Email-in order intake ──────────────────────────────────────────────────────
+// Office managers email an order; the app parses it and creates order_requests on
+// Chava's queue. Providers (Cloudflare Email Worker / Postmark / SendGrid Inbound)
+// POST the message to this token-gated webhook.
+function orderIntakeToken() { let t = getState('order_intake_token'); if (!t) { t = crypto.randomBytes(18).toString('base64url'); setState('order_intake_token', t); } return t; }
+function normalizeInbound(b) {
+  const pick = (...keys) => { for (const k of keys) { if (b && b[k] != null && String(b[k]).trim() !== '') return String(b[k]); } return ''; };
+  const emailOf = (s) => { const m = String(s || '').match(/[<(]?([^\s<>()]+@[^\s<>()]+)[>)]?/); return m ? m[1].toLowerCase() : String(s || '').toLowerCase().trim(); };
+  const from = emailOf(pick('from', 'sender', 'From', 'Sender'));
+  const to = String(pick('to', 'recipient', 'To', 'envelope_to')).toLowerCase();
+  const subject = pick('subject', 'Subject');
+  let text = pick('text', 'body-plain', 'TextBody', 'plain', 'stripped-text', 'body');
+  if (!text) { const html = pick('html', 'HtmlBody', 'body-html'); text = String(html).replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim(); }
+  return { from, to, subject, text };
+}
+app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb' }), async (req, res) => {
+  if ((req.query.t || req.headers['x-intake-token']) !== orderIntakeToken()) return res.status(401).json({ error: 'bad token' });
+  const msg = normalizeInbound(req.body || {});
+  if (!msg.from) return res.status(400).json({ error: 'no sender' });
+  // Resolve the entity: an address/+tag route wins, else a sender route, else default.
+  const routes = db.prepare(`SELECT * FROM order_intake_routes WHERE active = 1`).all();
+  let entity = null, requester = msg.from;
+  const plus = (msg.to.match(/\+([^@]+)@/) || [])[1];   // orders+dayton@…
+  const localPart = (msg.to.match(/([^@<>\s]+)@/) || [])[1] || '';
+  for (const r of routes) if (r.kind === 'address' && (r.value === plus || r.value === localPart || msg.to.includes(r.value))) { entity = r.entity; break; }
+  if (!entity) { const sr = routes.find((r) => r.kind === 'sender' && r.value === msg.from); if (sr) { entity = sr.entity; requester = sr.label || msg.from; } }
+  if (!entity) entity = getState('order_intake_default') || DETOX_LOCATION;
+  // Parse the email into line items (AI); fall back to one item = the whole email.
+  let parsed = null;
+  if (claudeConfigured()) { try { parsed = await extractOrderItems(msg.subject, msg.text); } catch { parsed = null; } }
+  let created = 0;
+  const insert = db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, vendor, link, priority, status, notes, requested_by, source) VALUES (?,?,?,?,?,?,?, 'requested', ?, ?, 'email')`);
+  const pris = ['Low', 'Normal', 'High', 'Urgent'];
+  if (parsed && parsed.is_order && Array.isArray(parsed.items) && parsed.items.length) {
+    for (const it of parsed.items) {
+      if (!String(it.item_name || '').trim()) continue;
+      insert.run(entity, String(it.item_name).slice(0, 200), String(it.qty || '').slice(0, 40), String(it.category || '').slice(0, 60), String(it.vendor || '').slice(0, 80), String(it.link || '').slice(0, 500), pris.includes(it.priority) ? it.priority : 'Normal', `via email from ${requester}${it.notes ? ' — ' + it.notes : ''}`.slice(0, 1000), requester);
+      created++;
+    }
+  }
+  if (!created) {   // couldn't parse (or AI off) — capture the whole email as one order to review
+    insert.run(entity, (msg.subject || 'Emailed order').slice(0, 200), '', 'Other', '', '', 'Normal', `via email from ${requester}. Original:\n${msg.text}`.slice(0, 1000), requester);
+    created = 1;
+  }
+  console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}`);
+  res.json({ ok: true, entity, created });
+});
+app.get('/api/corp/intake', requireAuth, requireCorp, (req, res) => {
+  const routes = db.prepare(`SELECT * FROM order_intake_routes WHERE active = 1 ORDER BY kind, value`).all();
+  const recent = db.prepare(`SELECT id, facility, item_name, requested_by, created_at FROM order_requests WHERE source='email' ORDER BY id DESC LIMIT 20`).all();
+  const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  res.json({
+    token: req.user.role === 'admin' ? orderIntakeToken() : undefined,
+    webhookUrl: req.user.role === 'admin' ? `${base || '(your app URL)'}/api/inbound/order?t=${orderIntakeToken()}` : undefined,
+    routes, recent, locations: orgLocations(), defaultEntity: getState('order_intake_default') || DETOX_LOCATION,
+  });
+});
+app.post('/api/corp/intake/route', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (!['sender', 'address'].includes(b.kind) || !String(b.value || '').trim() || !String(b.entity || '').trim()) return res.status(400).json({ error: 'kind, value, entity required.' });
+  const info = db.prepare(`INSERT INTO order_intake_routes (kind, value, entity, label) VALUES (?,?,?,?)`).run(b.kind, String(b.value).toLowerCase().trim().slice(0, 160), String(b.entity).slice(0, 120), String(b.label || '').slice(0, 80));
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/intake/route/:id', requireAuth, requireAdmin, (req, res) => { db.prepare(`UPDATE order_intake_routes SET active=0 WHERE id=?`).run(req.params.id); res.json({ ok: true }); });
+app.post('/api/corp/intake/settings', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.defaultEntity != null) setState('order_intake_default', String(b.defaultEntity).slice(0, 120));
+  if (b.baseUrl != null) setState('public_base_url', String(b.baseUrl).trim().slice(0, 200));
+  if (b.regenerate) { setState('order_intake_token', crypto.randomBytes(18).toString('base64url')); }
+  res.json({ ok: true, token: orderIntakeToken() });
+});
+// Let the owner test the parser without wiring email yet.
+app.post('/api/corp/intake/test', requireAuth, requireCorp, async (req, res) => {
+  const b = req.body || {};
+  const token = orderIntakeToken();
+  try {
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/inbound/order?t=${token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: b.from || req.user.username || 'test@armadarecovery.com', to: b.to || 'orders@armadarecovery.com', subject: b.subject || 'Order', text: b.text || '' }) });
+    res.json(await r.json());
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 // Payment methods / vendor accounts (reference info only — never full card numbers).
 app.get('/api/corp/payments', requireAuth, requireCorp, (req, res) => res.json({ payments: db.prepare(`SELECT * FROM payment_methods WHERE active = 1 ORDER BY facility, label`).all(), locations: orgLocations() }));
 app.post('/api/corp/payments', requireAuth, requireCorp, (req, res) => {

@@ -789,3 +789,52 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 .lean-main{flex:1;min-width:0}
 .lean-t{font-weight:700;font-size:15.5px;color:var(--navy,#16242a);line-height:1.25}
 .lean-go{font-size:24px;color:var(--muted);flex:0 0 auto}
+
+/* ── Corporate Hub — mobile-first redesign ─────────────────────────────────
+   Pill tab bar (horizontal scroll on phones), stat-card polish, and a table→card
+   transformation: hub tables get data-th stamps so on small screens each row
+   becomes a tap-friendly card with labeled fields. */
+.corp-tabs{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:6px 2px 10px;margin-top:8px;scrollbar-width:none}
+.corp-tabs::-webkit-scrollbar{display:none}
+.corp-tabs button{flex:0 0 auto;font-family:var(--sans);border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:9px 15px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap;transition:all .15s;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.corp-tabs button:active{transform:scale(.96)}
+.corp-tabs button.active{background:linear-gradient(135deg,var(--teal),#2e6a72);color:#fff;border-color:transparent;box-shadow:0 4px 12px rgba(35,80,86,.35)}
+[data-theme="dark"] .corp-tabs button{background:#16202a;border-color:#28323c;color:#9aabb7}
+[data-theme="dark"] .corp-tabs button.active{background:linear-gradient(135deg,#2e6a72,#235056);color:#fff}
+#corphub .ret-card{background:linear-gradient(165deg,var(--paper),#f2f6f3);border-radius:14px;box-shadow:0 2px 10px rgba(35,80,86,.07)}
+[data-theme="dark"] #corphub .ret-card{background:linear-gradient(165deg,#16202a,#121a22)}
+#corphub details>summary{list-style:none;cursor:pointer;padding:10px 6px;border-radius:10px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+#corphub details>summary::-webkit-details-marker{display:none}
+#corphub details>summary::before{content:'▸';color:var(--gold);font-size:12px;flex:0 0 auto;transition:transform .15s}
+#corphub details[open]>summary::before{transform:rotate(90deg)}
+#corphub details>summary:hover{background:rgba(210,154,94,.08)}
+@media(max-width:760px){
+  /* tables → stacked cards */
+  #corphub table.m-cards,#corphub table.m-cards tbody{display:block;width:100%}
+  #corphub table.m-cards tr:has(th){display:none}
+  #corphub table.m-cards tr{display:block;background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:10px 0;box-shadow:0 2px 8px rgba(27,40,37,.06)}
+  [data-theme="dark"] #corphub table.m-cards tr{background:#16202a;border-color:#28323c}
+  #corphub table.m-cards td{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border:0;padding:5px 0;text-align:right;font-size:14px}
+  #corphub table.m-cards td:empty{display:none}
+  #corphub table.m-cards td::before{content:attr(data-th);font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;text-align:left;flex:0 0 auto}
+  #corphub table.m-cards td[data-th=""]{justify-content:flex-end;flex-wrap:wrap;gap:6px}
+  #corphub table.m-cards td[data-th=""]::before{content:none}
+  #corphub table.m-cards td:first-child{text-align:left;justify-content:flex-start;font-size:15px}
+  #corphub table.m-cards td:first-child::before{display:none}
+  /* forms: stack, full-width, real touch targets, no iOS zoom */
+  #corphub .toolbar{flex-direction:column;align-items:stretch;gap:8px}
+  #corphub .toolbar>*{width:100%;margin:0}
+  #corphub .toolbar input,#corphub .toolbar select{width:100%!important;min-width:0!important}
+  #corphub input,#corphub select,#corphub textarea{font-size:16px;min-height:46px;width:100%;box-sizing:border-box;border-radius:10px}
+  #corphub textarea{min-height:110px}
+  #corphub input[type="checkbox"]{width:22px;min-height:22px}
+  #corphub input[type="date"]{min-width:0}
+  #corphub .btn{min-height:46px;border-radius:12px;font-size:15px}
+  #corphub table.m-cards .btn{min-height:40px;flex:0 0 auto;width:auto}
+  #corphub .cmd-hero-row{flex-direction:column;align-items:stretch;gap:10px}
+  #corphub .ret-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  #corphub .ret-card{padding:16px 12px}
+  #corphub .ret-card .n{font-size:24px}
+  #corphub h3{font-size:16px}
+  #corphub .pc-note{border-radius:12px;padding:10px 12px}
+}

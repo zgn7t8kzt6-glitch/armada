@@ -5737,13 +5737,26 @@ async function loadCorpHub(){
   const facSel=`<label class="hint">Facility <select id="corpFac" onchange="CORP_FAC=this.value;renderCorpTab()"><option value="">🏢 All facilities</option>${CORP_LOCS.map(l=>`<option ${CORP_FAC===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${facSel}${(ME&&ME.role==='admin'&&!PREVIEW_ROLE)?'<button class="btn btn-ghost btn-sm sans" onclick="previewAsChava()">👁 Preview corporate view</button>':''}</div></div>
     ${CORP_FAC?`<div class="pc-note" style="margin-top:6px">Viewing <strong>${esc(CORP_FAC)}</strong> only. <a href="#" onclick="CORP_FAC='';loadCorpHub();return false">← all facilities</a></div>`:''}
-    <div class="itabs" id="corpTabs" style="margin-top:6px">
-      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','insurance|🛡️ Insurance','leases|🏢 Leases','entities|🏛️ Entities','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
+    <div class="corp-tabs" id="corpTabs">
+      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','insurance|🛡️ Insurance','leases|🏢 Leases','entities|🏛️ Entities','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
     </div></div>
     <div id="corpBody"><div class="hint">Loading…</div></div>`;
+  // Mobile: restack hub tables into cards after every re-render (see corpDecorateTables).
+  if(!loadCorpHub._obs){ let t=null; loadCorpHub._obs=new MutationObserver(()=>{ clearTimeout(t); t=setTimeout(corpDecorateTables,60); }); loadCorpHub._obs.observe(host,{childList:true,subtree:true}); }
   renderCorpTab();
 }
-function corpTab(k){ CORP_TAB=k; document.querySelectorAll('#corpTabs .itab').forEach(b=>b.classList.toggle('active', b.getAttribute('onclick').includes("'"+k+"'"))); renderCorpTab(); }
+// Stamp each hub table cell with its column header (data-th) so the mobile CSS can
+// turn rows into labeled, tap-friendly cards. Tables that must stay grids (e.g. the
+// insurance coverage matrix) opt out with class="nomcard".
+function corpDecorateTables(){
+  document.querySelectorAll('#corphub table.tbl:not(.nomcard)').forEach(t=>{
+    const ths=[...t.querySelectorAll('tr th')].map(th=>th.textContent.trim());
+    if(!ths.length) return;
+    t.classList.add('m-cards');
+    t.querySelectorAll('tr').forEach(tr=>{[...tr.children].forEach((td,i)=>{ if(td.tagName==='TD'&&!td.hasAttribute('data-th')) td.setAttribute('data-th',ths[i]||''); });});
+  });
+}
+function corpTab(k){ CORP_TAB=k; document.querySelectorAll('#corpTabs button').forEach(b=>b.classList.toggle('active', b.getAttribute('onclick').includes("'"+k+"'"))); renderCorpTab(); }
 async function renderCorpTab(){
   const body=$('corpBody'); if(!body) return; body.innerHTML='<div class="hint">Loading…</div>';
   if(CORP_TAB==='dashboard') return renderCorpDashboard(body);
@@ -6079,7 +6092,7 @@ async function renderCorpInsurance(body){
     const sym=c.status==='expired'?'⚠':c.status==='expiring'?'●':'✓';
     return `<td style="text-align:center;cursor:pointer" title="${esc(ct)} · ${esc(c.carrier||'')} · exp ${esc(c.exp||'')}${c.daysLeft!=null?' ('+c.daysLeft+'d)':''}" onclick="editInsurance(${c.id})"><span style="color:${col};font-weight:700">${sym}</span>${c.status!=='active'&&c.daysLeft!=null?`<div class="hint" style="font-size:10px">${c.daysLeft<0?Math.abs(c.daysLeft)+'d over':c.daysLeft+'d'}</div>`:''}</td>`;
   };
-  const matrixHtml=`<div style="overflow-x:auto"><table class="tbl" style="font-size:12px"><tr><th>Entity</th>${types.map(ct=>`<th style="writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;height:110px;${req.includes(ct)?'':'opacity:.6'}">${esc(ct)}${req.includes(ct)?' *':''}</th>`).join('')}</tr>
+  const matrixHtml=`<div style="overflow-x:auto"><table class="tbl nomcard" style="font-size:12px"><tr><th>Entity</th>${types.map(ct=>`<th style="writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;height:110px;${req.includes(ct)?'':'opacity:.6'}">${esc(ct)}${req.includes(ct)?' *':''}</th>`).join('')}</tr>
     ${locs.map(loc=>`<tr><td style="white-space:nowrap"><strong>${esc(loc)}</strong></td>${types.map(ct=>cellHtml(loc,ct)).join('')}</tr>`).join('')}</table></div>
     <div class="hint" style="margin-top:4px">✓ active · <span style="color:#a60">●</span> renewing ≤60d · <span style="color:var(--danger)">⚠</span> expired · <span style="color:var(--danger)">✗</span> required &amp; missing · * = required. Tap a cell to open the policy.</div>`;
   // Gaps

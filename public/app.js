@@ -5898,8 +5898,11 @@ async function renderCorpEntities(body){
   ENT_DATA=d;
   const mask=(v)=>!v?'':(ENT_SHOW?esc(v):'••••'+(String(v).length>4&&ENT_SHOW?'':''));
   const recs=d.records||[], banks=d.banks||[], cards=d.cards||[], portals=d.portals||[];
+  const closedSet=new Set(recs.filter(r=>r.status==='closed').map(r=>r.entity));
   const entities=[...new Set([...recs.map(r=>r.entity),...banks.map(b=>b.entity),...cards.map(c=>c.entity),...(d.locations||[])].filter(Boolean))].sort();
-  let list=CORP_FAC?entities.filter(e=>e===CORP_FAC):entities;
+  let active=entities.filter(e=>!closedSet.has(e)), closed=[...closedSet].sort();
+  if(CORP_FAC){ active=active.filter(e=>e===CORP_FAC); closed=closed.filter(e=>e===CORP_FAC); }
+  let list=active;
   const kv=(k,v,sensitive)=>v?`<div class="hint"><span style="color:var(--muted)">${esc(k)}:</span> ${sensitive?mask(v):esc(v)}</div>`:'';
   const entCard=(ent)=>{
     const r=recs.find(x=>x.entity===ent)||{};
@@ -5913,7 +5916,8 @@ async function renderCorpEntities(body){
   };
   body.innerHTML=`<div class="pc-note" style="color:#a60;margin-bottom:8px">🔒 <strong>Sensitive vault</strong> — EINs, bank accounts, full card numbers/CVV, and logins. Owner + Executive Assistant only. Values are hidden until you tap “Show”. Treat this like a password manager.</div>
     <div class="toolbar" style="justify-content:flex-start;gap:8px;margin-bottom:6px"><button class="btn btn-gold btn-sm sans" onclick="ENT_SHOW=!ENT_SHOW;renderCorpEntities($('corpBody'))">${ENT_SHOW?'🙈 Hide values':'👁 Show values'}</button>${ME.role==='admin'?'<button class="btn btn-ghost btn-sm sans" onclick="importEntities()">⤓ Import from file</button>':''}<span id="entMsg" class="hint" style="align-self:center"></span></div>
-    <div class="card"><h3 style="margin-top:0">🏛️ Entities <span class="hint" style="font-weight:400">· ${list.length}</span></h3>${list.length?list.map(entCard).join(''):'<div class="hint">No entities yet — admin can Import from file.</div>'}</div>
+    <div class="card"><h3 style="margin-top:0">🏛️ Entities <span class="hint" style="font-weight:400">· ${list.length} active</span></h3>${list.length?list.map(entCard).join(''):'<div class="hint">No entities yet — admin can Import from file.</div>'}</div>
+    ${closed.length?`<div class="card" style="opacity:.85"><details><summary style="cursor:pointer"><strong>🗄️ Archived — closed / sold entities</strong> <span class="hint">· ${closed.length}</span></summary><div style="margin-top:6px">${closed.map(entCard).join('')}</div></details></div>`:''}
     <div class="card"><h3 style="margin-top:0">🔑 Portals &amp; logins <span class="hint" style="font-weight:400">· ${portals.length}</span></h3>
       ${portals.length?`<table class="tbl"><tr><th>Portal</th><th>Username</th><th>Password</th><th>Info</th><th>Entity</th></tr>${portals.map(p=>`<tr><td><strong>${esc(p.name)}</strong></td><td class="hint">${esc(p.username||'')}</td><td>${mask(p.password)}</td><td class="hint">${esc(p.info||'')}</td><td class="hint">${esc(p.entity||'')}</td></tr>`).join('')}</table>`:'<div class="hint">No logins yet.</div>'}</div>`;
 }

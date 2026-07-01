@@ -3554,9 +3554,9 @@ app.get('/api/corp/entities', requireAuth, requireCorp, (req, res) => {
 app.post('/api/corp/entities/record', requireAuth, requireCorp, (req, res) => {
   const b = req.body || {};
   if (!String(b.entity || '').trim()) return res.status(400).json({ error: 'Entity required.' });
-  const f = [String(b.entity).slice(0, 120), String(b.legal_name || '').slice(0, 160), String(b.tax_id || '').slice(0, 40), String(b.npi || '').slice(0, 60), String(b.taxonomy || '').slice(0, 60), String(b.medicaid_id || '').slice(0, 120), String(b.duns || '').slice(0, 40), String(b.address || '').slice(0, 300), String(b.mailing_address || '').slice(0, 300), String(b.incorp_date || '').slice(0, 40), String(b.notes || '').slice(0, 2000)];
-  if (b.id) { db.prepare(`UPDATE entity_records SET entity=?,legal_name=?,tax_id=?,npi=?,taxonomy=?,medicaid_id=?,duns=?,address=?,mailing_address=?,incorp_date=?,notes=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
-  const info = db.prepare(`INSERT INTO entity_records (entity,legal_name,tax_id,npi,taxonomy,medicaid_id,duns,address,mailing_address,incorp_date,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(...f);
+  const f = [String(b.entity).slice(0, 120), String(b.legal_name || '').slice(0, 160), String(b.tax_id || '').slice(0, 40), String(b.npi || '').slice(0, 60), String(b.taxonomy || '').slice(0, 60), String(b.medicaid_id || '').slice(0, 120), String(b.duns || '').slice(0, 40), String(b.address || '').slice(0, 300), String(b.mailing_address || '').slice(0, 300), String(b.incorp_date || '').slice(0, 40), String(b.notes || '').slice(0, 2000), b.status === 'closed' ? 'closed' : 'active'];
+  if (b.id) { db.prepare(`UPDATE entity_records SET entity=?,legal_name=?,tax_id=?,npi=?,taxonomy=?,medicaid_id=?,duns=?,address=?,mailing_address=?,incorp_date=?,notes=?,status=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
+  const info = db.prepare(`INSERT INTO entity_records (entity,legal_name,tax_id,npi,taxonomy,medicaid_id,duns,address,mailing_address,incorp_date,notes,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(...f);
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 app.post('/api/corp/entities/bank', requireAuth, requireCorp, (req, res) => {
@@ -3595,8 +3595,8 @@ app.post('/api/corp/entities/import', requireAuth, requireAdmin, (req, res) => {
   try {
     if (Array.isArray(b.records)) {
       db.exec('DELETE FROM entity_records');
-      const ins = db.prepare(`INSERT INTO entity_records (entity,legal_name,tax_id,npi,taxonomy,medicaid_id,duns,address,mailing_address,incorp_date,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
-      for (const r of b.records) { ins.run(s(r.entity, 120), s(r.legal_name, 160), s(r.tax_id, 40), s(r.npi, 60), s(r.taxonomy, 60), s(r.medicaid_id, 120), s(r.duns, 40), s(r.address, 300), s(r.mailing_address, 300), s(r.incorp_date, 40), s(r.notes, 2000)); n.records++; }
+      const ins = db.prepare(`INSERT INTO entity_records (entity,legal_name,tax_id,npi,taxonomy,medicaid_id,duns,address,mailing_address,incorp_date,notes,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const r of b.records) { ins.run(s(r.entity, 120), s(r.legal_name, 160), s(r.tax_id, 40), s(r.npi, 60), s(r.taxonomy, 60), s(r.medicaid_id, 120), s(r.duns, 40), s(r.address, 300), s(r.mailing_address, 300), s(r.incorp_date, 40), s(r.notes, 2000), r.status === 'closed' ? 'closed' : 'active'); n.records++; }
     }
     if (Array.isArray(b.banks)) {
       db.exec('DELETE FROM entity_bank_accounts');

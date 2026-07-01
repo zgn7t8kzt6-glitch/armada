@@ -1580,6 +1580,7 @@ addColumn('maintenance_requests', 'facility', 'TEXT'); // which location the wor
 addColumn('leases', 'landlord_email', 'TEXT');            // where landlord-responsibility emails go
 addColumn('leases', 'landlord_categories', 'TEXT');      // comma list of categories the landlord covers
 addColumn('order_requests', 'landlord_emailed', 'TEXT'); // when we auto-emailed the landlord (dedupe)
+addColumn('entity_records', 'status', 'TEXT');           // active | closed (archive)
 addColumn('leases', 'file_id', 'INTEGER');               // uploaded lease file (corp_files)
 addColumn('insurance_policies', 'file_id', 'INTEGER');   // uploaded policy file (corp_files)
 // Uploaded corporate documents (insurance contracts, leases). Stored as base64 so the

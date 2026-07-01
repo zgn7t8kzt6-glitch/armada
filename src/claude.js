@@ -469,8 +469,10 @@ Given a recently discharged client's documentation, determine what happened and
 what the team can learn — so the next client like this stays.
 - type: classify the discharge using ONLY the documentation — one of:
   Completed, AMA, Transferred, Administrative, Unknown.
-- reason: the most likely REAL reason THIS person left — the emotional/underlying
-  driver specific to their time in the program, not just the surface complaint.
+- reason: the most likely REAL reason THIS person left, built from CONCRETE events
+  in the notes — an incident, a behavioral contract, a conflict with staff or a peer,
+  a refused medication, an unmanaged craving or pain, something they said or asked
+  for. Name what actually happened for this person, not a generic pattern.
 - evidence: quote or name the specific in-stay note detail your reason rests on
   (e.g. "Group note 6/12: said he wanted to leave once his cravings eased").
   Leave empty ONLY if no in-stay/discharge note documents a reason.
@@ -524,7 +526,7 @@ export async function generateDischargeDebrief(careCard, notesText, meta = {}) {
     messages: [{ role: 'user', content:
       `Review this discharged client and what we could learn.\n\n=== CARE CARD ===\n${careCardText(careCard)}\n\n` +
       (docNote ? docNote + '\n\n' : '') +
-      `=== DOCUMENTATION (this stay, discharge & late-stay notes first) ===\n${scrub(notesText || 'No documentation available.', names)}` }],
+      `=== DOCUMENTATION (experience-relevant excerpts pulled from EVERY note this stay — nurse's notes, progress, group, case management, incidents, behavioral contracts, discharge; demographics stripped out) ===\n${scrub(notesText || 'No documentation available.', names)}` }],
   });
   if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
   const t = response.content.find((b) => b.type === 'text');

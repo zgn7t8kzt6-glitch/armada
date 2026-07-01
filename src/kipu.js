@@ -782,29 +782,52 @@ export async function kipuPatientNotes(casefileId) {
   return { text: texts.join('\n\n').slice(0, +(process.env.KIPU_NOTES_CHARS || 9000)), therapist, case_manager: caseMgrName, forms, debug };
 }
 
-// Notes tuned for a DISCHARGE review: elevate discharge-summary / AMA / aftercare
-// documentation and the LATE-stay progress notes (what led to the departure), and
-// push intake paperwork to the bottom — an intake biopsychosocial says who someone
-// was on day one, not why they left. Reports doc quality so the debrief can say
-// "reason not documented" instead of inventing one from demographics.
+// Notes tuned for a DISCHARGE review: read EVERY note in the stay — nurse's notes,
+// progress, group, case management, incident reports, behavioral contracts, physician
+// and discharge notes — and pull out only the passages that bear on the person's
+// EXPERIENCE and why they'd stay or leave (incidents, conflict, refusals, cravings,
+// discomfort, engagement, what they said, plans). Demographic/administrative
+// boilerplate (employment, marital status, insurance, addresses) is dropped so it
+// can't drown out or genericize the signal. Reports doc quality so the debrief can
+// honestly say "not documented" when no note actually speaks to the departure.
+const DISCH_CRITICAL = /discharg|against medical advice|\bama\b|incident|behavior|behaviou?r|contract|elopement|left (the |against|ama)|safety plan|grievance|complaint|aftercare|continuing care|step.?down/i;
+const DISCH_INTAKE = /biopsych|bio.?psycho|initial assessment|admission assessment|\bintake\b|history and physical|\bh&p\b|screening|pre.?admission|demographic|financial|consent|release of information|\broi\b/i;
+const DISCH_EXPERIENCE = /progress|nursing|group|case ?manage|case ?mgmt|family session|counsel|individual|physician|clinical note|shift|encounter|milieu|observation|\bbht\b|therapy/i;
+// A line worth keeping: something about what happened / how they were / why they'd leave.
+const SIGNAL = /incident|behavior|contract|refus|declin|\bleft\b|leav|\bama\b|against medical|elop|discharg|transfer|conflict|altercation|argu|fight|threat|aggress|agitat|angry|upset|tearful|cried|frustrat|anxious|panic|craving|urge|relaps|\bused\b|positive|withdrawal|\bpain\b|nausea|vomit|insomnia|sleep|uncomfortab|complain|grievance|staff|peer|roommate|\bgroup\b|participat|engag|disengag|isolat|withdrawn|motivat|wants? to (leave|go|stay|use|stay)|asked to|requested|refused|family|phone|visit|medication|missed|non.?compli|safety|\brisk\b|suicid|self.?harm|homesick|bored|\bstated\b|\breported\b|\bexpressed\b|verbaliz|denied|endorsed|plan to|going to/i;
+// A line that is pure demographic/administrative boilerplate — drop it even if it
+// happens to trip a signal word.
+const BOILERPLATE = /^(employment|employer|marital|race|ethnic|gender|sexual orientation|address|street|city|state|zip|\bphone\b|email|\bdob\b|date of birth|\bssn\b|insurance|policy|member id|group number|guarantor|next of kin|emergency contact|occupation|education|religion|preferred language|\bincome\b|children|dependents|housing|living (situation|arrangement)|referral source|legal status|veteran|allergies|height|weight|\bbmi\b|blood pressure|\bbp\b|pulse|temp(erature)?|respirat|\bo2\b|oxygen)\b/i;
+function pullSignalLines(text, keepAll) {
+  if (!text) return '';
+  const lines = String(text).split(/\r?\n|(?<=[.!?])\s+(?=[A-Z])/).map((l) => l.trim()).filter(Boolean);
+  const kept = [];
+  for (const l of lines) {
+    if (BOILERPLATE.test(l)) continue;
+    if (keepAll || SIGNAL.test(l)) kept.push(l);
+  }
+  // De-dupe identical lines (charts repeat headers/standard phrases across notes).
+  return [...new Set(kept)].join('\n');
+}
 export async function kipuDischargeNotes(casefileId) {
   const list0 = await evalListRaw(casefileId, { all: false });
-  const isDischarge = (nm) => /discharg|against medical advice|\bama\b|aftercare|step.?down|continuing care|leaving|departure|transition/i.test(nm || '');
-  const isIntake = (nm) => /assessment|treatment plan|biopsych|bio.?psycho|\bintake\b|admission|history and physical|\bh&p\b|screening|pre.?admission/i.test(nm || '');
-  const isExperience = (nm) => /progress|nursing|group|case ?manage|family session|counsel|individual|physician|clinical note|shift|encounter|\bbht\b/i.test(nm || '');
-  const tierOf = (nm) => isDischarge(nm) ? 0 : (isExperience(nm) && !isIntake(nm)) ? 1 : isIntake(nm) ? 3 : 2;
-  // Prefer discharge + experience docs; only fall back to intake if there's nothing else.
-  let pool = list0.filter((e) => e.id && tierOf(e.name) < 3);
-  if (pool.length < 2) pool = list0.filter((e) => e.id);
-  pool.sort((a, b) => {
+  const isCritical = (nm) => DISCH_CRITICAL.test(nm || '');
+  const isIntake = (nm) => DISCH_INTAKE.test(nm || '');
+  const isExperience = (nm) => DISCH_EXPERIENCE.test(nm || '');
+  const tierOf = (nm) => isCritical(nm) ? 0 : (isExperience(nm) && !isIntake(nm)) ? 1 : isIntake(nm) ? 3 : 2;
+  // Read EVERYTHING in the stay (up to a generous cap), newest-first within tier so
+  // the departure end of the stay leads. We keep intake docs too, but only their
+  // signal lines survive the content filter.
+  const all = list0.filter((e) => e.id);
+  all.sort((a, b) => {
     const at = tierOf(a.name), bt = tierOf(b.name);
     if (at !== bt) return at - bt;
     const ad = a.created_at || '', bd = b.created_at || '';
     if (ad || bd) return String(bd).localeCompare(String(ad));
     return (+b.id || 0) - (+a.id || 0);
   });
-  const want = +(process.env.KIPU_NOTES_MAX || 8);
-  const candidates = pool.slice(0, want + 3);
+  const cap = +(process.env.KIPU_DEBRIEF_NOTES_MAX || 30);
+  const candidates = all.slice(0, cap);
   const results = await mapLimit(candidates, +(process.env.KIPU_CONCURRENCY || 6), async (e) => {
     try {
       const ev = await fetchEvalDetail(casefileId, e.id);
@@ -817,17 +840,20 @@ export async function kipuDischargeNotes(casefileId) {
   });
   const texts = [], used = [];
   for (const r of results) {
-    if (!r) continue;
+    if (!r || !r.content) continue;
     const nm = r.e.name || '';
-    if (r.content && r.content.length > 10 && texts.length < want) { texts.push(`[${r.date ? r.date + ' · ' : ''}${nm.trim() || 'Note'}]\n${r.content}`); used.push(nm.trim() || 'Note'); }
+    // Critical/experience notes: keep their full narrative. Intake/other: keep only
+    // the signal lines, so demographics don't leak in and genericize the read.
+    const keepAll = isCritical(nm) || (isExperience(nm) && !isIntake(nm));
+    const sig = pullSignalLines(r.content, keepAll);
+    if (sig && sig.length > 8) { texts.push(`[${r.date ? r.date + ' · ' : ''}${nm.trim() || 'Note'}]\n${sig}`); used.push(nm.trim() || 'Note'); }
   }
-  const hasDischargeDoc = used.some((n) => isDischarge(n));
-  // A "departure-relevant" doc is a discharge/AMA note or a PURE progress/group note
-  // (not an intake-flavored one like "Nursing Assessment", which matches both). If
-  // nothing used is departure-relevant, the chart can't explain why they left.
-  const departureRelevant = (n) => isDischarge(n) || (isExperience(n) && !isIntake(n));
+  const hasDischargeDoc = used.some((n) => isCritical(n));
+  // If nothing used is a discharge/incident note or a real progress note, the chart
+  // can't actually explain the departure.
+  const departureRelevant = (n) => isCritical(n) || (isExperience(n) && !isIntake(n));
   const onlyIntake = texts.length > 0 && !used.some(departureRelevant);
-  return { text: texts.join('\n\n').slice(0, +(process.env.KIPU_NOTES_CHARS || 9000)), used, hasDischargeDoc, onlyIntake, empty: texts.length === 0 };
+  return { text: texts.join('\n\n').slice(0, +(process.env.KIPU_NOTES_CHARS || 12000)), used, hasDischargeDoc, onlyIntake, empty: texts.length === 0 };
 }
 
 // FULL CHART: list EVERY evaluation/form on a client (all pages), light rows for

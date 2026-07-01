@@ -51,12 +51,12 @@ export function ensureCorporateUser({ quiet = false } = {}) {
   const existing = db.prepare(`SELECT id FROM users WHERE lower(username) = ? OR lower(email) = ?`).get(username, username);
   if (existing) {
     // Make sure the role/email are set even if the row pre-existed.
-    db.prepare(`UPDATE users SET job_role = 'Corporate', email = COALESCE(email, ?), active = 1 WHERE id = ?`).run(username, existing.id);
+    db.prepare(`UPDATE users SET job_role = 'Executive Assistant', email = COALESCE(email, ?), active = 1 WHERE id = ?`).run(username, existing.id);
     return;
   }
   const generated = !process.env.CHAVA_PASS;
   const pass = process.env.CHAVA_PASS || crypto.randomBytes(9).toString('base64url');
-  const u = createUser({ name: 'Chava', username, password: pass, role: 'staff', job_role: 'Corporate' });
+  const u = createUser({ name: 'Chava', username, password: pass, role: 'staff', job_role: 'Executive Assistant' });
   try { db.prepare(`UPDATE users SET email = ? WHERE id = ?`).run(username, u.id || u); } catch { /* createUser return shape */ }
   if (!quiet) console.log(`Created corporate user "${username}".` + (generated ? ` Temporary password: ${pass}  (set CHAVA_PASS or have her reset it).` : ''));
 }

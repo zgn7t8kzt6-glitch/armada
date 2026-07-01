@@ -122,10 +122,10 @@ function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
 setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Corporate'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant'];
 // Corporate Operations (Chava): sees ordering, maintenance, and her hub — plus owner/
 // leadership can see it too. A shared board, so anyone can drop a task for her.
-function canSeeCorp(user) { return !!user && (user.role === 'admin' || ['Corporate', 'Executive Director', 'Director of Operations'].includes(user.job_role)); }
+function canSeeCorp(user) { return !!user && (user.role === 'admin' || ['Executive Assistant', 'Executive Director', 'Director of Operations'].includes(user.job_role)); }
 function requireCorp(req, res, next) { if (!canSeeCorp(req.user)) return res.status(403).json({ error: 'Corporate access only.' }); next(); }
 
 /* ───────── Selection over hiring (Horst Schulze): role profiles + structured interview ───────── */
@@ -216,7 +216,7 @@ const ROLE_SPECIFICS = {
     qualities: [{ name: 'Authentic credibility', desc: 'Relates genuinely and earns trust.' }, { name: 'Encouragement', desc: 'Believes in people and shows it.' }],
     responsibilities: ['1:1 support & goal-setting', 'Connect residents to meetings/sponsors', 'Lead activities & engagement', 'Spot and respond to struggles early'],
     interview: [{ q: 'How do you support someone who has lost all motivation?', look: 'Encouragement' }, { q: 'Where’s the line between being a friend and being a coach?', look: 'Boundaries' }] },
-  'Corporate': { purpose: 'Keep every facility running so the care teams can focus on people — ordering, maintenance, projects, and the corporate records, across all locations.',
+  'Executive Assistant': { purpose: 'Keep every facility running so the care teams can focus on people — ordering, maintenance, projects, and the corporate records, across all locations.',
     reportsTo: 'Executive Director',
     qualities: [{ name: 'Ownership & follow-through', desc: 'Nothing sits — every request and project moves to done.' }, { name: 'Organized under load', desc: 'Keeps many balls in the air across 8 locations without dropping one.' }],
     responsibilities: ['Ordering & supply flow across facilities', 'Maintenance coordination & vendor follow-through', 'Project & task management for the owner', 'Facility records — leases, utilities, insurance, permits, vendors', 'Employee-morale items with the facilities'] },

@@ -1248,6 +1248,7 @@ addColumn('users', 'invited_by', 'TEXT');
 addColumn('beds', 'gender', 'TEXT');   // detox bed designation: Male | Female | Any
 // Role rename: in-house kitchen → external caterer.
 try { db.prepare(`UPDATE users SET job_role='Catering / Dietary' WHERE job_role='Kitchen'`).run(); } catch { /* ok */ }
+try { db.prepare(`UPDATE users SET job_role='Executive Assistant' WHERE job_role='Corporate'`).run(); } catch { /* ok */ }
 // One-time: drop the default "Issue ID band / wristband" front-desk arrival step (not used).
 try { if (getState('migr_drop_idband') !== 'done') { db.prepare(`UPDATE arrival_items SET active=0 WHERE role='Front Desk' AND label='Issue ID band / wristband'`).run(); setState('migr_drop_idband', 'done'); } } catch { /* ok */ }
 // One-time: relabel the front-desk "notify team" step — it now auto-alerts the care team.

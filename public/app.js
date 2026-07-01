@@ -276,7 +276,7 @@ const UNIVERSAL_VIEWS = ['myrole','mystats','mygrowth','mytasks','messages','tea
 // Corporate Operations (Chava): walled to her lane — the hub, ordering, maintenance.
 const CORPORATE_VIEWS = ['corphub','inventory','maintenance'];
 let PREVIEW_ROLE=null;   // admin "preview as" — see the app exactly as a role does
-function isCorporateRole(){ return !!(ME && (ME.job_role==='Corporate' || PREVIEW_ROLE==='Corporate')); }
+function isCorporateRole(){ return !!(ME && (ME.job_role==='Executive Assistant' || PREVIEW_ROLE==='Executive Assistant')); }
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
@@ -288,7 +288,7 @@ const ROLE_MENU = {
   'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
   'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
-  'Corporate': ['corphub','inventory','maintenance','myrole','mygrowth','messages'],
+  'Executive Assistant': ['corphub','inventory','maintenance','myrole','mygrowth','messages'],
   'Housing Director': ['housing','myrole','mygrowth','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','mygrowth','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','myrole','mygrowth','housing','voice','activities','residents','houses','mytasks','messages'],
@@ -327,7 +327,7 @@ function flatMenu(){
   // even if they're also an admin — so they never see any Armada/detox pages.
   if(isHousingRole()) return ROLE_MENU[ME.job_role] ? ROLE_MENU[ME.job_role].filter(canSeeView) : null;
   // Corporate (Chava) gets a focused, corporate-only flat menu.
-  if(isCorporateRole()) return ROLE_MENU['Corporate'].filter(canSeeView);
+  if(isCorporateRole()) return ROLE_MENU['Executive Assistant'].filter(canSeeView);
   // Admins + leadership keep the full grouped nav.
   if(ME.role==='admin' || ME.job_role==='Director of Operations') return null;
   if(ME.job_role==='Executive Director') return null;
@@ -337,7 +337,7 @@ function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role=
 function canSeeView(v){
   if(!ME) return true;
   // Admin "preview as" — restrict to exactly what that role sees.
-  if(PREVIEW_ROLE==='Corporate') return CORPORATE_VIEWS.includes(v)||UNIVERSAL_VIEWS.includes(v);
+  if(PREVIEW_ROLE==='Executive Assistant') return CORPORATE_VIEWS.includes(v)||UNIVERSAL_VIEWS.includes(v);
   // Akron Outpatient is owner-only: the admin, plus anyone the owner explicitly grants.
   // Even Exec/Ops directors don't see it unless granted — so this check comes first.
   if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
@@ -5714,7 +5714,7 @@ async function saveFacilities(){
   catch(e){ if(m)m.textContent=e.message; }
 }
 function previewAsChava(){
-  PREVIEW_ROLE='Corporate';
+  PREVIEW_ROLE='Executive Assistant';
   showPreviewBanner();
   renderGroups();
   show('corphub');

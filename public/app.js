@@ -275,7 +275,8 @@ const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 const UNIVERSAL_VIEWS = ['myrole','mystats','mygrowth','mytasks','messages','team','training','library','standard'];
 // Corporate Operations (Chava): walled to her lane — the hub, ordering, maintenance.
 const CORPORATE_VIEWS = ['corphub','inventory','maintenance'];
-function isCorporateRole(){ return !!(ME && ME.job_role==='Corporate'); }
+let PREVIEW_ROLE=null;   // admin "preview as" — see the app exactly as a role does
+function isCorporateRole(){ return !!(ME && (ME.job_role==='Corporate' || PREVIEW_ROLE==='Corporate')); }
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
@@ -319,6 +320,8 @@ const SHIFT_FLOW = {
 };
 function flatMenu(){
   if(!ME) return null;
+  // Admin previewing as a role sees that role's focused menu.
+  if(PREVIEW_ROLE) return (ROLE_MENU[PREVIEW_ROLE]||[]).filter(canSeeView);
   // A person's COMPANY is their job role. Hilltop staff (Housing Director / House
   // Manager / Recovery Coach) ALWAYS get the focused, Hilltop-only flat menu —
   // even if they're also an admin — so they never see any Armada/detox pages.
@@ -333,6 +336,8 @@ function flatMenu(){
 function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role==='Director of Operations')); }
 function canSeeView(v){
   if(!ME) return true;
+  // Admin "preview as" — restrict to exactly what that role sees.
+  if(PREVIEW_ROLE==='Corporate') return CORPORATE_VIEWS.includes(v)||UNIVERSAL_VIEWS.includes(v);
   // Akron Outpatient is owner-only: the admin, plus anyone the owner explicitly grants.
   // Even Exec/Ops directors don't see it unless granted — so this check comes first.
   if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
@@ -5708,10 +5713,27 @@ async function saveFacilities(){
   try{ await api('/facilities',{method:'POST',body:JSON.stringify({facilities:fs})}); if(m)m.textContent='✓ Saved'; loadOwnership(); }
   catch(e){ if(m)m.textContent=e.message; }
 }
+function previewAsChava(){
+  PREVIEW_ROLE='Corporate';
+  showPreviewBanner();
+  renderGroups();
+  show('corphub');
+}
+function exitPreview(){
+  PREVIEW_ROLE=null;
+  const b=document.getElementById('previewBanner'); if(b) b.remove();
+  renderGroups();
+  show('corphub');
+}
+function showPreviewBanner(){
+  let b=document.getElementById('previewBanner');
+  if(!b){ b=document.createElement('div'); b.id='previewBanner'; b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#5b3fa0;color:#fff;padding:9px 14px;text-align:center;font-family:system-ui,sans-serif;font-size:14px;box-shadow:0 -2px 10px rgba(0,0,0,.25)'; document.body.appendChild(b); }
+  b.innerHTML='👁 Previewing as <strong>Chava</strong> (Corporate) — this is exactly what she sees. <button onclick="exitPreview()" style="margin-left:10px;background:#fff;color:#5b3fa0;border:none;border-radius:5px;padding:5px 12px;cursor:pointer;font-weight:700">Exit preview</button>';
+}
 let CORP_TAB='dashboard';
 async function loadCorpHub(){
   const host=$('corphub'); if(!host) return;
-  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div></div>
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div>${(ME&&ME.role==='admin'&&!PREVIEW_ROLE)?'<button class="btn btn-ghost btn-sm sans" onclick="previewAsChava()">👁 Preview as Chava</button>':''}</div>
     <div class="itabs" id="corpTabs" style="margin-top:6px">
       ${['dashboard|📊 Dashboard','projects|✅ Projects','vendors|📇 Vendors','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
     </div></div>

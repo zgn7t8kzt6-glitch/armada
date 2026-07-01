@@ -216,6 +216,10 @@ const ROLE_SPECIFICS = {
     qualities: [{ name: 'Authentic credibility', desc: 'Relates genuinely and earns trust.' }, { name: 'Encouragement', desc: 'Believes in people and shows it.' }],
     responsibilities: ['1:1 support & goal-setting', 'Connect residents to meetings/sponsors', 'Lead activities & engagement', 'Spot and respond to struggles early'],
     interview: [{ q: 'How do you support someone who has lost all motivation?', look: 'Encouragement' }, { q: 'Where’s the line between being a friend and being a coach?', look: 'Boundaries' }] },
+  'Corporate': { purpose: 'Keep every facility running so the care teams can focus on people — ordering, maintenance, projects, and the corporate records, across all locations.',
+    reportsTo: 'Executive Director',
+    qualities: [{ name: 'Ownership & follow-through', desc: 'Nothing sits — every request and project moves to done.' }, { name: 'Organized under load', desc: 'Keeps many balls in the air across 8 locations without dropping one.' }],
+    responsibilities: ['Ordering & supply flow across facilities', 'Maintenance coordination & vendor follow-through', 'Project & task management for the owner', 'Facility records — leases, utilities, insurance, permits, vendors', 'Employee-morale items with the facilities'] },
 };
 function defaultProfileFor(role) {
   const s = ROLE_SPECIFICS[role] || {};
@@ -3134,39 +3138,40 @@ function cycleDays(a, b) { if (!a || !b) return null; const n = (Date.parse(b) -
 function avgOf(arr) { const v = arr.filter((n) => n != null); return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : null; }
 app.get('/api/corp/overview', requireAuth, requireCorp, (req, res) => {
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : addDays(appToday(), -30);
-  // Ordering (reorder_requests): open now, completed (received) in window, cycle times.
-  const ordOpen = db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status != 'received'`).get().n;
-  const ordDone = db.prepare(`SELECT * FROM reorder_requests WHERE status = 'received' AND substr(received_at,1,10) >= ?`).all(since);
-  const orderCycle = avgOf(ordDone.map((r) => cycleDays(r.created_at, r.ordered_at)));   // flagged → ordered
-  const receiveCycle = avgOf(ordDone.map((r) => cycleDays(r.ordered_at || r.created_at, r.received_at)));  // ordered → received
+  // Optional facility scope — the dashboard's facility switcher. '' = all locations.
+  const facility = orgLocations().includes(req.query.facility) ? req.query.facility : '';
+  const facSql = facility ? ` AND facility = ?` : '';
+  const fa = facility ? [facility] : [];
+  // Ordering from the unified order_requests stream (all locations, facility-scopable).
+  const ordDone = db.prepare(`SELECT created_at, ordered_at, received_at FROM order_requests WHERE status='received' AND substr(received_at,1,10) >= ?${facSql}`).all(since, ...fa);
   const ordering = {
-    open: ordOpen,
-    awaitingOrder: db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'open'`).get().n,
-    ordered: db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'ordered'`).get().n,
+    open: db.prepare(`SELECT COUNT(*) n FROM order_requests WHERE status IN ('requested','ordered')${facSql}`).get(...fa).n,
+    awaitingOrder: db.prepare(`SELECT COUNT(*) n FROM order_requests WHERE status='requested'${facSql}`).get(...fa).n,
+    ordered: db.prepare(`SELECT COUNT(*) n FROM order_requests WHERE status='ordered'${facSql}`).get(...fa).n,
     completed: ordDone.length,
-    avgToOrderDays: orderCycle, avgToReceiveDays: receiveCycle,
+    avgToOrderDays: avgOf(ordDone.map((r) => cycleDays(r.created_at, r.ordered_at))),
+    avgToReceiveDays: avgOf(ordDone.map((r) => cycleDays(r.ordered_at || r.created_at, r.received_at))),
   };
-  // Maintenance: open, in progress, resolved in window, cycle time.
-  const mOpen = db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status IN ('open','in_progress')`).get().n;
-  const mDone = db.prepare(`SELECT created_at, resolved_at FROM maintenance_requests WHERE status IN ('resolved','closed') AND substr(resolved_at,1,10) >= ?`).all(since);
+  // Maintenance: open, in progress, resolved in window, cycle time (facility-scopable).
+  const mDone = db.prepare(`SELECT created_at, resolved_at FROM maintenance_requests WHERE status IN ('resolved','closed') AND substr(resolved_at,1,10) >= ?${facSql}`).all(since, ...fa);
   const maintenance = {
-    open: db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status = 'open'`).get().n,
-    inProgress: db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status = 'in_progress'`).get().n,
-    openTotal: mOpen,
+    open: db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status='open'${facSql}`).get(...fa).n,
+    inProgress: db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status='in_progress'${facSql}`).get(...fa).n,
+    openTotal: db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status IN ('open','in_progress')${facSql}`).get(...fa).n,
     completed: mDone.length,
     avgResolveDays: avgOf(mDone.map((r) => cycleDays(r.created_at, r.resolved_at))),
   };
-  // Project board rollup.
-  const tasks = db.prepare(`SELECT status, COUNT(*) n FROM corp_tasks GROUP BY status`).all();
+  // Project board rollup (facility-scopable).
+  const tasks = db.prepare(`SELECT status, COUNT(*) n FROM corp_tasks WHERE 1=1${facSql} GROUP BY status`).all(...fa);
   const taskCounts = { todo: 0, doing: 0, blocked: 0, done: 0 };
   for (const t of tasks) taskCounts[t.status] = t.n;
-  // Cross-location order requests: where things are being requested right now.
+  // Where things are being requested right now (only meaningful in the all-locations view).
   const openOrders = db.prepare(`SELECT facility, status, COUNT(*) n FROM order_requests WHERE status IN ('requested','ordered') GROUP BY facility, status`).all();
   const ordersByLocation = {};
   for (const r of openOrders) { const l = ordersByLocation[r.facility] = ordersByLocation[r.facility] || { facility: r.facility, requested: 0, ordered: 0 }; l[r.status] = r.n; }
   ordering.byLocation = Object.values(ordersByLocation).sort((a, b) => (b.requested + b.ordered) - (a.requested + a.ordered));
   ordering.locationsRequesting = ordering.byLocation.length;
-  res.json({ since, ordering, maintenance, taskCounts });
+  res.json({ since, facility, locations: orgLocations(), ordering, maintenance, taskCounts });
 });
 // Project / task board — anyone with corp access can add; corporate works them.
 app.get('/api/corp/tasks', requireAuth, requireCorp, (req, res) => {
@@ -4548,7 +4553,8 @@ app.post('/api/growth/:id/checkin', requireAuth, (req, res) => {
 // "My Role" — every staff member can always see their own job description,
 // responsibilities, and what's out of their lane.
 app.get('/api/my-role', requireAuth, (req, res) => {
-  const role = req.user.job_role || '';
+  // Admins can preview another role's card (the "preview as" feature).
+  const role = (req.user.role === 'admin' && JOB_ROLES.includes(req.query.as)) ? req.query.as : (req.user.job_role || '');
   if (!role) return res.json({ role: '', purpose: '', responsibilities: [], limitations: [], qualities: [] });
   res.json(getRoleProfile(role));
 });

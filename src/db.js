@@ -1575,6 +1575,7 @@ addColumn('clients', 'aftercare_facility_id', 'INTEGER'); // if Partner, which a
 addColumn('facilities', 'preferred', 'INTEGER');       // 1 = approved reciprocal partner CMs may refer to
 addColumn('clients', 'discharged_by_kipu', 'TEXT');    // who did the discharge in Kipu (best-effort), for accountability
 addColumn('maintenance_requests', 'photo', 'TEXT');    // (legacy single photo — superseded by maintenance_photos)
+addColumn('maintenance_requests', 'facility', 'TEXT'); // which location the work order is for (multi-facility)
 addColumn('inventory_items', 'sku', 'TEXT');           // supplier/product code (e.g. PFS code) for ordering
 addColumn('assigned_tasks', 'assigned_by_id', 'INTEGER'); // who created the task, so they can see responses
 // Cleanup: older syncs sometimes saved the building/facility name (e.g. "Armada

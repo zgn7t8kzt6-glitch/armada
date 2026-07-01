@@ -4146,7 +4146,7 @@ async function openHireRole(roleEnc){
 async function loadMyRole(){
   const host=$('myroleBody'); if(!host) return;
   host.innerHTML='<div class="card"><div class="empty">Loading…</div></div>';
-  let p; try{ p=await api('/my-role'); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  let p; try{ p=await api('/my-role'+(PREVIEW_ROLE?'?as='+encodeURIComponent(PREVIEW_ROLE):'')); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
   const role=p.role||(ME&&ME.job_role)||'Team member';
   const resp=(p.responsibilities||[]).map(r=>`<li>${esc(r)}</li>`).join('');
   const lim=(p.limitations||[]).map(r=>`<li>${esc(r)}</li>`).join('');
@@ -5728,12 +5728,15 @@ function exitPreview(){
 function showPreviewBanner(){
   let b=document.getElementById('previewBanner');
   if(!b){ b=document.createElement('div'); b.id='previewBanner'; b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#5b3fa0;color:#fff;padding:9px 14px;text-align:center;font-family:system-ui,sans-serif;font-size:14px;box-shadow:0 -2px 10px rgba(0,0,0,.25)'; document.body.appendChild(b); }
-  b.innerHTML='👁 Previewing as <strong>Chava</strong> (Corporate) — this is exactly what she sees. <button onclick="exitPreview()" style="margin-left:10px;background:#fff;color:#5b3fa0;border:none;border-radius:5px;padding:5px 12px;cursor:pointer;font-weight:700">Exit preview</button>';
+  b.innerHTML='👁 Previewing the <strong>Corporate</strong> view — exactly what the corporate team (e.g. Chava, Executive Assistant) sees. <button onclick="exitPreview()" style="margin-left:10px;background:#fff;color:#5b3fa0;border:none;border-radius:5px;padding:5px 12px;cursor:pointer;font-weight:700">Exit preview</button>';
 }
-let CORP_TAB='dashboard';
+let CORP_TAB='dashboard', CORP_FAC='', CORP_LOCS=[];
 async function loadCorpHub(){
   const host=$('corphub'); if(!host) return;
-  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div>${(ME&&ME.role==='admin'&&!PREVIEW_ROLE)?'<button class="btn btn-ghost btn-sm sans" onclick="previewAsChava()">👁 Preview as Chava</button>':''}</div>
+  if(!CORP_LOCS.length){ try{ const o=await api('/corp/overview'); CORP_LOCS=o.locations||[]; }catch(_e){} }
+  const facSel=`<label class="hint">Facility <select id="corpFac" onchange="CORP_FAC=this.value;renderCorpTab()"><option value="">🏢 All facilities</option>${CORP_LOCS.map(l=>`<option ${CORP_FAC===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${facSel}${(ME&&ME.role==='admin'&&!PREVIEW_ROLE)?'<button class="btn btn-ghost btn-sm sans" onclick="previewAsChava()">👁 Preview corporate view</button>':''}</div></div>
+    ${CORP_FAC?`<div class="pc-note" style="margin-top:6px">Viewing <strong>${esc(CORP_FAC)}</strong> only. <a href="#" onclick="CORP_FAC='';loadCorpHub();return false">← all facilities</a></div>`:''}
     <div class="itabs" id="corpTabs" style="margin-top:6px">
       ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
     </div></div>
@@ -5752,14 +5755,16 @@ async function renderCorpTab(){
   if(CORP_TAB==='role') return renderCorpRole(body);
 }
 async function renderCorpDashboard(body){
-  let d; try{ d=await api('/corp/overview'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  let d; try{ d=await api('/corp/overview?facility='+encodeURIComponent(CORP_FAC)); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  if(d.locations&&d.locations.length) CORP_LOCS=d.locations;
   const o=d.ordering||{}, m=d.maintenance||{}, tc=d.taskCounts||{};
   const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
-  const byLoc=(o.byLocation||[]);
+  const byLoc=CORP_FAC?[]:(o.byLocation||[]);
+  const scopeNote=CORP_FAC?` <span class="hint" style="font-weight:400">· ${esc(CORP_FAC)}</span>`:` <span class="hint" style="font-weight:400">· ${o.locationsRequesting||0} location${o.locationsRequesting===1?'':'s'} requesting</span>`;
   body.innerHTML=`
-    <div class="card"><h3 style="margin-top:0">🛒 Ordering <span class="hint" style="font-weight:400">· ${o.locationsRequesting||0} location${o.locationsRequesting===1?'':'s'} requesting</span></h3>
+    <div class="card"><h3 style="margin-top:0">🛒 Ordering${scopeNote}</h3>
       <div class="ret-cards">${box(o.open||0,'Open to order',(o.open?'rc-elev':''))}${box(o.ordered||0,'Ordered · awaiting')}${box(o.completed||0,'Received (30d)')}${box(o.avgToReceiveDays!=null?o.avgToReceiveDays+'d':'—','Avg order→receive')}</div>
-      ${byLoc.length?`<div style="margin-top:8px"><div class="hint">Where it's being requested right now:</div><table class="tbl" style="margin-top:4px"><tr><th>Location</th><th>Requested</th><th>Ordered</th></tr>${byLoc.map(l=>`<tr><td><strong>${esc(l.facility)}</strong></td><td>${l.requested||0}</td><td>${l.ordered||0}</td></tr>`).join('')}</table></div>`:'<div class="hint" style="margin-top:6px">No open requests. As locations flag items, they appear here by location.</div>'}
+      ${byLoc.length?`<div style="margin-top:8px"><div class="hint">Where it's being requested right now — tap a location to focus:</div><table class="tbl" style="margin-top:4px"><tr><th>Location</th><th>Requested</th><th>Ordered</th></tr>${byLoc.map(l=>`<tr style="cursor:pointer" onclick="CORP_FAC='${l.facility.replace(/'/g,"\\'")}';loadCorpHub()"><td><strong>${esc(l.facility)}</strong></td><td>${l.requested||0}</td><td>${l.ordered||0}</td></tr>`).join('')}</table></div>`:(CORP_FAC?'':'<div class="hint" style="margin-top:6px">No open requests. As locations flag items, they appear here by location.</div>')}
       <div class="hint" style="margin-top:6px">Avg flag→ordered: <strong>${o.avgToOrderDays!=null?o.avgToOrderDays+'d':'—'}</strong>. <a href="#" onclick="corpTab('orders');return false">Work the order queue ↗</a></div></div>
     <div class="card"><h3 style="margin-top:0">🔧 Maintenance</h3>
       <div class="ret-cards">${box(m.open||0,'Open',(m.open?'rc-elev':''))}${box(m.inProgress||0,'In progress')}${box(m.completed||0,'Resolved (30d)')}${box(m.avgResolveDays!=null?m.avgResolveDays+'d':'—','Avg time to resolve')}</div>
@@ -5768,11 +5773,10 @@ async function renderCorpDashboard(body){
       <div class="ret-cards">${box(tc.todo||0,'To do')}${box(tc.doing||0,'In progress')}${box(tc.blocked||0,'Blocked',(tc.blocked?'rc-elev':''))}${box(tc.done||0,'Done')}</div>
       <div class="hint" style="margin-top:6px"><a href="#" onclick="corpTab('projects');return false">Open the board ↗</a></div></div>`;
 }
-let ORD_FILTER='';
 async function renderCorpOrders(body){
   let d; try{ d=await api('/corp/orders'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
-  const locs=d.locations||[]; let orders=d.orders||[];
-  if(ORD_FILTER) orders=orders.filter(o=>o.facility===ORD_FILTER);
+  const locs=d.locations||[]; if(locs.length) CORP_LOCS=locs; let orders=d.orders||[];
+  if(CORP_FAC) orders=orders.filter(o=>o.facility===CORP_FAC);
   const pris=['Low','Normal','High','Urgent'];
   const priColor=(p)=>p==='Urgent'?'var(--danger)':p==='High'?'#a60':'';
   const statusPill=(s)=>({requested:'<span class="risk risk-elev">requested</span>',ordered:'<span class="risk risk-low">ordered</span>',received:'<span class="risk" style="background:#e6f4ea;color:#137333">received</span>',cancelled:'<span class="hint">cancelled</span>'}[s]||s);
@@ -5795,7 +5799,7 @@ async function renderCorpOrders(body){
   const doneList=orders.filter(o=>o.status==='received'||o.status==='cancelled').slice(0,30);
   body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add an order request</h3>
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
-        <select id="oFac">${locs.map(l=>`<option>${esc(l)}</option>`).join('')}</select>
+        <select id="oFac">${locs.map(l=>`<option ${CORP_FAC===l?'selected':''}>${esc(l)}</option>`).join('')}</select>
         <input id="oItem" placeholder="What to order" style="min-width:180px"/>
         <input id="oQty" placeholder="Qty" style="width:90px"/>
         <input id="oVendor" placeholder="Vendor" style="width:110px"/>
@@ -5852,7 +5856,8 @@ async function savePayment(){
 async function delPayment(id){ if(!confirm('Remove this payment method?'))return; try{ await api('/corp/payments/'+id,{method:'DELETE'}); renderCorpPayments($('corpBody')); }catch(e){ alert(e.message); } }
 async function renderCorpProjects(body){
   let d; try{ d=await api('/corp/tasks'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
-  const ts=d.tasks||[];
+  let ts=d.tasks||[];
+  if(CORP_FAC) ts=ts.filter(t=>t.facility===CORP_FAC);
   const cats=['Project','Errand','Ordering','Maintenance','Admin','Morale'], pris=['Low','Normal','High','Urgent'];
   const cols=[['todo','To do'],['doing','In progress'],['blocked','Blocked'],['done','Done']];
   const priColor=(p)=>p==='Urgent'?'var(--danger)':p==='High'?'#a60':'';
@@ -5876,7 +5881,7 @@ async function renderCorpProjects(body){
     </div>`;
 }
 async function addCorpTask(){
-  const b={title:($('ctTitle')||{}).value||'',category:($('ctCat')||{}).value,priority:($('ctPri')||{}).value,assignee:($('ctAssignee')||{}).value||'',due_date:($('ctDue')||{}).value||'',detail:($('ctDetail')||{}).value||''};
+  const b={title:($('ctTitle')||{}).value||'',category:($('ctCat')||{}).value,priority:($('ctPri')||{}).value,assignee:($('ctAssignee')||{}).value||'',due_date:($('ctDue')||{}).value||'',detail:($('ctDetail')||{}).value||'',facility:CORP_FAC||''};
   if(!b.title.trim()){ if($('ctMsg'))$('ctMsg').textContent='Add a title.'; return; }
   try{ await api('/corp/tasks',{method:'POST',body:JSON.stringify(b)}); renderCorpProjects($('corpBody')); }catch(e){ if($('ctMsg'))$('ctMsg').textContent=e.message; }
 }
@@ -5938,8 +5943,8 @@ async function corpSaveDoc(){
 }
 async function corpDelDoc(id){ if(!confirm("Delete this document record?"))return; try{ await api("/corp/docs/"+id,{method:'DELETE'}); renderCorpDocs($('corpBody')); }catch(e){ alert(e.message); } }
 function renderCorpRole(body){
-  body.innerHTML=`<div class="card"><h3 style="margin-top:0">⭐ Corporate Operations — your role</h3>
-    <p class="sub sans">You keep the facilities running so the care teams can focus on people. You are the owner's right hand on everything operational, administrative, and vendor-facing across all locations.</p>
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">⭐ Corporate Operations — the role</h3>
+    <p class="sub sans">The corporate team keeps the facilities running so the care teams can focus on people — the owner's right hand on everything operational, administrative, and vendor-facing across all locations. (Chava — Executive Assistant.)</p>
     <h3 style="font-size:14px;margin:10px 0 4px">What good looks like</h3>
     <ul class="sans" style="margin:0;padding-left:18px;line-height:1.7">
       <li><strong>Nothing runs out, nothing stays broken.</strong> Open orders and maintenance are cleared fast — you watch the Dashboard and drive both cycle times down.</li>

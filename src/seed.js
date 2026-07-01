@@ -21,6 +21,7 @@ export function ensureHrRoster({ quiet = false } = {}) {
   db.exec('BEGIN');
   try { for (const r of rows) ins.run(r.entity || '', r.last || '', r.first || ''); db.exec('COMMIT'); }
   catch (e) { try { db.exec('ROLLBACK'); } catch { /* ignore */ } if (!quiet) console.error('[hr seed]', e.message); return; }
+  try { db.prepare(`UPDATE hr_employees SET job_title='Executive Assistant' WHERE lower(first_name)='chava' AND lower(last_name)='appel'`).run(); } catch { /* best-effort */ }
   if (!quiet) console.log(`Imported ${rows.length} employees into the HR roster.`);
 }
 

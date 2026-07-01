@@ -1744,6 +1744,49 @@ db.exec(`CREATE TABLE IF NOT EXISTS facility_docs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// Corporate ordering stream — supply requests from ALL locations land here, tagged by
+// facility, so Chava sees where everything is being requested and works one queue.
+db.exec(`CREATE TABLE IF NOT EXISTS order_requests (
+  id INTEGER PRIMARY KEY,
+  facility TEXT NOT NULL,
+  item_name TEXT NOT NULL,
+  qty TEXT,
+  category TEXT,
+  vendor TEXT,
+  link TEXT,                                  -- Amazon / supplier reorder link
+  priority TEXT NOT NULL DEFAULT 'Normal',    -- Low | Normal | High | Urgent
+  status TEXT NOT NULL DEFAULT 'requested',   -- requested | ordered | received | cancelled
+  notes TEXT,
+  est_cost TEXT,
+  requested_by_id INTEGER REFERENCES users(id),
+  requested_by TEXT,
+  source TEXT,                                -- 'detox-auto' | 'manual'
+  ordered_at TEXT, ordered_by TEXT,
+  received_at TEXT, received_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_order_req ON order_requests(status, facility);`);
+// Payment methods & vendor account info per location. NOTE: never store full card
+// numbers or CVV here (PCI risk) — hold reference info (last 4, which card) and keep
+// raw numbers in a vault. account_number is for vendor/ACH accounts, not cards.
+db.exec(`CREATE TABLE IF NOT EXISTS payment_methods (
+  id INTEGER PRIMARY KEY,
+  label TEXT NOT NULL,                        -- e.g. "Amex — Akron ops"
+  kind TEXT NOT NULL DEFAULT 'Card',          -- Card | ACH/Bank | Vendor account | Net terms
+  brand TEXT,                                 -- Visa | Amex | ...
+  last4 TEXT,
+  exp TEXT,                                   -- MM/YY
+  billing_zip TEXT,
+  cardholder TEXT,
+  account_number TEXT,                        -- vendor / ACH account (not a card PAN)
+  vendor TEXT,
+  facility TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // Org-wide employee roster (HR / ownership) across all entities, broken down by
 // location. Salary is highly sensitive — the endpoints are admin-only. Seeded from the
 // Active Employees export; job title + salary are filled in by the owner.

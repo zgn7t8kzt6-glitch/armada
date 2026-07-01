@@ -5735,7 +5735,7 @@ async function loadCorpHub(){
   const host=$('corphub'); if(!host) return;
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div>${(ME&&ME.role==='admin'&&!PREVIEW_ROLE)?'<button class="btn btn-ghost btn-sm sans" onclick="previewAsChava()">👁 Preview as Chava</button>':''}</div>
     <div class="itabs" id="corpTabs" style="margin-top:6px">
-      ${['dashboard|📊 Dashboard','projects|✅ Projects','vendors|📇 Vendors','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
+      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
     </div></div>
     <div id="corpBody"><div class="hint">Loading…</div></div>`;
   renderCorpTab();
@@ -5744,8 +5744,10 @@ function corpTab(k){ CORP_TAB=k; document.querySelectorAll('#corpTabs .itab').fo
 async function renderCorpTab(){
   const body=$('corpBody'); if(!body) return; body.innerHTML='<div class="hint">Loading…</div>';
   if(CORP_TAB==='dashboard') return renderCorpDashboard(body);
+  if(CORP_TAB==='orders') return renderCorpOrders(body);
   if(CORP_TAB==='projects') return renderCorpProjects(body);
   if(CORP_TAB==='vendors') return renderCorpVendors(body);
+  if(CORP_TAB==='accounts') return renderCorpPayments(body);
   if(CORP_TAB==='docs') return renderCorpDocs(body);
   if(CORP_TAB==='role') return renderCorpRole(body);
 }
@@ -5753,10 +5755,12 @@ async function renderCorpDashboard(body){
   let d; try{ d=await api('/corp/overview'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
   const o=d.ordering||{}, m=d.maintenance||{}, tc=d.taskCounts||{};
   const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const byLoc=(o.byLocation||[]);
   body.innerHTML=`
-    <div class="card"><h3 style="margin-top:0">🛒 Ordering</h3>
+    <div class="card"><h3 style="margin-top:0">🛒 Ordering <span class="hint" style="font-weight:400">· ${o.locationsRequesting||0} location${o.locationsRequesting===1?'':'s'} requesting</span></h3>
       <div class="ret-cards">${box(o.open||0,'Open to order',(o.open?'rc-elev':''))}${box(o.ordered||0,'Ordered · awaiting')}${box(o.completed||0,'Received (30d)')}${box(o.avgToReceiveDays!=null?o.avgToReceiveDays+'d':'—','Avg order→receive')}</div>
-      <div class="hint" style="margin-top:6px">Avg flag→ordered: <strong>${o.avgToOrderDays!=null?o.avgToOrderDays+'d':'—'}</strong>. <a href="#" onclick="show('inventory');return false">Open Ordering ↗</a></div></div>
+      ${byLoc.length?`<div style="margin-top:8px"><div class="hint">Where it's being requested right now:</div><table class="tbl" style="margin-top:4px"><tr><th>Location</th><th>Requested</th><th>Ordered</th></tr>${byLoc.map(l=>`<tr><td><strong>${esc(l.facility)}</strong></td><td>${l.requested||0}</td><td>${l.ordered||0}</td></tr>`).join('')}</table></div>`:'<div class="hint" style="margin-top:6px">No open requests. As locations flag items, they appear here by location.</div>'}
+      <div class="hint" style="margin-top:6px">Avg flag→ordered: <strong>${o.avgToOrderDays!=null?o.avgToOrderDays+'d':'—'}</strong>. <a href="#" onclick="corpTab('orders');return false">Work the order queue ↗</a></div></div>
     <div class="card"><h3 style="margin-top:0">🔧 Maintenance</h3>
       <div class="ret-cards">${box(m.open||0,'Open',(m.open?'rc-elev':''))}${box(m.inProgress||0,'In progress')}${box(m.completed||0,'Resolved (30d)')}${box(m.avgResolveDays!=null?m.avgResolveDays+'d':'—','Avg time to resolve')}</div>
       <div class="hint" style="margin-top:6px"><a href="#" onclick="show('maintenance');return false">Open Maintenance ↗</a></div></div>
@@ -5764,6 +5768,88 @@ async function renderCorpDashboard(body){
       <div class="ret-cards">${box(tc.todo||0,'To do')}${box(tc.doing||0,'In progress')}${box(tc.blocked||0,'Blocked',(tc.blocked?'rc-elev':''))}${box(tc.done||0,'Done')}</div>
       <div class="hint" style="margin-top:6px"><a href="#" onclick="corpTab('projects');return false">Open the board ↗</a></div></div>`;
 }
+let ORD_FILTER='';
+async function renderCorpOrders(body){
+  let d; try{ d=await api('/corp/orders'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const locs=d.locations||[]; let orders=d.orders||[];
+  if(ORD_FILTER) orders=orders.filter(o=>o.facility===ORD_FILTER);
+  const pris=['Low','Normal','High','Urgent'];
+  const priColor=(p)=>p==='Urgent'?'var(--danger)':p==='High'?'#a60':'';
+  const statusPill=(s)=>({requested:'<span class="risk risk-elev">requested</span>',ordered:'<span class="risk risk-low">ordered</span>',received:'<span class="risk" style="background:#e6f4ea;color:#137333">received</span>',cancelled:'<span class="hint">cancelled</span>'}[s]||s);
+  const actions=(o)=>{
+    let b='';
+    if(o.status==='requested') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'ordered')">Mark ordered</button>`;
+    if(o.status==='ordered') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'received')">Mark received</button>`;
+    if(o.status!=='received'&&o.status!=='cancelled') b+=`<button class="btn btn-ghost btn-sm sans" onclick="setOrder(${o.id},'cancelled')">Cancel</button>`;
+    b+=`<button class="btn btn-ghost btn-sm sans" onclick="delOrder(${o.id})">🗑</button>`;
+    return b;
+  };
+  const rowH=(o)=>`<tr>
+    <td><strong>${esc(o.item_name)}</strong>${o.qty?` <span class="hint">· ${esc(o.qty)}</span>`:''}${o.link?` <a href="${esc(o.link)}" target="_blank" rel="noopener">🔗</a>`:''}${o.notes?`<div class="hint">${esc(o.notes)}</div>`:''}</td>
+    <td class="hint">${esc(o.facility)}</td>
+    <td>${o.priority!=='Normal'?`<span style="color:${priColor(o.priority)}">${esc(o.priority)}</span>`:'<span class="hint">Normal</span>'}</td>
+    <td class="hint">${esc(o.vendor||'')}${o.est_cost?`<div>${esc(o.est_cost)}</div>`:''}</td>
+    <td>${statusPill(o.status)}<div class="hint">${esc(o.requested_by||'')}</div></td>
+    <td><div style="display:flex;gap:4px;flex-wrap:wrap">${actions(o)}</div></td></tr>`;
+  const open=orders.filter(o=>o.status==='requested'||o.status==='ordered');
+  const doneList=orders.filter(o=>o.status==='received'||o.status==='cancelled').slice(0,30);
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add an order request</h3>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+        <select id="oFac">${locs.map(l=>`<option>${esc(l)}</option>`).join('')}</select>
+        <input id="oItem" placeholder="What to order" style="min-width:180px"/>
+        <input id="oQty" placeholder="Qty" style="width:90px"/>
+        <input id="oVendor" placeholder="Vendor" style="width:110px"/>
+        <select id="oPri">${pris.map(p=>`<option ${p==='Normal'?'selected':''}>${p}</option>`).join('')}</select>
+        <input id="oCost" placeholder="Est. $" style="width:80px"/>
+        <button class="btn btn-gold btn-sm sans" onclick="addOrder()">Add</button></div>
+      <input id="oLink" placeholder="Amazon / supplier link (optional)" style="width:100%;margin-top:6px"/>
+      <span id="oMsg" class="hint"></span></div>
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Open queue <span class="hint" style="font-weight:400">· ${open.length}</span></h3></div>
+      <label class="hint">Location <select id="ordFilter" onchange="ORD_FILTER=this.value;renderCorpOrders($('corpBody'))"><option value="">All</option>${locs.map(l=>`<option ${ORD_FILTER===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label></div>
+      ${open.length?`<table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${open.map(rowH).join('')}</table>`:'<div class="hint">Nothing open. Detox auto-flags land here automatically; add other locations above.</div>'}</div>
+    ${doneList.length?`<div class="card"><h3 style="margin-top:0">Recently completed</h3><table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${doneList.map(rowH).join('')}</table></div>`:''}`;
+}
+async function addOrder(){
+  const b={facility:($('oFac')||{}).value,item_name:($('oItem')||{}).value||'',qty:($('oQty')||{}).value||'',vendor:($('oVendor')||{}).value||'',priority:($('oPri')||{}).value,est_cost:($('oCost')||{}).value||'',link:($('oLink')||{}).value||''};
+  if(!b.item_name.trim()){ if($('oMsg'))$('oMsg').textContent='What are we ordering?'; return; }
+  try{ await api('/corp/orders',{method:'POST',body:JSON.stringify(b)}); renderCorpOrders($('corpBody')); }catch(e){ if($('oMsg'))$('oMsg').textContent=e.message; }
+}
+async function setOrder(id,status){ try{ await api('/corp/orders/'+id,{method:'PATCH',body:JSON.stringify({status})}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
+async function delOrder(id){ if(!confirm('Delete this order request?'))return; try{ await api('/corp/orders/'+id,{method:'DELETE'}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
+let PAY_SHOW=false;
+async function renderCorpPayments(body){
+  let d; try{ d=await api('/corp/payments'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const ps=d.payments||[], locs=d.locations||[];
+  const kinds=['Card','ACH/Bank','Vendor account','Net terms'];
+  const mask=(v)=>PAY_SHOW?esc(v||''):(v?'••••':'');
+  const row=(p)=>`<tr><td><strong>${esc(p.label)}</strong><div class="hint">${esc(p.kind)}${p.brand?' · '+esc(p.brand):''}${p.cardholder?' · '+esc(p.cardholder):''}</div></td>
+    <td>${p.last4?'····'+esc(p.last4):''}${p.exp?` <span class="hint">${mask(p.exp)}</span>`:''}${p.billing_zip?`<div class="hint">zip ${mask(p.billing_zip)}</div>`:''}</td>
+    <td class="hint">${p.account_number?mask(p.account_number):''}</td><td class="hint">${esc(p.vendor||'')}</td><td class="hint">${esc(p.facility||'')}</td><td class="hint">${esc(p.notes||'')}</td>
+    <td><button class="btn btn-ghost btn-sm sans" onclick="delPayment(${p.id})">🗑</button></td></tr>`;
+  body.innerHTML=`<div class="pc-note" style="color:#a60;margin-bottom:8px">🔒 Store <strong>reference info only</strong> — last 4, which card, billing zip, account #. Never the full card number or CVV (that's a security/PCI risk). Keep full numbers in a password vault.</div>
+    <div class="card"><h3 style="margin-top:0">Add a payment method / account</h3>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+        <input id="pLabel" placeholder="Label (e.g. Amex — Akron ops)" style="min-width:170px"/>
+        <select id="pKind">${kinds.map(k=>`<option>${k}</option>`).join('')}</select>
+        <input id="pBrand" placeholder="Brand" style="width:90px"/>
+        <input id="pLast4" placeholder="Last 4" maxlength="4" style="width:70px"/>
+        <input id="pExp" placeholder="MM/YY" style="width:70px"/>
+        <input id="pZip" placeholder="Billing zip" style="width:90px"/>
+        <input id="pAcct" placeholder="Account # (vendor/ACH)" style="width:140px"/>
+        <input id="pVendor" placeholder="Vendor" style="width:110px"/>
+        <select id="pFac"><option value="">Facility (any)</option>${locs.map(l=>`<option>${esc(l)}</option>`).join('')}</select>
+        <button class="btn btn-gold btn-sm sans" onclick="savePayment()">Add</button></div>
+      <input id="pNotes" placeholder="Notes (which vendors it's for, limits, etc.)" style="width:100%;margin-top:6px"/>
+      <span id="pMsg" class="hint"></span></div>
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Cards &amp; accounts <span class="hint" style="font-weight:400">· ${ps.length}</span></h3></div><button class="btn btn-ghost btn-sm sans" onclick="PAY_SHOW=!PAY_SHOW;renderCorpPayments($('corpBody'))">${PAY_SHOW?'🙈 Hide':'👁 Show'} details</button></div>
+      ${ps.length?`<table class="tbl"><tr><th>Method</th><th>Card</th><th>Account #</th><th>Vendor</th><th>Facility</th><th>Notes</th><th></th></tr>${ps.map(row).join('')}</table>`:'<div class="hint">No payment methods yet.</div>'}</div>`;
+}
+async function savePayment(){
+  const b={label:($('pLabel')||{}).value||'',kind:($('pKind')||{}).value,brand:($('pBrand')||{}).value||'',last4:($('pLast4')||{}).value||'',exp:($('pExp')||{}).value||'',billing_zip:($('pZip')||{}).value||'',account_number:($('pAcct')||{}).value||'',vendor:($('pVendor')||{}).value||'',facility:($('pFac')||{}).value||'',notes:($('pNotes')||{}).value||''};
+  if(!b.label.trim()){ if($('pMsg'))$('pMsg').textContent='Add a label.'; return; }
+  try{ await api('/corp/payments',{method:'POST',body:JSON.stringify(b)}); renderCorpPayments($('corpBody')); }catch(e){ if($('pMsg'))$('pMsg').textContent=e.message; }
+}
+async function delPayment(id){ if(!confirm('Remove this payment method?'))return; try{ await api('/corp/payments/'+id,{method:'DELETE'}); renderCorpPayments($('corpBody')); }catch(e){ alert(e.message); } }
 async function renderCorpProjects(body){
   let d; try{ d=await api('/corp/tasks'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
   const ts=d.tasks||[];

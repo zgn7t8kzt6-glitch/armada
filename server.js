@@ -324,6 +324,13 @@ function getFacilities() {
 // facilities show as "pending" in the ownership view rather than erroring.
 function sparkConfigured() { return false; }
 function connectionReachable(conn) { return conn === 'spark' ? sparkConfigured() : kipuConfigured(); }
+// The 8 legal entities / locations that request orders. Derived from the HR roster
+// (falls back to a fixed list). Used to tag order requests by where they came from.
+const ORG_LOCATIONS_FALLBACK = ['Armada Detox of Akron', 'Akron House Recovery, LLC', 'Hilltop Recovery Home, LLC - AKRON', 'Armada Recovery Dayton, LLC', 'Hilltop Recovery Dayton, LLC', 'Spark Recovery, LLC', 'Reverie Sober Living of Indianapolis', 'Armada Recovery LLC ("Corporate")'];
+function orgLocations() {
+  try { const rows = db.prepare(`SELECT DISTINCT entity FROM hr_employees WHERE entity != '' ORDER BY entity`).all().map((r) => r.entity); if (rows.length) return rows; } catch { /* table may be empty */ }
+  return ORG_LOCATIONS_FALLBACK;
+}
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
   if (user) { user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); }
@@ -502,6 +509,14 @@ function raiseReorder(item, qty, level, user) {
   }
   db.prepare(`INSERT INTO reorder_requests (item_id, qty_on_hand, level, requested_by_id, requested_by) VALUES (?,?,?,?,?)`)
     .run(item.id, qty, level, user?.id || null, user?.name || '');
+  // Mirror into the corporate ordering stream so Chava sees detox requests alongside
+  // the other locations (deduped on an open request for the same item + facility).
+  try {
+    const fac = 'Armada Detox of Akron';
+    const open = db.prepare(`SELECT id FROM order_requests WHERE source='detox-auto' AND facility=? AND item_name=? AND status='requested'`).get(fac, item.name);
+    if (!open) db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, priority, status, requested_by_id, requested_by, source) VALUES (?,?,?,?,?, 'requested', ?, ?, 'detox-auto')`)
+      .run(fac, item.name, `to par (${Math.max((item.par_level || 0) - qty, 1)} ${item.unit || ''})`.trim(), item.department || null, level === 'out' ? 'High' : 'Normal', user?.id || null, user?.name || 'Auto');
+  } catch { /* order stream is best-effort */ }
   return true;
 }
 async function emailReorder(item, qty, level, user) {
@@ -3145,6 +3160,12 @@ app.get('/api/corp/overview', requireAuth, requireCorp, (req, res) => {
   const tasks = db.prepare(`SELECT status, COUNT(*) n FROM corp_tasks GROUP BY status`).all();
   const taskCounts = { todo: 0, doing: 0, blocked: 0, done: 0 };
   for (const t of tasks) taskCounts[t.status] = t.n;
+  // Cross-location order requests: where things are being requested right now.
+  const openOrders = db.prepare(`SELECT facility, status, COUNT(*) n FROM order_requests WHERE status IN ('requested','ordered') GROUP BY facility, status`).all();
+  const ordersByLocation = {};
+  for (const r of openOrders) { const l = ordersByLocation[r.facility] = ordersByLocation[r.facility] || { facility: r.facility, requested: 0, ordered: 0 }; l[r.status] = r.n; }
+  ordering.byLocation = Object.values(ordersByLocation).sort((a, b) => (b.requested + b.ordered) - (a.requested + a.ordered));
+  ordering.locationsRequesting = ordering.byLocation.length;
   res.json({ since, ordering, maintenance, taskCounts });
 });
 // Project / task board — anyone with corp access can add; corporate works them.
@@ -3209,6 +3230,55 @@ app.post('/api/corp/docs', requireAuth, requireCorp, (req, res) => {
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 app.delete('/api/corp/docs/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM facility_docs WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// ── Corporate ordering (all 8 locations) ──────────────────────────────────────
+app.get('/api/corp/orders', requireAuth, requireCorp, (req, res) => {
+  const status = ['requested', 'ordered', 'received', 'cancelled', 'open'].includes(req.query.status) ? req.query.status : null;
+  const rows = db.prepare(`SELECT * FROM order_requests ${status ? (status === 'open' ? `WHERE status IN ('requested','ordered')` : `WHERE status = '${status}'`) : ''}
+    ORDER BY (status='received'),(status='cancelled'), CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, id DESC`).all();
+  const byLoc = {};
+  for (const r of rows) { const l = byLoc[r.facility] = byLoc[r.facility] || { facility: r.facility, requested: 0, ordered: 0, received: 0, items: [] }; l.items.push(r); if (l[r.status] != null) l[r.status]++; }
+  res.json({ orders: rows, byLocation: Object.values(byLoc).sort((a, b) => (b.requested + b.ordered) - (a.requested + a.ordered)), locations: orgLocations() });
+});
+app.post('/api/corp/orders', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.facility || '').trim() || !String(b.item_name || '').trim()) return res.status(400).json({ error: 'Facility and item are required.' });
+  const pris = ['Low', 'Normal', 'High', 'Urgent'];
+  const info = db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, vendor, link, priority, est_cost, notes, requested_by_id, requested_by, source) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'manual')`)
+    .run(String(b.facility).slice(0, 120), String(b.item_name).slice(0, 200), String(b.qty || '').slice(0, 40), String(b.category || '').slice(0, 60), String(b.vendor || '').slice(0, 80), String(b.link || '').slice(0, 500), pris.includes(b.priority) ? b.priority : 'Normal', String(b.est_cost || '').slice(0, 40), String(b.notes || '').slice(0, 1000), req.user.id, req.user.name);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  const o = db.prepare(`SELECT * FROM order_requests WHERE id = ?`).get(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Not found.' });
+  const status = ['requested', 'ordered', 'received', 'cancelled'].includes(b.status) ? b.status : o.status;
+  const now = new Date().toISOString();
+  const orderedAt = status === 'ordered' && o.status !== 'ordered' ? now : o.ordered_at;
+  const receivedAt = status === 'received' && o.status !== 'received' ? now : o.received_at;
+  db.prepare(`UPDATE order_requests SET status=?, priority=COALESCE(?,priority), vendor=COALESCE(?,vendor), link=COALESCE(?,link), qty=COALESCE(?,qty), est_cost=COALESCE(?,est_cost), notes=COALESCE(?,notes),
+    ordered_at=?, ordered_by=CASE WHEN ?='ordered' AND ordered_by IS NULL THEN ? ELSE ordered_by END, received_at=?, received_by=CASE WHEN ?='received' AND received_by IS NULL THEN ? ELSE received_by END, updated_at=datetime('now') WHERE id=?`)
+    .run(status, ['Low', 'Normal', 'High', 'Urgent'].includes(b.priority) ? b.priority : null, b.vendor != null ? String(b.vendor).slice(0, 80) : null, b.link != null ? String(b.link).slice(0, 500) : null, b.qty != null ? String(b.qty).slice(0, 40) : null, b.est_cost != null ? String(b.est_cost).slice(0, 40) : null, b.notes != null ? String(b.notes).slice(0, 1000) : null,
+      orderedAt, status, req.user.name, receivedAt, status, req.user.name, o.id);
+  res.json({ ok: true });
+});
+app.delete('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM order_requests WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// Payment methods / vendor accounts (reference info only — never full card numbers).
+app.get('/api/corp/payments', requireAuth, requireCorp, (req, res) => res.json({ payments: db.prepare(`SELECT * FROM payment_methods WHERE active = 1 ORDER BY facility, label`).all(), locations: orgLocations() }));
+app.post('/api/corp/payments', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.label || '').trim()) return res.status(400).json({ error: 'Label required.' });
+  const kinds = ['Card', 'ACH/Bank', 'Vendor account', 'Net terms'];
+  const last4 = String(b.last4 || '').replace(/\D/g, '').slice(-4);   // keep only last 4 digits, ever
+  if (b.id) {
+    db.prepare(`UPDATE payment_methods SET label=?, kind=?, brand=?, last4=?, exp=?, billing_zip=?, cardholder=?, account_number=?, vendor=?, facility=?, notes=?, updated_at=datetime('now') WHERE id=?`)
+      .run(b.label.trim().slice(0, 80), kinds.includes(b.kind) ? b.kind : 'Card', String(b.brand || '').slice(0, 30), last4, String(b.exp || '').slice(0, 7), String(b.billing_zip || '').slice(0, 12), String(b.cardholder || '').slice(0, 80), String(b.account_number || '').slice(0, 60), String(b.vendor || '').slice(0, 80), String(b.facility || '').slice(0, 120), String(b.notes || '').slice(0, 2000), b.id);
+    return res.json({ ok: true, id: b.id });
+  }
+  const info = db.prepare(`INSERT INTO payment_methods (label, kind, brand, last4, exp, billing_zip, cardholder, account_number, vendor, facility, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(b.label.trim().slice(0, 80), kinds.includes(b.kind) ? b.kind : 'Card', String(b.brand || '').slice(0, 30), last4, String(b.exp || '').slice(0, 7), String(b.billing_zip || '').slice(0, 12), String(b.cardholder || '').slice(0, 80), String(b.account_number || '').slice(0, 60), String(b.vendor || '').slice(0, 80), String(b.facility || '').slice(0, 120), String(b.notes || '').slice(0, 2000));
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/payments/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`UPDATE payment_methods SET active = 0 WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 // ── HR / Ownership employee roster (admin-only — salary is sensitive) ──────────
 // Everyone across every entity, broken down by location, with job title + salary.
 app.get('/api/hr/employees', requireAuth, requireAdmin, (req, res) => {

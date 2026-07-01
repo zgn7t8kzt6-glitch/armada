@@ -5763,8 +5763,14 @@ async function renderCorpDashboard(body){
   const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   const byLoc=CORP_FAC?[]:(o.byLocation||[]);
   const scopeNote=CORP_FAC?` <span class="hint" style="font-weight:400">· ${esc(CORP_FAC)}</span>`:` <span class="hint" style="font-weight:400">· ${o.locationsRequesting||0} location${o.locationsRequesting===1?'':'s'} requesting</span>`;
+  const toOrder=(o.toOrder||[]);
+  const priDot=(p)=>p==='Urgent'?'🔴':p==='High'?'🟠':'';
+  const toOrderHtml=toOrder.length?`<div class="card" style="border-left:4px solid var(--gold)"><h3 style="margin-top:0">🛒 To order — ${toOrder.length} item${toOrder.length===1?'':'s'} <span class="hint" style="font-weight:400">· tap ✓ once you've placed it</span></h3>
+      <table class="tbl"><tr><th>Item</th><th>Location</th><th>Vendor</th><th></th></tr>${toOrder.map(t=>`<tr><td>${priDot(t.priority)} <strong>${esc(t.item_name)}</strong>${t.qty?` <span class="hint">· ${esc(t.qty)}</span>`:''}${t.link?` <a href="${esc(t.link)}" target="_blank" rel="noopener">🔗</a>`:''}</td><td class="hint">${esc(t.facility)}</td><td class="hint">${esc(t.vendor||'')}</td><td style="white-space:nowrap"><button class="btn btn-gold btn-sm sans" onclick="setOrder(${t.id},'ordered');setTimeout(()=>renderCorpDashboard($('corpBody')),300)">✓ Ordered</button> <button class="btn btn-ghost btn-sm sans" onclick="emailLandlord(${t.id},this)" title="Email the landlord if this is their responsibility">🏠</button></td></tr>`).join('')}</table>
+      <div class="hint" style="margin-top:4px">New orders default to <strong>Armada Detox of Akron</strong>. Add for any location in the <a href="#" onclick="corpTab('orders');return false">Orders tab ↗</a>.</div></div>`:'<div class="card" style="border-left:4px solid var(--good)"><h3 style="margin-top:0">🛒 To order</h3><div class="hint">Nothing waiting to be ordered right now. 🎉</div></div>';
   body.innerHTML=`
-    <div class="card"><h3 style="margin-top:0">🛒 Ordering${scopeNote}</h3>
+    ${toOrderHtml}
+    <div class="card"><h3 style="margin-top:0">📈 Ordering${scopeNote}</h3>
       <div class="ret-cards">${box(o.open||0,'Open to order',(o.open?'rc-elev':''))}${box(o.ordered||0,'Ordered · awaiting')}${box(o.completed||0,'Received (30d)')}${box(o.avgToReceiveDays!=null?o.avgToReceiveDays+'d':'—','Avg order→receive')}</div>
       ${byLoc.length?`<div style="margin-top:8px"><div class="hint">Where it's being requested right now — tap a location to focus:</div><table class="tbl" style="margin-top:4px"><tr><th>Location</th><th>Requested</th><th>Ordered</th></tr>${byLoc.map(l=>`<tr style="cursor:pointer" onclick="CORP_FAC='${l.facility.replace(/'/g,"\\'")}';loadCorpHub()"><td><strong>${esc(l.facility)}</strong></td><td>${l.requested||0}</td><td>${l.ordered||0}</td></tr>`).join('')}</table></div>`:(CORP_FAC?'':'<div class="hint" style="margin-top:6px">No open requests. As locations flag items, they appear here by location.</div>')}
       <div class="hint" style="margin-top:6px">Avg flag→ordered: <strong>${o.avgToOrderDays!=null?o.avgToOrderDays+'d':'—'}</strong>. <a href="#" onclick="corpTab('orders');return false">Work the order queue ↗</a></div></div>
@@ -5787,6 +5793,7 @@ async function renderCorpOrders(body){
     if(o.status==='requested') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'ordered')">Mark ordered</button>`;
     if(o.status==='ordered') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'received')">Mark received</button>`;
     if(o.status!=='received'&&o.status!=='cancelled') b+=`<button class="btn btn-ghost btn-sm sans" onclick="setOrder(${o.id},'cancelled')">Cancel</button>`;
+    b+=`<button class="btn btn-ghost btn-sm sans" onclick="emailLandlord(${o.id},this)" title="Email the landlord (if this is their responsibility)">🏠</button>`;
     b+=`<button class="btn btn-ghost btn-sm sans" onclick="delOrder(${o.id})">🗑</button>`;
     return b;
   };
@@ -5801,7 +5808,7 @@ async function renderCorpOrders(body){
   const doneList=orders.filter(o=>o.status==='received'||o.status==='cancelled').slice(0,30);
   body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add an order request</h3>
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
-        <select id="oFac">${locs.map(l=>`<option ${CORP_FAC===l?'selected':''}>${esc(l)}</option>`).join('')}</select>
+        <select id="oFac">${locs.map(l=>`<option ${(CORP_FAC||'Armada Detox of Akron')===l?'selected':''}>${esc(l)}</option>`).join('')}</select>
         <input id="oItem" placeholder="What to order" style="min-width:180px"/>
         <input id="oQty" placeholder="Qty" style="width:90px"/>
         <input id="oVendor" placeholder="Vendor" style="width:110px"/>
@@ -5821,6 +5828,7 @@ async function addOrder(){
   try{ await api('/corp/orders',{method:'POST',body:JSON.stringify(b)}); renderCorpOrders($('corpBody')); }catch(e){ if($('oMsg'))$('oMsg').textContent=e.message; }
 }
 async function setOrder(id,status){ try{ await api('/corp/orders/'+id,{method:'PATCH',body:JSON.stringify({status})}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
+async function emailLandlord(id,btn){ if(btn)btn.disabled=true; try{ const r=await api('/corp/orders/'+id+'/email-landlord',{method:'POST'}); alert(r.sent?('✓ Emailed the landlord ('+r.to+').'):('Could not email landlord: '+(r.reason||'no landlord on file for this facility — add it on the lease.'))); }catch(e){ alert(e.message); } if(btn)btn.disabled=false; }
 async function delOrder(id){ if(!confirm('Delete this order request?'))return; try{ await api('/corp/orders/'+id,{method:'DELETE'}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
 let PAY_SHOW=false;
 async function renderCorpPayments(body){
@@ -5919,6 +5927,9 @@ async function editLease(id){
       <label class="hint">Term start<br><input id="lStart" type="date" value="${esc((l.term_start||'').slice(0,10))}"/></label>
       <label class="hint">Term end<br><input id="lEnd" type="date" value="${esc((l.term_end||'').slice(0,10))}"/></label>
       <label class="hint">Lease PDF link<br><input id="lDoc" value="${esc(l.doc_url||'')}" placeholder="Drive/OneDrive" style="min-width:150px"/></label></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">
+      <label class="hint">Landlord email <span style="color:var(--aqua)">(for auto-routing)</span><br><input id="lLandEmail" value="${esc(l.landlord_email||'')}" placeholder="landlord@…" style="min-width:170px"/></label>
+      <label class="hint">Landlord-responsible categories<br><input id="lLandCats" value="${esc(l.landlord_categories||'')}" placeholder="Plumbing, HVAC, Roof, Structural, Electrical" style="min-width:260px"/></label></div>
     <label class="hint" style="display:block;margin-top:6px">Renewal terms</label><input id="lRenew" value="${esc(l.renewal_terms||'')}" style="width:100%"/>
     <label class="hint" style="display:block;margin-top:6px">Full lease text <span style="color:var(--aqua)">— paste the whole lease here so the AI can answer questions from it</span></label>
     <textarea id="lText" rows="7" style="width:100%;font-family:inherit" placeholder="Paste the lease text (or the key clauses)…">${esc(l.lease_text||'')}</textarea>
@@ -5926,7 +5937,7 @@ async function editLease(id){
 }
 async function saveLease(id){
   const g=x=>($(x)||{}).value||'';
-  const b={id:id||undefined,entity:g('lEntity'),property_address:g('lAddr'),landlord:g('lLandlord'),landlord_contact:g('lLandContact'),monthly_rent:g('lRent'),security_deposit:g('lDep'),term_start:g('lStart'),term_end:g('lEnd'),renewal_terms:g('lRenew'),doc_url:g('lDoc'),lease_text:g('lText')};
+  const b={id:id||undefined,entity:g('lEntity'),property_address:g('lAddr'),landlord:g('lLandlord'),landlord_contact:g('lLandContact'),monthly_rent:g('lRent'),security_deposit:g('lDep'),term_start:g('lStart'),term_end:g('lEnd'),renewal_terms:g('lRenew'),doc_url:g('lDoc'),lease_text:g('lText'),landlord_email:g('lLandEmail'),landlord_categories:g('lLandCats')};
   if(!b.entity){ if($('lMsg'))$('lMsg').textContent='Pick an entity.'; return; }
   try{ await api('/corp/leases',{method:'POST',body:JSON.stringify(b)}); $('leaseEditor').innerHTML=''; renderCorpLeases($('corpBody')); }catch(e){ if($('lMsg'))$('lMsg').textContent=e.message; }
 }

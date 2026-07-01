@@ -331,6 +331,7 @@ function connectionReachable(conn) { return conn === 'spark' ? sparkConfigured()
 // The 8 legal entities / locations that request orders. Derived from the HR roster
 // (falls back to a fixed list). Used to tag order requests by where they came from.
 const ORG_LOCATIONS_FALLBACK = ['Armada Detox of Akron', 'Akron House Recovery, LLC', 'Hilltop Recovery Home, LLC - AKRON', 'Armada Recovery Dayton, LLC', 'Hilltop Recovery Dayton, LLC', 'Spark Recovery, LLC', 'Reverie Sober Living of Indianapolis', 'Armada Recovery LLC ("Corporate")'];
+const DETOX_LOCATION = 'Armada Detox of Akron';   // the default facility for new orders
 function orgLocations() {
   try { const rows = db.prepare(`SELECT DISTINCT entity FROM hr_employees WHERE entity != '' ORDER BY entity`).all().map((r) => r.entity); if (rows.length) return rows; } catch { /* table may be empty */ }
   return ORG_LOCATIONS_FALLBACK;
@@ -539,11 +540,14 @@ function raiseReorder(item, qty, level, user) {
     .run(item.id, qty, level, user?.id || null, user?.name || '');
   // Mirror into the corporate ordering stream so Chava sees detox requests alongside
   // the other locations (deduped on an open request for the same item + facility).
+  // FOOD is separate and detox-specific — Kitchen items are handled by the kitchen/
+  // Pollak flow, not Chava's supplies queue, so they don't mirror here.
   try {
-    const fac = 'Armada Detox of Akron';
-    const open = db.prepare(`SELECT id FROM order_requests WHERE source='detox-auto' AND facility=? AND item_name=? AND status='requested'`).get(fac, item.name);
-    if (!open) db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, priority, status, requested_by_id, requested_by, source) VALUES (?,?,?,?,?, 'requested', ?, ?, 'detox-auto')`)
-      .run(fac, item.name, `to par (${Math.max((item.par_level || 0) - qty, 1)} ${item.unit || ''})`.trim(), item.department || null, level === 'out' ? 'High' : 'Normal', user?.id || null, user?.name || 'Auto');
+    if (item.department !== 'Kitchen') {
+      const open = db.prepare(`SELECT id FROM order_requests WHERE source='detox-auto' AND facility=? AND item_name=? AND status='requested'`).get(DETOX_LOCATION, item.name);
+      if (!open) db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, priority, status, requested_by_id, requested_by, source) VALUES (?,?,?,?,?, 'requested', ?, ?, 'detox-auto')`)
+        .run(DETOX_LOCATION, item.name, `to par (${Math.max((item.par_level || 0) - qty, 1)} ${item.unit || ''})`.trim(), item.department || null, level === 'out' ? 'High' : 'Normal', user?.id || null, user?.name || 'Auto');
+    }
   } catch { /* order stream is best-effort */ }
   return true;
 }
@@ -3195,6 +3199,8 @@ app.get('/api/corp/overview', requireAuth, requireCorp, (req, res) => {
   for (const r of openOrders) { const l = ordersByLocation[r.facility] = ordersByLocation[r.facility] || { facility: r.facility, requested: 0, ordered: 0 }; l[r.status] = r.n; }
   ordering.byLocation = Object.values(ordersByLocation).sort((a, b) => (b.requested + b.ordered) - (a.requested + a.ordered));
   ordering.locationsRequesting = ordering.byLocation.length;
+  // The actual to-order list so it pops on the dashboard and she can act right away.
+  ordering.toOrder = db.prepare(`SELECT id, facility, item_name, qty, category, vendor, link, priority FROM order_requests WHERE status='requested'${facSql} ORDER BY CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, id DESC LIMIT 40`).all(...fa);
   res.json({ since, facility, locations: orgLocations(), ordering, maintenance, taskCounts });
 });
 // Project / task board — anyone with corp access can add; corporate works them.
@@ -3268,13 +3274,55 @@ app.get('/api/corp/orders', requireAuth, requireCorp, (req, res) => {
   for (const r of rows) { const l = byLoc[r.facility] = byLoc[r.facility] || { facility: r.facility, requested: 0, ordered: 0, received: 0, items: [] }; l.items.push(r); if (l[r.status] != null) l[r.status]++; }
   res.json({ orders: rows, byLocation: Object.values(byLoc).sort((a, b) => (b.requested + b.ordered) - (a.requested + a.ordered)), locations: orgLocations() });
 });
-app.post('/api/corp/orders', requireAuth, requireCorp, (req, res) => {
+app.post('/api/corp/orders', requireAuth, requireCorp, async (req, res) => {
   const b = req.body || {};
-  if (!String(b.facility || '').trim() || !String(b.item_name || '').trim()) return res.status(400).json({ error: 'Facility and item are required.' });
+  if (!String(b.item_name || '').trim()) return res.status(400).json({ error: 'An item is required.' });
+  const facility = String(b.facility || '').trim() || DETOX_LOCATION;   // default to detox
   const pris = ['Low', 'Normal', 'High', 'Urgent'];
   const info = db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, vendor, link, priority, est_cost, notes, requested_by_id, requested_by, source) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'manual')`)
-    .run(String(b.facility).slice(0, 120), String(b.item_name).slice(0, 200), String(b.qty || '').slice(0, 40), String(b.category || '').slice(0, 60), String(b.vendor || '').slice(0, 80), String(b.link || '').slice(0, 500), pris.includes(b.priority) ? b.priority : 'Normal', String(b.est_cost || '').slice(0, 40), String(b.notes || '').slice(0, 1000), req.user.id, req.user.name);
-  res.json({ ok: true, id: info.lastInsertRowid });
+    .run(facility.slice(0, 120), String(b.item_name).slice(0, 200), String(b.qty || '').slice(0, 40), String(b.category || '').slice(0, 60), String(b.vendor || '').slice(0, 80), String(b.link || '').slice(0, 500), pris.includes(b.priority) ? b.priority : 'Normal', String(b.est_cost || '').slice(0, 40), String(b.notes || '').slice(0, 1000), req.user.id, req.user.name);
+  // If this falls under the landlord's responsibility for the facility, email them.
+  let landlord = null;
+  try { const o = db.prepare(`SELECT * FROM order_requests WHERE id = ?`).get(info.lastInsertRowid); landlord = await maybeEmailLandlord(o, req.user, false); } catch { /* best-effort */ }
+  res.json({ ok: true, id: info.lastInsertRowid, landlordEmailed: !!(landlord && landlord.sent) });
+});
+// Landlord routing: a lease can list the categories the landlord covers. When an
+// order in one of those categories comes in, we email the landlord automatically.
+function facilityLease(facility) { return db.prepare(`SELECT * FROM leases WHERE entity = ? ORDER BY id DESC`).get(facility); }
+function landlordCoversOrder(lease, order) {
+  if (!lease || !lease.landlord_categories) return false;
+  const cats = String(lease.landlord_categories).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (!cats.length) return false;
+  const hay = `${order.category || ''} ${order.item_name || ''} ${order.notes || ''}`.toLowerCase();
+  return cats.some((c) => hay.includes(c));
+}
+async function maybeEmailLandlord(order, user, forceManual) {
+  const lease = facilityLease(order.facility);
+  if (!lease || !lease.landlord_email) return { sent: false, reason: 'no landlord email on file for this facility' };
+  if (!forceManual && !landlordCoversOrder(lease, order)) return { sent: false, reason: 'not a landlord category' };
+  if (!emailConfigured()) return { sent: false, reason: 'email not configured' };
+  const esc = htmlEsc;
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:560px">
+    <p>Hello${lease.landlord ? ' ' + esc(lease.landlord) : ''},</p>
+    <p>We have a maintenance/repair item at <strong>${esc(lease.property_address || order.facility)}</strong> that appears to fall under the landlord's responsibility per our lease. Could you please arrange to address it?</p>
+    <table style="border-collapse:collapse;margin:8px 0">
+      <tr><td style="padding:2px 12px 2px 0;color:#666">Item</td><td><b>${esc(order.item_name)}</b>${order.qty ? ' — ' + esc(order.qty) : ''}</td></tr>
+      <tr><td style="padding:2px 12px 2px 0;color:#666">Category</td><td>${esc(order.category || '')}</td></tr>
+      ${order.notes ? `<tr><td style="padding:2px 12px 2px 0;color:#666">Details</td><td>${esc(order.notes)}</td></tr>` : ''}
+      <tr><td style="padding:2px 12px 2px 0;color:#666">Priority</td><td>${esc(order.priority || 'Normal')}</td></tr>
+    </table>
+    <p>Please let us know the plan and timing. Thank you,<br>${esc(user?.name || 'Armada Recovery')}</p>
+    <p style="color:#888;font-size:12px">Sent via Armada Care Standards on behalf of ${esc(order.facility)}.</p></div>`;
+  try {
+    await sendEmail({ to: lease.landlord_email, cc: 'chavaa@armadarecovery.com', subject: `Maintenance request — ${order.facility}: ${order.item_name}`, html });
+    db.prepare(`UPDATE order_requests SET landlord_emailed = datetime('now'), notes = COALESCE(NULLIF(notes,''),'') || ' [landlord emailed]' WHERE id = ?`).run(order.id);
+    return { sent: true, to: lease.landlord_email };
+  } catch (e) { return { sent: false, reason: e.message }; }
+}
+app.post('/api/corp/orders/:id/email-landlord', requireAuth, requireCorp, async (req, res) => {
+  const o = db.prepare(`SELECT * FROM order_requests WHERE id = ?`).get(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Not found.' });
+  try { const r = await maybeEmailLandlord(o, req.user, true); if (!r.sent) return res.status(400).json(r); res.json(r); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
   const b = req.body || {};
@@ -3430,9 +3478,9 @@ app.post('/api/corp/leases', requireAuth, requireCorp, (req, res) => {
   const b = req.body || {};
   if (!String(b.entity || '').trim()) return res.status(400).json({ error: 'Entity required.' });
   const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
-  const f = [String(b.entity).slice(0, 120), String(b.property_address || '').slice(0, 200), String(b.landlord || '').slice(0, 120), String(b.landlord_contact || '').slice(0, 160), String(b.monthly_rent || '').slice(0, 40), String(b.security_deposit || '').slice(0, 40), dt(b.term_start), dt(b.term_end), String(b.renewal_terms || '').slice(0, 2000), String(b.responsibilities || '').slice(0, 4000), String(b.doc_url || '').slice(0, 500), String(b.lease_text || '').slice(0, 200000), String(b.notes || '').slice(0, 4000)];
-  if (b.id) { db.prepare(`UPDATE leases SET entity=?,property_address=?,landlord=?,landlord_contact=?,monthly_rent=?,security_deposit=?,term_start=?,term_end=?,renewal_terms=?,responsibilities=?,doc_url=?,lease_text=?,notes=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
-  const info = db.prepare(`INSERT INTO leases (entity,property_address,landlord,landlord_contact,monthly_rent,security_deposit,term_start,term_end,renewal_terms,responsibilities,doc_url,lease_text,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...f);
+  const f = [String(b.entity).slice(0, 120), String(b.property_address || '').slice(0, 200), String(b.landlord || '').slice(0, 120), String(b.landlord_contact || '').slice(0, 160), String(b.monthly_rent || '').slice(0, 40), String(b.security_deposit || '').slice(0, 40), dt(b.term_start), dt(b.term_end), String(b.renewal_terms || '').slice(0, 2000), String(b.responsibilities || '').slice(0, 4000), String(b.doc_url || '').slice(0, 500), String(b.lease_text || '').slice(0, 200000), String(b.notes || '').slice(0, 4000), String(b.landlord_email || '').slice(0, 160), String(b.landlord_categories || '').slice(0, 300)];
+  if (b.id) { db.prepare(`UPDATE leases SET entity=?,property_address=?,landlord=?,landlord_contact=?,monthly_rent=?,security_deposit=?,term_start=?,term_end=?,renewal_terms=?,responsibilities=?,doc_url=?,lease_text=?,notes=?,landlord_email=?,landlord_categories=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
+  const info = db.prepare(`INSERT INTO leases (entity,property_address,landlord,landlord_contact,monthly_rent,security_deposit,term_start,term_end,renewal_terms,responsibilities,doc_url,lease_text,notes,landlord_email,landlord_categories) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...f);
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 app.delete('/api/corp/leases/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM leases WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });

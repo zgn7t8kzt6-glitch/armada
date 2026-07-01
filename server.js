@@ -19,7 +19,7 @@ import {
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -82,7 +82,7 @@ try { db.prepare(`DELETE FROM alerts WHERE kind IN ('risk', 'concern') AND statu
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '5mb' }));   // headroom for client-resized photo uploads (several per work order)
+app.use(express.json({ limit: '30mb' }));   // headroom for photo uploads + insurance/lease contract PDFs (AI-read)
 app.use(cookies);
 
 // Basic security headers
@@ -3399,12 +3399,15 @@ app.post('/api/corp/insurance', requireAuth, requireCorp, (req, res) => {
   const num = (v) => (v === '' || v == null) ? null : +String(v).replace(/[^0-9.]/g, '');
   const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
   const fields = [String(b.entity).slice(0, 120), String(b.coverage_type).slice(0, 60), String(b.carrier || '').slice(0, 120), String(b.policy_number || '').slice(0, 80), b.broker_id ? +b.broker_id : null, String(b.broker_name || '').slice(0, 120), dt(b.effective_date), dt(b.expiration_date), num(b.premium), String(b.limit_each || '').slice(0, 40), String(b.limit_aggregate || '').slice(0, 40), String(b.deductible || '').slice(0, 40), stat, b.auto_renew ? 1 : 0, String(b.doc_url || '').slice(0, 500), String(b.notes || '').slice(0, 4000)];
+  let id;
   if (b.id) {
     db.prepare(`UPDATE insurance_policies SET entity=?,coverage_type=?,carrier=?,policy_number=?,broker_id=?,broker_name=?,effective_date=?,expiration_date=?,premium=?,limit_each=?,limit_aggregate=?,deductible=?,status=?,auto_renew=?,doc_url=?,notes=?,reminded=NULL,updated_at=datetime('now') WHERE id=?`).run(...fields, b.id);
-    return res.json({ ok: true, id: b.id });
+    id = b.id;
+  } else {
+    id = db.prepare(`INSERT INTO insurance_policies (entity,coverage_type,carrier,policy_number,broker_id,broker_name,effective_date,expiration_date,premium,limit_each,limit_aggregate,deductible,status,auto_renew,doc_url,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...fields).lastInsertRowid;
   }
-  const info = db.prepare(`INSERT INTO insurance_policies (entity,coverage_type,carrier,policy_number,broker_id,broker_name,effective_date,expiration_date,premium,limit_each,limit_aggregate,deductible,status,auto_renew,doc_url,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...fields);
-  res.json({ ok: true, id: info.lastInsertRowid });
+  if (b.file_id) db.prepare(`UPDATE insurance_policies SET file_id=?, doc_url=COALESCE(NULLIF(doc_url,''), ?) WHERE id=?`).run(+b.file_id, `/api/corp/files/${+b.file_id}`, id);
+  res.json({ ok: true, id });
 });
 app.delete('/api/corp/insurance/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM insurance_policies WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 app.get('/api/corp/insurance/brokers', requireAuth, requireCorp, (req, res) => res.json({ brokers: db.prepare(`SELECT * FROM insurance_brokers WHERE active = 1 ORDER BY name`).all() }));
@@ -3463,9 +3466,43 @@ async function checkInsuranceReminders({ force = false } = {}) {
 app.post('/api/corp/insurance/run-reminders', requireAuth, requireCorp, async (req, res) => {
   try { res.json(await checkInsuranceReminders({ force: false })); } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Upload a document (base64) → store it, return the file id + a download URL.
+function storeCorpFile(kind, b, user) {
+  const data = String(b.data || '').replace(/^data:[^;]+;base64,/, '');
+  if (!data) throw new Error('No file data.');
+  const info = db.prepare(`INSERT INTO corp_files (kind, name, media_type, data, size, uploaded_by) VALUES (?,?,?,?,?,?)`)
+    .run(kind, String(b.name || 'document').slice(0, 200), String(b.media_type || 'application/pdf').slice(0, 80), data, Math.round(data.length * 0.75), user?.name || '');
+  return info.lastInsertRowid;
+}
+app.get('/api/corp/files/:id', requireAuth, requireCorp, (req, res) => {
+  const f = db.prepare(`SELECT * FROM corp_files WHERE id = ?`).get(req.params.id);
+  if (!f) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', f.media_type || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${(f.name || 'document').replace(/"/g, '')}"`);
+  res.send(Buffer.from(f.data, 'base64'));
+});
+// Read an uploaded insurance contract and return prefilled fields (no manual entry).
+app.post('/api/corp/insurance/extract', requireAuth, requireCorp, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'AI is not configured.' });
+  const b = req.body || {};
+  let fileId, fields;
+  try { fileId = storeCorpFile('insurance', b, req.user); } catch (e) { return res.status(400).json({ error: e.message }); }
+  try { fields = await extractInsuranceDoc(String(b.data || '').replace(/^data:[^;]+;base64,/, ''), b.media_type || 'application/pdf'); }
+  catch (e) { return res.status(502).json({ error: 'Could not read the document: ' + e.message, fileId }); }
+  res.json({ fileId, fields, fileUrl: `/api/corp/files/${fileId}` });
+});
+app.post('/api/corp/leases/extract', requireAuth, requireCorp, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'AI is not configured.' });
+  const b = req.body || {};
+  let fileId, fields;
+  try { fileId = storeCorpFile('lease', b, req.user); } catch (e) { return res.status(400).json({ error: e.message }); }
+  try { fields = await extractLeaseDoc(String(b.data || '').replace(/^data:[^;]+;base64,/, ''), b.media_type || 'application/pdf'); }
+  catch (e) { return res.status(502).json({ error: 'Could not read the document: ' + e.message, fileId }); }
+  res.json({ fileId, fields, fileUrl: `/api/corp/files/${fileId}` });
+});
 // ── Facility leases + AI lease assistant ──────────────────────────────────────
 app.get('/api/corp/leases', requireAuth, requireCorp, (req, res) => {
-  const leases = db.prepare(`SELECT id, entity, property_address, landlord, landlord_contact, monthly_rent, security_deposit, term_start, term_end, renewal_terms, responsibilities, doc_url, notes, (lease_text IS NOT NULL AND lease_text != '') AS has_text, length(lease_text) AS text_len, updated_at FROM leases ORDER BY entity`).all();
+  const leases = db.prepare(`SELECT id, entity, property_address, landlord, landlord_contact, monthly_rent, security_deposit, term_start, term_end, renewal_terms, responsibilities, doc_url, file_id, notes, ((lease_text IS NOT NULL AND lease_text != '') OR file_id IS NOT NULL) AS has_text, length(lease_text) AS text_len, updated_at FROM leases ORDER BY entity`).all();
   res.json({ leases, locations: orgLocations() });
 });
 app.get('/api/corp/leases/:id', requireAuth, requireCorp, (req, res) => {
@@ -3479,9 +3516,11 @@ app.post('/api/corp/leases', requireAuth, requireCorp, (req, res) => {
   if (!String(b.entity || '').trim()) return res.status(400).json({ error: 'Entity required.' });
   const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
   const f = [String(b.entity).slice(0, 120), String(b.property_address || '').slice(0, 200), String(b.landlord || '').slice(0, 120), String(b.landlord_contact || '').slice(0, 160), String(b.monthly_rent || '').slice(0, 40), String(b.security_deposit || '').slice(0, 40), dt(b.term_start), dt(b.term_end), String(b.renewal_terms || '').slice(0, 2000), String(b.responsibilities || '').slice(0, 4000), String(b.doc_url || '').slice(0, 500), String(b.lease_text || '').slice(0, 200000), String(b.notes || '').slice(0, 4000), String(b.landlord_email || '').slice(0, 160), String(b.landlord_categories || '').slice(0, 300)];
-  if (b.id) { db.prepare(`UPDATE leases SET entity=?,property_address=?,landlord=?,landlord_contact=?,monthly_rent=?,security_deposit=?,term_start=?,term_end=?,renewal_terms=?,responsibilities=?,doc_url=?,lease_text=?,notes=?,landlord_email=?,landlord_categories=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
-  const info = db.prepare(`INSERT INTO leases (entity,property_address,landlord,landlord_contact,monthly_rent,security_deposit,term_start,term_end,renewal_terms,responsibilities,doc_url,lease_text,notes,landlord_email,landlord_categories) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...f);
-  res.json({ ok: true, id: info.lastInsertRowid });
+  let id;
+  if (b.id) { db.prepare(`UPDATE leases SET entity=?,property_address=?,landlord=?,landlord_contact=?,monthly_rent=?,security_deposit=?,term_start=?,term_end=?,renewal_terms=?,responsibilities=?,doc_url=?,lease_text=?,notes=?,landlord_email=?,landlord_categories=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); id = b.id; }
+  else { id = db.prepare(`INSERT INTO leases (entity,property_address,landlord,landlord_contact,monthly_rent,security_deposit,term_start,term_end,renewal_terms,responsibilities,doc_url,lease_text,notes,landlord_email,landlord_categories) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...f).lastInsertRowid; }
+  if (b.file_id) db.prepare(`UPDATE leases SET file_id=?, doc_url=COALESCE(NULLIF(doc_url,''), ?) WHERE id=?`).run(+b.file_id, `/api/corp/files/${+b.file_id}`, id);
+  res.json({ ok: true, id });
 });
 app.delete('/api/corp/leases/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM leases WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 // Ask the AI a question about a specific lease, answered from the lease text.
@@ -3491,10 +3530,16 @@ app.post('/api/corp/leases/:id/ask', requireAuth, requireCorp, async (req, res) 
   if (!l) return res.status(404).json({ error: 'Lease not found.' });
   const q = String(req.body?.question || '').trim();
   if (!q) return res.status(400).json({ error: 'Ask a question.' });
-  if (!l.lease_text || l.lease_text.trim().length < 40) return res.status(400).json({ error: 'No lease text on file yet — paste the lease text into this record so the assistant can read it.' });
+  const file = l.file_id ? db.prepare(`SELECT * FROM corp_files WHERE id = ?`).get(l.file_id) : null;
+  const hasText = l.lease_text && l.lease_text.trim().length >= 40;
+  if (!file && !hasText) return res.status(400).json({ error: 'No lease document on file yet — upload the lease (or paste its text) so the assistant can read it.' });
   let answer;
-  try { answer = await askLease(l.lease_text, q, { entity: l.entity, landlord: l.landlord, property: l.property_address }); }
-  catch (e) { return res.status(502).json({ error: e.message }); }
+  try {
+    // Prefer reading the uploaded file directly; fall back to pasted text.
+    answer = file
+      ? await askLeaseDoc(file.data, file.media_type || 'application/pdf', q, { entity: l.entity, landlord: l.landlord })
+      : await askLease(l.lease_text, q, { entity: l.entity, landlord: l.landlord, property: l.property_address });
+  } catch (e) { return res.status(502).json({ error: e.message }); }
   db.prepare(`INSERT INTO lease_questions (lease_id, question, answer, asked_by) VALUES (?,?,?,?)`).run(l.id, q.slice(0, 500), answer, req.user.name);
   res.json({ answer });
 });

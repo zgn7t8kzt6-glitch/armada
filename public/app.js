@@ -5809,8 +5809,9 @@ async function renderCorpOrders(body){
   body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add an order request</h3>
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
         <select id="oFac">${locs.map(l=>`<option ${(CORP_FAC||'Armada Detox of Akron')===l?'selected':''}>${esc(l)}</option>`).join('')}</select>
-        <input id="oItem" placeholder="What to order" style="min-width:180px"/>
-        <input id="oQty" placeholder="Qty" style="width:90px"/>
+        <input id="oItem" placeholder="What to order" style="min-width:170px"/>
+        <select id="oCat">${['Supplies','Housekeeping','Medical','Office','Marketing Materials','Swag / Merch','Maintenance / Repair','Other'].map(c=>`<option>${c}</option>`).join('')}</select>
+        <input id="oQty" placeholder="Qty" style="width:80px"/>
         <input id="oVendor" placeholder="Vendor" style="width:110px"/>
         <select id="oPri">${pris.map(p=>`<option ${p==='Normal'?'selected':''}>${p}</option>`).join('')}</select>
         <input id="oCost" placeholder="Est. $" style="width:80px"/>
@@ -5823,7 +5824,7 @@ async function renderCorpOrders(body){
     ${doneList.length?`<div class="card"><h3 style="margin-top:0">Recently completed</h3><table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${doneList.map(rowH).join('')}</table></div>`:''}`;
 }
 async function addOrder(){
-  const b={facility:($('oFac')||{}).value,item_name:($('oItem')||{}).value||'',qty:($('oQty')||{}).value||'',vendor:($('oVendor')||{}).value||'',priority:($('oPri')||{}).value,est_cost:($('oCost')||{}).value||'',link:($('oLink')||{}).value||''};
+  const b={facility:($('oFac')||{}).value,item_name:($('oItem')||{}).value||'',category:($('oCat')||{}).value||'',qty:($('oQty')||{}).value||'',vendor:($('oVendor')||{}).value||'',priority:($('oPri')||{}).value,est_cost:($('oCost')||{}).value||'',link:($('oLink')||{}).value||''};
   if(!b.item_name.trim()){ if($('oMsg'))$('oMsg').textContent='What are we ordering?'; return; }
   try{ await api('/corp/orders',{method:'POST',body:JSON.stringify(b)}); renderCorpOrders($('corpBody')); }catch(e){ if($('oMsg'))$('oMsg').textContent=e.message; }
 }
@@ -5890,7 +5891,7 @@ async function renderCorpProjects(body){
       ${cols.map(([k,l])=>`<div class="card"><h3 style="margin-top:0;font-size:14px">${l} <span class="hint" style="font-weight:400">· ${ts.filter(t=>t.status===k).length}</span></h3>${ts.filter(t=>t.status===k).map(card).join('')||'<div class="hint">—</div>'}</div>`).join('')}
     </div>`;
 }
-let LEASE_DATA=null, LEASE_OPEN=null;
+let LEASE_DATA=null, LEASE_OPEN=null, LEASE_FILE=null;
 async function renderCorpLeases(body){
   let d; try{ d=await api('/corp/leases'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
   LEASE_DATA=d;
@@ -5915,8 +5916,10 @@ async function editLease(id){
   let l={entity:CORP_FAC||'',property_address:'',landlord:'',landlord_contact:'',monthly_rent:'',security_deposit:'',term_start:'',term_end:'',renewal_terms:'',responsibilities:'',doc_url:'',lease_text:'',notes:''};
   if(id){ try{ const r=await api('/corp/leases/'+id); l=r.lease; }catch(e){ alert(e.message); return; } }
   const locs=(LEASE_DATA&&LEASE_DATA.locations)||[];
+  LEASE_FILE=l.file_id||null;
   host.innerHTML=`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><h3 style="margin-top:0">${id?'Edit':'Add'} lease</h3>
-    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+    <div class="pc-note" style="background:#faf6ee;border-left:4px solid var(--gold)"><strong>📎 Upload the lease — AI reads &amp; fills it in</strong>, and powers the Q&amp;A. <button class="btn btn-gold btn-sm sans" onclick="corpPickFile('leases',$('leaseUpStatus'),applyLeaseExtract)">Upload lease (PDF/photo)</button> <span id="leaseUpStatus" class="hint"></span></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">
       <label class="hint">Entity<br><select id="lEntity"><option value="">—</option>${locs.map(x=>`<option ${x===l.entity?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
       <label class="hint">Property address<br><input id="lAddr" value="${esc(l.property_address||'')}" style="min-width:200px"/></label>
       <label class="hint">Landlord<br><input id="lLandlord" value="${esc(l.landlord||'')}" style="min-width:140px"/></label>
@@ -5935,9 +5938,15 @@ async function editLease(id){
     <textarea id="lText" rows="7" style="width:100%;font-family:inherit" placeholder="Paste the lease text (or the key clauses)…">${esc(l.lease_text||'')}</textarea>
     <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="saveLease(${id||0})">Save lease</button><button class="btn btn-ghost btn-sm sans" onclick="$('leaseEditor').innerHTML=''">Cancel</button>${id?`<button class="btn btn-ghost btn-sm sans" style="color:var(--danger)" onclick="delLease(${id})">Delete</button>`:''}<span id="lMsg" class="hint" style="align-self:center"></span></div></div>`;
 }
+function applyLeaseExtract(f,fileId){
+  LEASE_FILE=fileId||LEASE_FILE;
+  setVal('lAddr',f.property_address); setVal('lLandlord',f.landlord); setVal('lLandEmail',f.landlord_email); setVal('lLandContact',f.landlord_contact);
+  setVal('lRent',f.monthly_rent); setVal('lDep',f.security_deposit); setVal('lStart',(f.term_start||'').slice(0,10)); setVal('lEnd',(f.term_end||'').slice(0,10));
+  setVal('lRenew',f.renewal_terms); setVal('lLandCats',f.landlord_categories);
+}
 async function saveLease(id){
   const g=x=>($(x)||{}).value||'';
-  const b={id:id||undefined,entity:g('lEntity'),property_address:g('lAddr'),landlord:g('lLandlord'),landlord_contact:g('lLandContact'),monthly_rent:g('lRent'),security_deposit:g('lDep'),term_start:g('lStart'),term_end:g('lEnd'),renewal_terms:g('lRenew'),doc_url:g('lDoc'),lease_text:g('lText'),landlord_email:g('lLandEmail'),landlord_categories:g('lLandCats')};
+  const b={id:id||undefined,entity:g('lEntity'),property_address:g('lAddr'),landlord:g('lLandlord'),landlord_contact:g('lLandContact'),monthly_rent:g('lRent'),security_deposit:g('lDep'),term_start:g('lStart'),term_end:g('lEnd'),renewal_terms:g('lRenew'),doc_url:g('lDoc'),lease_text:g('lText'),landlord_email:g('lLandEmail'),landlord_categories:g('lLandCats'),file_id:LEASE_FILE};
   if(!b.entity){ if($('lMsg'))$('lMsg').textContent='Pick an entity.'; return; }
   try{ await api('/corp/leases',{method:'POST',body:JSON.stringify(b)}); $('leaseEditor').innerHTML=''; renderCorpLeases($('corpBody')); }catch(e){ if($('lMsg'))$('lMsg').textContent=e.message; }
 }
@@ -5952,7 +5961,7 @@ async function openLease(id){
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(l.entity)} — lease</h3><p class="sub sans" style="margin:0">${esc(l.property_address||'')}${l.landlord?' · Landlord: '+esc(l.landlord):''}${term?' · '+esc(term):''}${l.monthly_rent?' · '+esc(l.monthly_rent)+'/mo':''}</p></div>${l.doc_url?`<a class="btn btn-ghost btn-sm sans" href="${esc(l.doc_url)}" target="_blank" rel="noopener">📄 Open PDF</a>`:''}</div>
     <div style="background:#faf6ee;border-left:4px solid var(--gold);padding:10px;border-radius:6px;margin-top:8px">
       <h3 style="margin:0 0 4px">🤖 Ask about this lease</h3>
-      <p class="sub sans" style="margin:0 0 6px">${l.has_text||(l.lease_text&&l.lease_text.length>40)?'Ask anything — e.g. “Is the HVAC repair the landlord’s responsibility?” Answers come only from the lease text.':'<span style="color:#a60">No lease text on file yet. Tap Edit and paste the lease text so the assistant can read it.</span>'}</p>
+      <p class="sub sans" style="margin:0 0 6px">${l.file_id||(l.lease_text&&l.lease_text.length>40)?'Ask anything — e.g. “Is the HVAC repair the landlord’s responsibility?” Answers come only from this lease document.':'<span style="color:#a60">No lease on file yet. Tap Edit and <strong>upload the lease</strong> (or paste its text) so the assistant can read it.</span>'}</p>
       <div class="toolbar" style="justify-content:flex-start;gap:6px"><input id="leaseQ" placeholder="Is ___ covered by the landlord?" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')askLeaseQ(${l.id})"/><button class="btn btn-gold btn-sm sans" onclick="askLeaseQ(${l.id})">Ask</button></div>
       <div class="toolbar" style="justify-content:flex-start;gap:4px;margin-top:4px;flex-wrap:wrap">${['Who pays for roof repairs?','Is HVAC the landlord’s responsibility?','What are my renewal options?','Who handles snow removal & landscaping?','Can I sublease or assign?'].map(s=>`<button class="btn btn-ghost btn-sm sans" onclick="$('leaseQ').value=this.textContent;askLeaseQ(${l.id})" style="font-size:11px">${esc(s)}</button>`).join('')}</div>
       <div id="leaseAns"></div></div>
@@ -5965,7 +5974,19 @@ async function askLeaseQ(id){
     if(ans)ans.innerHTML=`<div class="pc-note" style="margin-top:8px;white-space:pre-wrap;background:#fff">${esc(r.answer)}</div><div class="hint" style="margin-top:2px">Guidance from the document — confirm anything ambiguous with counsel or the broker.</div>`;
   }catch(e){ if(ans)ans.innerHTML='<div class="hint" style="margin-top:8px;color:var(--danger)">'+esc(e.message)+'</div>'; }
 }
-let INS_DATA=null, INS_EDIT=null;
+// Upload a document → AI reads it → prefill a form. kind: 'insurance' | 'leases'.
+function corpPickFile(kind, statusEl, onDone){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.pdf,image/*';
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(!f)return; if(statusEl)statusEl.innerHTML='⏳ Reading <strong>'+esc(f.name)+'</strong> with AI…';
+    const r=new FileReader(); r.onload=async()=>{ const data=String(r.result).replace(/^data:[^;]+;base64,/,'');
+      try{ const resp=await api('/corp/'+kind+'/extract',{method:'POST',body:JSON.stringify({data,media_type:f.type||'application/pdf',name:f.name})});
+        if(statusEl)statusEl.innerHTML='✓ Read <strong>'+esc(f.name)+'</strong> — review the fields below and Save.'; onDone(resp.fields||{}, resp.fileId, resp.fileUrl); }
+      catch(e){ if(statusEl)statusEl.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } };
+    r.readAsDataURL(f);
+  };
+  inp.click();
+}
+let INS_DATA=null, INS_EDIT=null, INS_FILE=null;
 async function renderCorpInsurance(body){
   let d; try{ d=await api('/corp/insurance'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
   INS_DATA=d;
@@ -6010,8 +6031,10 @@ function openInsuranceEditor(p){
   const host=$('insEditor'); if(!host) return; INS_EDIT=p;
   const d=INS_DATA||{}; const locs=d.locations||[], types=d.coverageTypes||[], brokers=d.brokers||[];
   const opt=(arr,cur)=>arr.map(x=>`<option ${x===cur?'selected':''}>${esc(x)}</option>`).join('');
+  INS_FILE=p.file_id||null;
   host.innerHTML=`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><h3 style="margin-top:0">${p.id?'Edit':'Add'} policy</h3>
-    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+    <div class="pc-note" style="background:#faf6ee;border-left:4px solid var(--gold)"><strong>📎 Upload the policy — AI fills it in.</strong> No manual typing. <button class="btn btn-gold btn-sm sans" onclick="corpPickFile('insurance',$('insUpStatus'),applyInsExtract)">Upload contract (PDF/photo)</button> <span id="insUpStatus" class="hint"></span></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">
       <label class="hint">Entity<br><select id="iEntity"><option value="">—</option>${opt(locs,p.entity)}</select></label>
       <label class="hint">Coverage<br><select id="iType"><option value="">—</option>${opt(types,p.coverage_type)}</select></label>
       <label class="hint">Carrier<br><input id="iCarrier" value="${esc(p.carrier||'')}" style="min-width:130px"/></label>
@@ -6029,9 +6052,18 @@ function openInsuranceEditor(p){
     <label class="hint" style="display:block;margin-top:6px">Notes</label><input id="iNotes" value="${esc(p.notes||'')}" style="width:100%"/>
     <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="saveInsurance()">Save policy</button><button class="btn btn-ghost btn-sm sans" onclick="INS_EDIT=null;$('insEditor').innerHTML=''">Cancel</button>${p.id?`<button class="btn btn-ghost btn-sm sans" style="color:var(--danger)" onclick="delInsurance(${p.id})">Delete</button>`:''}<span id="iMsg" class="hint" style="align-self:center"></span></div></div>`;
 }
+function setVal(id,v){ const el=$(id); if(el&&v!=null&&v!=='') el.value=v; }
+function applyInsExtract(f,fileId){
+  INS_FILE=fileId||INS_FILE;
+  // entity: try to match named insured to a known location
+  if(f.named_insured){ const locs=(INS_DATA&&INS_DATA.locations)||[]; const hit=locs.find(l=>l.toLowerCase().includes(String(f.named_insured).toLowerCase().split(',')[0].slice(0,10))||String(f.named_insured).toLowerCase().includes(l.toLowerCase().split(',')[0].slice(0,10))); if(hit&&$('iEntity'))$('iEntity').value=hit; }
+  if(f.coverage_type){ const types=(INS_DATA&&INS_DATA.coverageTypes)||[]; const m=types.find(t=>t.toLowerCase()===String(f.coverage_type).toLowerCase())||types.find(t=>String(f.coverage_type).toLowerCase().includes(t.toLowerCase().split(' ')[0])); if(m&&$('iType'))$('iType').value=m; }
+  setVal('iCarrier',f.carrier); setVal('iPolNum',f.policy_number); setVal('iEff',(f.effective_date||'').slice(0,10)); setVal('iExp',(f.expiration_date||'').slice(0,10));
+  setVal('iPrem',f.premium); setVal('iLimE',f.limit_each); setVal('iLimA',f.limit_aggregate); setVal('iDed',f.deductible); setVal('iNotes',f.notes);
+}
 async function saveInsurance(){
   const g=id=>($(id)||{}).value||'';
-  const b={id:INS_EDIT&&INS_EDIT.id,entity:g('iEntity'),coverage_type:g('iType'),carrier:g('iCarrier'),policy_number:g('iPolNum'),broker_id:g('iBroker')||null,broker_name:'',effective_date:g('iEff'),expiration_date:g('iExp'),premium:g('iPrem'),limit_each:g('iLimE'),limit_aggregate:g('iLimA'),deductible:g('iDed'),status:g('iStatus'),doc_url:g('iDoc'),notes:g('iNotes')};
+  const b={id:INS_EDIT&&INS_EDIT.id,entity:g('iEntity'),coverage_type:g('iType'),carrier:g('iCarrier'),policy_number:g('iPolNum'),broker_id:g('iBroker')||null,broker_name:'',effective_date:g('iEff'),expiration_date:g('iExp'),premium:g('iPrem'),limit_each:g('iLimE'),limit_aggregate:g('iLimA'),deductible:g('iDed'),status:g('iStatus'),doc_url:g('iDoc'),notes:g('iNotes'),file_id:INS_FILE};
   const bk=(INS_DATA.brokers||[]).find(x=>String(x.id)===String(b.broker_id)); if(bk) b.broker_name=bk.name;
   if(!b.entity||!b.coverage_type){ if($('iMsg'))$('iMsg').textContent='Entity and coverage are required.'; return; }
   try{ await api('/corp/insurance',{method:'POST',body:JSON.stringify(b)}); INS_EDIT=null; renderCorpInsurance($('corpBody')); }catch(e){ if($('iMsg'))$('iMsg').textContent=e.message; }

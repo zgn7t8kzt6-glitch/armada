@@ -325,6 +325,93 @@ RULES:
   need to confirm with the landlord or broker. Never guess.
 - Be concise and practical. This is guidance from the document, not legal advice —
   end anything ambiguous with a one-line suggestion to confirm with counsel/broker.`;
+// ---- Document extraction: read an uploaded PDF/image and pull structured fields ----
+async function extractFromDoc(base64, mediaType, system, schema, instruction) {
+  const client = await getClient();
+  const isImg = String(mediaType || '').startsWith('image/');
+  const block = isImg
+    ? { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } }
+    : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } };
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 8000,
+    system: G + system,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema } },
+    messages: [{ role: 'user', content: [block, { type: 'text', text: instruction }] }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) throw new Error('No data could be read from the document.');
+  return JSON.parse(t.text);
+}
+const INSURANCE_EXTRACT_SCHEMA = {
+  type: 'object',
+  properties: {
+    coverage_type: { type: 'string', description: 'The line of coverage, normalized to one of: General Liability, Professional Liability, Property, Workers Compensation, Commercial Auto, Umbrella / Excess, Cyber Liability, Directors & Officers, Employment Practices (EPLI), Abuse & Molestation. Best match if wording differs.' },
+    named_insured: { type: 'string', description: 'The named insured / entity on the policy. Empty string if unclear.' },
+    carrier: { type: 'string', description: 'Insurance carrier / company. Empty string if not found.' },
+    policy_number: { type: 'string' },
+    broker_name: { type: 'string', description: 'Broker / agency / producer if shown. Empty string if none.' },
+    effective_date: { type: 'string', description: 'Policy effective date as YYYY-MM-DD, or empty string.' },
+    expiration_date: { type: 'string', description: 'Policy expiration date as YYYY-MM-DD, or empty string.' },
+    premium: { type: 'string', description: 'Annual premium as a number without symbols (e.g. 12500), or empty string.' },
+    limit_each: { type: 'string', description: 'Per-occurrence / each-claim limit (e.g. $1,000,000), or empty.' },
+    limit_aggregate: { type: 'string', description: 'Aggregate limit, or empty.' },
+    deductible: { type: 'string', description: 'Deductible / retention, or empty.' },
+    notes: { type: 'string', description: 'Anything important the operator should know (endorsements, exclusions, sublimits). Brief. Empty if none.' },
+  },
+  required: ['coverage_type', 'named_insured', 'carrier', 'policy_number', 'broker_name', 'effective_date', 'expiration_date', 'premium', 'limit_each', 'limit_aggregate', 'deductible', 'notes'],
+  additionalProperties: false,
+};
+export async function extractInsuranceDoc(base64, mediaType) {
+  return extractFromDoc(base64, mediaType,
+    'You read insurance policies / certificates and extract the key facts accurately. Only report what the document states; use empty strings for anything not present. Never guess dates or numbers.',
+    INSURANCE_EXTRACT_SCHEMA,
+    'Extract the policy details from this insurance document. Dates MUST be YYYY-MM-DD. If several coverages appear, extract the PRIMARY one this document is for.');
+}
+const LEASE_EXTRACT_SCHEMA = {
+  type: 'object',
+  properties: {
+    property_address: { type: 'string' },
+    landlord: { type: 'string', description: 'Landlord / lessor name. Empty if unclear.' },
+    landlord_email: { type: 'string', description: 'Landlord contact email if present, else empty.' },
+    landlord_contact: { type: 'string', description: 'Landlord phone / contact person if present, else empty.' },
+    monthly_rent: { type: 'string', description: 'Monthly base rent (e.g. $3,500), or empty.' },
+    security_deposit: { type: 'string' },
+    term_start: { type: 'string', description: 'Lease commencement date YYYY-MM-DD, or empty.' },
+    term_end: { type: 'string', description: 'Lease expiration date YYYY-MM-DD, or empty.' },
+    renewal_terms: { type: 'string', description: 'Renewal / extension options in one or two sentences, or empty.' },
+    landlord_categories: { type: 'string', description: 'Comma-separated list of the repair/maintenance categories the LANDLORD is responsible for per the lease (e.g. "Roof, Structural, HVAC, Plumbing"). Empty if the lease does not specify.' },
+    responsibilities: { type: 'string', description: 'A short plain summary of the landlord vs tenant responsibility split.' },
+  },
+  required: ['property_address', 'landlord', 'landlord_email', 'landlord_contact', 'monthly_rent', 'security_deposit', 'term_start', 'term_end', 'renewal_terms', 'landlord_categories', 'responsibilities'],
+  additionalProperties: false,
+};
+export async function extractLeaseDoc(base64, mediaType) {
+  return extractFromDoc(base64, mediaType,
+    'You read commercial real-estate leases and extract the key facts accurately. Only report what the lease states; use empty strings for anything not present. Never guess dates or numbers.',
+    LEASE_EXTRACT_SCHEMA,
+    'Extract the lease details. Dates MUST be YYYY-MM-DD. For landlord_categories, list only the maintenance/repair categories the lease assigns to the LANDLORD.');
+}
+// Ask a question about a lease directly from the uploaded file (PDF/image).
+export async function askLeaseDoc(base64, mediaType, question, meta = {}) {
+  const client = await getClient();
+  const isImg = String(mediaType || '').startsWith('image/');
+  const block = isImg
+    ? { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } }
+    : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } };
+  const header = [meta.entity ? `Facility/entity: ${meta.entity}` : '', meta.landlord ? `Landlord: ${meta.landlord}` : ''].filter(Boolean).join('\n');
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1200,
+    system: G + LEASE_SYSTEM,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: [block, { type: 'text', text: `QUESTION: ${question}\n${header ? '\n' + header : ''}\n\nAnswer only from this lease document.` }] }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+}
+
 export async function askLease(leaseText, question, meta = {}) {
   const client = await getClient();
   const header = [meta.entity ? `Facility/entity: ${meta.entity}` : '', meta.landlord ? `Landlord: ${meta.landlord}` : '', meta.property ? `Property: ${meta.property}` : ''].filter(Boolean).join('\n');

@@ -1580,6 +1580,20 @@ addColumn('maintenance_requests', 'facility', 'TEXT'); // which location the wor
 addColumn('leases', 'landlord_email', 'TEXT');            // where landlord-responsibility emails go
 addColumn('leases', 'landlord_categories', 'TEXT');      // comma list of categories the landlord covers
 addColumn('order_requests', 'landlord_emailed', 'TEXT'); // when we auto-emailed the landlord (dedupe)
+addColumn('leases', 'file_id', 'INTEGER');               // uploaded lease file (corp_files)
+addColumn('insurance_policies', 'file_id', 'INTEGER');   // uploaded policy file (corp_files)
+// Uploaded corporate documents (insurance contracts, leases). Stored as base64 so the
+// AI can read them and they're downloadable.
+db.exec(`CREATE TABLE IF NOT EXISTS corp_files (
+  id INTEGER PRIMARY KEY,
+  kind TEXT,                                   -- insurance | lease
+  name TEXT,
+  media_type TEXT,
+  data TEXT,                                   -- base64
+  size INTEGER,
+  uploaded_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 addColumn('inventory_items', 'sku', 'TEXT');           // supplier/product code (e.g. PFS code) for ordering
 addColumn('assigned_tasks', 'assigned_by_id', 'INTEGER'); // who created the task, so they can see responses
 // Cleanup: older syncs sometimes saved the building/facility name (e.g. "Armada

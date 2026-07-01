@@ -18,13 +18,14 @@ import {
   mfaSetup, mfaEnable, mfaDisable, hashPassword, otpauthForTicket, mfaRequired, setMfaRequired,
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
-import { ensureAdmin, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
+import { ensureAdmin, ensureCorporateUser, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
 ensureAdmin();
+ensureCorporateUser();
 if (process.env.SEED_SAMPLE === 'true') ensureSampleData();
 ensureExampleClient12A();
 ensureInventoryCatalog();
@@ -120,7 +121,11 @@ function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
 setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Corporate'];
+// Corporate Operations (Chava): sees ordering, maintenance, and her hub — plus owner/
+// leadership can see it too. A shared board, so anyone can drop a task for her.
+function canSeeCorp(user) { return !!user && (user.role === 'admin' || ['Corporate', 'Executive Director', 'Director of Operations'].includes(user.job_role)); }
+function requireCorp(req, res, next) { if (!canSeeCorp(req.user)) return res.status(403).json({ error: 'Corporate access only.' }); next(); }
 
 /* ───────── Selection over hiring (Horst Schulze): role profiles + structured interview ───────── */
 const HIRING_STAGES = ['Applied', 'Phone screen', 'Interview', 'References', 'Offer', 'Hired', 'Passed'];
@@ -320,7 +325,7 @@ function sparkConfigured() { return false; }
 function connectionReachable(conn) { return conn === 'spark' ? sparkConfigured() : kipuConfigured(); }
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
-  if (user) user.outpatientAccess = canSeeOutpatient(user);
+  if (user) { user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); }
   res.json({ user: user || null });
 });
 
@@ -3106,6 +3111,103 @@ app.get('/api/ownership', requireAuth, requireOutpatient, async (req, res) => {
     sparkPending: facilities.some((f) => f.connection === 'spark') && !sparkConfigured(),
   });
 });
+// ── Corporate Operations Hub (Chava) ──────────────────────────────────────────
+// One dashboard: ordering + maintenance status with completion counts and cycle
+// times, the project board, vendors, and the facility document store.
+function cycleDays(a, b) { if (!a || !b) return null; const n = (Date.parse(b) - Date.parse(a)) / 864e5; return n >= 0 ? +n.toFixed(1) : null; }
+function avgOf(arr) { const v = arr.filter((n) => n != null); return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : null; }
+app.get('/api/corp/overview', requireAuth, requireCorp, (req, res) => {
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : addDays(appToday(), -30);
+  // Ordering (reorder_requests): open now, completed (received) in window, cycle times.
+  const ordOpen = db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status != 'received'`).get().n;
+  const ordDone = db.prepare(`SELECT * FROM reorder_requests WHERE status = 'received' AND substr(received_at,1,10) >= ?`).all(since);
+  const orderCycle = avgOf(ordDone.map((r) => cycleDays(r.created_at, r.ordered_at)));   // flagged → ordered
+  const receiveCycle = avgOf(ordDone.map((r) => cycleDays(r.ordered_at || r.created_at, r.received_at)));  // ordered → received
+  const ordering = {
+    open: ordOpen,
+    awaitingOrder: db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'open'`).get().n,
+    ordered: db.prepare(`SELECT COUNT(*) n FROM reorder_requests WHERE status = 'ordered'`).get().n,
+    completed: ordDone.length,
+    avgToOrderDays: orderCycle, avgToReceiveDays: receiveCycle,
+  };
+  // Maintenance: open, in progress, resolved in window, cycle time.
+  const mOpen = db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status IN ('open','in_progress')`).get().n;
+  const mDone = db.prepare(`SELECT created_at, resolved_at FROM maintenance_requests WHERE status IN ('resolved','closed') AND substr(resolved_at,1,10) >= ?`).all(since);
+  const maintenance = {
+    open: db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status = 'open'`).get().n,
+    inProgress: db.prepare(`SELECT COUNT(*) n FROM maintenance_requests WHERE status = 'in_progress'`).get().n,
+    openTotal: mOpen,
+    completed: mDone.length,
+    avgResolveDays: avgOf(mDone.map((r) => cycleDays(r.created_at, r.resolved_at))),
+  };
+  // Project board rollup.
+  const tasks = db.prepare(`SELECT status, COUNT(*) n FROM corp_tasks GROUP BY status`).all();
+  const taskCounts = { todo: 0, doing: 0, blocked: 0, done: 0 };
+  for (const t of tasks) taskCounts[t.status] = t.n;
+  res.json({ since, ordering, maintenance, taskCounts });
+});
+// Project / task board — anyone with corp access can add; corporate works them.
+app.get('/api/corp/tasks', requireAuth, requireCorp, (req, res) => {
+  const rows = db.prepare(`SELECT * FROM corp_tasks ORDER BY (status='done'), CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, COALESCE(due_date,'9999'), id DESC`).all();
+  res.json({ tasks: rows });
+});
+app.post('/api/corp/tasks', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.title || '').trim()) return res.status(400).json({ error: 'Title required.' });
+  const cats = ['Project', 'Errand', 'Ordering', 'Maintenance', 'Admin', 'Morale'];
+  const pris = ['Low', 'Normal', 'High', 'Urgent'];
+  const info = db.prepare(`INSERT INTO corp_tasks (title, detail, category, priority, facility, requested_by_id, requested_by, assignee, due_date)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    String(b.title).trim().slice(0, 200), String(b.detail || '').slice(0, 4000),
+    cats.includes(b.category) ? b.category : 'Project', pris.includes(b.priority) ? b.priority : 'Normal',
+    String(b.facility || '').slice(0, 80), req.user.id, req.user.name,
+    String(b.assignee || '').slice(0, 80), /^\d{4}-\d{2}-\d{2}$/.test(b.due_date || '') ? b.due_date : null);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.patch('/api/corp/tasks/:id', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  const t = db.prepare(`SELECT * FROM corp_tasks WHERE id = ?`).get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Not found.' });
+  const status = ['todo', 'doing', 'blocked', 'done'].includes(b.status) ? b.status : t.status;
+  const completedAt = status === 'done' ? (t.completed_at || new Date().toISOString()) : null;
+  db.prepare(`UPDATE corp_tasks SET status=?, priority=COALESCE(?,priority), assignee=COALESCE(?,assignee), detail=COALESCE(?,detail), due_date=COALESCE(?,due_date), completed_at=?, updated_at=datetime('now') WHERE id=?`)
+    .run(status, ['Low', 'Normal', 'High', 'Urgent'].includes(b.priority) ? b.priority : null,
+      b.assignee != null ? String(b.assignee).slice(0, 80) : null, b.detail != null ? String(b.detail).slice(0, 4000) : null,
+      /^\d{4}-\d{2}-\d{2}$/.test(b.due_date || '') ? b.due_date : null, completedAt, t.id);
+  res.json({ ok: true });
+});
+app.delete('/api/corp/tasks/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM corp_tasks WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// Vendor directory.
+app.get('/api/corp/vendors', requireAuth, requireCorp, (req, res) => res.json({ vendors: db.prepare(`SELECT * FROM vendors WHERE active = 1 ORDER BY category, name`).all() }));
+app.post('/api/corp/vendors', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.name || '').trim()) return res.status(400).json({ error: 'Name required.' });
+  if (b.id) {
+    db.prepare(`UPDATE vendors SET name=?, category=?, contact_name=?, phone=?, email=?, account_number=?, facility=?, notes=?, updated_at=datetime('now') WHERE id=?`)
+      .run(b.name.trim().slice(0, 120), String(b.category || '').slice(0, 40), String(b.contact_name || '').slice(0, 80), String(b.phone || '').slice(0, 40), String(b.email || '').slice(0, 120), String(b.account_number || '').slice(0, 60), String(b.facility || '').slice(0, 80), String(b.notes || '').slice(0, 2000), b.id);
+    return res.json({ ok: true, id: b.id });
+  }
+  const info = db.prepare(`INSERT INTO vendors (name, category, contact_name, phone, email, account_number, facility, notes) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(b.name.trim().slice(0, 120), String(b.category || '').slice(0, 40), String(b.contact_name || '').slice(0, 80), String(b.phone || '').slice(0, 40), String(b.email || '').slice(0, 120), String(b.account_number || '').slice(0, 60), String(b.facility || '').slice(0, 80), String(b.notes || '').slice(0, 2000));
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/vendors/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`UPDATE vendors SET active = 0 WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// Facility documents / recurring info store.
+app.get('/api/corp/docs', requireAuth, requireCorp, (req, res) => res.json({ docs: db.prepare(`SELECT * FROM facility_docs ORDER BY facility, doc_type, COALESCE(renewal_date,'9999'), title`).all() }));
+app.post('/api/corp/docs', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.title || '').trim()) return res.status(400).json({ error: 'Title required.' });
+  const types = ['Lease', 'Utility', 'Insurance', 'Permit/License', 'Internet/Phone', 'Contract', 'Other'];
+  if (b.id) {
+    db.prepare(`UPDATE facility_docs SET facility=?, doc_type=?, title=?, provider=?, account_number=?, amount=?, renewal_date=?, url=?, notes=?, updated_at=datetime('now') WHERE id=?`)
+      .run(String(b.facility || '').slice(0, 80), types.includes(b.doc_type) ? b.doc_type : 'Other', b.title.trim().slice(0, 160), String(b.provider || '').slice(0, 120), String(b.account_number || '').slice(0, 60), String(b.amount || '').slice(0, 40), /^\d{4}-\d{2}-\d{2}$/.test(b.renewal_date || '') ? b.renewal_date : null, String(b.url || '').slice(0, 500), String(b.notes || '').slice(0, 4000), b.id);
+    return res.json({ ok: true, id: b.id });
+  }
+  const info = db.prepare(`INSERT INTO facility_docs (facility, doc_type, title, provider, account_number, amount, renewal_date, url, notes) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(String(b.facility || '').slice(0, 80), types.includes(b.doc_type) ? b.doc_type : 'Other', b.title.trim().slice(0, 160), String(b.provider || '').slice(0, 120), String(b.account_number || '').slice(0, 60), String(b.amount || '').slice(0, 40), /^\d{4}-\d{2}-\d{2}$/.test(b.renewal_date || '') ? b.renewal_date : null, String(b.url || '').slice(0, 500), String(b.notes || '').slice(0, 4000));
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/docs/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM facility_docs WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 app.get('/api/facilities', requireAuth, requireOutpatient, (req, res) => res.json({ facilities: getFacilities(), sparkConfigured: sparkConfigured() }));
 app.post('/api/facilities', requireAuth, requireAdmin, (req, res) => {
   const list = Array.isArray(req.body?.facilities) ? req.body.facilities : null;

@@ -196,7 +196,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',ownership:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',ownership:'command',corphub:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -273,6 +273,9 @@ const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // The handful of shared pages housing staff still get (their own tasks/comms/learning) —
 // everything else clinical/detox stays hidden from them.
 const UNIVERSAL_VIEWS = ['myrole','mystats','mygrowth','mytasks','messages','team','training','library','standard'];
+// Corporate Operations (Chava): walled to her lane — the hub, ordering, maintenance.
+const CORPORATE_VIEWS = ['corphub','inventory','maintenance'];
+function isCorporateRole(){ return !!(ME && ME.job_role==='Corporate'); }
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
 // tabs, nothing buried) instead of the journey groups. Other roles keep the full nav.
 const ROLE_MENU = {
@@ -284,6 +287,7 @@ const ROLE_MENU = {
   'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
   'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
+  'Corporate': ['corphub','inventory','maintenance','myrole','mygrowth','messages'],
   'Housing Director': ['housing','myrole','mygrowth','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','mygrowth','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','myrole','mygrowth','housing','voice','activities','residents','houses','mytasks','messages'],
@@ -319,6 +323,8 @@ function flatMenu(){
   // Manager / Recovery Coach) ALWAYS get the focused, Hilltop-only flat menu —
   // even if they're also an admin — so they never see any Armada/detox pages.
   if(isHousingRole()) return ROLE_MENU[ME.job_role] ? ROLE_MENU[ME.job_role].filter(canSeeView) : null;
+  // Corporate (Chava) gets a focused, corporate-only flat menu.
+  if(isCorporateRole()) return ROLE_MENU['Corporate'].filter(canSeeView);
   // Admins + leadership keep the full grouped nav.
   if(ME.role==='admin' || ME.job_role==='Director of Operations') return null;
   if(ME.job_role==='Executive Director') return null;
@@ -330,6 +336,10 @@ function canSeeView(v){
   // Akron Outpatient is owner-only: the admin, plus anyone the owner explicitly grants.
   // Even Exec/Ops directors don't see it unless granted — so this check comes first.
   if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
+  // Corporate hub: Chava, plus owner/leadership. Even non-corporate leadership gets it.
+  if(v==='corphub') return !!(ME.role==='admin' || ME.corpAccess);
+  // Corporate role is walled to its own lane — the hub, ordering, maintenance.
+  if(isCorporateRole()) return CORPORATE_VIEWS.includes(v) || UNIVERSAL_VIEWS.includes(v);
   // Recovery Housing is walled off: only the owner/admin and housing staff see it.
   // Nobody on the clinical/detox side does — not even the broad-leadership roles below.
   if(HOUSING_VIEWS.includes(v)) return ME.role==='admin' || ME.job_role==='Executive Director' || HOUSING_ROLES.includes(ME.job_role);
@@ -493,6 +503,7 @@ function show(v){
   if(v==='dupes') loadDupes();
   if(v==='outpatient') loadOutpatient();
   if(v==='ownership') loadOwnership();
+  if(v==='corphub') loadCorpHub();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5641,6 +5652,147 @@ async function saveFacilities(){
   const m=$('ownFacMsg'); if(m)m.textContent='Saving…';
   try{ await api('/facilities',{method:'POST',body:JSON.stringify({facilities:fs})}); if(m)m.textContent='✓ Saved'; loadOwnership(); }
   catch(e){ if(m)m.textContent=e.message; }
+}
+let CORP_TAB='dashboard';
+async function loadCorpHub(){
+  const host=$('corphub'); if(!host) return;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div></div>
+    <div class="itabs" id="corpTabs" style="margin-top:6px">
+      ${['dashboard|📊 Dashboard','projects|✅ Projects','vendors|📇 Vendors','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
+    </div></div>
+    <div id="corpBody"><div class="hint">Loading…</div></div>`;
+  renderCorpTab();
+}
+function corpTab(k){ CORP_TAB=k; document.querySelectorAll('#corpTabs .itab').forEach(b=>b.classList.toggle('active', b.getAttribute('onclick').includes("'"+k+"'"))); renderCorpTab(); }
+async function renderCorpTab(){
+  const body=$('corpBody'); if(!body) return; body.innerHTML='<div class="hint">Loading…</div>';
+  if(CORP_TAB==='dashboard') return renderCorpDashboard(body);
+  if(CORP_TAB==='projects') return renderCorpProjects(body);
+  if(CORP_TAB==='vendors') return renderCorpVendors(body);
+  if(CORP_TAB==='docs') return renderCorpDocs(body);
+  if(CORP_TAB==='role') return renderCorpRole(body);
+}
+async function renderCorpDashboard(body){
+  let d; try{ d=await api('/corp/overview'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const o=d.ordering||{}, m=d.maintenance||{}, tc=d.taskCounts||{};
+  const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  body.innerHTML=`
+    <div class="card"><h3 style="margin-top:0">🛒 Ordering</h3>
+      <div class="ret-cards">${box(o.open||0,'Open to order',(o.open?'rc-elev':''))}${box(o.ordered||0,'Ordered · awaiting')}${box(o.completed||0,'Received (30d)')}${box(o.avgToReceiveDays!=null?o.avgToReceiveDays+'d':'—','Avg order→receive')}</div>
+      <div class="hint" style="margin-top:6px">Avg flag→ordered: <strong>${o.avgToOrderDays!=null?o.avgToOrderDays+'d':'—'}</strong>. <a href="#" onclick="show('inventory');return false">Open Ordering ↗</a></div></div>
+    <div class="card"><h3 style="margin-top:0">🔧 Maintenance</h3>
+      <div class="ret-cards">${box(m.open||0,'Open',(m.open?'rc-elev':''))}${box(m.inProgress||0,'In progress')}${box(m.completed||0,'Resolved (30d)')}${box(m.avgResolveDays!=null?m.avgResolveDays+'d':'—','Avg time to resolve')}</div>
+      <div class="hint" style="margin-top:6px"><a href="#" onclick="show('maintenance');return false">Open Maintenance ↗</a></div></div>
+    <div class="card"><h3 style="margin-top:0">✅ Projects</h3>
+      <div class="ret-cards">${box(tc.todo||0,'To do')}${box(tc.doing||0,'In progress')}${box(tc.blocked||0,'Blocked',(tc.blocked?'rc-elev':''))}${box(tc.done||0,'Done')}</div>
+      <div class="hint" style="margin-top:6px"><a href="#" onclick="corpTab('projects');return false">Open the board ↗</a></div></div>`;
+}
+async function renderCorpProjects(body){
+  let d; try{ d=await api('/corp/tasks'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const ts=d.tasks||[];
+  const cats=['Project','Errand','Ordering','Maintenance','Admin','Morale'], pris=['Low','Normal','High','Urgent'];
+  const cols=[['todo','To do'],['doing','In progress'],['blocked','Blocked'],['done','Done']];
+  const priColor=(p)=>p==='Urgent'?'var(--danger)':p==='High'?'#a60':'';
+  const nextBtns=(t)=>['todo','doing','blocked','done'].filter(s=>s!==t.status).map(s=>`<button class="btn btn-ghost btn-sm sans" onclick="setCorpTask(${t.id},'${s}')">${s==='doing'?'▶ Start':s==='done'?'✓ Done':s==='blocked'?'⛔ Block':'↩ To-do'}</button>`).join('');
+  const card=(t)=>`<div class="pc-note" style="border-left:3px solid ${priColor(t.priority)||'var(--line)'}"><div style="display:flex;justify-content:space-between;gap:6px"><strong>${esc(t.title)}</strong><span class="hint">${esc(t.category)}</span></div>
+    ${t.detail?`<div class="hint">${esc(t.detail)}</div>`:''}
+    <div class="hint" style="margin-top:2px">${t.priority!=='Normal'?`<span style="color:${priColor(t.priority)}">${esc(t.priority)}</span> · `:''}${t.assignee?'👤 '+esc(t.assignee)+' · ':''}${t.due_date?'📅 '+esc(t.due_date)+' · ':''}from ${esc(t.requested_by||'—')}${t.facility?' · '+esc(t.facility):''}</div>
+    <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${nextBtns(t)}<button class="btn btn-ghost btn-sm sans" onclick="delCorpTask(${t.id})">🗑</button></div></div>`;
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add a task</h3>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+        <input id="ctTitle" placeholder="What needs doing?" style="min-width:220px"/>
+        <select id="ctCat">${cats.map(c=>`<option>${c}</option>`).join('')}</select>
+        <select id="ctPri">${pris.map(p=>`<option ${p==='Normal'?'selected':''}>${p}</option>`).join('')}</select>
+        <input id="ctAssignee" placeholder="Assignee (optional)" style="min-width:120px"/>
+        <input id="ctDue" type="date"/>
+        <button class="btn btn-gold btn-sm sans" onclick="addCorpTask()">Add</button></div>
+      <input id="ctDetail" placeholder="Details / notes (optional)" style="width:100%;margin-top:6px"/>
+      <span id="ctMsg" class="hint"></span></div>
+    <div class="cmd-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
+      ${cols.map(([k,l])=>`<div class="card"><h3 style="margin-top:0;font-size:14px">${l} <span class="hint" style="font-weight:400">· ${ts.filter(t=>t.status===k).length}</span></h3>${ts.filter(t=>t.status===k).map(card).join('')||'<div class="hint">—</div>'}</div>`).join('')}
+    </div>`;
+}
+async function addCorpTask(){
+  const b={title:($('ctTitle')||{}).value||'',category:($('ctCat')||{}).value,priority:($('ctPri')||{}).value,assignee:($('ctAssignee')||{}).value||'',due_date:($('ctDue')||{}).value||'',detail:($('ctDetail')||{}).value||''};
+  if(!b.title.trim()){ if($('ctMsg'))$('ctMsg').textContent='Add a title.'; return; }
+  try{ await api('/corp/tasks',{method:'POST',body:JSON.stringify(b)}); renderCorpProjects($('corpBody')); }catch(e){ if($('ctMsg'))$('ctMsg').textContent=e.message; }
+}
+async function setCorpTask(id,status){ try{ await api('/corp/tasks/'+id,{method:'PATCH',body:JSON.stringify({status})}); renderCorpProjects($('corpBody')); }catch(e){ alert(e.message); } }
+async function delCorpTask(id){ if(!confirm('Delete this task?'))return; try{ await api('/corp/tasks/'+id,{method:'DELETE'}); renderCorpProjects($('corpBody')); }catch(e){ alert(e.message); } }
+async function renderCorpVendors(body){
+  let d; try{ d=await api('/corp/vendors'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const vs=d.vendors||[];
+  const cats=['Supplies','Plumbing','Electrical','HVAC','IT','Landscaping','Utilities','Appliance','Cleaning','Other'];
+  const row=(v)=>`<tr><td><strong>${esc(v.name)}</strong>${v.account_number?`<div class="hint">acct ${esc(v.account_number)}</div>`:''}</td><td class="hint">${esc(v.category||'')}</td><td>${esc(v.contact_name||'')}${v.phone?`<div><a href="tel:${esc(v.phone)}">${esc(v.phone)}</a></div>`:''}${v.email?`<div class="hint">${esc(v.email)}</div>`:''}</td><td class="hint">${esc(v.facility||'')}</td><td class="hint">${esc(v.notes||'')}</td><td><button class="btn btn-ghost btn-sm sans" onclick="delVendor(${v.id})">🗑</button></td></tr>`;
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add a vendor</h3>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+        <input id="vName" placeholder="Vendor name" style="min-width:160px"/>
+        <select id="vCat">${cats.map(c=>`<option>${c}</option>`).join('')}</select>
+        <input id="vContact" placeholder="Contact" style="min-width:120px"/>
+        <input id="vPhone" placeholder="Phone" style="min-width:110px"/>
+        <input id="vEmail" placeholder="Email" style="min-width:140px"/>
+        <input id="vAcct" placeholder="Account #" style="min-width:100px"/>
+        <input id="vFac" placeholder="Facility" style="min-width:110px"/>
+        <button class="btn btn-gold btn-sm sans" onclick="saveVendor()">Add</button></div>
+      <input id="vNotes" placeholder="Notes (what they do, hours, etc.)" style="width:100%;margin-top:6px"/>
+      <span id="vMsg" class="hint"></span></div>
+    <div class="card"><h3 style="margin-top:0">Vendors <span class="hint" style="font-weight:400">· ${vs.length}</span></h3>
+      ${vs.length?`<table class="tbl"><tr><th>Vendor</th><th>Category</th><th>Contact</th><th>Facility</th><th>Notes</th><th></th></tr>${vs.map(row).join('')}</table>`:'<div class="hint">No vendors yet — add the ones you call.</div>'}</div>`;
+}
+async function saveVendor(){
+  const b={name:($('vName')||{}).value||'',category:($('vCat')||{}).value,contact_name:($('vContact')||{}).value||'',phone:($('vPhone')||{}).value||'',email:($('vEmail')||{}).value||'',account_number:($('vAcct')||{}).value||'',facility:($('vFac')||{}).value||'',notes:($('vNotes')||{}).value||''};
+  if(!b.name.trim()){ if($('vMsg'))$('vMsg').textContent='Add a name.'; return; }
+  try{ await api('/corp/vendors',{method:'POST',body:JSON.stringify(b)}); renderCorpVendors($('corpBody')); }catch(e){ if($('vMsg'))$('vMsg').textContent=e.message; }
+}
+async function delVendor(id){ if(!confirm('Remove this vendor?'))return; try{ await api('/corp/vendors/'+id,{method:'DELETE'}); renderCorpVendors($('corpBody')); }catch(e){ alert(e.message); } }
+async function renderCorpDocs(body){
+  let d; try{ d=await api('/corp/docs'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const ds=d.docs||[];
+  const types=['Lease','Utility','Insurance','Permit/License','Internet/Phone','Contract','Other'];
+  const soon=(dt)=>{ if(!dt)return false; const days=(Date.parse(dt)-Date.now())/864e5; return days<=45; };
+  const row=(x)=>`<tr><td><strong>${esc(x.title)}</strong>${x.url?` <a href="${esc(x.url)}" target="_blank" rel="noopener">↗</a>`:''}<div class="hint">${esc(x.doc_type)}${x.provider?' · '+esc(x.provider):''}</div></td><td class="hint">${esc(x.facility||'')}</td><td class="hint">${esc(x.account_number||'')}</td><td class="hint">${esc(x.amount||'')}</td><td>${x.renewal_date?`<span ${soon(x.renewal_date)?'style="color:var(--danger);font-weight:600"':''}>${esc(x.renewal_date)}</span>`:'<span class="hint">—</span>'}</td><td class="hint">${esc(x.notes||'')}</td><td><button class="btn btn-ghost btn-sm sans" onclick="corpDelDoc(${x.id})">🗑</button></td></tr>`;
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add a document / recurring bill</h3>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+        <select id="dType">${types.map(t=>`<option>${t}</option>`).join('')}</select>
+        <input id="dTitle" placeholder="Title (e.g. Akron lease)" style="min-width:170px"/>
+        <input id="dProvider" placeholder="Provider / landlord" style="min-width:140px"/>
+        <input id="dFac" placeholder="Facility" style="min-width:110px"/>
+        <input id="dAcct" placeholder="Account #" style="min-width:100px"/>
+        <input id="dAmount" placeholder="Amount (e.g. $2,400/mo)" style="min-width:120px"/>
+        <label class="hint">Renews <input id="dRenew" type="date"/></label>
+        <button class="btn btn-gold btn-sm sans" onclick="corpSaveDoc()">Add</button></div>
+      <input id="dUrl" placeholder="Link to file (Drive/Dropbox) — optional" style="width:100%;margin-top:6px"/>
+      <input id="dNotes" placeholder="Notes" style="width:100%;margin-top:6px"/>
+      <span id="dMsg" class="hint"></span></div>
+    <div class="card"><h3 style="margin-top:0">Facility documents <span class="hint" style="font-weight:400">· ${ds.length}</span></h3>
+      <p class="sub sans" style="margin:0 0 6px">Leases, utilities, insurance, permits, internet/phone — the recurring facts. Renewal dates within 45 days show in red.</p>
+      ${ds.length?`<table class="tbl"><tr><th>Document</th><th>Facility</th><th>Account</th><th>Amount</th><th>Renews</th><th>Notes</th><th></th></tr>${ds.map(row).join('')}</table>`:'<div class="hint">Nothing stored yet — start with leases and utilities.</div>'}</div>`;
+}
+async function corpSaveDoc(){
+  const b={doc_type:($('dType')||{}).value,title:($('dTitle')||{}).value||'',provider:($('dProvider')||{}).value||'',facility:($('dFac')||{}).value||'',account_number:($('dAcct')||{}).value||'',amount:($('dAmount')||{}).value||'',renewal_date:($('dRenew')||{}).value||'',url:($('dUrl')||{}).value||'',notes:($('dNotes')||{}).value||''};
+  if(!b.title.trim()){ if($('dMsg'))$('dMsg').textContent='Add a title.'; return; }
+  try{ await api("/corp/docs",{method:"POST",body:JSON.stringify(b)}); renderCorpDocs($('corpBody')); }catch(e){ if($('dMsg'))$('dMsg').textContent=e.message; }
+}
+async function corpDelDoc(id){ if(!confirm("Delete this document record?"))return; try{ await api("/corp/docs/"+id,{method:'DELETE'}); renderCorpDocs($('corpBody')); }catch(e){ alert(e.message); } }
+function renderCorpRole(body){
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">⭐ Corporate Operations — your role</h3>
+    <p class="sub sans">You keep the facilities running so the care teams can focus on people. You are the owner's right hand on everything operational, administrative, and vendor-facing across all locations.</p>
+    <h3 style="font-size:14px;margin:10px 0 4px">What good looks like</h3>
+    <ul class="sans" style="margin:0;padding-left:18px;line-height:1.7">
+      <li><strong>Nothing runs out, nothing stays broken.</strong> Open orders and maintenance are cleared fast — you watch the Dashboard and drive both cycle times down.</li>
+      <li><strong>Every project moves.</strong> Anything the owner or team drops on your board gets a status, an owner, and a next step within the day. Nothing sits in “to-do” silently.</li>
+      <li><strong>One source of truth.</strong> Leases, utilities, insurance, permits, and the vendor list are all current here — anyone can find a document or a phone number in seconds.</li>
+      <li><strong>Ahead of renewals.</strong> No lease or policy ever lapses — you act on the red renewal dates before they arrive.</li>
+      <li><strong>You make it easy.</strong> The facility confirms; you don't chase. Orders and work orders flow to you and update themselves — your job is oversight and follow-through, not data entry.</li>
+    </ul>
+    <h3 style="font-size:14px;margin:12px 0 4px">Your responsibilities</h3>
+    <ul class="sans" style="margin:0;padding-left:18px;line-height:1.7">
+      <li>Ordering &amp; supply flow across facilities (with automation doing the heavy lifting).</li>
+      <li>Maintenance coordination — dispatch, follow-up, and closeout with vendors.</li>
+      <li>Project &amp; task management for the owner (executive-assistant work).</li>
+      <li>Facility records: leases, utilities, insurance, permits, vendor directory.</li>
+      <li>Employee-morale items you and the facility partner on.</li>
+    </ul></div>`;
 }
 async function loadOutpatient(){
   const host=$('outpatient'); if(!host) return;

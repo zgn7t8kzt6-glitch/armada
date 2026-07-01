@@ -1694,6 +1694,56 @@ db.exec(`CREATE TABLE IF NOT EXISTS maintenance_photos (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_maint_photos ON maintenance_photos(request_id);`);
+// ── Corporate Operations (Chava's hub): project/task board, vendors, facility docs ──
+// A lightweight project-management board — anyone can drop a task; corporate works it.
+db.exec(`CREATE TABLE IF NOT EXISTS corp_tasks (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  detail TEXT,
+  category TEXT NOT NULL DEFAULT 'Project',   -- Project | Errand | Ordering | Maintenance | Admin | Morale
+  status TEXT NOT NULL DEFAULT 'todo',        -- todo | doing | blocked | done
+  priority TEXT NOT NULL DEFAULT 'Normal',    -- Low | Normal | High | Urgent
+  facility TEXT,
+  requested_by_id INTEGER REFERENCES users(id),
+  requested_by TEXT,
+  assignee TEXT,
+  due_date TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_corp_tasks_status ON corp_tasks(status, priority);`);
+// Vendor directory — who corporate calls to get things done, per facility/category.
+db.exec(`CREATE TABLE IF NOT EXISTS vendors (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  category TEXT,                              -- Supplies | Plumbing | Electrical | HVAC | IT | Landscaping | Utilities | Other
+  contact_name TEXT,
+  phone TEXT,
+  email TEXT,
+  account_number TEXT,
+  facility TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+// Facility documents & recurring info — leases, utilities, insurance, permits. Stores
+// the structured facts + a link (file storage can come later); renewal_date drives reminders.
+db.exec(`CREATE TABLE IF NOT EXISTS facility_docs (
+  id INTEGER PRIMARY KEY,
+  facility TEXT,
+  doc_type TEXT NOT NULL DEFAULT 'Other',     -- Lease | Utility | Insurance | Permit/License | Internet/Phone | Contract | Other
+  title TEXT NOT NULL,
+  provider TEXT,
+  account_number TEXT,
+  amount TEXT,                                -- e.g. monthly cost / rent
+  renewal_date TEXT,
+  url TEXT,                                   -- link to the stored file (Drive/Dropbox/etc.)
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // Case-management needs the team should help with, pulled from the notes + manual.
 db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   id INTEGER PRIMARY KEY,

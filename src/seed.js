@@ -24,6 +24,23 @@ export function ensureAdmin({ quiet = false } = {}) {
   }
 }
 
+// Chava's corporate login. Idempotent: creates it once, sets her email + Corporate
+// role. Temp password from CHAVA_PASS (or generated + printed once) — she resets it.
+export function ensureCorporateUser({ quiet = false } = {}) {
+  const username = 'chavaa@armadarecovery.com';
+  const existing = db.prepare(`SELECT id FROM users WHERE lower(username) = ? OR lower(email) = ?`).get(username, username);
+  if (existing) {
+    // Make sure the role/email are set even if the row pre-existed.
+    db.prepare(`UPDATE users SET job_role = 'Corporate', email = COALESCE(email, ?), active = 1 WHERE id = ?`).run(username, existing.id);
+    return;
+  }
+  const generated = !process.env.CHAVA_PASS;
+  const pass = process.env.CHAVA_PASS || crypto.randomBytes(9).toString('base64url');
+  const u = createUser({ name: 'Chava', username, password: pass, role: 'staff', job_role: 'Corporate' });
+  try { db.prepare(`UPDATE users SET email = ? WHERE id = ?`).run(username, u.id || u); } catch { /* createUser return shape */ }
+  if (!quiet) console.log(`Created corporate user "${username}".` + (generated ? ` Temporary password: ${pass}  (set CHAVA_PASS or have her reset it).` : ''));
+}
+
 // Demo staff + one fully-filled client, so a pilot has something to look at.
 export function ensureSampleData() {
   for (const s of [

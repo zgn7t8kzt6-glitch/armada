@@ -3426,6 +3426,47 @@ app.post('/api/corp/intake/settings', requireAuth, requireAdmin, (req, res) => {
   if (b.regenerate) { setState('order_intake_token', crypto.randomBytes(18).toString('base64url')); }
   res.json({ ok: true, token: orderIntakeToken() });
 });
+// One-tap: email the complete Power Automate setup instructions (with the real
+// webhook URL baked in) to the IT company.
+app.post('/api/corp/intake/send-instructions', requireAuth, requireAdmin, async (req, res) => {
+  if (!emailConfigured()) return res.status(400).json({ error: 'Email isn’t connected — Settings → Email.' });
+  const to = String(req.body?.to || '').trim();
+  if (!/@/.test(to)) return res.status(400).json({ error: 'Enter the IT company’s email address.' });
+  const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  if (!base) return res.status(400).json({ error: 'Set “Your app URL” first (and Save), so the webhook link is complete.' });
+  const hook = `${base}/api/inbound/order?t=${orderIntakeToken()}`;
+  const esc = htmlEsc;
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:640px">
+    <p>Hi team,</p>
+    <p>Following up on the shared mailbox <strong>orders@armadarecovery.com</strong> — once it's in place, we need one Power Automate flow that forwards each incoming email to our operations app. Details below.</p>
+    <h3 style="margin:14px 0 4px">What we need</h3>
+    <p style="margin:0 0 8px">A Power Automate cloud flow that fires whenever an email arrives in orders@armadarecovery.com and POSTs it to our app's webhook.</p>
+    <p style="margin:0 0 4px"><strong>1. Flow ownership:</strong> please create the flow under a <strong>service account</strong> (not a personal user account), so it doesn't stop working if any individual is offboarded.</p>
+    <p style="margin:8px 0 4px"><strong>2. Trigger:</strong> Office 365 Outlook connector → <em>“When a new email arrives in a shared mailbox (V2)”</em><br>
+    &nbsp;&nbsp;• Mailbox address: <code>orders@armadarecovery.com</code> &nbsp;• Folder: Inbox</p>
+    <p style="margin:8px 0 4px"><strong>3. Action:</strong> <em>HTTP → POST</em></p>
+    <div style="background:#f6f6f2;border:1px solid #ddd;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;word-break:break-all">
+      URI: ${esc(hook)}<br>
+      Header: Content-Type: application/json<br><br>
+      Body (use the trigger's dynamic content fields):<br>
+      {<br>
+      &nbsp;&nbsp;"from": [From dynamic field],<br>
+      &nbsp;&nbsp;"to": [To dynamic field],<br>
+      &nbsp;&nbsp;"subject": [Subject dynamic field],<br>
+      &nbsp;&nbsp;"text": [Body dynamic field]<br>
+      }
+    </div>
+    <p style="margin:8px 0 4px"><strong>4. Licensing:</strong> the HTTP action is a premium connector, so the flow owner (the service account) needs a <strong>Power Automate Premium</strong> license. Let me know if we don't already have one available.</p>
+    <p style="margin:8px 0 4px"><strong>5. Testing:</strong> once live, send a test email to orders@armadarecovery.com with a body like <em>“Please order 2 cases of nitrile gloves and 1 box of pens”</em> and confirm the flow run shows a <strong>200 response</strong> from the HTTP step. We'll verify it arrived on our side.</p>
+    <p style="margin:8px 0 4px"><strong>Security notes:</strong> the webhook URL above contains an access token — please don't post it anywhere public. The flow only needs read access to this one shared mailbox; no broader mailbox permissions are required.</p>
+    <p>Thanks — happy to jump on a quick call if anything's unclear.</p>
+    <p>${esc(req.user.name || 'Shlomo')}<br><span style="color:#888;font-size:12px">Armada Recovery</span></p></div>`;
+  try {
+    await sendEmail({ to, subject: 'Orders mailbox — automation to connect it to our operations app', html, replyTo: req.user.email || undefined });
+    audit({ user: req.user, action: 'INTAKE_INSTRUCTIONS_SENT', detail: to, ip: req.ip });
+    res.json({ sent: true, to });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 // Let the owner test the parser without wiring email yet.
 app.post('/api/corp/intake/test', requireAuth, requireCorp, async (req, res) => {
   const b = req.body || {};

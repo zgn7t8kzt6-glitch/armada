@@ -838,3 +838,15 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
   #corphub h3{font-size:16px}
   #corphub .pc-note{border-radius:12px;padding:10px 12px}
 }
+/* Corp hub hand-tuned pieces: swipeable kanban, chip rows, mobile-only hints */
+.corp-kanban{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+[data-mobile-only]{display:none}
+#corphub .chip-row{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#corphub .chip-row::-webkit-scrollbar{display:none}
+@media(max-width:760px){
+  [data-mobile-only]{display:block}
+  .corp-kanban{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+  .corp-kanban>.card{flex:0 0 86%;scroll-snap-align:start;margin:0;min-width:0}
+  #corphub .chip-row{flex-direction:row!important}
+  #corphub .chip-row>.btn{width:auto!important;flex:0 0 auto;min-height:38px;white-space:nowrap}
+}

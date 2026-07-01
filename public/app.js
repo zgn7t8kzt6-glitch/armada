@@ -5820,8 +5820,11 @@ async function renderCorpOrders(body){
     <td><div style="display:flex;gap:4px;flex-wrap:wrap">${actions(o)}</div></td></tr>`;
   const open=orders.filter(o=>o.status==='requested'||o.status==='ordered');
   const doneList=orders.filter(o=>o.status==='received'||o.status==='cancelled').slice(0,30);
-  body.innerHTML=`<div id="intakePanel"></div>
-    <div class="card"><h3 style="margin-top:0">Add an order request</h3>
+  body.innerHTML=`
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🛒 Open queue <span class="hint" style="font-weight:400">· ${open.length}</span></h3></div>
+      <label class="hint">Location <select onchange="CORP_FAC=this.value;renderCorpOrders($('corpBody'))"><option value="">All</option>${locs.map(l=>`<option ${CORP_FAC===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label></div>
+      ${open.length?`<table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${open.map(rowH).join('')}</table>`:'<div class="hint">Nothing open. Detox auto-flags land here automatically; add anything below.</div>'}</div>
+    <div class="card"><details><summary><strong>＋ Add an order request</strong> <span class="hint">any location — defaults to Detox</span></summary><div style="margin-top:8px">
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
         <select id="oFac">${locs.map(l=>`<option ${(CORP_FAC||'Armada Detox of Akron')===l?'selected':''}>${esc(l)}</option>`).join('')}</select>
         <input id="oItem" placeholder="What to order" style="min-width:170px"/>
@@ -5830,13 +5833,11 @@ async function renderCorpOrders(body){
         <input id="oVendor" placeholder="Vendor" style="width:110px"/>
         <select id="oPri">${pris.map(p=>`<option ${p==='Normal'?'selected':''}>${p}</option>`).join('')}</select>
         <input id="oCost" placeholder="Est. $" style="width:80px"/>
-        <button class="btn btn-gold btn-sm sans" onclick="addOrder()">Add</button></div>
-      <input id="oLink" placeholder="Amazon / supplier link (optional)" style="width:100%;margin-top:6px"/>
-      <span id="oMsg" class="hint"></span></div>
-    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Open queue <span class="hint" style="font-weight:400">· ${open.length}</span></h3></div>
-      <label class="hint">Location <select onchange="CORP_FAC=this.value;renderCorpOrders($('corpBody'))"><option value="">All</option>${locs.map(l=>`<option ${CORP_FAC===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label></div>
-      ${open.length?`<table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${open.map(rowH).join('')}</table>`:'<div class="hint">Nothing open. Detox auto-flags land here automatically; add other locations above.</div>'}</div>
-    ${doneList.length?`<div class="card"><h3 style="margin-top:0">Recently completed</h3><table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${doneList.map(rowH).join('')}</table></div>`:''}`;
+        <input id="oLink" placeholder="Amazon / supplier link (optional)" style="width:100%"/>
+        <button class="btn btn-gold sans" onclick="addOrder()">Add order</button></div>
+      <span id="oMsg" class="hint"></span></div></details></div>
+    ${doneList.length?`<div class="card"><details><summary><strong>Recently completed</strong> <span class="hint">· ${doneList.length}</span></summary><table class="tbl" style="margin-top:6px"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${doneList.map(rowH).join('')}</table></details></div>`:''}
+    <div id="intakePanel"></div>`;
   loadIntakePanel();
 }
 async function loadIntakePanel(){
@@ -5883,8 +5884,10 @@ async function renderCorpPayments(body){
     <td>${p.last4?'····'+esc(p.last4):''}${p.exp?` <span class="hint">${mask(p.exp)}</span>`:''}${p.billing_zip?`<div class="hint">zip ${mask(p.billing_zip)}</div>`:''}</td>
     <td class="hint">${p.account_number?mask(p.account_number):''}</td><td class="hint">${esc(p.vendor||'')}</td><td class="hint">${esc(p.facility||'')}</td><td class="hint">${esc(p.notes||'')}</td>
     <td><button class="btn btn-ghost btn-sm sans" onclick="delPayment(${p.id})">🗑</button></td></tr>`;
-  body.innerHTML=`<div class="pc-note" style="color:#a60;margin-bottom:8px">🔒 Store <strong>reference info only</strong> — last 4, which card, billing zip, account #. Never the full card number or CVV (that's a security/PCI risk). Keep full numbers in a password vault.</div>
-    <div class="card"><h3 style="margin-top:0">Add a payment method / account</h3>
+  body.innerHTML=`<div class="pc-note" style="color:#a60;margin-bottom:8px">🔒 Store <strong>reference info only</strong> — last 4, which card, billing zip, account #. Never the full card number or CVV (that's a security/PCI risk). Full card numbers live in the 🏛️ Entities vault.</div>
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">💳 Cards &amp; accounts <span class="hint" style="font-weight:400">· ${ps.length}</span></h3></div><button class="btn btn-ghost btn-sm sans" onclick="PAY_SHOW=!PAY_SHOW;renderCorpPayments($('corpBody'))">${PAY_SHOW?'🙈 Hide':'👁 Show'} details</button></div>
+      ${ps.length?`<table class="tbl"><tr><th>Method</th><th>Card</th><th>Account #</th><th>Vendor</th><th>Facility</th><th>Notes</th><th></th></tr>${ps.map(row).join('')}</table>`:'<div class="hint">No payment methods yet.</div>'}</div>
+    <div class="card"><details ${ps.length?'':'open'}><summary><strong>＋ Add a payment method / account</strong></summary><div style="margin-top:8px">
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
         <input id="pLabel" placeholder="Label (e.g. Amex — Akron ops)" style="min-width:170px"/>
         <select id="pKind">${kinds.map(k=>`<option>${k}</option>`).join('')}</select>
@@ -5895,11 +5898,9 @@ async function renderCorpPayments(body){
         <input id="pAcct" placeholder="Account # (vendor/ACH)" style="width:140px"/>
         <input id="pVendor" placeholder="Vendor" style="width:110px"/>
         <select id="pFac"><option value="">Facility (any)</option>${locs.map(l=>`<option>${esc(l)}</option>`).join('')}</select>
-        <button class="btn btn-gold btn-sm sans" onclick="savePayment()">Add</button></div>
-      <input id="pNotes" placeholder="Notes (which vendors it's for, limits, etc.)" style="width:100%;margin-top:6px"/>
-      <span id="pMsg" class="hint"></span></div>
-    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Cards &amp; accounts <span class="hint" style="font-weight:400">· ${ps.length}</span></h3></div><button class="btn btn-ghost btn-sm sans" onclick="PAY_SHOW=!PAY_SHOW;renderCorpPayments($('corpBody'))">${PAY_SHOW?'🙈 Hide':'👁 Show'} details</button></div>
-      ${ps.length?`<table class="tbl"><tr><th>Method</th><th>Card</th><th>Account #</th><th>Vendor</th><th>Facility</th><th>Notes</th><th></th></tr>${ps.map(row).join('')}</table>`:'<div class="hint">No payment methods yet.</div>'}</div>`;
+        <input id="pNotes" placeholder="Notes (which vendors it's for, limits, etc.)" style="width:100%"/>
+        <button class="btn btn-gold sans" onclick="savePayment()">Add</button></div>
+      <span id="pMsg" class="hint"></span></div></details></div>`;
 }
 async function savePayment(){
   const b={label:($('pLabel')||{}).value||'',kind:($('pKind')||{}).value,brand:($('pBrand')||{}).value||'',last4:($('pLast4')||{}).value||'',exp:($('pExp')||{}).value||'',billing_zip:($('pZip')||{}).value||'',account_number:($('pAcct')||{}).value||'',vendor:($('pVendor')||{}).value||'',facility:($('pFac')||{}).value||'',notes:($('pNotes')||{}).value||''};
@@ -5919,17 +5920,18 @@ async function renderCorpProjects(body){
     ${t.detail?`<div class="hint">${esc(t.detail)}</div>`:''}
     <div class="hint" style="margin-top:2px">${t.priority!=='Normal'?`<span style="color:${priColor(t.priority)}">${esc(t.priority)}</span> · `:''}${t.assignee?'👤 '+esc(t.assignee)+' · ':''}${t.due_date?'📅 '+esc(t.due_date)+' · ':''}from ${esc(t.requested_by||'—')}${t.facility?' · '+esc(t.facility):''}</div>
     <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${nextBtns(t)}<button class="btn btn-ghost btn-sm sans" onclick="delCorpTask(${t.id})">🗑</button></div></div>`;
-  body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add a task</h3>
+  body.innerHTML=`<div class="card"><details open><summary><strong>＋ Add a task</strong> <span class="hint">anyone can drop one — corporate works it</span></summary><div style="margin-top:8px">
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
         <input id="ctTitle" placeholder="What needs doing?" style="min-width:220px"/>
         <select id="ctCat">${cats.map(c=>`<option>${c}</option>`).join('')}</select>
         <select id="ctPri">${pris.map(p=>`<option ${p==='Normal'?'selected':''}>${p}</option>`).join('')}</select>
         <input id="ctAssignee" placeholder="Assignee (optional)" style="min-width:120px"/>
         <input id="ctDue" type="date"/>
-        <button class="btn btn-gold btn-sm sans" onclick="addCorpTask()">Add</button></div>
-      <input id="ctDetail" placeholder="Details / notes (optional)" style="width:100%;margin-top:6px"/>
-      <span id="ctMsg" class="hint"></span></div>
-    <div class="cmd-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
+        <input id="ctDetail" placeholder="Details / notes (optional)" style="width:100%"/>
+        <button class="btn btn-gold sans" onclick="addCorpTask()">Add task</button></div>
+      <span id="ctMsg" class="hint"></span></div></details></div>
+    <div class="hint" style="margin:2px 0 6px" data-mobile-only>Swipe sideways for the other columns →</div>
+    <div class="corp-kanban">
       ${cols.map(([k,l])=>`<div class="card"><h3 style="margin-top:0;font-size:14px">${l} <span class="hint" style="font-weight:400">· ${ts.filter(t=>t.status===k).length}</span></h3>${ts.filter(t=>t.status===k).map(card).join('')||'<div class="hint">—</div>'}</div>`).join('')}
     </div>`;
 }
@@ -6055,7 +6057,7 @@ async function openLease(id){
       <h3 style="margin:0 0 4px">🤖 Ask about this lease</h3>
       <p class="sub sans" style="margin:0 0 6px">${l.file_id||(l.lease_text&&l.lease_text.length>40)?'Ask anything — e.g. “Is the HVAC repair the landlord’s responsibility?” Answers come only from this lease document.':'<span style="color:#a60">No lease on file yet. Tap Edit and <strong>upload the lease</strong> (or paste its text) so the assistant can read it.</span>'}</p>
       <div class="toolbar" style="justify-content:flex-start;gap:6px"><input id="leaseQ" placeholder="Is ___ covered by the landlord?" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')askLeaseQ(${l.id})"/><button class="btn btn-gold btn-sm sans" onclick="askLeaseQ(${l.id})">Ask</button></div>
-      <div class="toolbar" style="justify-content:flex-start;gap:4px;margin-top:4px;flex-wrap:wrap">${['Who pays for roof repairs?','Is HVAC the landlord’s responsibility?','What are my renewal options?','Who handles snow removal & landscaping?','Can I sublease or assign?'].map(s=>`<button class="btn btn-ghost btn-sm sans" onclick="$('leaseQ').value=this.textContent;askLeaseQ(${l.id})" style="font-size:11px">${esc(s)}</button>`).join('')}</div>
+      <div class="toolbar chip-row" style="justify-content:flex-start;gap:4px;margin-top:4px">${['Who pays for roof repairs?','Is HVAC the landlord’s responsibility?','What are my renewal options?','Who handles snow removal & landscaping?','Can I sublease or assign?'].map(s=>`<button class="btn btn-ghost btn-sm sans" onclick="$('leaseQ').value=this.textContent;askLeaseQ(${l.id})" style="font-size:11px">${esc(s)}</button>`).join('')}</div>
       <div id="leaseAns"></div></div>
     ${hist?`<h3 style="font-size:14px;margin:12px 0 4px">Earlier questions</h3>${hist}`:''}</div>`;
 }
@@ -6181,7 +6183,9 @@ async function renderCorpVendors(body){
   const vs=d.vendors||[];
   const cats=['Supplies','Plumbing','Electrical','HVAC','IT','Landscaping','Utilities','Appliance','Cleaning','Other'];
   const row=(v)=>`<tr><td><strong>${esc(v.name)}</strong>${v.account_number?`<div class="hint">acct ${esc(v.account_number)}</div>`:''}</td><td class="hint">${esc(v.category||'')}</td><td>${esc(v.contact_name||'')}${v.phone?`<div><a href="tel:${esc(v.phone)}">${esc(v.phone)}</a></div>`:''}${v.email?`<div class="hint">${esc(v.email)}</div>`:''}</td><td class="hint">${esc(v.facility||'')}</td><td class="hint">${esc(v.notes||'')}</td><td><button class="btn btn-ghost btn-sm sans" onclick="delVendor(${v.id})">🗑</button></td></tr>`;
-  body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add a vendor</h3>
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">📇 Vendors <span class="hint" style="font-weight:400">· ${vs.length}</span></h3>
+      ${vs.length?`<table class="tbl"><tr><th>Vendor</th><th>Category</th><th>Contact</th><th>Facility</th><th>Notes</th><th></th></tr>${vs.map(row).join('')}</table>`:'<div class="hint">No vendors yet — add the ones you call.</div>'}</div>
+    <div class="card"><details ${vs.length?'':'open'}><summary><strong>＋ Add a vendor</strong></summary><div style="margin-top:8px">
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
         <input id="vName" placeholder="Vendor name" style="min-width:160px"/>
         <select id="vCat">${cats.map(c=>`<option>${c}</option>`).join('')}</select>
@@ -6190,11 +6194,9 @@ async function renderCorpVendors(body){
         <input id="vEmail" placeholder="Email" style="min-width:140px"/>
         <input id="vAcct" placeholder="Account #" style="min-width:100px"/>
         <input id="vFac" placeholder="Facility" style="min-width:110px"/>
-        <button class="btn btn-gold btn-sm sans" onclick="saveVendor()">Add</button></div>
-      <input id="vNotes" placeholder="Notes (what they do, hours, etc.)" style="width:100%;margin-top:6px"/>
-      <span id="vMsg" class="hint"></span></div>
-    <div class="card"><h3 style="margin-top:0">Vendors <span class="hint" style="font-weight:400">· ${vs.length}</span></h3>
-      ${vs.length?`<table class="tbl"><tr><th>Vendor</th><th>Category</th><th>Contact</th><th>Facility</th><th>Notes</th><th></th></tr>${vs.map(row).join('')}</table>`:'<div class="hint">No vendors yet — add the ones you call.</div>'}</div>`;
+        <input id="vNotes" placeholder="Notes (what they do, hours, etc.)" style="width:100%"/>
+        <button class="btn btn-gold sans" onclick="saveVendor()">Add vendor</button></div>
+      <span id="vMsg" class="hint"></span></div></details></div>`;
 }
 async function saveVendor(){
   const b={name:($('vName')||{}).value||'',category:($('vCat')||{}).value,contact_name:($('vContact')||{}).value||'',phone:($('vPhone')||{}).value||'',email:($('vEmail')||{}).value||'',account_number:($('vAcct')||{}).value||'',facility:($('vFac')||{}).value||'',notes:($('vNotes')||{}).value||''};
@@ -6208,7 +6210,10 @@ async function renderCorpDocs(body){
   const types=['Lease','Utility','Insurance','Permit/License','Internet/Phone','Contract','Other'];
   const soon=(dt)=>{ if(!dt)return false; const days=(Date.parse(dt)-Date.now())/864e5; return days<=45; };
   const row=(x)=>`<tr><td><strong>${esc(x.title)}</strong>${x.url?` <a href="${esc(x.url)}" target="_blank" rel="noopener">↗</a>`:''}<div class="hint">${esc(x.doc_type)}${x.provider?' · '+esc(x.provider):''}</div></td><td class="hint">${esc(x.facility||'')}</td><td class="hint">${esc(x.account_number||'')}</td><td class="hint">${esc(x.amount||'')}</td><td>${x.renewal_date?`<span ${soon(x.renewal_date)?'style="color:var(--danger);font-weight:600"':''}>${esc(x.renewal_date)}</span>`:'<span class="hint">—</span>'}</td><td class="hint">${esc(x.notes||'')}</td><td><button class="btn btn-ghost btn-sm sans" onclick="corpDelDoc(${x.id})">🗑</button></td></tr>`;
-  body.innerHTML=`<div class="card"><h3 style="margin-top:0">Add a document / recurring bill</h3>
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">📁 Facility documents <span class="hint" style="font-weight:400">· ${ds.length}</span></h3>
+      <p class="sub sans" style="margin:0 0 6px">Leases, utilities, insurance, permits, internet/phone — the recurring facts. Renewal dates within 45 days show in red.</p>
+      ${ds.length?`<table class="tbl"><tr><th>Document</th><th>Facility</th><th>Account</th><th>Amount</th><th>Renews</th><th>Notes</th><th></th></tr>${ds.map(row).join('')}</table>`:'<div class="hint">Nothing stored yet — start with leases and utilities.</div>'}</div>
+    <div class="card"><details ${ds.length?'':'open'}><summary><strong>＋ Add a document / recurring bill</strong></summary><div style="margin-top:8px">
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
         <select id="dType">${types.map(t=>`<option>${t}</option>`).join('')}</select>
         <input id="dTitle" placeholder="Title (e.g. Akron lease)" style="min-width:170px"/>
@@ -6217,13 +6222,10 @@ async function renderCorpDocs(body){
         <input id="dAcct" placeholder="Account #" style="min-width:100px"/>
         <input id="dAmount" placeholder="Amount (e.g. $2,400/mo)" style="min-width:120px"/>
         <label class="hint">Renews <input id="dRenew" type="date"/></label>
-        <button class="btn btn-gold btn-sm sans" onclick="corpSaveDoc()">Add</button></div>
-      <input id="dUrl" placeholder="Link to file (Drive/Dropbox) — optional" style="width:100%;margin-top:6px"/>
-      <input id="dNotes" placeholder="Notes" style="width:100%;margin-top:6px"/>
-      <span id="dMsg" class="hint"></span></div>
-    <div class="card"><h3 style="margin-top:0">Facility documents <span class="hint" style="font-weight:400">· ${ds.length}</span></h3>
-      <p class="sub sans" style="margin:0 0 6px">Leases, utilities, insurance, permits, internet/phone — the recurring facts. Renewal dates within 45 days show in red.</p>
-      ${ds.length?`<table class="tbl"><tr><th>Document</th><th>Facility</th><th>Account</th><th>Amount</th><th>Renews</th><th>Notes</th><th></th></tr>${ds.map(row).join('')}</table>`:'<div class="hint">Nothing stored yet — start with leases and utilities.</div>'}</div>`;
+        <input id="dUrl" placeholder="Link to file (Drive/OneDrive) — optional" style="width:100%"/>
+        <input id="dNotes" placeholder="Notes" style="width:100%"/>
+        <button class="btn btn-gold sans" onclick="corpSaveDoc()">Add document</button></div>
+      <span id="dMsg" class="hint"></span></div></details></div>`;
 }
 async function corpSaveDoc(){
   const b={doc_type:($('dType')||{}).value,title:($('dTitle')||{}).value||'',provider:($('dProvider')||{}).value||'',facility:($('dFac')||{}).value||'',account_number:($('dAcct')||{}).value||'',amount:($('dAmount')||{}).value||'',renewal_date:($('dRenew')||{}).value||'',url:($('dUrl')||{}).value||'',notes:($('dNotes')||{}).value||''};

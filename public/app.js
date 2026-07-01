@@ -5898,26 +5898,36 @@ async function renderCorpEntities(body){
   ENT_DATA=d;
   const mask=(v)=>!v?'':(ENT_SHOW?esc(v):'••••'+(String(v).length>4&&ENT_SHOW?'':''));
   const recs=d.records||[], banks=d.banks||[], cards=d.cards||[], portals=d.portals||[];
-  const closedSet=new Set(recs.filter(r=>r.status==='closed').map(r=>r.entity));
-  const entities=[...new Set([...recs.map(r=>r.entity),...banks.map(b=>b.entity),...cards.map(c=>c.entity),...(d.locations||[])].filter(Boolean))].sort();
-  let active=entities.filter(e=>!closedSet.has(e)), closed=[...closedSet].sort();
-  if(CORP_FAC){ active=active.filter(e=>e===CORP_FAC); closed=closed.filter(e=>e===CORP_FAC); }
-  let list=active;
+  // Normalize names so "Akron House Recovery LLC" / "Akron House Recovery, LLC" merge.
+  const entKey=(s)=>String(s||'').toLowerCase().replace(/[.,]/g,'').replace(/\b(llc|inc|l l c|home|of|the|recovery propco)\b/g,'').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+  // Build one canonical entity per key — records (legal data) win as the anchor.
+  const byKey=new Map();
+  for(const r of recs){ const k=entKey(r.entity); if(!k)continue; if(!byKey.has(k)) byKey.set(k,{name:r.entity,key:k,rec:r,status:r.status||'active'}); else if(!byKey.get(k).rec) byKey.get(k).rec=r; }
+  for(const loc of (d.locations||[])){ const k=entKey(loc); if(k&&!byKey.has(k)) byKey.set(k,{name:loc,key:k,rec:null,status:'active'}); }
+  const canon=[...byKey.values()].sort((a,b)=>a.name.localeCompare(b.name));
+  const known=new Set(canon.map(e=>e.key));
+  const orphanBanks=banks.filter(b=>!known.has(entKey(b.entity)));
+  const orphanCards=cards.filter(c=>!known.has(entKey(c.entity)));
+  let active=canon.filter(e=>e.status!=='closed'), closed=canon.filter(e=>e.status==='closed');
+  if(CORP_FAC){ const ck=entKey(CORP_FAC); active=active.filter(e=>e.key===ck); closed=closed.filter(e=>e.key===ck); }
   const kv=(k,v,sensitive)=>v?`<div class="hint"><span style="color:var(--muted)">${esc(k)}:</span> ${sensitive?mask(v):esc(v)}</div>`:'';
-  const entCard=(ent)=>{
-    const r=recs.find(x=>x.entity===ent)||{};
-    const bk=banks.filter(x=>x.entity===ent), cd=cards.filter(x=>x.entity===ent);
-    return `<details style="margin:6px 0"><summary style="cursor:pointer"><strong>${esc(ent)}</strong>${r.tax_id?` <span class="hint">· EIN ${mask(r.tax_id)}</span>`:''}</summary>
+  const cardBlock=(cd)=>cd.map(c=>`<div class="pc-note" style="font-size:12px">${esc(c.name_on_card||'')}<div class="hint">${mask(c.card_number)} · exp ${esc(c.exp||'')} · CVV ${mask(c.back_code)}${c.front_code?' · '+mask(c.front_code):''}${c.entity?' · '+esc(c.entity):''}</div></div>`).join('');
+  const bankBlock=(bk)=>bk.map(b=>`<div class="pc-note" style="font-size:12px">${esc(b.bank||'')} ${b.acct_type?'· '+esc(b.acct_type):''}<div class="hint">routing ${mask(b.routing)} · acct ${mask(b.account_number)}</div></div>`).join('');
+  const entCard=(e)=>{
+    const r=e.rec||{};
+    const bk=banks.filter(x=>entKey(x.entity)===e.key), cd=cards.filter(x=>entKey(x.entity)===e.key);
+    return `<details style="margin:6px 0"><summary style="cursor:pointer"><strong>${esc(e.name)}</strong>${r.tax_id?` <span class="hint">· EIN ${mask(r.tax_id)}</span>`:''}${r.npi?` <span class="hint">· NPI ${esc(String(r.npi).split(' ')[0])}</span>`:''}</summary>
       <div style="padding:6px 0 2px">
         ${kv('Legal name',r.legal_name)}${kv('EIN / Tax ID',r.tax_id,true)}${kv('NPI',r.npi)}${kv('Taxonomy',r.taxonomy)}${kv('Medicaid ID',r.medicaid_id)}${kv('DUNS',r.duns)}${kv('Address',r.address)}${kv('Incorporated',r.incorp_date)}
-        <div style="margin-top:6px"><strong style="font-size:13px">🏦 Bank accounts</strong>${bk.length?bk.map(b=>`<div class="pc-note" style="font-size:12px">${esc(b.bank||'')} ${b.acct_type?'· '+esc(b.acct_type):''}<div class="hint">routing ${mask(b.routing)} · acct ${mask(b.account_number)}</div></div>`).join(''):'<div class="hint">none on file</div>'}</div>
-        <div style="margin-top:6px"><strong style="font-size:13px">💳 Cards</strong>${cd.length?cd.map(c=>`<div class="pc-note" style="font-size:12px">${esc(c.name_on_card||'')}<div class="hint">${mask(c.card_number)} · exp ${esc(c.exp||'')} · CVV ${mask(c.back_code)}${c.front_code?' · '+mask(c.front_code):''}</div></div>`).join(''):'<div class="hint">none on file</div>'}</div>
+        <div style="margin-top:6px"><strong style="font-size:13px">🏦 Bank accounts</strong>${bk.length?bankBlock(bk):'<div class="hint">none on file</div>'}</div>
+        <div style="margin-top:6px"><strong style="font-size:13px">💳 Cards</strong>${cd.length?cardBlock(cd):'<div class="hint">none on file</div>'}</div>
       </div></details>`;
   };
   body.innerHTML=`<div class="pc-note" style="color:#a60;margin-bottom:8px">🔒 <strong>Sensitive vault</strong> — EINs, bank accounts, full card numbers/CVV, and logins. Owner + Executive Assistant only. Values are hidden until you tap “Show”. Treat this like a password manager.</div>
     <div class="toolbar" style="justify-content:flex-start;gap:8px;margin-bottom:6px"><button class="btn btn-gold btn-sm sans" onclick="ENT_SHOW=!ENT_SHOW;renderCorpEntities($('corpBody'))">${ENT_SHOW?'🙈 Hide values':'👁 Show values'}</button>${ME.role==='admin'?'<button class="btn btn-ghost btn-sm sans" onclick="importEntities()">⤓ Import from file</button>':''}<span id="entMsg" class="hint" style="align-self:center"></span></div>
-    <div class="card"><h3 style="margin-top:0">🏛️ Entities <span class="hint" style="font-weight:400">· ${list.length} active</span></h3>${list.length?list.map(entCard).join(''):'<div class="hint">No entities yet — admin can Import from file.</div>'}</div>
+    <div class="card"><h3 style="margin-top:0">🏛️ Entities <span class="hint" style="font-weight:400">· ${active.length} active</span></h3>${active.length?active.map(entCard).join(''):'<div class="hint">No entities yet — admin can Import from file.</div>'}</div>
     ${closed.length?`<div class="card" style="opacity:.85"><details><summary style="cursor:pointer"><strong>🗄️ Archived — closed / sold entities</strong> <span class="hint">· ${closed.length}</span></summary><div style="margin-top:6px">${closed.map(entCard).join('')}</div></details></div>`:''}
+    ${(orphanCards.length||orphanBanks.length)?`<div class="card"><details><summary style="cursor:pointer"><strong>💳 Cards / accounts not tied to an entity</strong> <span class="hint">· ${orphanCards.length+orphanBanks.length}</span></summary><div style="margin-top:6px">${bankBlock(orphanBanks)}${cardBlock(orphanCards)}</div></details></div>`:''}
     <div class="card"><h3 style="margin-top:0">🔑 Portals &amp; logins <span class="hint" style="font-weight:400">· ${portals.length}</span></h3>
       ${portals.length?`<table class="tbl"><tr><th>Portal</th><th>Username</th><th>Password</th><th>Info</th><th>Entity</th></tr>${portals.map(p=>`<tr><td><strong>${esc(p.name)}</strong></td><td class="hint">${esc(p.username||'')}</td><td>${mask(p.password)}</td><td class="hint">${esc(p.info||'')}</td><td class="hint">${esc(p.entity||'')}</td></tr>`).join('')}</table>`:'<div class="hint">No logins yet.</div>'}</div>`;
 }

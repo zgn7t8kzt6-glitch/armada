@@ -5738,7 +5738,7 @@ async function loadCorpHub(){
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${facSel}${(ME&&ME.role==='admin'&&!PREVIEW_ROLE)?'<button class="btn btn-ghost btn-sm sans" onclick="previewAsChava()">👁 Preview corporate view</button>':''}</div></div>
     ${CORP_FAC?`<div class="pc-note" style="margin-top:6px">Viewing <strong>${esc(CORP_FAC)}</strong> only. <a href="#" onclick="CORP_FAC='';loadCorpHub();return false">← all facilities</a></div>`:''}
     <div class="itabs" id="corpTabs" style="margin-top:6px">
-      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
+      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','insurance|🛡️ Insurance','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
     </div></div>
     <div id="corpBody"><div class="hint">Loading…</div></div>`;
   renderCorpTab();
@@ -5749,6 +5749,7 @@ async function renderCorpTab(){
   if(CORP_TAB==='dashboard') return renderCorpDashboard(body);
   if(CORP_TAB==='orders') return renderCorpOrders(body);
   if(CORP_TAB==='projects') return renderCorpProjects(body);
+  if(CORP_TAB==='insurance') return renderCorpInsurance(body);
   if(CORP_TAB==='vendors') return renderCorpVendors(body);
   if(CORP_TAB==='accounts') return renderCorpPayments(body);
   if(CORP_TAB==='docs') return renderCorpDocs(body);
@@ -5880,6 +5881,86 @@ async function renderCorpProjects(body){
       ${cols.map(([k,l])=>`<div class="card"><h3 style="margin-top:0;font-size:14px">${l} <span class="hint" style="font-weight:400">· ${ts.filter(t=>t.status===k).length}</span></h3>${ts.filter(t=>t.status===k).map(card).join('')||'<div class="hint">—</div>'}</div>`).join('')}
     </div>`;
 }
+let INS_DATA=null, INS_EDIT=null;
+async function renderCorpInsurance(body){
+  let d; try{ d=await api('/corp/insurance'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  INS_DATA=d;
+  const s=d.summary||{}, locs=(CORP_FAC?[CORP_FAC]:d.locations||[]), types=d.coverageTypes||[], req=d.required||[];
+  const money=(n)=>'$'+Number(n||0).toLocaleString('en-US',{maximumFractionDigits:0});
+  const box=(n,l,col)=>`<div class="ret-card"><div class="n"${col?' style="color:'+col+'"':''}>${n}</div><div class="l">${l}</div></div>`;
+  // Coverage matrix
+  const cellHtml=(loc,ct)=>{ const c=(d.matrix[loc]||{})[ct]||{status:'missing'}; const isReq=req.includes(ct);
+    if(c.status==='missing') return `<td style="text-align:center;background:${isReq?'#fdecea':'#fafafa'}" title="${isReq?'REQUIRED — missing':'not carried'}">${isReq?'<span style="color:var(--danger);font-weight:700">✗</span>':'<span class="hint">—</span>'}</td>`;
+    const col=c.status==='expired'?'var(--danger)':c.status==='expiring'?'#a60':'var(--good)';
+    const sym=c.status==='expired'?'⚠':c.status==='expiring'?'●':'✓';
+    return `<td style="text-align:center;cursor:pointer" title="${esc(ct)} · ${esc(c.carrier||'')} · exp ${esc(c.exp||'')}${c.daysLeft!=null?' ('+c.daysLeft+'d)':''}" onclick="editInsurance(${c.id})"><span style="color:${col};font-weight:700">${sym}</span>${c.status!=='active'&&c.daysLeft!=null?`<div class="hint" style="font-size:10px">${c.daysLeft<0?Math.abs(c.daysLeft)+'d over':c.daysLeft+'d'}</div>`:''}</td>`;
+  };
+  const matrixHtml=`<div style="overflow-x:auto"><table class="tbl" style="font-size:12px"><tr><th>Entity</th>${types.map(ct=>`<th style="writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;height:110px;${req.includes(ct)?'':'opacity:.6'}">${esc(ct)}${req.includes(ct)?' *':''}</th>`).join('')}</tr>
+    ${locs.map(loc=>`<tr><td style="white-space:nowrap"><strong>${esc(loc)}</strong></td>${types.map(ct=>cellHtml(loc,ct)).join('')}</tr>`).join('')}</table></div>
+    <div class="hint" style="margin-top:4px">✓ active · <span style="color:#a60">●</span> renewing ≤60d · <span style="color:var(--danger)">⚠</span> expired · <span style="color:var(--danger)">✗</span> required &amp; missing · * = required. Tap a cell to open the policy.</div>`;
+  // Gaps
+  const gaps=(d.gaps||[]).filter(g=>!CORP_FAC||g.entity===CORP_FAC);
+  const gapHtml=gaps.length?`<div class="card" style="border-left:4px solid var(--danger)"><h3 style="margin-top:0;color:var(--danger)">⚠ Coverage gaps — ${gaps.length}</h3><p class="sub sans" style="margin:0 0 6px">Required coverage that's missing or expired. Close these so every entity is fully covered.</p>${gaps.map(g=>`<div class="pc-note">• <strong>${esc(g.entity)}</strong> — ${esc(g.coverage)} <span style="color:var(--danger)">${g.status==='expired'?'EXPIRED':'MISSING'}</span> <button class="btn btn-ghost btn-sm sans" onclick="newInsurance('${g.entity.replace(/'/g,"\\'")}','${g.coverage.replace(/'/g,"\\'")}')">Add policy</button></div>`).join('')}</div>`:'<div class="card" style="border-left:4px solid var(--good)"><h3 style="margin-top:0;color:var(--good)">✓ No coverage gaps</h3><p class="sub sans" style="margin:0">Every entity carries all required coverage. Keep it that way — renewals are watched automatically.</p></div>';
+  // Expiring soon
+  let pols=(d.policies||[]).slice();
+  if(CORP_FAC) pols=pols.filter(p=>p.entity===CORP_FAC);
+  const soon=pols.filter(p=>p.daysLeft!=null&&p.status!=='cancelled'&&p.daysLeft<=90).sort((a,b)=>a.daysLeft-b.daysLeft);
+  const soonHtml=soon.length?`<div class="card"><h3 style="margin-top:0">⏰ Renewing soon &amp; overdue</h3><table class="tbl"><tr><th>Entity</th><th>Coverage</th><th>Carrier</th><th>Expires</th><th>Days</th><th>Broker</th><th></th></tr>${soon.map(p=>`<tr><td><strong>${esc(p.entity)}</strong></td><td>${esc(p.coverage_type)}</td><td class="hint">${esc(p.carrier||'')}</td><td>${esc((p.expiration_date||'').slice(0,10))}</td><td style="color:${p.daysLeft<0?'var(--danger)':p.daysLeft<=14?'var(--danger)':p.daysLeft<=30?'#a60':'inherit'};font-weight:600">${p.daysLeft<0?Math.abs(p.daysLeft)+'d over':p.daysLeft+'d'}</td><td class="hint">${esc(p.brokerName||'')}</td><td><button class="btn btn-ghost btn-sm sans" onclick="editInsurance(${p.id})">Open</button></td></tr>`).join('')}</table></div>`:'';
+  // Full policy list
+  const polRows=pols.sort((a,b)=>(a.entity+a.coverage_type).localeCompare(b.entity+b.coverage_type)).map(p=>`<tr><td><strong>${esc(p.entity)}</strong></td><td>${esc(p.coverage_type)}</td><td class="hint">${esc(p.carrier||'')}<div>${esc(p.policy_number||'')}</div></td><td class="hint">${p.premium?money(p.premium)+'/yr':''}</td><td>${esc((p.expiration_date||'').slice(0,10))}</td><td>${insStatusPill(p.liveStatus)}</td><td class="hint">${p.doc_url?`<a href="${esc(p.doc_url)}" target="_blank" rel="noopener">policy 📄</a>`:''}</td><td><button class="btn btn-ghost btn-sm sans" onclick="editInsurance(${p.id})">Edit</button></td></tr>`).join('')||'<tr><td colspan="8" class="hint">No policies yet — add them below or from a gap above.</td></tr>';
+  body.innerHTML=`<div class="ret-cards" style="margin-top:4px">${box(s.activeCovers||0,'Active policies')}${box(s.expiring60||0,'Renewing ≤60d',(s.expiring60?'#a60':''))}${box(s.expired||0,'Expired',(s.expired?'var(--danger)':''))}${box(s.gaps||0,'Coverage gaps',(s.gaps?'var(--danger)':'var(--good)'))}${box(money(s.totalPremium),'Annual premium')}</div>
+    <div class="toolbar" style="justify-content:flex-start;gap:8px;margin:6px 0"><button class="btn btn-gold btn-sm sans" onclick="newInsurance()">+ Add policy</button><button class="btn btn-ghost btn-sm sans" onclick="runInsReminders(this)">Send renewal check now</button><span id="insMsg" class="hint" style="align-self:center"></span></div>
+    <div id="insEditor"></div>
+    ${gapHtml}
+    <div class="card"><h3 style="margin-top:0">🗺️ Coverage matrix ${CORP_FAC?'· '+esc(CORP_FAC):'· every entity × every line'}</h3>${matrixHtml}</div>
+    ${soonHtml}
+    <div class="card"><h3 style="margin-top:0">All policies <span class="hint" style="font-weight:400">· ${pols.length}</span></h3><div style="overflow-x:auto"><table class="tbl"><tr><th>Entity</th><th>Coverage</th><th>Carrier / policy #</th><th>Premium</th><th>Expires</th><th>Status</th><th>Copy</th><th></th></tr>${polRows}</table></div></div>
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🧑‍💼 Brokers</h3></div></div><div id="insBrokers"></div></div>`;
+  if(INS_EDIT!==null) openInsuranceEditor(INS_EDIT);
+  renderInsBrokers();
+}
+function insStatusPill(s){ return ({active:'<span class="risk" style="background:#e6f4ea;color:#137333">active</span>',expiring:'<span class="risk risk-elev">renewing</span>',expired:'<span class="risk risk-high">expired</span>',pending:'<span class="hint">pending</span>',cancelled:'<span class="hint">cancelled</span>'}[s]||s); }
+function newInsurance(entity,coverage){ INS_EDIT={entity:entity||'',coverage_type:coverage||''}; openInsuranceEditor(INS_EDIT); }
+function editInsurance(id){ const p=(INS_DATA.policies||[]).find(x=>x.id===id); if(p){ INS_EDIT=p; openInsuranceEditor(p); } }
+function openInsuranceEditor(p){
+  const host=$('insEditor'); if(!host) return; INS_EDIT=p;
+  const d=INS_DATA||{}; const locs=d.locations||[], types=d.coverageTypes||[], brokers=d.brokers||[];
+  const opt=(arr,cur)=>arr.map(x=>`<option ${x===cur?'selected':''}>${esc(x)}</option>`).join('');
+  host.innerHTML=`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><h3 style="margin-top:0">${p.id?'Edit':'Add'} policy</h3>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+      <label class="hint">Entity<br><select id="iEntity"><option value="">—</option>${opt(locs,p.entity)}</select></label>
+      <label class="hint">Coverage<br><select id="iType"><option value="">—</option>${opt(types,p.coverage_type)}</select></label>
+      <label class="hint">Carrier<br><input id="iCarrier" value="${esc(p.carrier||'')}" style="min-width:130px"/></label>
+      <label class="hint">Policy #<br><input id="iPolNum" value="${esc(p.policy_number||'')}" style="min-width:110px"/></label>
+      <label class="hint">Broker<br><select id="iBroker"><option value="">—</option>${brokers.map(b=>`<option value="${b.id}" ${p.broker_id===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">
+      <label class="hint">Effective<br><input id="iEff" type="date" value="${esc((p.effective_date||'').slice(0,10))}"/></label>
+      <label class="hint">Expiration<br><input id="iExp" type="date" value="${esc((p.expiration_date||'').slice(0,10))}"/></label>
+      <label class="hint">Premium/yr<br><input id="iPrem" value="${p.premium!=null?p.premium:''}" placeholder="$" style="width:90px"/></label>
+      <label class="hint">Limit each<br><input id="iLimE" value="${esc(p.limit_each||'')}" placeholder="$1M" style="width:90px"/></label>
+      <label class="hint">Aggregate<br><input id="iLimA" value="${esc(p.limit_aggregate||'')}" placeholder="$3M" style="width:90px"/></label>
+      <label class="hint">Deductible<br><input id="iDed" value="${esc(p.deductible||'')}" style="width:90px"/></label>
+      <label class="hint">Status<br><select id="iStatus">${opt(['active','pending','expired','cancelled'],p.status||'active')}</select></label></div>
+    <label class="hint" style="display:block;margin-top:6px">Policy copy (link to file)</label><input id="iDoc" value="${esc(p.doc_url||'')}" placeholder="Drive/OneDrive link to the policy PDF" style="width:100%"/>
+    <label class="hint" style="display:block;margin-top:6px">Notes</label><input id="iNotes" value="${esc(p.notes||'')}" style="width:100%"/>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="saveInsurance()">Save policy</button><button class="btn btn-ghost btn-sm sans" onclick="INS_EDIT=null;$('insEditor').innerHTML=''">Cancel</button>${p.id?`<button class="btn btn-ghost btn-sm sans" style="color:var(--danger)" onclick="delInsurance(${p.id})">Delete</button>`:''}<span id="iMsg" class="hint" style="align-self:center"></span></div></div>`;
+}
+async function saveInsurance(){
+  const g=id=>($(id)||{}).value||'';
+  const b={id:INS_EDIT&&INS_EDIT.id,entity:g('iEntity'),coverage_type:g('iType'),carrier:g('iCarrier'),policy_number:g('iPolNum'),broker_id:g('iBroker')||null,broker_name:'',effective_date:g('iEff'),expiration_date:g('iExp'),premium:g('iPrem'),limit_each:g('iLimE'),limit_aggregate:g('iLimA'),deductible:g('iDed'),status:g('iStatus'),doc_url:g('iDoc'),notes:g('iNotes')};
+  const bk=(INS_DATA.brokers||[]).find(x=>String(x.id)===String(b.broker_id)); if(bk) b.broker_name=bk.name;
+  if(!b.entity||!b.coverage_type){ if($('iMsg'))$('iMsg').textContent='Entity and coverage are required.'; return; }
+  try{ await api('/corp/insurance',{method:'POST',body:JSON.stringify(b)}); INS_EDIT=null; renderCorpInsurance($('corpBody')); }catch(e){ if($('iMsg'))$('iMsg').textContent=e.message; }
+}
+async function delInsurance(id){ if(!confirm('Delete this policy record?'))return; try{ await api('/corp/insurance/'+id,{method:'DELETE'}); INS_EDIT=null; renderCorpInsurance($('corpBody')); }catch(e){ alert(e.message); } }
+async function runInsReminders(btn){ if(btn)btn.disabled=true; if($('insMsg'))$('insMsg').textContent='Checking renewals…'; try{ const r=await api('/corp/insurance/run-reminders',{method:'POST'}); if($('insMsg'))$('insMsg').textContent=r.sent?`✓ Sent — ${r.dueSoon} renewing, ${r.expired} expired.`:'Nothing due right now — all clear.'; }catch(e){ if($('insMsg'))$('insMsg').textContent=e.message; } if(btn)btn.disabled=false; }
+function renderInsBrokers(){
+  const host=$('insBrokers'); if(!host) return; const bs=(INS_DATA&&INS_DATA.brokers)||[];
+  host.innerHTML=`<div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><input id="bkName" placeholder="Broker / agent" style="min-width:130px"/><input id="bkAgency" placeholder="Agency" style="min-width:120px"/><input id="bkPhone" placeholder="Phone" style="width:110px"/><input id="bkEmail" placeholder="Email" style="min-width:140px"/><button class="btn btn-gold btn-sm sans" onclick="saveBroker()">Add</button></div>
+    ${bs.length?`<table class="tbl" style="margin-top:6px"><tr><th>Broker</th><th>Agency</th><th>Contact</th><th></th></tr>${bs.map(b=>`<tr><td><strong>${esc(b.name)}</strong></td><td class="hint">${esc(b.agency||'')}</td><td class="hint">${b.phone?`<a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>`:''}${b.email?' · '+esc(b.email):''}</td><td><button class="btn btn-ghost btn-sm sans" onclick="delBroker(${b.id})">🗑</button></td></tr>`).join('')}</table>`:'<div class="hint" style="margin-top:6px">No brokers yet.</div>'}`;
+}
+async function saveBroker(){ const b={name:($('bkName')||{}).value||'',agency:($('bkAgency')||{}).value||'',phone:($('bkPhone')||{}).value||'',email:($('bkEmail')||{}).value||''}; if(!b.name.trim())return; try{ await api('/corp/insurance/brokers',{method:'POST',body:JSON.stringify(b)}); renderCorpInsurance($('corpBody')); }catch(e){ alert(e.message); } }
+async function delBroker(id){ if(!confirm('Remove broker?'))return; try{ await api('/corp/insurance/brokers/'+id,{method:'DELETE'}); renderCorpInsurance($('corpBody')); }catch(e){ alert(e.message); } }
 async function addCorpTask(){
   const b={title:($('ctTitle')||{}).value||'',category:($('ctCat')||{}).value,priority:($('ctPri')||{}).value,assignee:($('ctAssignee')||{}).value||'',due_date:($('ctDue')||{}).value||'',detail:($('ctDetail')||{}).value||'',facility:CORP_FAC||''};
   if(!b.title.trim()){ if($('ctMsg'))$('ctMsg').textContent='Add a title.'; return; }

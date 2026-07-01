@@ -1789,6 +1789,47 @@ db.exec(`CREATE TABLE IF NOT EXISTS payment_methods (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// Insurance brokers / agents — who to call per policy.
+db.exec(`CREATE TABLE IF NOT EXISTS insurance_brokers (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  agency TEXT,
+  contact_name TEXT,
+  phone TEXT,
+  email TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+// Insurance policies across every entity. Renewal reminders fire off expiration_date;
+// the coverage matrix flags any entity missing a required coverage so nothing lapses
+// and every entity carries full coverage. `reminded` tracks which day-thresholds have
+// already been emailed so reminders don't repeat.
+db.exec(`CREATE TABLE IF NOT EXISTS insurance_policies (
+  id INTEGER PRIMARY KEY,
+  entity TEXT NOT NULL,                         -- which location / legal entity
+  coverage_type TEXT NOT NULL,                  -- General Liability | Professional Liability | Property | ...
+  carrier TEXT,                                 -- insurance company
+  policy_number TEXT,
+  broker_id INTEGER REFERENCES insurance_brokers(id),
+  broker_name TEXT,                             -- denormalized for display / if no broker row
+  effective_date TEXT,
+  expiration_date TEXT,                          -- the renewal date reminders fire off
+  premium REAL,                                 -- annual premium
+  limit_each TEXT,                              -- per-occurrence limit
+  limit_aggregate TEXT,
+  deductible TEXT,
+  status TEXT NOT NULL DEFAULT 'active',         -- active | pending | expired | cancelled
+  auto_renew INTEGER NOT NULL DEFAULT 0,
+  doc_url TEXT,                                  -- link to the policy copy (Drive/OneDrive)
+  notes TEXT,
+  reminded TEXT,                                -- JSON array of thresholds already emailed
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ins_entity ON insurance_policies(entity, coverage_type);
+CREATE INDEX IF NOT EXISTS idx_ins_exp ON insurance_policies(expiration_date);`);
 // Org-wide employee roster (HR / ownership) across all entities, broken down by
 // location. Salary is highly sensitive — the endpoints are admin-only. Seeded from the
 // Active Employees export; job title + salary are filled in by the owner.

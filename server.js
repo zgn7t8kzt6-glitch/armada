@@ -335,6 +335,30 @@ function orgLocations() {
   try { const rows = db.prepare(`SELECT DISTINCT entity FROM hr_employees WHERE entity != '' ORDER BY entity`).all().map((r) => r.entity); if (rows.length) return rows; } catch { /* table may be empty */ }
   return ORG_LOCATIONS_FALLBACK;
 }
+// Insurance: the coverage lines we track, and which are REQUIRED so the matrix can
+// flag any entity that's missing one (configurable by the owner).
+const COVERAGE_TYPES = ['General Liability', 'Professional Liability', 'Property', 'Workers Compensation', 'Commercial Auto', 'Umbrella / Excess', 'Cyber Liability', 'Directors & Officers', 'Employment Practices (EPLI)', 'Abuse & Molestation'];
+function requiredCoverage() {
+  try { const a = JSON.parse(getState('insurance_required') || 'null'); if (Array.isArray(a) && a.length) return a; } catch { /* default below */ }
+  return ['General Liability', 'Professional Liability', 'Property', 'Workers Compensation', 'Abuse & Molestation'];
+}
+function insuranceRecipients() {
+  const set = (getState('insurance_email') || '').trim();
+  if (set) return set;
+  return [...new Set(['chavaa@armadarecovery.com', (getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '').trim()].filter(Boolean))].join(',');
+}
+// Status of a policy relative to today: cancelled/pending pass through; otherwise
+// expired (past), expiring (≤60d), or active.
+function policyStatus(p, today) {
+  if (p.status === 'cancelled' || p.status === 'pending') return p.status;
+  const exp = (p.expiration_date || '').slice(0, 10);
+  if (!exp) return p.status || 'active';
+  const days = Math.round((Date.parse(exp + 'T00:00:00') - Date.parse(today + 'T00:00:00')) / 864e5);
+  if (days < 0) return 'expired';
+  if (days <= 60) return 'expiring';
+  return 'active';
+}
+function daysToExpiry(exp, today) { if (!exp) return null; return Math.round((Date.parse(String(exp).slice(0, 10) + 'T00:00:00') - Date.parse(today + 'T00:00:00')) / 864e5); }
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
   if (user) { user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); }
@@ -3284,6 +3308,113 @@ app.post('/api/corp/payments', requireAuth, requireCorp, (req, res) => {
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 app.delete('/api/corp/payments/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`UPDATE payment_methods SET active = 0 WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// ── Insurance management: policies, brokers, coverage matrix, renewal reminders ──
+app.get('/api/corp/insurance', requireAuth, requireCorp, (req, res) => {
+  const today = appToday();
+  const brokers = db.prepare(`SELECT * FROM insurance_brokers WHERE active = 1 ORDER BY name`).all();
+  const bMap = Object.fromEntries(brokers.map((b) => [b.id, b]));
+  const raw = db.prepare(`SELECT * FROM insurance_policies ORDER BY entity, coverage_type`).all();
+  const policies = raw.map((p) => ({ ...p, brokerName: p.broker_name || (bMap[p.broker_id] ? bMap[p.broker_id].name : ''), liveStatus: policyStatus(p, today), daysLeft: daysToExpiry(p.expiration_date, today) }));
+  const locations = orgLocations();
+  const required = requiredCoverage();
+  // Coverage matrix: entity × coverage type → best (latest-expiring, non-cancelled) policy.
+  const matrix = {};
+  for (const loc of locations) {
+    matrix[loc] = {};
+    for (const ct of COVERAGE_TYPES) {
+      const cands = policies.filter((p) => p.entity === loc && p.coverage_type === ct && p.status !== 'cancelled');
+      if (!cands.length) { matrix[loc][ct] = { status: 'missing' }; continue; }
+      cands.sort((a, b) => String(b.expiration_date || '').localeCompare(String(a.expiration_date || '')));
+      const p = cands[0];
+      matrix[loc][ct] = { status: p.liveStatus, id: p.id, exp: (p.expiration_date || '').slice(0, 10), daysLeft: p.daysLeft, carrier: p.carrier };
+    }
+  }
+  // Gaps: required coverages that are missing or expired, per entity.
+  const gaps = [];
+  for (const loc of locations) for (const ct of required) { const c = matrix[loc][ct]; if (c.status === 'missing' || c.status === 'expired') gaps.push({ entity: loc, coverage: ct, status: c.status }); }
+  const active = policies.filter((p) => p.liveStatus === 'active' || p.liveStatus === 'expiring');
+  const summary = {
+    policies: policies.length,
+    activeCovers: active.length,
+    expiring60: policies.filter((p) => p.liveStatus === 'expiring').length,
+    expiring30: policies.filter((p) => p.daysLeft != null && p.daysLeft >= 0 && p.daysLeft <= 30 && p.status !== 'cancelled').length,
+    expired: policies.filter((p) => p.liveStatus === 'expired').length,
+    gaps: gaps.length,
+    totalPremium: active.reduce((a, p) => a + (p.premium || 0), 0),
+  };
+  res.json({ policies, brokers, matrix, gaps, summary, coverageTypes: COVERAGE_TYPES, required, locations, insuranceEmail: insuranceRecipients() });
+});
+app.post('/api/corp/insurance', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.entity || '').trim() || !String(b.coverage_type || '').trim()) return res.status(400).json({ error: 'Entity and coverage type are required.' });
+  const stat = ['active', 'pending', 'expired', 'cancelled'].includes(b.status) ? b.status : 'active';
+  const num = (v) => (v === '' || v == null) ? null : +String(v).replace(/[^0-9.]/g, '');
+  const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
+  const fields = [String(b.entity).slice(0, 120), String(b.coverage_type).slice(0, 60), String(b.carrier || '').slice(0, 120), String(b.policy_number || '').slice(0, 80), b.broker_id ? +b.broker_id : null, String(b.broker_name || '').slice(0, 120), dt(b.effective_date), dt(b.expiration_date), num(b.premium), String(b.limit_each || '').slice(0, 40), String(b.limit_aggregate || '').slice(0, 40), String(b.deductible || '').slice(0, 40), stat, b.auto_renew ? 1 : 0, String(b.doc_url || '').slice(0, 500), String(b.notes || '').slice(0, 4000)];
+  if (b.id) {
+    db.prepare(`UPDATE insurance_policies SET entity=?,coverage_type=?,carrier=?,policy_number=?,broker_id=?,broker_name=?,effective_date=?,expiration_date=?,premium=?,limit_each=?,limit_aggregate=?,deductible=?,status=?,auto_renew=?,doc_url=?,notes=?,reminded=NULL,updated_at=datetime('now') WHERE id=?`).run(...fields, b.id);
+    return res.json({ ok: true, id: b.id });
+  }
+  const info = db.prepare(`INSERT INTO insurance_policies (entity,coverage_type,carrier,policy_number,broker_id,broker_name,effective_date,expiration_date,premium,limit_each,limit_aggregate,deductible,status,auto_renew,doc_url,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...fields);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/insurance/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM insurance_policies WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+app.get('/api/corp/insurance/brokers', requireAuth, requireCorp, (req, res) => res.json({ brokers: db.prepare(`SELECT * FROM insurance_brokers WHERE active = 1 ORDER BY name`).all() }));
+app.post('/api/corp/insurance/brokers', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.name || '').trim()) return res.status(400).json({ error: 'Name required.' });
+  if (b.id) { db.prepare(`UPDATE insurance_brokers SET name=?,agency=?,contact_name=?,phone=?,email=?,notes=?,updated_at=datetime('now') WHERE id=?`).run(b.name.trim().slice(0, 120), String(b.agency || '').slice(0, 120), String(b.contact_name || '').slice(0, 80), String(b.phone || '').slice(0, 40), String(b.email || '').slice(0, 120), String(b.notes || '').slice(0, 2000), b.id); return res.json({ ok: true, id: b.id }); }
+  const info = db.prepare(`INSERT INTO insurance_brokers (name,agency,contact_name,phone,email,notes) VALUES (?,?,?,?,?,?)`).run(b.name.trim().slice(0, 120), String(b.agency || '').slice(0, 120), String(b.contact_name || '').slice(0, 80), String(b.phone || '').slice(0, 40), String(b.email || '').slice(0, 120), String(b.notes || '').slice(0, 2000));
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/insurance/brokers/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`UPDATE insurance_brokers SET active = 0 WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+app.post('/api/corp/insurance/settings', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (Array.isArray(b.required)) setState('insurance_required', JSON.stringify(b.required.filter((x) => COVERAGE_TYPES.includes(x))));
+  if (b.email != null) setState('insurance_email', String(b.email).trim().slice(0, 300));
+  res.json({ ok: true });
+});
+// Renewal reminders: a daily digest to Chava + owner as each policy crosses a
+// threshold (90/60/30/14/7/1 days) and when one expires. `reminded` prevents repeats.
+const INS_THRESHOLDS = [90, 60, 30, 14, 7, 1];
+async function checkInsuranceReminders({ force = false } = {}) {
+  if (!emailConfigured()) return { sent: false, reason: 'email not configured' };
+  const today = appToday();
+  const rows = db.prepare(`SELECT * FROM insurance_policies WHERE status IN ('active','pending')`).all();
+  const dueSoon = [], expired = [];
+  const marks = [];   // {id, reminded}
+  for (const p of rows) {
+    const days = daysToExpiry(p.expiration_date, today);
+    if (days == null) continue;
+    let reminded; try { reminded = JSON.parse(p.reminded || '[]'); } catch { reminded = []; }
+    if (!Array.isArray(reminded)) reminded = [];
+    if (days < 0) {
+      if (!reminded.includes('expired')) { expired.push({ p, days }); reminded.push('expired'); marks.push({ id: p.id, reminded }); }
+      continue;
+    }
+    const crossed = INS_THRESHOLDS.filter((t) => days <= t && !reminded.includes(t));
+    if (crossed.length) { dueSoon.push({ p, days }); reminded.push(...crossed); marks.push({ id: p.id, reminded }); }
+  }
+  if (!force && !dueSoon.length && !expired.length) return { sent: false, reason: 'nothing due' };
+  // Persist the marks so we don't re-notify.
+  const upd = db.prepare(`UPDATE insurance_policies SET reminded=? WHERE id=?`);
+  for (const m of marks) upd.run(JSON.stringify(m.reminded), m.id);
+  if (!dueSoon.length && !expired.length) return { sent: false, reason: 'nothing due' };
+  const esc = htmlEsc;
+  const line = (x) => `<div>• <strong>${esc(x.p.entity)}</strong> — ${esc(x.p.coverage_type)}${x.p.carrier ? ' (' + esc(x.p.carrier) + ')' : ''} · exp <strong>${esc((x.p.expiration_date || '').slice(0, 10))}</strong> — <span style="color:${x.days < 0 ? '#b00' : x.days <= 14 ? '#b00' : '#a60'}">${x.days < 0 ? Math.abs(x.days) + ' days OVERDUE' : x.days + ' days left'}</span>${x.p.brokerName ? ' · broker: ' + esc(x.p.brokerName) : ''}</div>`;
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:600px">
+    <h2 style="margin:0 0 4px">Insurance renewals — action needed</h2>
+    <p style="color:#666;margin:0 0 12px">Automated watch · ${esc(today)}</p>
+    ${expired.length ? `<h3 style="color:#b00;margin:12px 0 4px">⚠ EXPIRED — coverage may have lapsed</h3>${expired.map(line).join('')}` : ''}
+    ${dueSoon.length ? `<h3 style="color:#a60;margin:14px 0 4px">Renewing soon</h3>${dueSoon.map(line).join('')}` : ''}
+    <p style="color:#555;margin-top:16px;font-size:13px">Renew or confirm each before it lapses. Open the app → Corporate Hub → Insurance.</p>
+    <p style="color:#888;font-size:12px">Sent automatically by Armada Care Standards — Insurance watch.</p></div>`;
+  try { await sendEmail({ to: insuranceRecipients(), subject: `Insurance: ${expired.length ? expired.length + ' EXPIRED, ' : ''}${dueSoon.length} renewing soon`, html }); return { sent: true, dueSoon: dueSoon.length, expired: expired.length }; }
+  catch (e) { return { sent: false, reason: e.message }; }
+}
+app.post('/api/corp/insurance/run-reminders', requireAuth, requireCorp, async (req, res) => {
+  try { res.json(await checkInsuranceReminders({ force: false })); } catch (e) { res.status(502).json({ error: e.message }); }
+});
 // ── HR / Ownership employee roster (admin-only — salary is sensitive) ──────────
 // Everyone across every entity, broken down by location, with job title + salary.
 app.get('/api/hr/employees', requireAuth, requireAdmin, (req, res) => {
@@ -9720,6 +9851,9 @@ if (kipuConfigured()) {
   setTimeout(runOutpatient, 90000);                // shortly after boot
   setInterval(runOutpatient, 24 * 3600 * 1000);    // daily
 }
+// Insurance renewal watch — check daily so nothing lapses; `reminded` prevents repeats.
+setTimeout(() => { checkInsuranceReminders().then((r) => { if (r.sent) console.log(`[insurance] reminder sent (${r.dueSoon} soon, ${r.expired} expired)`); }).catch((e) => console.error('[insurance] reminder:', e.message)); }, 120000);
+setInterval(() => { checkInsuranceReminders().then((r) => { if (r.sent) console.log(`[insurance] reminder sent (${r.dueSoon} soon, ${r.expired} expired)`); }).catch((e) => console.error('[insurance] reminder:', e.message)); }, 12 * 3600 * 1000);
 
 // ---- Daily cutoff: at LOCAL midnight, finalize the day just ended and open a
 // fresh one, so each day's intakes/discharges/LOC-changes/AMA is a fixed record.

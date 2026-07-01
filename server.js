@@ -3403,10 +3403,11 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
 app.get('/api/corp/intake', requireAuth, requireCorp, (req, res) => {
   const routes = db.prepare(`SELECT * FROM order_intake_routes WHERE active = 1 ORDER BY kind, value`).all();
   const recent = db.prepare(`SELECT id, facility, item_name, requested_by, created_at FROM order_requests WHERE source='email' ORDER BY id DESC LIMIT 20`).all();
-  const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  // Auto-detect the app's public address from the request; a saved override wins.
+  const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || appBaseUrl(req)).replace(/\/$/, '');
   res.json({
     token: req.user.role === 'admin' ? orderIntakeToken() : undefined,
-    webhookUrl: req.user.role === 'admin' ? `${base || '(your app URL)'}/api/inbound/order?t=${orderIntakeToken()}` : undefined,
+    webhookUrl: req.user.role === 'admin' ? `${base}/api/inbound/order?t=${orderIntakeToken()}` : undefined,
     routes, recent, locations: orgLocations(), defaultEntity: getState('order_intake_default') || DETOX_LOCATION,
     confirmOn: getState('order_intake_confirm') !== 'off',
   });
@@ -3432,8 +3433,7 @@ app.post('/api/corp/intake/send-instructions', requireAuth, requireAdmin, async 
   if (!emailConfigured()) return res.status(400).json({ error: 'Email isn’t connected — Settings → Email.' });
   const to = String(req.body?.to || '').trim();
   if (!/@/.test(to)) return res.status(400).json({ error: 'Enter the IT company’s email address.' });
-  const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
-  if (!base) return res.status(400).json({ error: 'Set “Your app URL” first (and Save), so the webhook link is complete.' });
+  const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || appBaseUrl(req)).replace(/\/$/, '');
   const hook = `${base}/api/inbound/order?t=${orderIntakeToken()}`;
   const esc = htmlEsc;
   const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:640px">

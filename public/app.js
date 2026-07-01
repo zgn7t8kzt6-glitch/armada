@@ -5738,7 +5738,7 @@ async function loadCorpHub(){
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${facSel}${(ME&&ME.role==='admin'&&!PREVIEW_ROLE)?'<button class="btn btn-ghost btn-sm sans" onclick="previewAsChava()">👁 Preview corporate view</button>':''}</div></div>
     ${CORP_FAC?`<div class="pc-note" style="margin-top:6px">Viewing <strong>${esc(CORP_FAC)}</strong> only. <a href="#" onclick="CORP_FAC='';loadCorpHub();return false">← all facilities</a></div>`:''}
     <div class="itabs" id="corpTabs" style="margin-top:6px">
-      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','insurance|🛡️ Insurance','leases|🏢 Leases','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
+      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','insurance|🛡️ Insurance','leases|🏢 Leases','entities|🏛️ Entities','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
     </div></div>
     <div id="corpBody"><div class="hint">Loading…</div></div>`;
   renderCorpTab();
@@ -5751,6 +5751,7 @@ async function renderCorpTab(){
   if(CORP_TAB==='projects') return renderCorpProjects(body);
   if(CORP_TAB==='insurance') return renderCorpInsurance(body);
   if(CORP_TAB==='leases') return renderCorpLeases(body);
+  if(CORP_TAB==='entities') return renderCorpEntities(body);
   if(CORP_TAB==='vendors') return renderCorpVendors(body);
   if(CORP_TAB==='accounts') return renderCorpPayments(body);
   if(CORP_TAB==='docs') return renderCorpDocs(body);
@@ -5890,6 +5891,42 @@ async function renderCorpProjects(body){
     <div class="cmd-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
       ${cols.map(([k,l])=>`<div class="card"><h3 style="margin-top:0;font-size:14px">${l} <span class="hint" style="font-weight:400">· ${ts.filter(t=>t.status===k).length}</span></h3>${ts.filter(t=>t.status===k).map(card).join('')||'<div class="hint">—</div>'}</div>`).join('')}
     </div>`;
+}
+let ENT_SHOW=false, ENT_DATA=null;
+async function renderCorpEntities(body){
+  let d; try{ d=await api('/corp/entities'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  ENT_DATA=d;
+  const mask=(v)=>!v?'':(ENT_SHOW?esc(v):'••••'+(String(v).length>4&&ENT_SHOW?'':''));
+  const recs=d.records||[], banks=d.banks||[], cards=d.cards||[], portals=d.portals||[];
+  const entities=[...new Set([...recs.map(r=>r.entity),...banks.map(b=>b.entity),...cards.map(c=>c.entity),...(d.locations||[])].filter(Boolean))].sort();
+  let list=CORP_FAC?entities.filter(e=>e===CORP_FAC):entities;
+  const kv=(k,v,sensitive)=>v?`<div class="hint"><span style="color:var(--muted)">${esc(k)}:</span> ${sensitive?mask(v):esc(v)}</div>`:'';
+  const entCard=(ent)=>{
+    const r=recs.find(x=>x.entity===ent)||{};
+    const bk=banks.filter(x=>x.entity===ent), cd=cards.filter(x=>x.entity===ent);
+    return `<details style="margin:6px 0"><summary style="cursor:pointer"><strong>${esc(ent)}</strong>${r.tax_id?` <span class="hint">· EIN ${mask(r.tax_id)}</span>`:''}</summary>
+      <div style="padding:6px 0 2px">
+        ${kv('Legal name',r.legal_name)}${kv('EIN / Tax ID',r.tax_id,true)}${kv('NPI',r.npi)}${kv('Taxonomy',r.taxonomy)}${kv('Medicaid ID',r.medicaid_id)}${kv('DUNS',r.duns)}${kv('Address',r.address)}${kv('Incorporated',r.incorp_date)}
+        <div style="margin-top:6px"><strong style="font-size:13px">🏦 Bank accounts</strong>${bk.length?bk.map(b=>`<div class="pc-note" style="font-size:12px">${esc(b.bank||'')} ${b.acct_type?'· '+esc(b.acct_type):''}<div class="hint">routing ${mask(b.routing)} · acct ${mask(b.account_number)}</div></div>`).join(''):'<div class="hint">none on file</div>'}</div>
+        <div style="margin-top:6px"><strong style="font-size:13px">💳 Cards</strong>${cd.length?cd.map(c=>`<div class="pc-note" style="font-size:12px">${esc(c.name_on_card||'')}<div class="hint">${mask(c.card_number)} · exp ${esc(c.exp||'')} · CVV ${mask(c.back_code)}${c.front_code?' · '+mask(c.front_code):''}</div></div>`).join(''):'<div class="hint">none on file</div>'}</div>
+      </div></details>`;
+  };
+  body.innerHTML=`<div class="pc-note" style="color:#a60;margin-bottom:8px">🔒 <strong>Sensitive vault</strong> — EINs, bank accounts, full card numbers/CVV, and logins. Owner + Executive Assistant only. Values are hidden until you tap “Show”. Treat this like a password manager.</div>
+    <div class="toolbar" style="justify-content:flex-start;gap:8px;margin-bottom:6px"><button class="btn btn-gold btn-sm sans" onclick="ENT_SHOW=!ENT_SHOW;renderCorpEntities($('corpBody'))">${ENT_SHOW?'🙈 Hide values':'👁 Show values'}</button>${ME.role==='admin'?'<button class="btn btn-ghost btn-sm sans" onclick="importEntities()">⤓ Import from file</button>':''}<span id="entMsg" class="hint" style="align-self:center"></span></div>
+    <div class="card"><h3 style="margin-top:0">🏛️ Entities <span class="hint" style="font-weight:400">· ${list.length}</span></h3>${list.length?list.map(entCard).join(''):'<div class="hint">No entities yet — admin can Import from file.</div>'}</div>
+    <div class="card"><h3 style="margin-top:0">🔑 Portals &amp; logins <span class="hint" style="font-weight:400">· ${portals.length}</span></h3>
+      ${portals.length?`<table class="tbl"><tr><th>Portal</th><th>Username</th><th>Password</th><th>Info</th><th>Entity</th></tr>${portals.map(p=>`<tr><td><strong>${esc(p.name)}</strong></td><td class="hint">${esc(p.username||'')}</td><td>${mask(p.password)}</td><td class="hint">${esc(p.info||'')}</td><td class="hint">${esc(p.entity||'')}</td></tr>`).join('')}</table>`:'<div class="hint">No logins yet.</div>'}</div>`;
+}
+async function importEntities(){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(!f)return; const r=new FileReader();
+    r.onload=async()=>{ let payload; try{ payload=JSON.parse(r.result); }catch(e){ if($('entMsg'))$('entMsg').textContent='That file isn’t valid JSON.'; return; }
+      if(!confirm('Import the entity vault? This replaces the current entity data.'))return;
+      if($('entMsg'))$('entMsg').textContent='Importing…';
+      try{ const resp=await api('/corp/entities/import',{method:'POST',body:JSON.stringify(payload)}); if($('entMsg'))$('entMsg').textContent=`✓ Imported ${resp.imported.records} entities, ${resp.imported.banks} bank accts, ${resp.imported.cards} cards, ${resp.imported.portals} logins.`; renderCorpEntities($('corpBody')); }
+      catch(e){ if($('entMsg'))$('entMsg').textContent=e.message; } };
+    r.readAsText(f); };
+  inp.click();
 }
 let LEASE_DATA=null, LEASE_OPEN=null, LEASE_FILE=null;
 async function renderCorpLeases(body){

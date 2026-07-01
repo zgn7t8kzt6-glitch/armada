@@ -3543,6 +3543,80 @@ app.post('/api/corp/leases/:id/ask', requireAuth, requireCorp, async (req, res) 
   db.prepare(`INSERT INTO lease_questions (lease_id, question, answer, asked_by) VALUES (?,?,?,?)`).run(l.id, q.slice(0, 500), answer, req.user.name);
   res.json({ answer });
 });
+// ── Entity vault: legal + banking + cards + logins (corp + owner, masked) ──────
+app.get('/api/corp/entities', requireAuth, requireCorp, (req, res) => {
+  const records = db.prepare(`SELECT * FROM entity_records ORDER BY entity`).all();
+  const banks = db.prepare(`SELECT * FROM entity_bank_accounts WHERE active = 1 ORDER BY entity, bank`).all();
+  const cards = db.prepare(`SELECT * FROM entity_cards WHERE active = 1 ORDER BY entity, name_on_card`).all();
+  const portals = db.prepare(`SELECT * FROM portals WHERE active = 1 ORDER BY name`).all();
+  res.json({ records, banks, cards, portals, locations: orgLocations() });
+});
+app.post('/api/corp/entities/record', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.entity || '').trim()) return res.status(400).json({ error: 'Entity required.' });
+  const f = [String(b.entity).slice(0, 120), String(b.legal_name || '').slice(0, 160), String(b.tax_id || '').slice(0, 40), String(b.npi || '').slice(0, 60), String(b.taxonomy || '').slice(0, 60), String(b.medicaid_id || '').slice(0, 120), String(b.duns || '').slice(0, 40), String(b.address || '').slice(0, 300), String(b.mailing_address || '').slice(0, 300), String(b.incorp_date || '').slice(0, 40), String(b.notes || '').slice(0, 2000)];
+  if (b.id) { db.prepare(`UPDATE entity_records SET entity=?,legal_name=?,tax_id=?,npi=?,taxonomy=?,medicaid_id=?,duns=?,address=?,mailing_address=?,incorp_date=?,notes=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
+  const info = db.prepare(`INSERT INTO entity_records (entity,legal_name,tax_id,npi,taxonomy,medicaid_id,duns,address,mailing_address,incorp_date,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(...f);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.post('/api/corp/entities/bank', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.entity || '').trim()) return res.status(400).json({ error: 'Entity required.' });
+  const f = [String(b.entity).slice(0, 120), String(b.bank || '').slice(0, 80), String(b.routing || '').slice(0, 40), String(b.account_number || '').slice(0, 60), String(b.acct_type || '').slice(0, 40), String(b.notes || '').slice(0, 500)];
+  if (b.id) { db.prepare(`UPDATE entity_bank_accounts SET entity=?,bank=?,routing=?,account_number=?,acct_type=?,notes=? WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
+  const info = db.prepare(`INSERT INTO entity_bank_accounts (entity,bank,routing,account_number,acct_type,notes) VALUES (?,?,?,?,?,?)`).run(...f);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/entities/bank/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`UPDATE entity_bank_accounts SET active=0 WHERE id=?`).run(req.params.id); res.json({ ok: true }); });
+app.post('/api/corp/entities/card', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  const f = [String(b.entity || '').slice(0, 120), String(b.name_on_card || '').slice(0, 80), String(b.card_number || '').slice(0, 40), String(b.exp || '').slice(0, 10), String(b.front_code || '').slice(0, 10), String(b.back_code || '').slice(0, 10), String(b.notes || '').slice(0, 500)];
+  if (b.id) { db.prepare(`UPDATE entity_cards SET entity=?,name_on_card=?,card_number=?,exp=?,front_code=?,back_code=?,notes=? WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
+  const info = db.prepare(`INSERT INTO entity_cards (entity,name_on_card,card_number,exp,front_code,back_code,notes) VALUES (?,?,?,?,?,?,?)`).run(...f);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/entities/card/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`UPDATE entity_cards SET active=0 WHERE id=?`).run(req.params.id); res.json({ ok: true }); });
+app.post('/api/corp/entities/portal', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.name || '').trim()) return res.status(400).json({ error: 'Portal name required.' });
+  const f = [String(b.name).slice(0, 120), String(b.username || '').slice(0, 120), String(b.password || '').slice(0, 120), String(b.info || '').slice(0, 1000), String(b.entity || '').slice(0, 120)];
+  if (b.id) { db.prepare(`UPDATE portals SET name=?,username=?,password=?,info=?,entity=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
+  const info = db.prepare(`INSERT INTO portals (name,username,password,info,entity) VALUES (?,?,?,?,?)`).run(...f);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/entities/portal/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`UPDATE portals SET active=0 WHERE id=?`).run(req.params.id); res.json({ ok: true }); });
+// One-time bulk import from the entity information sheet (owner uploads the JSON I
+// prepared). Replaces existing rows so re-import is idempotent.
+app.post('/api/corp/entities/import', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const s = (v, n) => String(v == null ? '' : v).slice(0, n);
+  let n = { records: 0, banks: 0, cards: 0, portals: 0 };
+  db.exec('BEGIN');
+  try {
+    if (Array.isArray(b.records)) {
+      db.exec('DELETE FROM entity_records');
+      const ins = db.prepare(`INSERT INTO entity_records (entity,legal_name,tax_id,npi,taxonomy,medicaid_id,duns,address,mailing_address,incorp_date,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const r of b.records) { ins.run(s(r.entity, 120), s(r.legal_name, 160), s(r.tax_id, 40), s(r.npi, 60), s(r.taxonomy, 60), s(r.medicaid_id, 120), s(r.duns, 40), s(r.address, 300), s(r.mailing_address, 300), s(r.incorp_date, 40), s(r.notes, 2000)); n.records++; }
+    }
+    if (Array.isArray(b.banks)) {
+      db.exec('DELETE FROM entity_bank_accounts');
+      const ins = db.prepare(`INSERT INTO entity_bank_accounts (entity,bank,routing,account_number,acct_type,notes) VALUES (?,?,?,?,?,?)`);
+      for (const r of b.banks) { ins.run(s(r.entity, 120), s(r.bank, 80), s(r.routing, 40), s(r.account_number, 60), s(r.acct_type, 40), s(r.notes, 500)); n.banks++; }
+    }
+    if (Array.isArray(b.cards)) {
+      db.exec('DELETE FROM entity_cards');
+      const ins = db.prepare(`INSERT INTO entity_cards (entity,name_on_card,card_number,exp,front_code,back_code,notes) VALUES (?,?,?,?,?,?,?)`);
+      for (const r of b.cards) { ins.run(s(r.entity, 120), s(r.name_on_card, 80), s(r.card_number, 40), s(r.exp, 10), s(r.front_code, 10), s(r.back_code, 10), s(r.notes, 500)); n.cards++; }
+    }
+    if (Array.isArray(b.portals)) {
+      db.exec('DELETE FROM portals');
+      const ins = db.prepare(`INSERT INTO portals (name,username,password,info,entity) VALUES (?,?,?,?,?)`);
+      for (const r of b.portals) { ins.run(s(r.name, 120), s(r.username, 120), s(r.password, 120), s(r.info, 1000), s(r.entity, 120)); n.portals++; }
+    }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* ignore */ } return res.status(500).json({ error: e.message }); }
+  res.json({ ok: true, imported: n });
+});
 // ── HR / Ownership employee roster (admin-only — salary is sensitive) ──────────
 // Everyone across every entity, broken down by location, with job title + salary.
 app.get('/api/hr/employees', requireAuth, requireAdmin, (req, res) => {

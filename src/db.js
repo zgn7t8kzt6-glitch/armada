@@ -1793,6 +1793,55 @@ CREATE TABLE IF NOT EXISTS lease_questions (
   asked_by TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// ── Entity vault: legal + banking + cards + portal logins per legal entity ──────
+// Highly sensitive; corp/owner-only, masked in the UI. Loaded via in-app import so
+// the raw data never lives in the code repository.
+db.exec(`CREATE TABLE IF NOT EXISTS entity_records (
+  id INTEGER PRIMARY KEY,
+  entity TEXT NOT NULL,
+  legal_name TEXT,
+  tax_id TEXT,
+  npi TEXT,
+  taxonomy TEXT,
+  medicaid_id TEXT,
+  duns TEXT,
+  address TEXT,
+  mailing_address TEXT,
+  incorp_date TEXT,
+  notes TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS entity_bank_accounts (
+  id INTEGER PRIMARY KEY,
+  entity TEXT NOT NULL,
+  bank TEXT,
+  routing TEXT,
+  account_number TEXT,
+  acct_type TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS entity_cards (
+  id INTEGER PRIMARY KEY,
+  entity TEXT,
+  name_on_card TEXT,
+  card_number TEXT,
+  exp TEXT,
+  front_code TEXT,
+  back_code TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS portals (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  username TEXT,
+  password TEXT,
+  info TEXT,
+  entity TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // Corporate ordering stream — supply requests from ALL locations land here, tagged by
 // facility, so Chava sees where everything is being requested and works one queue.
 db.exec(`CREATE TABLE IF NOT EXISTS order_requests (

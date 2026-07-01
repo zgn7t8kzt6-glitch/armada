@@ -2942,8 +2942,10 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req,
   const quick = all.map((c) => { const pd = (c.iop_start && c.admit) ? opDays(c.admit, c.iop_start) : null; return pd != null && pd <= quickThresh ? { name: c.pref || c.name, payer: c.payer || '', phpDays: pd, admit: (c.admit || '').slice(0, 10), iopStart: (c.iop_start || '').slice(0, 10), active: !!c.active } : null; }).filter(Boolean).sort((a, b) => a.phpDays - b.phpDays);
   const tracking = !!getState('outpatient_synced_at');
   // The exact admits we counted — so a real-vs-app gap can be diagnosed by name.
-  const admitList = admitRows.map((a) => ({ name: a.pref || a.name, admit: (a.admit || '').slice(0, 10), discharged: (a.discharge || '').slice(0, 10), level: levelByKid.get(String(a.kipuId)) || '', sameDay: a.admit && a.discharge && String(a.admit).slice(0, 10) === String(a.discharge).slice(0, 10) }))
+  // active = still enrolled (no discharge date on the admissions record).
+  const admitList = admitRows.map((a) => ({ name: a.pref || a.name, admit: (a.admit || '').slice(0, 10), discharged: (a.discharge || '').slice(0, 10), level: levelByKid.get(String(a.kipuId)) || '', active: !(a.discharge && String(a.discharge).slice(0, 10)), sameDay: a.admit && a.discharge && String(a.admit).slice(0, 10) === String(a.discharge).slice(0, 10) }))
     .sort((a, b) => (a.admit < b.admit ? 1 : a.admit > b.admit ? -1 : 0));
+  const admitsStillHere = admitList.filter((a) => a.active).length;
   // The exact discharges in the window, with length of stay (admit→discharge).
   const dischargeList = dischargeRows.map((a) => {
     const admit = (a.admit || '').slice(0, 10), disch = (a.discharge || '').slice(0, 10);
@@ -2955,7 +2957,7 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req,
     since, end, spanDays, perWeek: +(admits.length / (spanDays / 7)).toFixed(1),
     counts,
     admits: admits.length, discharges: discharges.length, movedToIop: movedToIop.length,
-    admitsPrev, admitList, dischargeList, source,
+    admitsPrev, admitList, admitsStillHere, dischargeList, source,
     los: { php: avgPhpLos, phpPrev: avgPhpPrev, iop: avgIopLos, iopPrev: avgIopPrev, curPhpDays, curIopDays },
     payers: payerList,
     quick, quickThresh,

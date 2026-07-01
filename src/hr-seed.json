@@ -1,0 +1,772 @@
+[
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Appel",
+"first": "Chava"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Biderman",
+"first": "Jay"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Borenstein",
+"first": "Chaya"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Cherry",
+"first": "Catina"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Copeland",
+"first": "Rose"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Dean",
+"first": "Terri"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Goldfarb",
+"first": "Rob"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Jacobs",
+"first": "Aaron"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Leach",
+"first": "Julie"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Martin",
+"first": "Ashlie"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Menzer",
+"first": "Janna"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Moore",
+"first": "Dawn"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Morabito",
+"first": "Erin"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Newman",
+"first": "Cassie"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Pepose",
+"first": "Asher"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Reich",
+"first": "Ari"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Shaull",
+"first": "Lauren"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Teitz",
+"first": "Bassie"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Vayntraub",
+"first": "Jane"
+},
+{
+"entity": "Armada Recovery LLC (\"Corporate\")",
+"last": "Vayntraub",
+"first": "Valentina"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Argenio",
+"first": "Nicole"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Banks",
+"first": "Judith"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Begg",
+"first": "Teresa"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Bucha",
+"first": "Rich"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Calder",
+"first": "Matthew"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Craft",
+"first": "Marina"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Crossland",
+"first": "Christine"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Crum",
+"first": "Ramona"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Donohoe",
+"first": "Wendy"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Garnes",
+"first": "Barbara"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Gilpin",
+"first": "Alyssa"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Green",
+"first": "Dewayne"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Griebenow",
+"first": "Courtney"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Hall",
+"first": "Tara"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Immel",
+"first": "Danielle"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Jackson",
+"first": "Darci"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Miller",
+"first": "Brandon"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Olugbemiro",
+"first": "Olufemi"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Roebuck",
+"first": "Tina"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Tuck",
+"first": "Grace"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Valenti",
+"first": "Alaina"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Wheeler",
+"first": "Mary"
+},
+{
+"entity": "Akron House Recovery, LLC",
+"last": "Yost",
+"first": "Joe"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Avery",
+"first": "George"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Berry",
+"first": "Ben"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Beauchamp",
+"first": "Mitchell"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Brooks",
+"first": "Tracy"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Damjanovic(Wolf)",
+"first": "Amanda"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Dexter",
+"first": "Cassie"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Hirsch",
+"first": "Neil"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Holtzclaw",
+"first": "Christina"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Lipsey",
+"first": "Kenneth"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Miller",
+"first": "Vicki"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Monroe",
+"first": "Theodore (Ted)"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Smith",
+"first": "Erika"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Snell",
+"first": "Donald"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Ward",
+"first": "Alyssa"
+},
+{
+"entity": "Hilltop Recovery Home, LLC - AKRON",
+"last": "Wingard",
+"first": "William"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Allen",
+"first": "Kasey"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Altick",
+"first": "Kimber"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Bennett",
+"first": "Ryan"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Carmack",
+"first": "Randall"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Dunaway",
+"first": "Antonia (Antonio)"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Horner",
+"first": "Molly"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Long",
+"first": "Sarah"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Nevins",
+"first": "Daniel"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "O'Bryan",
+"first": "Alicia"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Pavy",
+"first": "Mallory"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Pillow",
+"first": "Andrew"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Pillow",
+"first": "Christina"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Shank-Lane",
+"first": "Antwon"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Squire",
+"first": "Carla"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Steinke",
+"first": "Addison"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Torres Serrano",
+"first": "Zacha"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Weikert",
+"first": "Joe"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Werner",
+"first": "Clarissa"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Williams",
+"first": "Angela"
+},
+{
+"entity": "Hilltop Recovery Dayton, LLC",
+"last": "Alexander",
+"first": "Shamika"
+},
+{
+"entity": "Hilltop Recovery Dayton, LLC",
+"last": "Barrow",
+"first": "Elaine"
+},
+{
+"entity": "Armada Recovery Dayton, LLC",
+"last": "Brown",
+"first": "Jessica"
+},
+{
+"entity": "Hilltop Recovery Dayton, LLC",
+"last": "Chancellor",
+"first": "Alysa"
+},
+{
+"entity": "Hilltop Recovery Dayton, LLC",
+"last": "Musgrove",
+"first": "Jamie"
+},
+{
+"entity": "Hilltop Recovery Dayton, LLC",
+"last": "Patterson",
+"first": "Jasmine"
+},
+{
+"entity": "Hilltop Recovery Dayton, LLC",
+"last": "Thomason",
+"first": "Tasia"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Akinwole",
+"first": "Taiwo"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Atkinson",
+"first": "Asia"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Bell",
+"first": "Rockea"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Bellamy",
+"first": "Lisa"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Biderman",
+"first": "Jay"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Burdine",
+"first": "Vicki"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Davis",
+"first": "Bryson"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Evans",
+"first": "Tiera"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Lindsey-Morris",
+"first": "Maureen"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Lutz",
+"first": "Channing"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "MacIntire",
+"first": "Stephanie"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Madden",
+"first": "Delandra"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "McGuffog",
+"first": "Neil"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Medcalf",
+"first": "Spencer"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Pollard",
+"first": "DeKita"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Randolph",
+"first": "John"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Sam",
+"first": "Kimtoiya"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Schaefer",
+"first": "Johnny"
+},
+{
+"entity": "Spark Recovery, LLC",
+"last": "Vander Woude",
+"first": "Duane"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Anderson",
+"first": "Landin"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Crabtree",
+"first": "Austin"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Dobbs",
+"first": "David(Tony)"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Hornaday",
+"first": "Barbara"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Huckleby",
+"first": "Shawn"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Killen",
+"first": "Andrew"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Mathis",
+"first": "Kayla"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "McGee",
+"first": "Tiana"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "McLin",
+"first": "Allison"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Palmer",
+"first": "Shannon"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Rix",
+"first": "Jeremy"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Rollins",
+"first": "Jesse"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Scott",
+"first": "Bradley"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Sears",
+"first": "Timothy"
+},
+{
+"entity": "Reverie Sober Living of Indianapolis",
+"last": "Wilson",
+"first": "Ila"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Adeleke",
+"first": "Temitope"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Ashcraft",
+"first": "Natasha"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Baker",
+"first": "Nadia"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Biscardi",
+"first": "Paul"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Briggs",
+"first": "Shai"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Cole",
+"first": "Jason"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Demshar",
+"first": "Amanda"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Elmerick",
+"first": "James"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Ferrebee",
+"first": "Shyanne"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Foss",
+"first": "Tracy"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Hodous",
+"first": "Jasmine"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Hovey",
+"first": "Wendy"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Jackson",
+"first": "Shabrina"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Jinks",
+"first": "Jennifer"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Johnson",
+"first": "Tamica"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Luckey",
+"first": "Herbert"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Martin",
+"first": "Lori"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Mastache",
+"first": "Desiree"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Mastache",
+"first": "Kiera"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "McGrady",
+"first": "David"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Miller",
+"first": "Lynsey"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Moore",
+"first": "Zakiya"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Morgan",
+"first": "Shantel"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Moss",
+"first": "Almond"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Murphy",
+"first": "Terrence"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Parsons",
+"first": "Suzanne"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Pixley",
+"first": "Antoine"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Reeves",
+"first": "Stevie"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Roberson",
+"first": "Natasha"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Robertson",
+"first": "Alexis"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Robinson",
+"first": "Benjamin"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Rodgers",
+"first": "Nathaniel"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Schultz",
+"first": "Kayla"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Strasser",
+"first": "Macayla"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Taylor",
+"first": "Sarah"
+},
+{
+"entity": "Armada Detox of Akron",
+"last": "Trego",
+"first": "Shiann"
+}
+]

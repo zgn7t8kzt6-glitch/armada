@@ -1744,6 +1744,23 @@ db.exec(`CREATE TABLE IF NOT EXISTS facility_docs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// Org-wide employee roster (HR / ownership) across all entities, broken down by
+// location. Salary is highly sensitive — the endpoints are admin-only. Seeded from the
+// Active Employees export; job title + salary are filled in by the owner.
+db.exec(`CREATE TABLE IF NOT EXISTS hr_employees (
+  id INTEGER PRIMARY KEY,
+  entity TEXT NOT NULL,                        -- location / legal entity
+  last_name TEXT,
+  first_name TEXT,
+  job_title TEXT,
+  salary REAL,
+  pay_type TEXT NOT NULL DEFAULT 'annual',     -- annual | hourly
+  status TEXT NOT NULL DEFAULT 'active',        -- active | inactive
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_hr_entity ON hr_employees(entity, last_name);`);
 // Case-management needs the team should help with, pulled from the notes + manual.
 db.exec(`CREATE TABLE IF NOT EXISTS case_tasks (
   id INTEGER PRIMARY KEY,

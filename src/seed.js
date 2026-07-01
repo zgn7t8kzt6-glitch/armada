@@ -2,8 +2,27 @@
 //   1. Automatically on server boot (ensureAdmin) so a fresh deploy is usable.
 //   2. Manually via `npm run seed` for local setup / sample data.
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { db } from './db.js';
 import { createUser } from './auth.js';
+
+// One-time import of the org-wide employee roster (name + entity/location). Job title
+// and salary are left blank for the owner to fill. Idempotent: only runs if empty.
+export function ensureHrRoster({ quiet = false } = {}) {
+  const have = db.prepare(`SELECT COUNT(*) n FROM hr_employees`).get().n;
+  if (have) return;
+  let rows;
+  try { rows = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'hr-seed.json'), 'utf8')); }
+  catch { return; }
+  const ins = db.prepare(`INSERT INTO hr_employees (entity, last_name, first_name) VALUES (?,?,?)`);
+  const tx = db.transaction ? null : null;   // node:sqlite has no .transaction(); use exec
+  db.exec('BEGIN');
+  try { for (const r of rows) ins.run(r.entity || '', r.last || '', r.first || ''); db.exec('COMMIT'); }
+  catch (e) { try { db.exec('ROLLBACK'); } catch { /* ignore */ } if (!quiet) console.error('[hr seed]', e.message); return; }
+  if (!quiet) console.log(`Imported ${rows.length} employees into the HR roster.`);
+}
 
 // Create the first admin if no admin exists yet. Idempotent and safe to run every boot.
 // Reads ADMIN_USER / ADMIN_PASS from the environment (set these in Render).

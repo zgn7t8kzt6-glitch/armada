@@ -18,7 +18,7 @@ import {
   mfaSetup, mfaEnable, mfaDisable, hashPassword, otpauthForTicket, mfaRequired, setMfaRequired,
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
-import { ensureAdmin, ensureCorporateUser, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
+import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 
@@ -26,6 +26,7 @@ import { mountHousing } from './src/housing.js';
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
 ensureAdmin();
 ensureCorporateUser();
+ensureHrRoster();
 if (process.env.SEED_SAMPLE === 'true') ensureSampleData();
 ensureExampleClient12A();
 ensureInventoryCatalog();
@@ -3208,6 +3209,38 @@ app.post('/api/corp/docs', requireAuth, requireCorp, (req, res) => {
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 app.delete('/api/corp/docs/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM facility_docs WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// ── HR / Ownership employee roster (admin-only — salary is sensitive) ──────────
+// Everyone across every entity, broken down by location, with job title + salary.
+app.get('/api/hr/employees', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`SELECT * FROM hr_employees WHERE status='active' ORDER BY entity, last_name, first_name`).all();
+  const byEntity = {};
+  for (const r of rows) {
+    const e = byEntity[r.entity] = byEntity[r.entity] || { entity: r.entity, count: 0, annual: 0, withSalary: 0, people: [] };
+    e.count++; e.people.push(r);
+    if (r.salary != null && r.salary > 0) { e.withSalary++; e.annual += r.pay_type === 'hourly' ? r.salary * 2080 : r.salary; }
+  }
+  const groups = Object.values(byEntity).sort((a, b) => b.count - a.count);
+  const totalAnnual = groups.reduce((a, g) => a + g.annual, 0);
+  res.json({ groups, totals: { headcount: rows.length, annual: totalAnnual, withSalary: rows.filter((r) => r.salary > 0).length } });
+});
+app.post('/api/hr/employees', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.entity || '').trim() || (!String(b.last_name || '').trim() && !String(b.first_name || '').trim())) return res.status(400).json({ error: 'Entity and a name are required.' });
+  const info = db.prepare(`INSERT INTO hr_employees (entity, last_name, first_name, job_title, salary, pay_type) VALUES (?,?,?,?,?,?)`)
+    .run(String(b.entity).slice(0, 120), String(b.last_name || '').slice(0, 80), String(b.first_name || '').slice(0, 80), String(b.job_title || '').slice(0, 120), b.salary != null && b.salary !== '' ? +b.salary : null, b.pay_type === 'hourly' ? 'hourly' : 'annual');
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.patch('/api/hr/employees/:id', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const e = db.prepare(`SELECT * FROM hr_employees WHERE id = ?`).get(req.params.id);
+  if (!e) return res.status(404).json({ error: 'Not found.' });
+  db.prepare(`UPDATE hr_employees SET entity=COALESCE(?,entity), last_name=COALESCE(?,last_name), first_name=COALESCE(?,first_name), job_title=COALESCE(?,job_title), salary=?, pay_type=COALESCE(?,pay_type), status=COALESCE(?,status), notes=COALESCE(?,notes), updated_at=datetime('now') WHERE id=?`)
+    .run(b.entity != null ? String(b.entity).slice(0, 120) : null, b.last_name != null ? String(b.last_name).slice(0, 80) : null, b.first_name != null ? String(b.first_name).slice(0, 80) : null,
+      b.job_title != null ? String(b.job_title).slice(0, 120) : null, (b.salary === '' || b.salary == null) ? null : +b.salary, b.pay_type === 'hourly' || b.pay_type === 'annual' ? b.pay_type : null,
+      b.status != null ? String(b.status) : null, b.notes != null ? String(b.notes).slice(0, 2000) : null, e.id);
+  res.json({ ok: true });
+});
+app.delete('/api/hr/employees/:id', requireAuth, requireAdmin, (req, res) => { db.prepare(`UPDATE hr_employees SET status='inactive', updated_at=datetime('now') WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 app.get('/api/facilities', requireAuth, requireOutpatient, (req, res) => res.json({ facilities: getFacilities(), sparkConfigured: sparkConfigured() }));
 app.post('/api/facilities', requireAuth, requireAdmin, (req, res) => {
   const list = Array.isArray(req.body?.facilities) ? req.body.facilities : null;

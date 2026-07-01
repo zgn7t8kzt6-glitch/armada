@@ -5634,8 +5634,36 @@ async function loadOwnership(){
       ${(d.byBrand||[]).length>1?`<div class="hint" style="margin-top:6px">${(d.byBrand||[]).map(b=>`<strong>${esc(b.brand)}</strong>: ${b.census} census · ${b.admits} admits · ${b.discharges} disch.`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>
     <div class="card"><h3 style="margin-top:0">Armada — Kipu <span class="hint" style="font-weight:400">· live</span></h3>${tbl(armada)}</div>
     <div class="card"><h3 style="margin-top:0">Spark${d.sparkPending?' <span class="hint" style="font-weight:400;color:#a60">· connection pending</span>':''}</h3>${d.sparkPending?'<div class="pc-note" style="color:#a60;margin-bottom:6px">These come online the moment you give me the Spark Kipu credentials — the rows are already wired.</div>':''}${tbl(spark)}</div>
+    ${ME.role==='admin'?`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Employees — by location</h3><p class="sub sans" style="margin:0">Everyone across every entity, with job title &amp; salary. Owner-only.</p></div></div><div id="ownHr"><div class="hint">Loading roster…</div></div></div>`:''}
     ${ME.role==='admin'?`<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">⚙️ Facility mapping <span class="hint" style="font-weight:400">— owner only</span></h3><p class="sub sans">If a facility shows no data, its Kipu location name here may not match Kipu. Use “List locations” in Akron Outpatient settings to see exact names, then fix them here.</p><div id="ownFacilities" class="hint">Loading…</div></div>`:''}`;
-  if(ME.role==='admin') loadFacilityEditor();
+  if(ME.role==='admin'){ loadFacilityEditor(); loadHrRoster(); }
+}
+let HR_SHOW_SAL=false;
+async function loadHrRoster(){
+  const host=$('ownHr'); if(!host) return;
+  let d; try{ d=await api('/hr/employees'); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  const money=(n)=>n==null?'':'$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0});
+  const t=d.totals||{};
+  const grp=(g)=>{
+    const rows=g.people.map(p=>`<tr>
+      <td><strong>${esc((p.first_name||'')+' '+(p.last_name||''))}</strong></td>
+      <td><input class="hrTitle" data-id="${p.id}" value="${esc(p.job_title||'')}" placeholder="job title" style="min-width:150px"/></td>
+      <td><input class="hrSal" data-id="${p.id}" type="${HR_SHOW_SAL?'number':'password'}" value="${p.salary!=null?p.salary:''}" placeholder="salary" style="width:110px"/></td>
+      <td><select class="hrPay" data-id="${p.id}"><option value="annual" ${p.pay_type!=='hourly'?'selected':''}>annual</option><option value="hourly" ${p.pay_type==='hourly'?'selected':''}>hourly</option></select></td>
+      <td><button class="btn btn-ghost btn-sm sans" onclick="saveHr(${p.id})">Save</button></td></tr>`).join('');
+    return `<details style="margin:6px 0"><summary style="cursor:pointer"><strong>${esc(g.entity)}</strong> <span class="hint">· ${g.count} people${g.annual?' · payroll '+money(g.annual)+'/yr'+(g.withSalary<g.count?' ('+g.withSalary+'/'+g.count+' entered)':''):''}</span></summary>
+      <table class="tbl" style="margin-top:4px"><tr><th>Name</th><th>Job title</th><th>Salary</th><th>Type</th><th></th></tr>${rows}</table></details>`;
+  };
+  host.innerHTML=`<div class="ret-cards" style="margin-top:4px">
+      <div class="ret-card"><div class="n">${t.headcount||0}</div><div class="l">Total headcount</div></div>
+      <div class="ret-card"><div class="n">${HR_SHOW_SAL?money(t.annual||0):'•••'}</div><div class="l">Annual payroll ${t.withSalary!=null?'('+t.withSalary+' entered)':''}</div></div>
+      <div class="ret-card"><div class="n">${(d.groups||[]).length}</div><div class="l">Locations</div></div></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:8px;margin:6px 0"><button class="btn btn-ghost btn-sm sans" onclick="HR_SHOW_SAL=!HR_SHOW_SAL;loadHrRoster()">${HR_SHOW_SAL?'🙈 Hide salaries':'👁 Show salaries'}</button><span class="hint">Type a salary + Save to fill it in. Salaries are owner-only.</span></div>
+    ${(d.groups||[]).map(grp).join('')}`;
+}
+async function saveHr(id){
+  const b={ job_title:(document.querySelector('.hrTitle[data-id="'+id+'"]')||{}).value, salary:(document.querySelector('.hrSal[data-id="'+id+'"]')||{}).value, pay_type:(document.querySelector('.hrPay[data-id="'+id+'"]')||{}).value };
+  try{ await api('/hr/employees/'+id,{method:'PATCH',body:JSON.stringify(b)}); loadHrRoster(); }catch(e){ alert(e.message); }
 }
 function ownPreset(p){ const e=today(); if(p==='mtd'){ OWN_PERIOD={since:e.slice(0,8)+'01',end:e}; } else { const d=new Date(e+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-(p-1)); OWN_PERIOD={since:d.toISOString().slice(0,10),end:e}; } loadOwnership(); }
 function ownPeriodChange(){ OWN_PERIOD={since:($('own_since')||{}).value||OWN_PERIOD.since, end:($('own_end')||{}).value||OWN_PERIOD.end}; loadOwnership(); }

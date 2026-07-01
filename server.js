@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -2195,19 +2195,21 @@ app.get('/api/assess-all/status', requireAuth, requireAdmin, (req, res) => res.j
 // ---- Discharge debriefs: read every recent discharge's notes and learn what we
 // could have done better (esp. AMA). Fills discharge type/reason/improve. ----
 let debriefJob = { running: false, total: 0, done: 0, ama: 0, errors: 0, lastError: null, current: null, startedAt: null, finishedAt: null };
-async function runDischargeDebriefs(user) {
+async function runDischargeDebriefs(user, redo = false) {
   const clients = db.prepare(`SELECT * FROM clients WHERE source = 'kipu' AND discharge_status IS NOT NULL
-    AND discharge_date >= date('now','-21 day') AND (discharge_improve IS NULL OR discharge_improve = '')`).all();
+    AND discharge_date >= date('now','-21 day')${redo ? '' : ` AND (discharge_improve IS NULL OR discharge_improve = '')`}`).all();
   debriefJob = { running: true, total: clients.length, done: 0, ama: 0, errors: 0, lastError: null, current: null, startedAt: Date.now(), finishedAt: null };
   for (const c of clients) {
     debriefJob.current = c.pref || c.name;
     try {
-      let notes = '';
-      if (c.kipu_id && kipuConfigured()) { try { notes = (await kipuPatientNotes(c.kipu_id)).text; } catch { /* care card only */ } }
-      const d = await generateDischargeDebrief(c, notes);
+      let notes = '', meta = { empty: true };
+      if (c.kipu_id && kipuConfigured()) { try { const dn = await kipuDischargeNotes(c.kipu_id); notes = dn.text; meta = { empty: dn.empty, onlyIntake: dn.onlyIntake, hasDischargeDoc: dn.hasDischargeDoc }; } catch { /* care card only */ } }
+      const d = await generateDischargeDebrief(c, notes, meta);
+      // Keep the concrete in-stay evidence attached to the reason so it stays specific.
+      const reasonOut = d.reason ? (d.evidence ? `${d.reason} — ${d.evidence}` : d.reason) : null;
       db.prepare(`UPDATE clients SET discharge_status = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
         .run(d.type && d.type !== 'Unknown' ? d.type : (c.discharge_status || 'Discharged'),
-          d.reason || null, (d.warning_signs || []).join('; ') || null, (d.could_do_better || []).join('; ') || null, c.id);
+          reasonOut, (d.warning_signs || []).join('; ') || null, (d.could_do_better || []).join('; ') || null, c.id);
       if (d.type === 'AMA') { debriefJob.ama++; createAlert(c.id, 'concern', 'Elevated', `${c.pref || c.name} left AMA — learn: ${d.summary || 'see debrief'}`); }
       audit({ user, action: 'DISCHARGE_DEBRIEF', entity: 'client', entity_id: c.id, detail: d.type, ip: '0.0.0.0' });
     } catch { debriefJob.errors++; }
@@ -2218,8 +2220,9 @@ async function runDischargeDebriefs(user) {
 app.post('/api/debrief-discharges', requireAuth, requireAdmin, (req, res) => {
   if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured.' });
   if (debriefJob.running) return res.json({ started: false, already: true });
-  runDischargeDebriefs(req.user).catch((e) => { debriefJob.running = false; console.error('[debrief]', e.message); });
-  res.json({ started: true });
+  const redo = req.query.redo === '1' || req.body?.redo === true;
+  runDischargeDebriefs(req.user, redo).catch((e) => { debriefJob.running = false; console.error('[debrief]', e.message); });
+  res.json({ started: true, redo });
 });
 app.get('/api/debrief-discharges/status', requireAuth, requireAdmin, (req, res) => res.json(debriefJob));
 /* ---------------- Case management ---------------- */

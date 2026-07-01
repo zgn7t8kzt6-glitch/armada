@@ -469,30 +469,48 @@ Given a recently discharged client's documentation, determine what happened and
 what the team can learn — so the next client like this stays.
 - type: classify the discharge using ONLY the documentation — one of:
   Completed, AMA, Transferred, Administrative, Unknown.
-- reason: the most likely REAL reason they left — the emotional/underlying
-  driver, not just the surface complaint.
+- reason: the most likely REAL reason THIS person left — the emotional/underlying
+  driver specific to their time in the program, not just the surface complaint.
+- evidence: quote or name the specific in-stay note detail your reason rests on
+  (e.g. "Group note 6/12: said he wanted to leave once his cravings eased").
+  Leave empty ONLY if no in-stay/discharge note documents a reason.
 - warning_signs: signals in the notes that preceded the departure the team could
   have caught earlier.
 - could_do_better: 2-4 concrete, specific things the team could have done to keep
   or better serve this client (run the Save, fix the fixable, follow through,
   the warm gesture). Constructive and systemic — never blame an individual.
 - summary: one or two sentences for leadership.
-Ground everything in the documentation. Do not invent. Person-first language.`;
+CRITICAL — ground the reason in what happened DURING the stay and at discharge
+(progress, group, counseling, nursing notes, and any discharge/AMA documentation).
+Do NOT infer the reason from intake or demographic facts (housing status,
+employment, arrival substance history) — those describe who the person was on
+arrival, not why they left, and produce the same generic answer for everyone.
+If the documentation is only intake paperwork with no progress or discharge notes,
+set reason to "Not documented — no in-stay or discharge notes found", leave
+evidence empty, and say so in the summary. Never manufacture a reason from intake
+facts. Do not invent. Person-first language.`;
 const DEBRIEF_SCHEMA = {
   type: 'object',
   properties: {
     type: { type: 'string', enum: ['Completed', 'AMA', 'Transferred', 'Administrative', 'Unknown'] },
     reason: { type: 'string' },
+    evidence: { type: 'string', description: 'The specific in-stay note detail the reason is grounded in; empty if none documented.' },
     warning_signs: { type: 'array', items: { type: 'string' } },
     could_do_better: { type: 'array', items: { type: 'string' } },
     summary: { type: 'string' },
   },
-  required: ['type', 'reason', 'warning_signs', 'could_do_better', 'summary'],
+  required: ['type', 'reason', 'evidence', 'warning_signs', 'could_do_better', 'summary'],
   additionalProperties: false,
 };
-export async function generateDischargeDebrief(careCard, notesText) {
+export async function generateDischargeDebrief(careCard, notesText, meta = {}) {
   const client = await getClient();
   const names = [careCard.name, careCard.pref];
+  // Tell the model what KIND of documentation it's looking at, so it doesn't treat
+  // an intake-only chart as if it explained the departure.
+  let docNote = '';
+  if (meta.empty) docNote = 'NOTE: No progress or discharge notes were found for this stay. Do not infer a reason from the Care Card demographics — mark it not documented.';
+  else if (meta.onlyIntake) docNote = 'NOTE: The only documentation available is intake paperwork (biopsychosocial / assessment). It does NOT explain why this person left — mark the reason not documented rather than inferring it from intake facts.';
+  else if (!meta.hasDischargeDoc) docNote = 'NOTE: No dedicated discharge/AMA note was found; base the reason on the late-stay progress/group/nursing notes below, not on intake facts.';
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1400,
@@ -500,7 +518,8 @@ export async function generateDischargeDebrief(careCard, notesText) {
     output_config: { effort: 'low', format: { type: 'json_schema', schema: DEBRIEF_SCHEMA } },
     messages: [{ role: 'user', content:
       `Review this discharged client and what we could learn.\n\n=== CARE CARD ===\n${careCardText(careCard)}\n\n` +
-      `=== DOCUMENTATION (this stay) ===\n${scrub(notesText || 'No documentation available.', names)}` }],
+      (docNote ? docNote + '\n\n' : '') +
+      `=== DOCUMENTATION (this stay, discharge & late-stay notes first) ===\n${scrub(notesText || 'No documentation available.', names)}` }],
   });
   if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
   const t = response.content.find((b) => b.type === 'text');
@@ -509,6 +528,7 @@ export async function generateDischargeDebrief(careCard, notesText) {
   if (!['Completed', 'AMA', 'Transferred', 'Administrative', 'Unknown'].includes(r.type)) r.type = 'Unknown';
   r.warning_signs = r.warning_signs || [];
   r.could_do_better = r.could_do_better || [];
+  r.evidence = r.evidence || '';
   return r;
 }
 

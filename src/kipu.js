@@ -740,11 +740,16 @@ export async function kipuPatientNotes(casefileId) {
   const noteCutoff = new Date(Date.now() - noteDays * 864e5).toISOString().slice(0, 10);
   const anyDated = list.some((e) => e.created_at);
   if (anyDated) list = list.filter((e) => !e.created_at || String(e.created_at).slice(0, 10) >= noteCutoff);
-  // Narrative notes first (real free-text), then newest-first (by date, else id).
-  const narrative = (nm) => /progress|nursing|group|case ?manage|family session|counsel|physician|clinical note|shift|encounter|assessment|treatment plan|biopsych|\bbht\b/i.test(nm || '');
+  // Rank by tier, then newest-first. EXPERIENCE notes (what actually happened during
+  // the stay — progress, group, counseling, nursing) rank above INTAKE paperwork
+  // (biopsychosocial, treatment plan, H&P) so summaries reflect each person's real
+  // time in the program, not the same day-one demographic facts for everyone.
+  const isIntake = (nm) => /assessment|treatment plan|biopsych|bio.?psycho|\bintake\b|admission|history and physical|\bh&p\b|screening|pre.?admission/i.test(nm || '');
+  const isExperience = (nm) => /progress|nursing|group|case ?manage|family session|counsel|individual|physician|clinical note|shift|encounter|\bbht\b/i.test(nm || '');
+  const tierOf = (nm) => (isIntake(nm) && !/progress|group|counsel|shift|encounter/i.test(nm || '')) ? 2 : isExperience(nm) ? 0 : 1;
   list.sort((a, b) => {
-    const an = narrative(a.name), bn = narrative(b.name);
-    if (an !== bn) return an ? -1 : 1;
+    const at = tierOf(a.name), bt = tierOf(b.name);
+    if (at !== bt) return at - bt;
     const ad = a.created_at || '', bd = b.created_at || '';
     if (ad || bd) return String(bd).localeCompare(String(ad));
     return (+b.id || 0) - (+a.id || 0);
@@ -775,6 +780,50 @@ export async function kipuPatientNotes(casefileId) {
     if (r.content && r.content.length > 10 && texts.length < want) { debug.withContent++; texts.push(`[${r.date ? r.date + ' · ' : ''}${nm.trim() || 'Note'}]\n${r.content}`); }
   }
   return { text: texts.join('\n\n').slice(0, +(process.env.KIPU_NOTES_CHARS || 9000)), therapist, case_manager: caseMgrName, forms, debug };
+}
+
+// Notes tuned for a DISCHARGE review: elevate discharge-summary / AMA / aftercare
+// documentation and the LATE-stay progress notes (what led to the departure), and
+// push intake paperwork to the bottom — an intake biopsychosocial says who someone
+// was on day one, not why they left. Reports doc quality so the debrief can say
+// "reason not documented" instead of inventing one from demographics.
+export async function kipuDischargeNotes(casefileId) {
+  const list0 = await evalListRaw(casefileId, { all: false });
+  const isDischarge = (nm) => /discharg|against medical advice|\bama\b|aftercare|step.?down|continuing care|leaving|departure|transition/i.test(nm || '');
+  const isIntake = (nm) => /assessment|treatment plan|biopsych|bio.?psycho|\bintake\b|admission|history and physical|\bh&p\b|screening|pre.?admission/i.test(nm || '');
+  const isExperience = (nm) => /progress|nursing|group|case ?manage|family session|counsel|individual|physician|clinical note|shift|encounter|\bbht\b/i.test(nm || '');
+  const tierOf = (nm) => isDischarge(nm) ? 0 : (isExperience(nm) && !isIntake(nm)) ? 1 : isIntake(nm) ? 3 : 2;
+  // Prefer discharge + experience docs; only fall back to intake if there's nothing else.
+  let pool = list0.filter((e) => e.id && tierOf(e.name) < 3);
+  if (pool.length < 2) pool = list0.filter((e) => e.id);
+  pool.sort((a, b) => {
+    const at = tierOf(a.name), bt = tierOf(b.name);
+    if (at !== bt) return at - bt;
+    const ad = a.created_at || '', bd = b.created_at || '';
+    if (ad || bd) return String(bd).localeCompare(String(ad));
+    return (+b.id || 0) - (+a.id || 0);
+  });
+  const want = +(process.env.KIPU_NOTES_MAX || 8);
+  const candidates = pool.slice(0, want + 3);
+  const results = await mapLimit(candidates, +(process.env.KIPU_CONCURRENCY || 6), async (e) => {
+    try {
+      const ev = await fetchEvalDetail(casefileId, e.id);
+      const evDate = e.created_at || ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '';
+      const body = extractText(ev?.evaluation_content);
+      const bodyClean = body && !/^standard$/i.test(body.trim()) ? body : '';
+      const content = [bodyClean, extractItems(ev)].filter(Boolean).join('\n').trim();
+      return { e, content, date: String(evDate).slice(0, 10) };
+    } catch { return null; }
+  });
+  const texts = [], used = [];
+  for (const r of results) {
+    if (!r) continue;
+    const nm = r.e.name || '';
+    if (r.content && r.content.length > 10 && texts.length < want) { texts.push(`[${r.date ? r.date + ' · ' : ''}${nm.trim() || 'Note'}]\n${r.content}`); used.push(nm.trim() || 'Note'); }
+  }
+  const hasDischargeDoc = used.some((n) => isDischarge(n));
+  const onlyIntake = texts.length > 0 && used.every((n) => isIntake(n) && !isDischarge(n) && !isExperience(n));
+  return { text: texts.join('\n\n').slice(0, +(process.env.KIPU_NOTES_CHARS || 9000)), used, hasDischargeDoc, onlyIntake, empty: texts.length === 0 };
 }
 
 // FULL CHART: list EVERY evaluation/form on a client (all pages), light rows for

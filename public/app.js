@@ -1582,8 +1582,8 @@ async function pollAssess(){
   }catch(e){ $('assessProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
 let debriefPoll=null;
-async function debriefDischarges(){
-  try{ const r=await api('/debrief-discharges',{method:'POST'});
+async function debriefDischarges(redo){
+  try{ const r=await api('/debrief-discharges'+(redo?'?redo=1':''),{method:'POST'});
     if(r.started===false && !r.already){ $('debriefProgress').textContent='Nothing to review.'; return; }
     $('debriefBtn').disabled=true; pollDebrief();
   }catch(e){ $('debriefProgress').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }

@@ -480,6 +480,11 @@ function corporateEmail() {
 function pollakEmail() {
   return (getState('pollak_email') || 'mordy@pollakdist.com').trim();
 }
+// Always CC'd on every inventory email (reorders, digests, distributor orders).
+// Configurable via the 'inventory_cc' state; defaults to Chavaa. Comma-separated ok.
+function inventoryCc() {
+  return (getState('inventory_cc') || 'chavaa@armadarecovery.com').trim();
+}
 // Raise (or refresh) a reorder request for an item. Dedupes on an open request so
 // corporate gets one email per shortage, not one per shift count. Returns true if
 // a NEW request was opened (i.e. an email should fire).
@@ -509,7 +514,7 @@ async function emailReorder(item, qty, level, user) {
     <p style="color:#888;margin-top:14px">Sent automatically by Armada Care Standards — Supply Standards.</p>
   </div>`;
   try {
-    await sendEmail({ to, subject: `Armada reorder — ${item.name} (${urgency})`, html });
+    await sendEmail({ to, cc: inventoryCc(), subject: `Armada reorder — ${item.name} (${urgency})`, html });
     db.prepare(`UPDATE reorder_requests SET emailed_at = datetime('now') WHERE item_id = ? AND status = 'open'`).run(item.id);
     return true;
   } catch (e) { console.error('reorder email:', e.message); return false; }
@@ -759,7 +764,7 @@ app.post('/api/inventory/reorders/send', requireAuth, requireAdmin, async (req, 
     ${body}
     <p style="color:#888;margin-top:16px;font-size:12px">Sent from Armada Care Standards — Supply Standards.</p></div>`;
   try {
-    await sendEmail({ to, subject: `Armada supplies to order — ${rows.length} item(s)`, html });
+    await sendEmail({ to, cc: inventoryCc(), subject: `Armada supplies to order — ${rows.length} item(s)`, html });
     db.prepare(`UPDATE reorder_requests SET emailed_at = datetime('now') WHERE status = 'open'`).run();
     audit({ user: req.user, action: 'REORDER_DIGEST', detail: `${rows.length} items`, ip: req.ip });
     res.json({ sent: true, to, count: rows.length });

@@ -5738,7 +5738,7 @@ async function loadCorpHub(){
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🗂️ Corporate Hub</h3><p class="sub sans" style="margin:0">Ordering &amp; maintenance at a glance, your project board, vendors, and every facility document — one place to run corporate.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${facSel}${(ME&&ME.role==='admin'&&!PREVIEW_ROLE)?'<button class="btn btn-ghost btn-sm sans" onclick="previewAsChava()">👁 Preview corporate view</button>':''}</div></div>
     ${CORP_FAC?`<div class="pc-note" style="margin-top:6px">Viewing <strong>${esc(CORP_FAC)}</strong> only. <a href="#" onclick="CORP_FAC='';loadCorpHub();return false">← all facilities</a></div>`:''}
     <div class="itabs" id="corpTabs" style="margin-top:6px">
-      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','insurance|🛡️ Insurance','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
+      ${['dashboard|📊 Dashboard','orders|🛒 Orders','projects|✅ Projects','insurance|🛡️ Insurance','leases|🏢 Leases','vendors|📇 Vendors','accounts|💳 Accounts','docs|📁 Documents','role|⭐ My Role'].map(t=>{const[k,l]=t.split('|');return `<button class="itab ${CORP_TAB===k?'active':''}" onclick="corpTab('${k}')">${l}</button>`;}).join('')}
     </div></div>
     <div id="corpBody"><div class="hint">Loading…</div></div>`;
   renderCorpTab();
@@ -5750,6 +5750,7 @@ async function renderCorpTab(){
   if(CORP_TAB==='orders') return renderCorpOrders(body);
   if(CORP_TAB==='projects') return renderCorpProjects(body);
   if(CORP_TAB==='insurance') return renderCorpInsurance(body);
+  if(CORP_TAB==='leases') return renderCorpLeases(body);
   if(CORP_TAB==='vendors') return renderCorpVendors(body);
   if(CORP_TAB==='accounts') return renderCorpPayments(body);
   if(CORP_TAB==='docs') return renderCorpDocs(body);
@@ -5880,6 +5881,78 @@ async function renderCorpProjects(body){
     <div class="cmd-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
       ${cols.map(([k,l])=>`<div class="card"><h3 style="margin-top:0;font-size:14px">${l} <span class="hint" style="font-weight:400">· ${ts.filter(t=>t.status===k).length}</span></h3>${ts.filter(t=>t.status===k).map(card).join('')||'<div class="hint">—</div>'}</div>`).join('')}
     </div>`;
+}
+let LEASE_DATA=null, LEASE_OPEN=null;
+async function renderCorpLeases(body){
+  let d; try{ d=await api('/corp/leases'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  LEASE_DATA=d;
+  let leases=(d.leases||[]); if(CORP_FAC) leases=leases.filter(l=>l.entity===CORP_FAC);
+  const soon=(dt)=>{ if(!dt)return''; const days=Math.round((Date.parse(dt)-Date.now())/864e5); return days<=90?` <span style="color:${days<0?'var(--danger)':'#a60'};font-weight:600">${days<0?'expired':days+'d'}</span>`:''; };
+  const rows=leases.map(l=>`<tr>
+      <td><strong>${esc(l.entity)}</strong><div class="hint">${esc(l.property_address||'')}</div></td>
+      <td class="hint">${esc(l.landlord||'')}</td>
+      <td class="hint">${esc(l.monthly_rent||'')}</td>
+      <td>${esc((l.term_end||'').slice(0,10)||'—')}${soon(l.term_end)}</td>
+      <td>${l.has_text?'<span style="color:var(--good)">✓ text on file</span>':'<span class="hint">no text</span>'}${l.doc_url?` · <a href="${esc(l.doc_url)}" target="_blank" rel="noopener">📄</a>`:''}</td>
+      <td><button class="btn btn-gold btn-sm sans" onclick="openLease(${l.id})">Open / Ask</button> <button class="btn btn-ghost btn-sm sans" onclick="editLease(${l.id})">Edit</button></td></tr>`).join('')||'<tr><td colspan="6" class="hint">No leases yet — add one below.</td></tr>';
+  body.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🏢 Facility leases</h3><p class="sub sans" style="margin:0">Every lease with its key terms — and an AI assistant that answers questions from the lease text (e.g. “is the roof the landlord’s responsibility?”).</p></div><button class="btn btn-gold btn-sm sans" onclick="newLease()">+ Add lease</button></div>
+      <div style="overflow-x:auto"><table class="tbl"><tr><th>Entity / property</th><th>Landlord</th><th>Rent</th><th>Term ends</th><th>Lease text</th><th></th></tr>${rows}</table></div></div>
+    <div id="leaseEditor"></div>
+    <div id="leasePanel"></div>`;
+  if(LEASE_OPEN) openLease(LEASE_OPEN);
+}
+function newLease(){ editLease(0); }
+async function editLease(id){
+  const host=$('leaseEditor'); if(!host) return;
+  let l={entity:CORP_FAC||'',property_address:'',landlord:'',landlord_contact:'',monthly_rent:'',security_deposit:'',term_start:'',term_end:'',renewal_terms:'',responsibilities:'',doc_url:'',lease_text:'',notes:''};
+  if(id){ try{ const r=await api('/corp/leases/'+id); l=r.lease; }catch(e){ alert(e.message); return; } }
+  const locs=(LEASE_DATA&&LEASE_DATA.locations)||[];
+  host.innerHTML=`<div class="card" style="background:#f4fafb;border-left:4px solid var(--aqua)"><h3 style="margin-top:0">${id?'Edit':'Add'} lease</h3>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+      <label class="hint">Entity<br><select id="lEntity"><option value="">—</option>${locs.map(x=>`<option ${x===l.entity?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
+      <label class="hint">Property address<br><input id="lAddr" value="${esc(l.property_address||'')}" style="min-width:200px"/></label>
+      <label class="hint">Landlord<br><input id="lLandlord" value="${esc(l.landlord||'')}" style="min-width:140px"/></label>
+      <label class="hint">Landlord contact<br><input id="lLandContact" value="${esc(l.landlord_contact||'')}" style="min-width:150px"/></label></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">
+      <label class="hint">Monthly rent<br><input id="lRent" value="${esc(l.monthly_rent||'')}" style="width:100px"/></label>
+      <label class="hint">Security deposit<br><input id="lDep" value="${esc(l.security_deposit||'')}" style="width:100px"/></label>
+      <label class="hint">Term start<br><input id="lStart" type="date" value="${esc((l.term_start||'').slice(0,10))}"/></label>
+      <label class="hint">Term end<br><input id="lEnd" type="date" value="${esc((l.term_end||'').slice(0,10))}"/></label>
+      <label class="hint">Lease PDF link<br><input id="lDoc" value="${esc(l.doc_url||'')}" placeholder="Drive/OneDrive" style="min-width:150px"/></label></div>
+    <label class="hint" style="display:block;margin-top:6px">Renewal terms</label><input id="lRenew" value="${esc(l.renewal_terms||'')}" style="width:100%"/>
+    <label class="hint" style="display:block;margin-top:6px">Full lease text <span style="color:var(--aqua)">— paste the whole lease here so the AI can answer questions from it</span></label>
+    <textarea id="lText" rows="7" style="width:100%;font-family:inherit" placeholder="Paste the lease text (or the key clauses)…">${esc(l.lease_text||'')}</textarea>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="saveLease(${id||0})">Save lease</button><button class="btn btn-ghost btn-sm sans" onclick="$('leaseEditor').innerHTML=''">Cancel</button>${id?`<button class="btn btn-ghost btn-sm sans" style="color:var(--danger)" onclick="delLease(${id})">Delete</button>`:''}<span id="lMsg" class="hint" style="align-self:center"></span></div></div>`;
+}
+async function saveLease(id){
+  const g=x=>($(x)||{}).value||'';
+  const b={id:id||undefined,entity:g('lEntity'),property_address:g('lAddr'),landlord:g('lLandlord'),landlord_contact:g('lLandContact'),monthly_rent:g('lRent'),security_deposit:g('lDep'),term_start:g('lStart'),term_end:g('lEnd'),renewal_terms:g('lRenew'),doc_url:g('lDoc'),lease_text:g('lText')};
+  if(!b.entity){ if($('lMsg'))$('lMsg').textContent='Pick an entity.'; return; }
+  try{ await api('/corp/leases',{method:'POST',body:JSON.stringify(b)}); $('leaseEditor').innerHTML=''; renderCorpLeases($('corpBody')); }catch(e){ if($('lMsg'))$('lMsg').textContent=e.message; }
+}
+async function delLease(id){ if(!confirm('Delete this lease?'))return; try{ await api('/corp/leases/'+id,{method:'DELETE'}); LEASE_OPEN=null; $('leaseEditor').innerHTML=''; renderCorpLeases($('corpBody')); }catch(e){ alert(e.message); } }
+async function openLease(id){
+  LEASE_OPEN=id; const host=$('leasePanel'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="hint">Loading lease…</div></div>';
+  let r; try{ r=await api('/corp/leases/'+id); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const l=r.lease, qs=r.questions||[];
+  const term=[l.term_start?('starts '+l.term_start.slice(0,10)):'',l.term_end?('ends '+l.term_end.slice(0,10)):''].filter(Boolean).join(' · ');
+  const hist=qs.map(q=>`<div class="pc-note"><strong>Q:</strong> ${esc(q.question)}<div style="margin-top:4px;white-space:pre-wrap">${esc(q.answer||'')}</div><div class="hint" style="margin-top:2px">${esc(q.asked_by||'')} · ${esc((q.created_at||'').slice(0,16))}</div></div>`).join('');
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${esc(l.entity)} — lease</h3><p class="sub sans" style="margin:0">${esc(l.property_address||'')}${l.landlord?' · Landlord: '+esc(l.landlord):''}${term?' · '+esc(term):''}${l.monthly_rent?' · '+esc(l.monthly_rent)+'/mo':''}</p></div>${l.doc_url?`<a class="btn btn-ghost btn-sm sans" href="${esc(l.doc_url)}" target="_blank" rel="noopener">📄 Open PDF</a>`:''}</div>
+    <div style="background:#faf6ee;border-left:4px solid var(--gold);padding:10px;border-radius:6px;margin-top:8px">
+      <h3 style="margin:0 0 4px">🤖 Ask about this lease</h3>
+      <p class="sub sans" style="margin:0 0 6px">${l.has_text||(l.lease_text&&l.lease_text.length>40)?'Ask anything — e.g. “Is the HVAC repair the landlord’s responsibility?” Answers come only from the lease text.':'<span style="color:#a60">No lease text on file yet. Tap Edit and paste the lease text so the assistant can read it.</span>'}</p>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px"><input id="leaseQ" placeholder="Is ___ covered by the landlord?" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')askLeaseQ(${l.id})"/><button class="btn btn-gold btn-sm sans" onclick="askLeaseQ(${l.id})">Ask</button></div>
+      <div class="toolbar" style="justify-content:flex-start;gap:4px;margin-top:4px;flex-wrap:wrap">${['Who pays for roof repairs?','Is HVAC the landlord’s responsibility?','What are my renewal options?','Who handles snow removal & landscaping?','Can I sublease or assign?'].map(s=>`<button class="btn btn-ghost btn-sm sans" onclick="$('leaseQ').value=this.textContent;askLeaseQ(${l.id})" style="font-size:11px">${esc(s)}</button>`).join('')}</div>
+      <div id="leaseAns"></div></div>
+    ${hist?`<h3 style="font-size:14px;margin:12px 0 4px">Earlier questions</h3>${hist}`:''}</div>`;
+}
+async function askLeaseQ(id){
+  const q=($('leaseQ')||{}).value||''; if(!q.trim())return;
+  const ans=$('leaseAns'); if(ans)ans.innerHTML='<div class="hint" style="margin-top:8px">Reading the lease…</div>';
+  try{ const r=await api('/corp/leases/'+id+'/ask',{method:'POST',body:JSON.stringify({question:q})});
+    if(ans)ans.innerHTML=`<div class="pc-note" style="margin-top:8px;white-space:pre-wrap;background:#fff">${esc(r.answer)}</div><div class="hint" style="margin-top:2px">Guidance from the document — confirm anything ambiguous with counsel or the broker.</div>`;
+  }catch(e){ if(ans)ans.innerHTML='<div class="hint" style="margin-top:8px;color:var(--danger)">'+esc(e.message)+'</div>'; }
 }
 let INS_DATA=null, INS_EDIT=null;
 async function renderCorpInsurance(body){

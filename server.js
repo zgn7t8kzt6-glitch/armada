@@ -19,7 +19,7 @@ import {
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
@@ -3414,6 +3414,41 @@ async function checkInsuranceReminders({ force = false } = {}) {
 }
 app.post('/api/corp/insurance/run-reminders', requireAuth, requireCorp, async (req, res) => {
   try { res.json(await checkInsuranceReminders({ force: false })); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// ── Facility leases + AI lease assistant ──────────────────────────────────────
+app.get('/api/corp/leases', requireAuth, requireCorp, (req, res) => {
+  const leases = db.prepare(`SELECT id, entity, property_address, landlord, landlord_contact, monthly_rent, security_deposit, term_start, term_end, renewal_terms, responsibilities, doc_url, notes, (lease_text IS NOT NULL AND lease_text != '') AS has_text, length(lease_text) AS text_len, updated_at FROM leases ORDER BY entity`).all();
+  res.json({ leases, locations: orgLocations() });
+});
+app.get('/api/corp/leases/:id', requireAuth, requireCorp, (req, res) => {
+  const l = db.prepare(`SELECT * FROM leases WHERE id = ?`).get(req.params.id);
+  if (!l) return res.status(404).json({ error: 'Not found.' });
+  const questions = db.prepare(`SELECT id, question, answer, asked_by, created_at FROM lease_questions WHERE lease_id = ? ORDER BY id DESC LIMIT 30`).all(l.id);
+  res.json({ lease: l, questions });
+});
+app.post('/api/corp/leases', requireAuth, requireCorp, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.entity || '').trim()) return res.status(400).json({ error: 'Entity required.' });
+  const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
+  const f = [String(b.entity).slice(0, 120), String(b.property_address || '').slice(0, 200), String(b.landlord || '').slice(0, 120), String(b.landlord_contact || '').slice(0, 160), String(b.monthly_rent || '').slice(0, 40), String(b.security_deposit || '').slice(0, 40), dt(b.term_start), dt(b.term_end), String(b.renewal_terms || '').slice(0, 2000), String(b.responsibilities || '').slice(0, 4000), String(b.doc_url || '').slice(0, 500), String(b.lease_text || '').slice(0, 200000), String(b.notes || '').slice(0, 4000)];
+  if (b.id) { db.prepare(`UPDATE leases SET entity=?,property_address=?,landlord=?,landlord_contact=?,monthly_rent=?,security_deposit=?,term_start=?,term_end=?,renewal_terms=?,responsibilities=?,doc_url=?,lease_text=?,notes=?,updated_at=datetime('now') WHERE id=?`).run(...f, b.id); return res.json({ ok: true, id: b.id }); }
+  const info = db.prepare(`INSERT INTO leases (entity,property_address,landlord,landlord_contact,monthly_rent,security_deposit,term_start,term_end,renewal_terms,responsibilities,doc_url,lease_text,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...f);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/corp/leases/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM leases WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+// Ask the AI a question about a specific lease, answered from the lease text.
+app.post('/api/corp/leases/:id/ask', requireAuth, requireCorp, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'AI is not configured.' });
+  const l = db.prepare(`SELECT * FROM leases WHERE id = ?`).get(req.params.id);
+  if (!l) return res.status(404).json({ error: 'Lease not found.' });
+  const q = String(req.body?.question || '').trim();
+  if (!q) return res.status(400).json({ error: 'Ask a question.' });
+  if (!l.lease_text || l.lease_text.trim().length < 40) return res.status(400).json({ error: 'No lease text on file yet — paste the lease text into this record so the assistant can read it.' });
+  let answer;
+  try { answer = await askLease(l.lease_text, q, { entity: l.entity, landlord: l.landlord, property: l.property_address }); }
+  catch (e) { return res.status(502).json({ error: e.message }); }
+  db.prepare(`INSERT INTO lease_questions (lease_id, question, answer, asked_by) VALUES (?,?,?,?)`).run(l.id, q.slice(0, 500), answer, req.user.name);
+  res.json({ answer });
 });
 // ── HR / Ownership employee roster (admin-only — salary is sensitive) ──────────
 // Everyone across every entity, broken down by location, with job title + salary.

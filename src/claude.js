@@ -309,6 +309,36 @@ provided below the question — about the house or a specific client.
   diagnoses, medications, or events. This is support for trained staff, not a
   medical or clinical directive.`;
 
+// ---- Lease Q&A: answer questions from a facility lease, grounded in the text ----
+const LEASE_SYSTEM = `You are a commercial real-estate lease analyst helping an
+operations manager understand a facility lease. You are given the lease text and a
+question (often "is X the landlord's or the tenant's responsibility?").
+RULES:
+- Answer ONLY from the lease text provided. Do not invent terms or use general
+  knowledge about "typical" leases as if it were in this lease.
+- Lead with a direct answer: who is responsible (Landlord / Tenant / Shared /
+  Not specified), or the direct answer to what was asked.
+- Then quote or closely paraphrase the specific clause/section that supports it,
+  naming the section if the text numbers it.
+- If the lease does not address the question, say clearly: "The lease doesn't
+  appear to address this" — and note what it would fall under, and that they may
+  need to confirm with the landlord or broker. Never guess.
+- Be concise and practical. This is guidance from the document, not legal advice —
+  end anything ambiguous with a one-line suggestion to confirm with counsel/broker.`;
+export async function askLease(leaseText, question, meta = {}) {
+  const client = await getClient();
+  const header = [meta.entity ? `Facility/entity: ${meta.entity}` : '', meta.landlord ? `Landlord: ${meta.landlord}` : '', meta.property ? `Property: ${meta.property}` : ''].filter(Boolean).join('\n');
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1200,
+    system: G + LEASE_SYSTEM,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: `QUESTION: ${question}\n\n${header ? header + '\n\n' : ''}=== LEASE TEXT ===\n${String(leaseText || '').slice(0, 60000) || 'No lease text on file.'}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+}
+
 export async function askAssistant(question, contextText) {
   const client = await getClient();
   const response = await client.messages.create({

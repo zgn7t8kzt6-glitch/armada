@@ -1746,6 +1746,36 @@ db.exec(`CREATE TABLE IF NOT EXISTS facility_docs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// Facility leases — the full record per property, including the lease TEXT so the AI
+// lease assistant can answer "is X the landlord's responsibility?" grounded in the doc.
+db.exec(`CREATE TABLE IF NOT EXISTS leases (
+  id INTEGER PRIMARY KEY,
+  entity TEXT NOT NULL,                         -- which location / legal entity
+  property_address TEXT,
+  landlord TEXT,
+  landlord_contact TEXT,
+  monthly_rent TEXT,
+  security_deposit TEXT,
+  term_start TEXT,
+  term_end TEXT,
+  renewal_terms TEXT,
+  responsibilities TEXT,                        -- quick notes on landlord/tenant split
+  doc_url TEXT,                                 -- link to the signed lease PDF
+  lease_text TEXT,                              -- pasted full text — powers the AI Q&A
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_leases_entity ON leases(entity);
+-- Q&A history so answers are saved and reusable.
+CREATE TABLE IF NOT EXISTS lease_questions (
+  id INTEGER PRIMARY KEY,
+  lease_id INTEGER REFERENCES leases(id) ON DELETE CASCADE,
+  question TEXT NOT NULL,
+  answer TEXT,
+  asked_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // Corporate ordering stream — supply requests from ALL locations land here, tagged by
 // facility, so Chava sees where everything is being requested and works one queue.
 db.exec(`CREATE TABLE IF NOT EXISTS order_requests (

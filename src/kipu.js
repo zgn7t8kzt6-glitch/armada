@@ -1375,6 +1375,21 @@ export async function kipuFixDischargeDates() {
 // Read-only census for a SECOND Kipu location, kept completely apart from the detox
 // roster — never writes to `clients`. Resolves the location by name, pulls its active
 // census, and classifies each patient's level of care as PHP / IOP / OP / Other.
+// Every location this Kipu account exposes (id + name + patient count where Kipu
+// gives it). The foundation for a multi-facility / ownership view: it tells us which
+// of the org's facilities are reachable with the current credentials.
+export async function kipuListLocations() {
+  const d = await kipuGet('/api/locations');
+  const llist = d?.locations || d?.buildings || (Array.isArray(d) ? d : []);
+  const locations = llist.map((l) => ({
+    id: l.location_id ?? l.id ?? l.value,
+    name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '').trim(),
+    beds: l.beds ?? l.bed_count ?? null,
+    enabled: l.enabled !== false,
+  })).filter((l) => l.name);
+  return { count: locations.length, locations };
+}
+
 // True admissions over a date range — INCLUDING patients who have since discharged.
 // /api/patients/admissions filters by admission_date, so to also catch discharges in
 // a window we pull with a generous lookback and let the caller filter by discharge.

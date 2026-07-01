@@ -5743,7 +5743,17 @@ function opSettingsHtml(d){
     <label>Kipu location name</label><input id="op_loc" value="${esc(d.location||'')}" placeholder="Akron House Recovery"/>
     <label style="margin-top:8px">Who else can see this (besides you)</label>
     <div id="op_access" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0">${staff.map(s=>{ const on=acc.find(a=>a.id===s.id); return `<button type="button" class="btn btn-sm sans ${on?'btn-gold':'btn-ghost'}" data-uid="${s.id}" onclick="this.classList.toggle('btn-gold');this.classList.toggle('btn-ghost')">${esc(s.name)}</button>`; }).join('')||'<span class="hint">No other staff yet.</span>'}</div>
-    <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold btn-sm sans" onclick="saveOutpatientSettings()">Save</button><span id="opSetMsg" class="hint" style="align-self:center"></span></div></div>`;
+    <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold btn-sm sans" onclick="saveOutpatientSettings()">Save</button><span id="opSetMsg" class="hint" style="align-self:center"></span></div>
+    <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:8px"><div class="cmd-hero-row"><div><strong>All Kipu locations</strong><p class="sub sans" style="margin:0">Every facility reachable with the current Kipu login — the basis for the consolidated ownership view across all 6 locations.</p></div><button class="btn btn-ghost btn-sm sans" onclick="listKipuLocations(this)">List locations</button></div>
+    <div id="opKipuLocs" class="hint"></div></div></div>`;
+}
+async function listKipuLocations(btn){
+  const el=$('opKipuLocs'); if(btn)btn.disabled=true; if(el)el.textContent='Reading locations from Kipu…';
+  try{ const r=await api('/kipu/locations');
+    if(r.error){ if(el)el.textContent=r.error; }
+    else if(el) el.innerHTML=`<div style="margin-top:4px">${(r.locations||[]).map(l=>`<div class="pc-note" style="font-family:monospace;font-size:12px">id ${esc(String(l.id))} · <strong>${esc(l.name)}</strong>${l.enabled?'':' <span style="color:#a60">(disabled)</span>'}</div>`).join('')}</div><div class="hint" style="margin-top:4px">${r.count} location${r.count===1?'':'s'} in this Kipu account. Send me this list and I’ll wire the consolidated ownership view.</div>`;
+  }catch(e){ if(el)el.textContent=e.message; }
+  if(btn)btn.disabled=false;
 }
 async function refreshOutpatient(btn){
   const m=$('opMsg'); if(btn)btn.disabled=true; if(m)m.textContent='Pulling from Kipu…';

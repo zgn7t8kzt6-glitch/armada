@@ -4216,7 +4216,9 @@ async function maybeEmailLandlord(order, user, forceManual) {
 app.post('/api/corp/orders/:id/email-landlord', requireAuth, requireCorp, async (req, res) => {
   const o = db.prepare(`SELECT * FROM order_requests WHERE id = ?`).get(req.params.id);
   if (!o) return res.status(404).json({ error: 'Not found.' });
-  try { const r = await maybeEmailLandlord(o, req.user, true); if (!r.sent) return res.status(400).json(r); res.json(r); } catch (e) { res.status(502).json({ error: e.message }); }
+  // Not-sendable is an answer, not an error — return 200 so the UI shows WHY
+  // ("no landlord email on file for this facility — add it on the lease").
+  try { res.json(await maybeEmailLandlord(o, req.user, true)); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
   const b = req.body || {};
@@ -4277,12 +4279,49 @@ function inboundAttachmentsText(body) {
   }
   return { text: parts.join('\n\n'), names };
 }
+// Outlook often uploads an "attachment" to OneDrive/SharePoint and sends only a
+// LINK — no bytes in the payload. Microsoft's shares API can fetch anonymous
+// ("Anyone with the link") shares without auth: encode the URL as u!<base64url>.
+// Org-internal links that require sign-in CAN'T be fetched — those fail loudly
+// (a note on the order + a P.S. to the sender), never silently.
+async function fetchCloudSheets(rawText) {
+  const urls = [...new Set([...String(rawText || '').matchAll(/https?:\/\/(?:1drv\.ms|onedrive\.live\.com|[\w-]+\.sharepoint\.com)[^\s<>"')\]]+/gi)].map((m) => m[0]))].slice(0, 3);
+  const parts = [], names = [];
+  let failed = 0;
+  for (const url of urls) {
+    try {
+      const token = 'u!' + Buffer.from(url).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+      const resp = await fetch(`https://api.onedrive.com/v1.0/shares/${token}/driveItem/content`, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+      if (!resp.ok) { failed++; continue; }
+      const dispo = resp.headers.get('content-disposition') || '';
+      let fname = (dispo.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i) || [])[1] || 'onedrive-file';
+      try { fname = decodeURIComponent(fname); } catch { /* keep raw */ }
+      const buf = Buffer.from(await resp.arrayBuffer());
+      if (buf.length > 6_000_000) { failed++; continue; }
+      if (/\.(xlsx|xlsm)$/i.test(fname) || buf.subarray(0, 2).toString('latin1') === 'PK') {
+        const t = workbookText(buf);
+        if (t.trim()) { parts.push(`[OneDrive spreadsheet: ${fname}]\n${t}`); names.push(fname); continue; }
+      } else if (/\.(csv|txt)$/i.test(fname)) {
+        parts.push(`[OneDrive file: ${fname}]\n${buf.toString('utf8').slice(0, 20000)}`); names.push(fname); continue;
+      }
+      failed++;
+    } catch { failed++; }
+  }
+  return { text: parts.join('\n\n'), names, failed, tried: urls.length };
+}
 app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb' }), async (req, res) => {
   if ((req.query.t || req.headers['x-intake-token']) !== orderIntakeToken()) return res.status(401).json({ error: 'bad token' });
   const msg = normalizeInbound(req.body || {});
   if (!msg.from) return res.status(400).json({ error: 'no sender' });
   const attach = inboundAttachmentsText(req.body || {});
   if (attach.text) msg.text = (msg.text ? msg.text + '\n\n' : '') + attach.text;
+  // Cloud "attachments": scan the plain text AND the raw HTML (link hrefs get
+  // stripped out of the text version) for OneDrive/SharePoint share links.
+  const rawHtml = String(req.body?.html || req.body?.HtmlBody || req.body?.['body-html'] || '');
+  let cloud = { text: '', names: [], failed: 0, tried: 0 };
+  try { cloud = await fetchCloudSheets(msg.text + ' ' + rawHtml); } catch { /* fail-visible below */ }
+  if (cloud.text) { msg.text += '\n\n' + cloud.text; attach.names.push(...cloud.names); }
+  if (cloud.failed) msg.text += `\n\n[${cloud.failed} OneDrive/SharePoint link${cloud.failed === 1 ? '' : 's'} in this email could not be opened — likely requires sign-in. Ask the sender to attach the file as a copy, or share it as "Anyone with the link".]`;
   // Resolve the entity: an address/+tag route wins, else a sender route, else default.
   const routes = db.prepare(`SELECT * FROM order_intake_routes WHERE active = 1`).all();
   let entity = null, requester = msg.from;
@@ -4312,7 +4351,7 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
     itemNames.push(label);
     created = 1;
   }
-  console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}${attach.names.length ? ' (spreadsheet: ' + attach.names.join(', ') + ')' : ''}`);
+  console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}${attach.names.length ? ' (spreadsheet: ' + attach.names.join(', ') + ')' : ''}${cloud.failed ? ' (' + cloud.failed + ' cloud link(s) unreadable)' : ''}`);
   publishEvent({ event: 'email.order_received', entity: 'order', facility_id: facilityForEntity(entity)?.id ?? null, actor: msg.from, summary: `${created} item${created === 1 ? '' : 's'} emailed in · ${entity}` });
   // Confirmation reply to the sender ("✓ Got it") — best-effort, never blocks intake.
   if (emailConfigured() && getState('order_intake_confirm') !== 'off' && /@/.test(msg.from)) {
@@ -4320,6 +4359,7 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
     const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:520px">
       <p>✓ Got it — <strong>${created} item${created === 1 ? '' : 's'}</strong> queued for <strong>${esc(entity)}</strong>:</p>
       ${itemNames.map((n) => `<div>• ${esc(n)}</div>`).join('')}
+      ${cloud.failed ? `<p style="color:#a60;margin-top:10px"><strong>P.S.</strong> — the OneDrive/SharePoint link in your email couldn't be opened (it requires sign-in). Next time, attach the file as a <strong>copy</strong> (paperclip → Browse this computer), or set the link to "Anyone with the link" — then we read the spreadsheet automatically.</p>` : ''}
       <p style="color:#555;margin-top:12px">Corporate will place the order and you'll hear if anything needs clarifying. No need to reply.</p>
       <p style="color:#888;font-size:12px">Armada Care Standards — automated order intake.</p></div>`;
     sendEmail({ to: msg.from, subject: `✓ Order received — ${created} item${created === 1 ? '' : 's'} for ${entity}`, html, suppressCc: true })

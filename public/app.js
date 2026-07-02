@@ -192,7 +192,7 @@ const GROUP_OF={
   // Care — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
   concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',bedmap:'stay',laundry:'stay',engagement:'stay',program:'stay',meals:'stay',property:'stay',
-  casemgmt:'stay',retention:'stay',surveys:'stay',clientvoice:'stay',incidents:'stay',compliance:'stay',
+  casemgmt:'stay',appts:'stay',retention:'stay',surveys:'stay',clientvoice:'stay',incidents:'stay',compliance:'stay',
   // Discharge — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
   // Revenue — Revenue OS: authorizations, money in, outpatient economics
@@ -359,6 +359,8 @@ function canSeeView(v){
   if(v==='authreg') return !!(ME.role==='admin' || ME.authAccess);
   // Billing readiness: leadership + clinical staff (rows scoped server-side).
   if(v==='billingready') return !!(ME.role==='admin' || ME.billingAccess);
+  // Scheduling & queue: the care team + front desk.
+  if(v==='appts') return !!(ME.role==='admin' || ME.apptsAccess);
   // Corporate hub: Chava, plus owner/leadership. Even non-corporate leadership gets it.
   if(v==='corphub') return !!(ME.role==='admin' || ME.corpAccess);
   if(v==='hcos') return !!(ME.role==='admin' || ME.hrAccess);
@@ -474,7 +476,7 @@ function show(v){
   renderHubTabs(v);
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',billingready:'Billing Readiness',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',billingready:'Billing Readiness',appts:'Scheduling & Queue',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
@@ -482,6 +484,7 @@ function show(v){
   if(v==='opscenter') loadOpsCenter();
   if(v==='authreg') loadAuthReg();
   if(v==='billingready') loadBillingReady();
+  if(v==='appts') loadAppts();
   if(v==='command') loadCommand();
   if(v==='finance') loadFinance();
   if(v==='expenses') loadExpenses();
@@ -5852,6 +5855,160 @@ async function authDel(id){
   if(!confirm('Delete this authorization row entirely? (Closing is usually right.)')) return;
   try{ await api('/auth-register/'+id,{method:'DELETE'}); loadAuthReg(); }catch(e){ alert(e.message); }
 }
+/* ── SCHEDULING & THE SERVICE PROMISE — queue + calendar + one-minute notes.
+   Excellence Wins: consistency (same flow every time), reliability (promises
+   visible + enforced), accountability (supervisor lens), respect (honest waits,
+   proactive reschedules — nothing evaporates on the client). ── */
+let AP_TAB='queue', AP_DATE='', AP_DATA=null;
+async function loadAppts(){
+  const host=$('appts'); if(!host) return;
+  if(!AP_DATE) AP_DATE=today();
+  host.innerHTML='<div class="card"><div class="skel" style="width:240px;height:22px;margin-bottom:14px"></div><div class="skel" style="height:70px"></div></div>';
+  let d; try{ d=await api('/appts?date='+AP_DATE); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'</div></div>'; return; }
+  AP_DATA=d;
+  const tabs=[['queue','🛎 Queue'+(d.queue.length?' ('+d.queue.length+')':'')],['cal','📅 Calendar'],['myday','📥 My follow-ups'+((d.pending.length+d.missed.length)?' ('+(d.pending.length+d.missed.length)+')':'')]];
+  if(d.leadership) tabs.push(['sup','📊 Supervisor']);
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Scheduling &amp; Queue</h3><p class="sub sans" style="margin:0">Every request gets a promise; every meeting gets a note before it closes; every miss gets rescheduled — predictable service, not interruptions.${d.estWaitMin!=null?' Typical response lately: <strong>~'+d.estWaitMin+' min</strong>.':''}</p></div></div>
+    <div class="corp-tabs" style="margin-top:8px">${tabs.map(([k,l])=>`<button class="${AP_TAB===k?'active':''}" onclick="AP_TAB='${k}';renderAppts()">${l}</button>`).join('')}</div>
+    <div id="apBody"></div></div><div id="apModalHost"></div>`;
+  renderAppts();
+}
+function renderAppts(){
+  const b=$('apBody'); if(!b||!AP_DATA) return;
+  document.querySelectorAll('#appts .corp-tabs button').forEach(x=>x.classList.toggle('active',x.getAttribute('onclick').includes("'"+AP_TAB+"'")));
+  if(AP_TAB==='queue') return apQueue(b);
+  if(AP_TAB==='cal') return apCal(b);
+  if(AP_TAB==='myday') return apMyDay(b);
+  if(AP_TAB==='sup') return apSup(b);
+}
+function apQueue(b){
+  const q=AP_DATA.queue||[];
+  const row=(r)=>`<div class="q-row ${r.promiseBreached?'q-overdue':''}" style="cursor:default">
+    <div class="q-main"><div class="q-title">${esc(r.client)}${r.room?' · '+esc(r.room):''} — ${esc(r.text)}</div>
+      <div class="q-sub">${esc(r.department)} · waiting ${r.waitMin} min${r.claimed_by?' · '+esc(r.claimed_by)+' on it':''}${r.promise_at?' · <strong>promised by '+esc(r.promise_at.slice(11,16))+'</strong>'+(r.promiseBreached?' <span class="badge-crit">promise at risk — reschedule or go now</span>':''):''}${r.ready?' · <span class="badge-ok">client notified — ready</span>':''}</div></div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap">
+      ${!r.promise_at?`<button class="btn btn-ghost btn-sm sans" onclick="apPromise(${r.id})" title="Commit a response time — the kiosk shows it to the client">⏱ Promise…</button>`:`<button class="btn btn-ghost btn-sm sans" onclick="apPromise(${r.id})">⏱ Re-promise</button>`}
+      ${!r.claimed_by?`<button class="btn btn-ghost btn-sm sans" onclick="apQAct(${r.id},'claim')">✋ I've got it</button>`:''}
+      ${!r.ready?`<button class="btn btn-ghost btn-sm sans" onclick="apQAct(${r.id},'ready')" title="Flashes 'we're ready for you' on the kiosk">📣 Ready</button>`:''}
+      <button class="btn btn-gold btn-sm sans" onclick="${r.needsNote?`apNoteModal('queue',${r.id})`:`apQAct(${r.id},'done')`}">✓ Done</button></div></div>`;
+  b.innerHTML=q.length?`<div style="margin-top:8px">${q.map(row).join('')}</div>`
+    :'<div class="empty"><div class="e-ico">🛎</div>The queue is clear — every request handled.<br>That IS the standard.</div>';
+}
+async function apPromise(id){
+  const mins=prompt('Promise a response within how many minutes? (the kiosk will show the client the committed time)','20');
+  if(!mins||!+mins) return;
+  try{ await api('/appts/queue/'+id,{method:'POST',body:JSON.stringify({action:'promise',minutes:+mins})}); }catch(e){ alert(e.message); }
+  loadAppts();
+}
+async function apQAct(id,action){ try{ await api('/appts/queue/'+id,{method:'POST',body:JSON.stringify({action})}); }catch(e){ alert(e.message);} loadAppts(); }
+function apCal(b){
+  const d=AP_DATA;
+  const stPill=(a)=>({scheduled:'<span class="badge-info">scheduled</span>',checked_in:'<span class="badge-warn">checked in</span>',in_session:'<span class="badge-warn">in session</span>',completed:'<span class="badge-ok">completed ✓ documented</span>',missed:'<span class="badge-crit">missed</span>',cancelled:'<span class="badge-idle">cancelled</span>'}[a.status]||a.status);
+  const row=(a)=>`<tr class="${a.overdue?'q-overdue':''}"><td><strong>${esc(a.time)}</strong> <span class="hint">${a.duration_min}m</span></td>
+    <td><strong>${esc(a.client)}</strong>${a.room?' <span class="hint">· '+esc(a.room)+'</span>':''}</td>
+    <td>${esc(a.kind)}<div class="hint">${esc(a.staff_name||'')}</div></td>
+    <td>${stPill(a)}${a.overdue?' <span class="badge-crit">running late — keep the promise</span>':''}</td>
+    <td><div style="display:flex;gap:4px;flex-wrap:wrap">
+      ${a.status==='scheduled'?`<button class="btn btn-ghost btn-sm sans" onclick="apAct(${a.id},'checkin')">Check in</button>`:''}
+      ${['scheduled','checked_in'].includes(a.status)?`<button class="btn btn-ghost btn-sm sans" onclick="apAct(${a.id},'start')">▶ Start</button>`:''}
+      ${['scheduled','checked_in','in_session'].includes(a.status)?`<button class="btn btn-gold btn-sm sans" onclick="apNoteModal('appt',${a.id})">✓ Complete + note</button>`:''}
+      ${['scheduled','checked_in'].includes(a.status)?`<button class="btn btn-ghost btn-sm sans" onclick="apMiss(${a.id})">Missed…</button>`:''}
+    </div></td></tr>`;
+  b.innerHTML=`<div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <label class="hint">Day <input type="date" value="${esc(AP_DATE)}" onchange="AP_DATE=this.value;loadAppts()"/></label>
+      <button class="btn btn-gold btn-sm sans" onclick="apBookForm()">＋ Book appointment</button></div>
+    <div id="apBook"></div>
+    ${d.appts.length?`<table class="tbl" style="margin-top:8px"><tr><th>Time</th><th>Client</th><th>With</th><th>Status</th><th></th></tr>${d.appts.map(row).join('')}</table>`
+      :'<div class="empty"><div class="e-ico">📅</div>No appointments this day yet.<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="apBookForm()">Book the first one</button></div></div>'}`;
+}
+function apBookForm(){
+  const h=$('apBook'); if(!h) return; const d=AP_DATA;
+  h.innerHTML=`<div class="pc-note" style="margin-top:8px"><div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+    <select id="apC">${d.clients.map(c=>`<option value="${c.id}">${esc(c.label)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
+    <select id="apK">${d.kinds.map(k=>`<option>${k}</option>`).join('')}</select>
+    <select id="apS">${[ME.name,...d.staff.filter(s=>s!==ME.name)].map(s=>`<option>${esc(s)}</option>`).join('')}</select>
+    <input type="date" id="apD" value="${esc(AP_DATE)}"/><input type="time" id="apT" value="10:00"/>
+    <select id="apDur"><option value="15">15m</option><option value="30" selected>30m</option><option value="45">45m</option><option value="60">60m</option></select>
+    <button class="btn btn-gold btn-sm sans" onclick="apBook(false)">Book &amp; promise</button></div>
+    <div class="hint" style="margin-top:4px">Booking = a promise to the client. Misses must be rescheduled — that's the deal.</div></div>`;
+}
+async function apBook(force){
+  const v=(id)=>($(id)||{}).value;
+  try{
+    await api('/appts',{method:'POST',body:JSON.stringify({client_id:+v('apC'),kind:v('apK'),staff_name:v('apS'),date:v('apD'),time:v('apT'),duration_min:+v('apDur'),force})});
+    AP_DATE=v('apD'); loadAppts();
+  }catch(e){
+    if(/Book anyway/.test(e.message)&&confirm(e.message)) return apBook(true);
+    alert(e.message);
+  }
+}
+async function apAct(id,action){ try{ await api('/appts/'+id,{method:'PATCH',body:JSON.stringify({action})}); }catch(e){ alert(e.message);} loadAppts(); }
+async function apMiss(id){
+  const move=confirm('Keep the promise: reschedule it now?\n\nOK = pick a new time · Cancel = record a reason instead');
+  if(move){
+    const date=prompt('New date (YYYY-MM-DD):', today()); if(!date) return;
+    const time=prompt('New time (HH:MM):','10:00'); if(!time) return;
+    try{ await api('/appts/'+id,{method:'PATCH',body:JSON.stringify({action:'missed',reschedule:{date,time}})}); }catch(e){ alert(e.message); }
+  } else {
+    const reason=prompt('Why was it missed? (the client deserves a reason — logged)'); if(!reason) return;
+    try{ await api('/appts/'+id,{method:'PATCH',body:JSON.stringify({action:'missed',reason})}); }catch(e){ alert(e.message); }
+  }
+  loadAppts();
+}
+// The one-minute note: 2 taps + optional line. Required before anything closes.
+const AP_TOPICS=['Housing','Employment','Family','Cravings/urges','Medication','Legal','Transport','Discharge plan','Peer support','Other'];
+function apNoteModal(mode,id){
+  const h=$('apModalHost'); if(!h) return;
+  h.innerHTML=`<div class="card" id="apModal" style="border-left:4px solid var(--gold)">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">One-minute note <span class="hint" style="font-weight:400">· required to close — protects the client AND the billing day</span></h3></div><button class="iconbtn" onclick="$('apModalHost').innerHTML=''">✕</button></div>
+    <div class="hint" style="margin:6px 0 2px">How are they doing?</div>
+    <div class="oi-action" id="apDisp">${['stable','improving','struggling','crisis'].map(x=>`<button class="btn btn-ghost btn-sm sans" data-v="${x}" onclick="document.querySelectorAll('#apDisp button').forEach(b=>b.classList.remove('btn-gold'));this.classList.add('btn-gold')">${x==='crisis'?'🔴 ':''}${x}</button>`).join('')}</div>
+    <div class="hint" style="margin:8px 0 2px">What did you cover? (tap all that apply)</div>
+    <div class="oi-action" id="apTop">${AP_TOPICS.map(t=>`<button class="btn btn-ghost btn-sm sans" data-v="${t}" onclick="this.classList.toggle('btn-gold')">${t}</button>`).join('')}</div>
+    <textarea id="apBody2" placeholder="One line if it helps (or use your keyboard's 🎤 dictation)…" style="width:100%;margin-top:8px" rows="2"></textarea>
+    <div class="toolbar" style="justify-content:flex-start;gap:10px;margin-top:6px">
+      <label class="hint"><input type="checkbox" id="apExpand"/> Needs a full note later (goes on my follow-ups)</label>
+      <button class="btn btn-gold btn-sm sans" onclick="apNoteSave('${mode}',${id})">Save &amp; close</button></div></div>`;
+  h.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+async function apNoteSave(mode,id){
+  const dispBtn=document.querySelector('#apDisp .btn-gold');
+  const disp=dispBtn?dispBtn.dataset.v:'';
+  const topics=[...document.querySelectorAll('#apTop .btn-gold')].map(b=>b.dataset.v);
+  const body=($('apBody2')||{}).value||'';
+  const payload={disposition:disp,topics,body,needs_expansion:($('apExpand')||{}).checked};
+  try{
+    if(mode==='appt') await api('/appts/'+id+'/complete',{method:'POST',body:JSON.stringify(payload)});
+    else await api('/appts/queue/'+id,{method:'POST',body:JSON.stringify({action:'done',...payload})});
+    $('apModalHost').innerHTML=''; loadAppts();
+  }catch(e){ alert(e.message); }
+}
+function apMyDay(b){
+  const d=AP_DATA;
+  b.innerHTML=`${d.missed.length?`<h3 style="margin:12px 0 4px">Missed — keep the promise</h3>${d.missed.map(m=>`<div class="q-row q-overdue" style="cursor:default"><div class="q-main"><div class="q-title">${esc(m.client)} · ${esc(m.kind)} · was ${esc(m.date)} ${esc(m.time)}</div><div class="q-sub">${esc(m.staff_name||'')}</div></div><button class="btn btn-gold btn-sm sans" onclick="apMiss(${m.id})">Reschedule / reason</button></div>`).join('')}`:''}
+    ${d.pending.length?`<h3 style="margin:12px 0 4px">Notes to expand</h3>${d.pending.map(p=>`<div class="q-row" style="cursor:default"><div class="q-main"><div class="q-title">${esc(p.client)} · ${esc(p.kind||'note')}</div><div class="q-sub">${esc(p.by)} · ${esc(p.at)}</div></div><button class="btn btn-ghost btn-sm sans" onclick="apExpandNote(${p.id})">Write full note</button></div>`).join('')}`:''}
+    ${(!d.missed.length&&!d.pending.length)?'<div class="empty"><div class="e-ico">🌤</div>Nothing pending — every meeting documented, every miss handled.</div>':''}`;
+}
+async function apExpandNote(id){
+  const body=prompt('Full case note (replaces the quick note body):'); if(body==null) return;
+  try{ await api('/quicknotes/'+id,{method:'PATCH',body:JSON.stringify({body})}); }catch(e){ alert(e.message); }
+  loadAppts();
+}
+function apSup(b){
+  const s=(AP_DATA||{}).supervisor; if(!s){ b.innerHTML='<div class="hint">Leadership only.</div>'; return; }
+  const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const best=s.staff.filter(x=>x.staff!=='(unassigned)' && (x.completed+x.notes)>0)[0];
+  b.innerHTML=`<div class="ret-cards" style="margin-top:8px">
+      ${box(s.promiseRate!=null?s.promiseRate+'%':'—','Promises kept (30d)',(s.promiseRate!=null&&s.promiseRate<90?'rc-elev':''))}
+      ${box(s.docCompliance!=null?s.docCompliance+'%':'—','Meetings documented')}
+      ${box(s.promisesMade,'Promises made')}
+    </div>
+    ${best?`<div class="oi-intel"><div class="oi-tag">Recognition</div><div style="font-size:13px;margin-top:3px">🏆 <strong>${esc(best.staff)}</strong> — ${best.completed} meetings kept, ${best.notes} notes${best.avgResponseMin!=null?', ~'+best.avgResponseMin+' min average response':''}. Consistency is the excellence — say it out loud at lineup.</div></div>`:''}
+    <table class="tbl" style="margin-top:8px"><tr><th>Staff</th><th>Meetings kept</th><th>Missed</th><th>Notes</th><th>Notes on time</th><th>Avg response</th></tr>
+    ${s.staff.map(x=>`<tr><td><strong>${esc(x.staff)}</strong></td><td>${x.completed}</td><td>${x.missed?`<span style="color:var(--crit)">${x.missed}</span>`:0}</td><td>${x.notes}</td><td>${x.notes?Math.round(x.notesFast/x.notes*100)+'%':'—'}</td><td>${x.avgResponseMin!=null?x.avgResponseMin+' min':'—'}</td></tr>`).join('')}</table>
+    <div class="hint" style="margin-top:6px">Schulze's rule: excellence is a reliable SYSTEM, not heroics. These numbers coach process — a slow average response means the queue needs coverage, not that someone needs blame.</div>`;
+}
+
 /* ── BILLING READINESS — every client day needs one qualifying encounter.
    Dashboard + 4 PM alert workflow + admin mapping. Kipu is read-only here. ── */
 let BR_DATE='', BR_FILTER='all', BR_DATA=null, BR_OPEN=null;

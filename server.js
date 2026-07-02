@@ -406,6 +406,12 @@ app.get('/api/opscenter', requireAuth, (req, res) => {
     return { group: 'queues', key: 'billing', label: 'Billing blockers', n: gaps + expAuth + over, alert: (expAuth + over) > 0, sub: parts.join(' · ') || undefined, view: (expAuth || over) ? 'authreg' : 'retention' };
   });
   add(() => {
+    const nowMin = new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })).toISOString().slice(0, 16).replace('T', ' ');
+    const broken = one(`SELECT COUNT(*) n FROM requests WHERE status != 'Done' AND promise_at IS NOT NULL AND promise_at < ?`, nowMin);
+    const waiting = one(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`);
+    return { group: 'now', key: 'promises', label: 'Service promises at risk', n: broken, alert: broken > 0, sub: waiting ? waiting + ' in queue' : undefined, view: 'appts' };
+  });
+  add(() => {
     const ran = db.prepare(`SELECT COUNT(*) n FROM billing_ready_status WHERE date=?${F}`).get(today).n;
     if (!ran) return { group: 'queues', key: 'encounters', label: 'Encounters check', n: 0, sub: 'not run yet today', view: 'billingready' };
     const miss = one(`SELECT COUNT(*) n FROM billing_ready_status WHERE date=? AND status IN ('missing','sync_error')${F}`, today);
@@ -874,6 +880,204 @@ app.post('/api/billingready/settings', requireAuth, requireAdmin, (req, res) => 
   res.json({ ok: true, cfg: next });
 });
 
+/* ═══ SCHEDULING & THE SERVICE PROMISE (Excellence Wins) ═══════════════════════
+   Two lanes into one system: the walk-up QUEUE (concierge requests, now carrying
+   a committed response time) and the CALENDAR (appointments). The rules that make
+   it trust-based rather than interruption-driven:
+   · every request can carry a promise ("seen within 20 min") — breaches surface,
+     and honoring or moving the promise is an explicit, logged act;
+   · a meeting cannot be completed without documentation (a sub-minute quick note);
+   · a missed appointment cannot just die — it must be rescheduled or carry a reason. */
+const APPT_KINDS = ['Case Management', 'Therapy', 'Peer Support', 'Medical', 'Family', 'Other'];
+const CARE_DEPTS = /case|therap|clinic|counsel|peer/i;   // queue departments whose completion needs a note
+function canSeeAppts(user) {
+  return !!user && (user.role === 'admin' || hasPerm(user, 'scheduling')
+    || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Therapist', 'Case Manager', 'Nurse', 'BHT / Tech', 'Front Desk'].includes(user.job_role));
+}
+const requireAppts = (req, res, next) => { if (!canSeeAppts(req.user)) return res.status(403).json({ error: 'Care team access only.' }); next(); };
+function apptsLeadership(user) { return user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director'].includes(user.job_role); }
+const nowHM = () => { const d = new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+// Estimated wait = how fast we've ACTUALLY been lately (median claim→done of the
+// last 20 resolved queue items), honest to the minute. No history → no fake number.
+function estWaitMinutes() {
+  const rows = db.prepare(`SELECT created_at, done_at FROM requests WHERE done_at IS NOT NULL ORDER BY id DESC LIMIT 20`).all();
+  const mins = rows.map((r) => Math.round((Date.parse(r.done_at + 'Z') - Date.parse(r.created_at + 'Z')) / 60000)).filter((m) => m >= 0 && m < 720).sort((a, b) => a - b);
+  return mins.length >= 3 ? mins[Math.floor(mins.length / 2)] : null;
+}
+function saveQuickNote({ user, client_id, appointment_id = null, request_id = null, kind, topics, disposition, body, needs_expansion }) {
+  const info = db.prepare(`INSERT INTO quick_notes (client_id, appointment_id, request_id, by_id, by_name, kind, topics, disposition, body, needs_expansion) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(client_id, appointment_id, request_id, user.id, user.name, String(kind || '').slice(0, 40),
+      Array.isArray(topics) ? topics.map((t) => String(t).slice(0, 30)).join(', ') : String(topics || '').slice(0, 200),
+      ['stable', 'improving', 'struggling', 'crisis'].includes(disposition) ? disposition : null,
+      String(body || '').slice(0, 2000), needs_expansion ? 1 : 0);
+  return info.lastInsertRowid;
+}
+app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  const today = appToday();
+  const appts = db.prepare(`SELECT a.*, c.pref, c.name AS client_name, c.room, (SELECT COUNT(*) FROM quick_notes q WHERE q.appointment_id=a.id) has_note
+    FROM appointments a JOIN clients c ON c.id=a.client_id WHERE a.date=? ORDER BY a.time`).all(day)
+    .map((a) => ({ ...a, client: a.pref || a.client_name,
+      overdue: a.date === today && ['scheduled', 'checked_in'].includes(a.status) && a.time < nowHM() }));
+  const queue = db.prepare(`SELECT r.*, c.pref, c.name AS client_name, c.room FROM requests r LEFT JOIN clients c ON c.id=r.client_id
+    WHERE r.status != 'Done' ORDER BY (r.priority='Urgent') DESC, r.id`).all()
+    .map((r) => ({ id: r.id, client: r.pref || r.client_name || 'Unknown', room: r.room || '', department: r.department, text: r.text, priority: r.priority,
+      status: r.status, created_at: r.created_at, claimed_by: r.claimed_by || '', ready: !!r.ready_at,
+      waitMin: Math.max(0, Math.round((Date.now() - Date.parse(r.created_at + 'Z')) / 60000)),
+      promise_at: r.promise_at || '', promised_by: r.promised_by || '',
+      promiseBreached: !!(r.promise_at && new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })).toISOString().slice(0, 16).replace('T', ' ') > r.promise_at),
+      needsNote: CARE_DEPTS.test(r.department || '') }));
+  // Pending documentation: quick notes flagged for expansion + my missed-without-reschedule.
+  const mine = (v) => String(v || '').toLowerCase() === String(req.user.name || '').toLowerCase();
+  let pending = db.prepare(`SELECT q.id, q.client_id, q.by_name, q.kind, q.created_at, c.pref, c.name AS client_name FROM quick_notes q JOIN clients c ON c.id=q.client_id WHERE q.needs_expansion=1 AND q.expanded_at IS NULL ORDER BY q.id DESC LIMIT 40`).all()
+    .map((q) => ({ id: q.id, client: q.pref || q.client_name, by: q.by_name, kind: q.kind, at: q.created_at }));
+  let missed = db.prepare(`SELECT a.id, a.date, a.time, a.kind, a.staff_name, a.missed_reason, c.pref, c.name AS client_name FROM appointments a JOIN clients c ON c.id=a.client_id
+    WHERE a.status='missed' AND a.missed_reason IS NULL AND NOT EXISTS (SELECT 1 FROM appointments r WHERE r.reschedule_of=a.id) ORDER BY a.date DESC LIMIT 40`).all()
+    .map((a) => ({ ...a, client: a.pref || a.client_name }));
+  if (!apptsLeadership(req.user)) { pending = pending.filter((p) => mine(p.by)); missed = missed.filter((m) => mine(m.staff_name)); }
+  const out = { date: day, appts, queue, estWaitMin: estWaitMinutes(), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
+    staff: db.prepare(`SELECT DISTINCT name FROM users WHERE active=1 AND job_role IN ('Case Manager','Therapist','Clinical Director','Nurse','Peer Support') ORDER BY name`).all().map((x) => x.name),
+    clients: db.prepare(`SELECT id, pref, name, room, therapist, case_manager FROM clients WHERE active=1 AND merged_into IS NULL ORDER BY pref, name`).all().map((c) => ({ id: c.id, label: c.pref || c.name, room: c.room, therapist: c.therapist, case_manager: c.case_manager })) };
+  // Supervisor lens: the Schulze numbers — reliability made visible (30 days).
+  if (apptsLeadership(req.user)) {
+    const d30 = addDays(today, -30);
+    const byStaff = {};
+    const S = (name) => { const k = name || '(unassigned)'; return byStaff[k] = byStaff[k] || { staff: k, completed: 0, missed: 0, notes: 0, notesFast: 0, avgResponseMin: null, _resp: [] }; };
+    for (const a of db.prepare(`SELECT staff_name, status FROM appointments WHERE date >= ?`).all(d30)) {
+      if (a.status === 'completed') S(a.staff_name).completed++;
+      if (a.status === 'missed') S(a.staff_name).missed++;
+    }
+    for (const r of db.prepare(`SELECT claimed_by, created_at, done_at FROM requests WHERE done_at IS NOT NULL AND created_at >= ?`).all(d30 + ' 00:00:00')) {
+      if (!r.claimed_by) continue;
+      const m = Math.round((Date.parse(r.done_at + 'Z') - Date.parse(r.created_at + 'Z')) / 60000);
+      if (m >= 0 && m < 720) S(r.claimed_by)._resp.push(m);
+    }
+    for (const q of db.prepare(`SELECT by_name, appointment_id, created_at, (SELECT a.date || ' ' || a.time FROM appointments a WHERE a.id=quick_notes.appointment_id) sched FROM quick_notes WHERE created_at >= ?`).all(d30 + ' 00:00:00')) {
+      const s = S(q.by_name); s.notes++;
+      if (q.sched) { const lag = (Date.parse(q.created_at + 'Z') - Date.parse(q.sched.replace(' ', 'T') + ':00')) / 60000; if (lag <= 75) s.notesFast++; }   // within ~15m of a 60m session
+    }
+    for (const k of Object.keys(byStaff)) { const s = byStaff[k]; s.avgResponseMin = s._resp.length ? Math.round(s._resp.reduce((a, b) => a + b, 0) / s._resp.length) : null; delete s._resp; }
+    const promises30 = db.prepare(`SELECT COUNT(*) n FROM requests WHERE promise_at IS NOT NULL AND created_at >= ?`).get(d30 + ' 00:00:00').n;
+    const kept = db.prepare(`SELECT COUNT(*) n FROM requests WHERE promise_at IS NOT NULL AND done_at IS NOT NULL AND replace(substr(done_at,1,16),'T',' ') <= promise_at AND created_at >= ?`).get(d30 + ' 00:00:00').n;
+    out.supervisor = {
+      staff: Object.values(byStaff).sort((a, b) => (b.completed + b.notes) - (a.completed + a.notes)),
+      promisesMade: promises30, promisesKept: kept, promiseRate: promises30 ? Math.round(kept / promises30 * 100) : null,
+      docCompliance: (() => { const done = db.prepare(`SELECT COUNT(*) n FROM appointments WHERE status='completed' AND date >= ?`).get(d30).n; const withNote = db.prepare(`SELECT COUNT(*) n FROM appointments WHERE status='completed' AND note_id IS NOT NULL AND date >= ?`).get(d30).n; return done ? Math.round(withNote / done * 100) : null; })(),
+    };
+  }
+  res.json(out);
+});
+app.post('/api/appts', requireAuth, requireAppts, (req, res) => {
+  const b = req.body || {};
+  if (!b.client_id || !/^\d{4}-\d{2}-\d{2}$/.test(b.date || '') || !/^\d{2}:\d{2}$/.test(b.time || '')) return res.status(400).json({ error: 'Client, date and time are required.' });
+  const staff = String(b.staff_name || req.user.name).slice(0, 80);
+  // Same-staff overlap check — a double-booked promise is a broken promise waiting.
+  const dur = Math.min(Math.max(+b.duration_min || 30, 5), 240);
+  const clash = db.prepare(`SELECT id, time, duration_min FROM appointments WHERE date=? AND staff_name=? AND status IN ('scheduled','checked_in','in_session')`).all(b.date, staff)
+    .some((a) => { const s1 = a.time, e1 = addMinHM(a.time, a.duration_min || 30), s2 = b.time, e2 = addMinHM(b.time, dur); return s1 < e2 && s2 < e1; });
+  if (clash && !b.force) return res.status(409).json({ error: `${staff} already has an appointment overlapping ${b.time}. Book anyway?`, clash: true });
+  const c = db.prepare(`SELECT facility_id, pref, name FROM clients WHERE id=?`).get(+b.client_id);
+  if (!c) return res.status(404).json({ error: 'Client not found.' });
+  const promise = String(b.promise_note || '').slice(0, 200) || `${APPT_KINDS.includes(b.kind) ? b.kind : 'Meeting'} on ${b.date} at ${b.time}`;
+  const info = db.prepare(`INSERT INTO appointments (client_id, facility_id, staff_id, staff_name, kind, date, time, duration_min, source, promise_note, reschedule_of) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(+b.client_id, c.facility_id, req.user.id, staff, APPT_KINDS.includes(b.kind) ? b.kind : 'Case Management', b.date, b.time, dur, b.reschedule_of ? 'reschedule' : 'staff', promise, b.reschedule_of || null);
+  publishEvent({ event: 'appointment.booked', entity: 'appointment', entity_id: info.lastInsertRowid, facility_id: c.facility_id, actor: req.user.username, summary: `${nameInitials(c.pref || c.name)} · ${b.kind || 'Case Management'} · ${b.date} ${b.time} w/ ${staff}` });
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+function addMinHM(hm, min) { const [h, m] = String(hm).split(':').map(Number); const t = h * 60 + m + (+min || 0); return String(Math.floor(t / 60) % 24).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
+app.patch('/api/appts/:id', requireAuth, requireAppts, (req, res) => {
+  const a = db.prepare(`SELECT * FROM appointments WHERE id=?`).get(req.params.id);
+  if (!a) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  const act = b.action;
+  if (act === 'checkin') db.prepare(`UPDATE appointments SET status='checked_in', updated_at=datetime('now') WHERE id=?`).run(a.id);
+  else if (act === 'start') db.prepare(`UPDATE appointments SET status='in_session', updated_at=datetime('now') WHERE id=?`).run(a.id);
+  else if (act === 'missed' || act === 'cancel') {
+    // The Service Promise: a missed meeting must be MOVED (reschedule) or carry a
+    // written reason the client would accept — it can never just evaporate.
+    const hasResched = b.reschedule && /^\d{4}-\d{2}-\d{2}$/.test(b.reschedule.date || '') && /^\d{2}:\d{2}$/.test(b.reschedule.time || '');
+    const reason = String(b.reason || '').trim();
+    if (!hasResched && reason.length < 5) return res.status(400).json({ error: 'Keep the promise: reschedule it now, or record why (the client deserves a reason).' });
+    db.prepare(`UPDATE appointments SET status=?, missed_reason=COALESCE(NULLIF(?,''), missed_reason), updated_at=datetime('now') WHERE id=?`).run(act === 'cancel' ? 'cancelled' : 'missed', reason, a.id);
+    let newId = null;
+    if (hasResched) {
+      const info = db.prepare(`INSERT INTO appointments (client_id, facility_id, staff_id, staff_name, kind, date, time, duration_min, source, promise_note, reschedule_of) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(a.client_id, a.facility_id, a.staff_id, a.staff_name, a.kind, b.reschedule.date, b.reschedule.time, a.duration_min, 'reschedule', `Rescheduled: ${a.kind} moved to ${b.reschedule.date} at ${b.reschedule.time}`, a.id);
+      newId = info.lastInsertRowid;
+    }
+    publishEvent({ event: 'appointment.' + (act === 'cancel' ? 'cancelled' : 'missed'), entity: 'appointment', entity_id: a.id, facility_id: a.facility_id, actor: req.user.username, summary: `${a.kind} ${act === 'cancel' ? 'cancelled' : 'missed'}${newId ? ' → rescheduled ' + b.reschedule.date + ' ' + b.reschedule.time : reason ? ' (' + reason.slice(0, 60) + ')' : ''}` });
+    audit({ user: req.user, action: 'APPT_' + act.toUpperCase(), entity: 'appointment', entity_id: a.id, detail: newId ? 'rescheduled → #' + newId : reason, ip: req.ip });
+    return res.json({ ok: true, rescheduledTo: newId });
+  }
+  else return res.status(400).json({ error: 'Unknown action.' });
+  res.json({ ok: true });
+});
+// Completing a meeting REQUIRES the quick note — documentation before done, always.
+app.post('/api/appts/:id/complete', requireAuth, requireAppts, (req, res) => {
+  const a = db.prepare(`SELECT * FROM appointments WHERE id=?`).get(req.params.id);
+  if (!a) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  if (!String(b.disposition || '').trim() && !String(b.body || '').trim() && !(Array.isArray(b.topics) && b.topics.length)) {
+    return res.status(400).json({ error: 'One minute for the note before it slips away — pick topics + how they\'re doing.' });
+  }
+  const noteId = saveQuickNote({ user: req.user, client_id: a.client_id, appointment_id: a.id, kind: a.kind, topics: b.topics, disposition: b.disposition, body: b.body, needs_expansion: b.needs_expansion });
+  db.prepare(`UPDATE appointments SET status='completed', note_id=?, updated_at=datetime('now') WHERE id=?`).run(noteId, a.id);
+  publishEvent({ event: 'appointment.completed', entity: 'appointment', entity_id: a.id, facility_id: a.facility_id, actor: req.user.username, summary: `${a.kind} completed · documented` });
+  res.json({ ok: true, noteId });
+});
+// Queue actions on concierge requests: claim / promise / ready / done(+note).
+app.post('/api/appts/queue/:id', requireAuth, requireAppts, (req, res) => {
+  const r = db.prepare(`SELECT * FROM requests WHERE id=?`).get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  const act = b.action;
+  const nowLocal = () => new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ }));
+  if (act === 'claim') {
+    db.prepare(`UPDATE requests SET status='In progress', claimed_by=COALESCE(claimed_by, ?), claimed_at=COALESCE(claimed_at, datetime('now')) WHERE id=?`).run(req.user.name, r.id);
+  } else if (act === 'promise') {
+    // "You will be seen within N minutes" — a commitment, logged with a name on it.
+    const mins = Math.min(Math.max(+b.minutes || 20, 5), 480);
+    const d = nowLocal(); d.setMinutes(d.getMinutes() + mins);
+    const at = d.toISOString().slice(0, 16).replace('T', ' ');
+    db.prepare(`UPDATE requests SET promise_at=?, promised_by=? WHERE id=?`).run(at, req.user.name, r.id);
+    publishEvent({ event: 'promise.made', entity: 'request', entity_id: r.id, actor: req.user.username, summary: `Promised within ${mins} min · ${r.department}` });
+  } else if (act === 'ready') {
+    db.prepare(`UPDATE requests SET ready_at=datetime('now'), claimed_by=COALESCE(claimed_by, ?) WHERE id=?`).run(req.user.name, r.id);
+  } else if (act === 'done') {
+    if (CARE_DEPTS.test(r.department || '') && r.client_id) {
+      if (!String(b.disposition || '').trim() && !String(b.body || '').trim() && !(Array.isArray(b.topics) && b.topics.length)) {
+        return res.status(400).json({ error: 'This was a care contact — one-minute note before closing it.' });
+      }
+      saveQuickNote({ user: req.user, client_id: r.client_id, request_id: r.id, kind: r.department, topics: b.topics, disposition: b.disposition, body: b.body, needs_expansion: b.needs_expansion });
+    }
+    db.prepare(`UPDATE requests SET status='Done', done_by=?, done_at=datetime('now'), claimed_by=COALESCE(claimed_by, ?) WHERE id=?`).run(req.user.id, req.user.name, r.id);
+  } else return res.status(400).json({ error: 'Unknown action.' });
+  res.json({ ok: true });
+});
+// Expand a quick note into the full case note later.
+app.patch('/api/quicknotes/:id', requireAuth, requireAppts, (req, res) => {
+  const q = db.prepare(`SELECT * FROM quick_notes WHERE id=?`).get(req.params.id);
+  if (!q) return res.status(404).json({ error: 'Not found.' });
+  db.prepare(`UPDATE quick_notes SET body=COALESCE(NULLIF(?,''), body), needs_expansion=0, expanded_at=datetime('now') WHERE id=?`).run(String(req.body?.body || '').slice(0, 8000), q.id);
+  res.json({ ok: true });
+});
+// Kiosk queue board: the client's own requests with position, honest wait, promise,
+// and the READY flash. Preferred-name only (weakly-authenticated device).
+app.get('/api/kiosk/queue', requireKiosk, (req, res) => {
+  const cid = +req.query.client_id;
+  if (!cid) return res.json({ requests: [] });
+  const open = db.prepare(`SELECT id, department, text, status, created_at, promise_at, ready_at, claimed_by FROM requests WHERE client_id=? AND status != 'Done' ORDER BY id`).all(cid);
+  const allOpen = db.prepare(`SELECT id FROM requests WHERE status != 'Done' ORDER BY id`).all().map((x) => x.id);
+  res.json({
+    estWaitMin: estWaitMinutes(),
+    requests: open.map((r) => ({
+      id: r.id, text: r.text.slice(0, 80), status: r.ready_at ? 'ready' : (r.status === 'In progress' ? 'helping' : 'waiting'),
+      position: allOpen.indexOf(r.id) + 1, waitMin: Math.max(0, Math.round((Date.now() - Date.parse(r.created_at + 'Z')) / 60000)),
+      promise: r.promise_at ? ('by ' + r.promise_at.slice(11, 16)) : null, with: r.claimed_by || null,
+    })),
+  });
+});
+
 app.get('/api/org/facilities', requireAuth, (req, res) => {
   res.json({ facilities: orgFacilities(), departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
 });
@@ -913,7 +1117,7 @@ function daysToExpiry(exp, today) { if (!exp) return null; return Math.round((Da
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
   if (user) {
-    user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); user.opsAccess = canSeeOps(user); user.authAccess = canSeeAuth(user); user.billingAccess = canSeeBilling(user);
+    user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); user.opsAccess = canSeeOps(user); user.authAccess = canSeeAuth(user); user.billingAccess = canSeeBilling(user); user.apptsAccess = canSeeAppts(user);
     // Facility scope for the shell chip: explicit user_facility_access rows win;
     // org-wide roles fall back to every operating facility; everyone else to detox.
     try {

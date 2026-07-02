@@ -2189,6 +2189,46 @@ CREATE TABLE IF NOT EXISTS billing_ready_runs (
   note TEXT
 );`);
 
+// ── Scheduling & Service Promise (Excellence Wins) — appointments with a spoken
+// commitment attached, and the sub-minute documentation that must exist before a
+// meeting can be closed. The concierge `requests` table stays the walk-up queue
+// (promise columns added below); this is the planned-care calendar on top of it.
+db.exec(`CREATE TABLE IF NOT EXISTS appointments (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  facility_id INTEGER REFERENCES org_facilities(id),
+  staff_id INTEGER REFERENCES users(id),
+  staff_name TEXT,
+  kind TEXT NOT NULL DEFAULT 'Case Management',   -- Case Management | Therapy | Peer Support | Medical | Family | Other
+  date TEXT NOT NULL,
+  time TEXT NOT NULL,
+  duration_min INTEGER NOT NULL DEFAULT 30,
+  status TEXT NOT NULL DEFAULT 'scheduled',       -- scheduled | checked_in | in_session | completed | missed | cancelled
+  source TEXT DEFAULT 'staff',                    -- staff | kiosk | reschedule
+  promise_note TEXT,                              -- the commitment as told to the client
+  reschedule_of INTEGER REFERENCES appointments(id),
+  missed_reason TEXT,
+  note_id INTEGER,                                -- quick_notes.id — documentation proof
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_appts_date ON appointments(date);
+CREATE TABLE IF NOT EXISTS quick_notes (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  request_id INTEGER REFERENCES requests(id),
+  by_id INTEGER REFERENCES users(id),
+  by_name TEXT,
+  kind TEXT,
+  topics TEXT,                                    -- comma list from the chip picker
+  disposition TEXT,                               -- stable | improving | struggling | crisis
+  body TEXT,
+  needs_expansion INTEGER NOT NULL DEFAULT 0,     -- "expand into a full note later"
+  expanded_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+
 // Insurance brokers / agents — who to call per policy.
 db.exec(`CREATE TABLE IF NOT EXISTS insurance_brokers (
   id INTEGER PRIMARY KEY,
@@ -2702,6 +2742,11 @@ addColumn('hr_employees', 'term_date', 'TEXT');          // offboarding: last da
 addColumn('hr_employees', 'term_reason', 'TEXT');        // Resignation | Retirement | Layoff | Termination
 addColumn('hr_onboard_tasks', 'phase', 'TEXT');          // null/'onboard' | 'offboard'
 addColumn('authorizations', 'reminded', 'TEXT');         // JSON of reminder thresholds already sent
+addColumn('requests', 'promise_at', 'TEXT');             // Service Promise: committed response time
+addColumn('requests', 'promised_by', 'TEXT');
+addColumn('requests', 'claimed_by', 'TEXT');             // who picked it up (response-time metric)
+addColumn('requests', 'claimed_at', 'TEXT');
+addColumn('requests', 'ready_at', 'TEXT');               // staff ready — kiosk flashes "you're up"
 // Standing ownership repair: any operational row that arrived without a facility
 // belongs to detox (all writes now stamp explicitly; this catches rows created
 // between the foundation seed and the stamping code, and is a no-op after that).

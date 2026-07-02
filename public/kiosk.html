@@ -19,6 +19,7 @@
   .mopt{flex:1;font-size:20px;text-align:center}
   .msel{border-color:var(--gold)!important;background:#faf6ee!important;font-weight:600}
   .kchip{font-family:inherit;font-size:15px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:#fff;cursor:pointer;color:var(--navy);margin:0 4px 4px 0}
+@keyframes kpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.015)}}
 </style>
 </head>
 <body>
@@ -78,6 +79,7 @@ function home(){
     <select id="kclient"><option value="">Prefer not to say</option>${DATA.clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
     <button class="kbtn" onclick="careView()">🧭  Who's on my care team?</button>
     <button class="kbtn" onclick="reqView()">🛎  Request something</button>
+    <button class="kbtn" onclick="queueView()">⏱  Where's my request?</button>
     <button class="kbtn" onclick="mealView()">🍽️  How was ${currentMeal().toLowerCase()}?</button>
     ${DATA.surveys.map(s=>`<button class="kbtn" onclick="surveyView(${s.id})">📝  ${esc(s.title)}</button>`).join('')}
     <button class="kbtn" onclick="suggestionView()">💡  Share an idea</button>
@@ -216,7 +218,9 @@ async function sendReq(){
   if(!cid){ if($('kreqerr')) $('kreqerr').textContent='Please choose your name so we can bring it to the right person.'; const s=$('kreqclient'); if(s){ s.focus(); s.style.borderColor='#c0392b'; } return; }
   if(!$('krtext').value.trim()) { if($('kreqerr')) $('kreqerr').textContent='Tell us what you need.'; return; }
   await kapi('request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,client_id:cid,department:$('kdept').value||null,text:$('krtext').value})});
-  thanks('We\'re on it. Someone will take care of this for you.');
+  let wait=null; try{ const q=await kapi('queue?code='+encodeURIComponent(CODE)+'&client_id='+encodeURIComponent(cid)); wait=q.estWaitMin; }catch(e){}
+  QCLIENT=cid;
+  thanks('We\'re on it.'+(wait!=null?' Lately we respond in about '+wait+' minutes.':' Someone will take care of this for you.')+' Tap "Where\'s my request?" any time to see your place in line.');
 }
 function surveyView(id){
   VIEW='survey';
@@ -250,6 +254,35 @@ function thanks(msg){
   $('kview').innerHTML=`<h1>Thank you 💚</h1><p class="ksub" style="font-size:17px">${esc(msg)}</p>
     <button class="btn btn-gold big" style="width:100%;margin-top:16px" onclick="home()">Done</button>`;
   setTimeout(()=>{ if($('kview')) home(); }, 6000);
+}
+let QCLIENT='', QTIMER=null;
+function queueView(){
+  VIEW='queue';
+  const cid = client() || QCLIENT;
+  if(!cid){
+    $('kview').innerHTML=`<h1>Where's my request?</h1>
+      <p class="ksub">Choose your name and we'll show you exactly where things stand.</p>
+      <select id="kqclient"><option value="">— choose your name —</option>${DATA.clients.map(c=>`<option value="${c.id}">${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
+      <button class="btn btn-gold big" style="width:100%;margin-top:10px" onclick="QCLIENT=$('kqclient').value; if(QCLIENT) queueView();">Show me</button>
+      <button class="kbtn" onclick="home()">← Back</button>`;
+    return;
+  }
+  QCLIENT=cid;
+  renderQueue();
+  clearInterval(QTIMER); QTIMER=setInterval(()=>{ if(VIEW==='queue') renderQueue(); else clearInterval(QTIMER); }, 15000);
+}
+async function renderQueue(){
+  let d; try{ d=await kapi('queue?code='+encodeURIComponent(CODE)+'&client_id='+encodeURIComponent(QCLIENT)); }catch(e){ return; }
+  const rows=(d.requests||[]);
+  const card=(r)=>{
+    if(r.status==='ready') return `<div class="kcard" style="border:3px solid #2f7a4f;background:#e7f0ea;padding:18px;margin:10px 0;animation:kpulse 1.2s infinite"><div style="font-size:22px;font-weight:700;color:#2f7a4f">✅ We're ready for you now!</div><div class="ksub" style="font-size:16px">${esc(r.text)}${r.with?' — '+esc(r.with)+' is ready':''}. Please come to the front desk.</div></div>`;
+    if(r.status==='helping') return `<div class="kcard" style="border:1px solid var(--line);padding:18px;margin:10px 0"><div style="font-weight:700">🤝 ${esc(r.with||'Someone')} is on it</div><div class="ksub">${esc(r.text)}${r.promise?' · you\'ll be seen '+esc(r.promise):''}</div></div>`;
+    return `<div class="kcard" style="border:1px solid var(--line);padding:18px;margin:10px 0"><div style="font-weight:700">⏳ You're #${r.position} in line</div><div class="ksub">${esc(r.text)} · waiting ${r.waitMin} min${r.promise?' · promised '+esc(r.promise):''}${d.estWaitMin!=null?' · typical response ~'+d.estWaitMin+' min':''}</div></div>`;
+  };
+  $('kview').innerHTML=`<h1>Where things stand</h1>
+    ${rows.length?rows.map(card).join(''):'<p class="ksub" style="font-size:17px">Nothing waiting right now — everything you asked for has been taken care of. 💚</p>'}
+    <p class="ksub" style="text-align:center">This updates by itself every few seconds.</p>
+    <button class="kbtn" onclick="clearInterval(QTIMER);home()">← Back</button>`;
 }
 if(CODE) enter(); else gate();
 

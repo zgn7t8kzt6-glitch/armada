@@ -123,7 +123,10 @@ function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
 setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant', 'HR'];
+// HCOS (HR command center): owner, HR, and executives.
+function canSeeHR(user) { return !!user && (user.role === 'admin' || ['HR', 'Executive Director'].includes(user.job_role)); }
+function requireHR(req, res, next) { if (!canSeeHR(req.user)) return res.status(403).json({ error: 'HR access only.' }); next(); }
 // Corporate Operations (Chava): sees ordering, maintenance, and her hub — plus owner/
 // leadership can see it too. A shared board, so anyone can drop a task for her.
 function canSeeCorp(user) { return !!user && (user.role === 'admin' || ['Executive Assistant', 'Executive Director', 'Director of Operations'].includes(user.job_role)); }
@@ -363,7 +366,7 @@ function policyStatus(p, today) {
 function daysToExpiry(exp, today) { if (!exp) return null; return Math.round((Date.parse(String(exp).slice(0, 10) + 'T00:00:00') - Date.parse(today + 'T00:00:00')) / 864e5); }
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
-  if (user) { user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); }
+  if (user) { user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); }
   res.json({ user: user || null });
 });
 
@@ -3803,6 +3806,224 @@ app.patch('/api/hr/employees/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 app.delete('/api/hr/employees/:id', requireAuth, requireAdmin, (req, res) => { db.prepare(`UPDATE hr_employees SET status='inactive', updated_at=datetime('now') WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+
+// ── HCOS: Human Capital Operating System ──────────────────────────────────────
+// The HR command center: executive dashboard, employee master record + timeline,
+// onboarding, reviews, coaching, employee relations, certifications, leave, AI copilot.
+function hrEvent(empId, kind, detail, by) { try { db.prepare(`INSERT INTO hr_events (employee_id, kind, detail, by_name) VALUES (?,?,?,?)`).run(empId, kind, String(detail || '').slice(0, 500), by || ''); } catch { /* timeline is best-effort */ } }
+const ONBOARD_TEMPLATE = [
+  { task: 'Send welcome email & first-day details', days: -3 }, { task: 'Create email & system accounts (IT)', days: -2 },
+  { task: 'Prepare workspace / uniform / supplies', days: -1 }, { task: 'ID badge & building access', days: 0 },
+  { task: 'I-9 verification', days: 0 }, { task: 'W-4 & payroll setup', days: 0 },
+  { task: 'Policy & handbook signatures', days: 1 }, { task: 'Department orientation & facility tour', days: 1 },
+  { task: 'Meet the team + assign mentor', days: 2 }, { task: 'Training schedule assigned', days: 3 },
+  { task: 'Benefits enrollment', days: 5 }, { task: 'Set 30-day goals with manager', days: 7 },
+  { task: '21-day belonging check-in', days: 21 },
+];
+const REVIEW_SCHEDULE = [['30-day', 30], ['60-day', 60], ['90-day', 90], ['6-month', 182], ['Annual', 365]];
+app.get('/api/hcos/overview', requireAuth, requireHR, (req, res) => {
+  const today = appToday();
+  const soon = addDays(today, 60);
+  const monthStart = today.slice(0, 8) + '01';
+  const emp = db.prepare(`SELECT COUNT(*) n FROM hr_employees WHERE status='active'`).get().n;
+  const newHires = db.prepare(`SELECT COUNT(*) n FROM hr_employees WHERE status='active' AND hire_date >= ?`).get(monthStart).n;
+  const pipeline = db.prepare(`SELECT stage, COUNT(*) n FROM candidates WHERE stage NOT IN ('Hired','Passed') GROUP BY stage`).all();
+  const reviewsDue = db.prepare(`SELECT r.id, r.type, r.due_date, e.first_name, e.last_name, e.entity FROM hr_reviews r JOIN hr_employees e ON e.id=r.employee_id WHERE r.status='open' AND r.due_date <= ? ORDER BY r.due_date LIMIT 30`).all(addDays(today, 14));
+  const overdue = reviewsDue.filter((r) => r.due_date < today).length;
+  const certsExpiring = db.prepare(`SELECT c.id, c.name, c.expires, e.first_name, e.last_name, e.entity FROM hr_certifications c JOIN hr_employees e ON e.id=c.employee_id WHERE c.expires IS NOT NULL AND c.expires <= ? ORDER BY c.expires LIMIT 30`).all(soon);
+  const openCases = db.prepare(`SELECT COUNT(*) n FROM hr_cases WHERE status='open'`).get().n;
+  const onLeave = db.prepare(`SELECT COUNT(*) n FROM hr_leave WHERE status='approved' AND start_date <= ? AND end_date >= ?`).get(today, today).n;
+  const leaveRequests = db.prepare(`SELECT COUNT(*) n FROM hr_leave WHERE status='requested'`).get().n;
+  const onboarding = db.prepare(`SELECT e.id, e.first_name, e.last_name, e.entity, e.hire_date,
+      (SELECT COUNT(*) FROM hr_onboard_tasks t WHERE t.employee_id=e.id) total,
+      (SELECT COUNT(*) FROM hr_onboard_tasks t WHERE t.employee_id=e.id AND t.done=1) done
+    FROM hr_employees e WHERE e.status='active' AND EXISTS (SELECT 1 FROM hr_onboard_tasks t WHERE t.employee_id=e.id AND t.done=0) ORDER BY e.hire_date DESC LIMIT 20`).all();
+  const tasksToday = db.prepare(`SELECT t.id, t.task, t.due_date, e.first_name, e.last_name FROM hr_onboard_tasks t JOIN hr_employees e ON e.id=t.employee_id WHERE t.done=0 AND t.due_date <= ? ORDER BY t.due_date LIMIT 30`).all(today);
+  const coachingMonth = db.prepare(`SELECT COUNT(*) n FROM hr_coaching WHERE created_at >= ?`).get(monthStart).n;
+  res.json({ today, headcount: emp, newHires, pipeline, pipelineTotal: pipeline.reduce((a, p) => a + p.n, 0), reviewsDue, reviewsOverdue: overdue, certsExpiring, openCases, onLeave, leaveRequests, onboarding, tasksToday, coachingMonth });
+});
+app.get('/api/hcos/people', requireAuth, requireHR, (req, res) => {
+  const rows = db.prepare(`SELECT id, entity, first_name, last_name, job_title, department, manager, hire_date, email, phone, status FROM hr_employees WHERE status='active' ORDER BY entity, last_name`).all();
+  res.json({ people: rows, locations: orgLocations() });
+});
+app.get('/api/hcos/person/:id', requireAuth, requireHR, (req, res) => {
+  const e = db.prepare(`SELECT * FROM hr_employees WHERE id = ?`).get(req.params.id);
+  if (!e) return res.status(404).json({ error: 'Not found.' });
+  const id = e.id;
+  res.json({
+    employee: e,
+    certs: db.prepare(`SELECT * FROM hr_certifications WHERE employee_id=? ORDER BY COALESCE(expires,'9999')`).all(id),
+    reviews: db.prepare(`SELECT * FROM hr_reviews WHERE employee_id=? ORDER BY COALESCE(due_date,'9999')`).all(id),
+    coaching: db.prepare(`SELECT * FROM hr_coaching WHERE employee_id=? ORDER BY id DESC LIMIT 50`).all(id),
+    cases: db.prepare(`SELECT * FROM hr_cases WHERE employee_id=? ORDER BY id DESC`).all(id),
+    leave: db.prepare(`SELECT * FROM hr_leave WHERE employee_id=? ORDER BY id DESC LIMIT 30`).all(id),
+    onboard: db.prepare(`SELECT * FROM hr_onboard_tasks WHERE employee_id=? ORDER BY sort, id`).all(id),
+    events: db.prepare(`SELECT * FROM hr_events WHERE employee_id=? ORDER BY id DESC LIMIT 80`).all(id),
+  });
+});
+app.post('/api/hcos/person/:id', requireAuth, requireHR, (req, res) => {
+  const b = req.body || {}; const e = db.prepare(`SELECT * FROM hr_employees WHERE id=?`).get(req.params.id);
+  if (!e) return res.status(404).json({ error: 'Not found.' });
+  const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
+  db.prepare(`UPDATE hr_employees SET job_title=COALESCE(?,job_title), department=COALESCE(?,department), manager=COALESCE(?,manager), hire_date=COALESCE(?,hire_date), email=COALESCE(?,email), phone=COALESCE(?,phone), entity=COALESCE(?,entity), updated_at=datetime('now') WHERE id=?`)
+    .run(b.job_title != null ? String(b.job_title).slice(0, 120) : null, b.department != null ? String(b.department).slice(0, 80) : null, b.manager != null ? String(b.manager).slice(0, 80) : null, dt(b.hire_date), b.email != null ? String(b.email).slice(0, 120) : null, b.phone != null ? String(b.phone).slice(0, 40) : null, b.entity != null ? String(b.entity).slice(0, 120) : null, e.id);
+  res.json({ ok: true });
+});
+// One-click lifecycle: start onboarding — builds the checklist and schedules the
+// full review cadence (30/60/90/6-month/annual) off the hire date.
+app.post('/api/hcos/person/:id/start-onboarding', requireAuth, requireHR, (req, res) => {
+  const e = db.prepare(`SELECT * FROM hr_employees WHERE id=?`).get(req.params.id);
+  if (!e) return res.status(404).json({ error: 'Not found.' });
+  const hire = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.hire_date || '') ? req.body.hire_date : (e.hire_date || appToday());
+  db.prepare(`UPDATE hr_employees SET hire_date=? WHERE id=?`).run(hire, e.id);
+  const haveTasks = db.prepare(`SELECT COUNT(*) n FROM hr_onboard_tasks WHERE employee_id=?`).get(e.id).n;
+  db.exec('BEGIN');
+  try {
+    if (!haveTasks) {
+      const ins = db.prepare(`INSERT INTO hr_onboard_tasks (employee_id, task, due_date, sort) VALUES (?,?,?,?)`);
+      ONBOARD_TEMPLATE.forEach((t, i) => ins.run(e.id, t.task, addDays(hire, t.days), i));
+    }
+    const insR = db.prepare(`INSERT INTO hr_reviews (employee_id, type, due_date) VALUES (?,?,?)`);
+    for (const [type, days] of REVIEW_SCHEDULE) {
+      const dup = db.prepare(`SELECT id FROM hr_reviews WHERE employee_id=? AND type=?`).get(e.id, type);
+      if (!dup) insR.run(e.id, type, addDays(hire, days));
+    }
+    db.exec('COMMIT');
+  } catch (err) { try { db.exec('ROLLBACK'); } catch { /* ignore */ } return res.status(500).json({ error: err.message }); }
+  hrEvent(e.id, 'onboarding', `Onboarding started — hire date ${hire}`, req.user.name);
+  res.json({ ok: true, hire });
+});
+app.post('/api/hcos/onboard/task/:id/toggle', requireAuth, requireHR, (req, res) => {
+  const t = db.prepare(`SELECT * FROM hr_onboard_tasks WHERE id=?`).get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Not found.' });
+  db.prepare(`UPDATE hr_onboard_tasks SET done=?, done_at=? WHERE id=?`).run(t.done ? 0 : 1, t.done ? null : new Date().toISOString(), t.id);
+  if (!t.done) hrEvent(t.employee_id, 'onboarding', `✓ ${t.task}`, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/hcos/cert', requireAuth, requireHR, (req, res) => {
+  const b = req.body || {};
+  if (!b.employee_id || !String(b.name || '').trim()) return res.status(400).json({ error: 'Employee and certification name required.' });
+  const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
+  const info = db.prepare(`INSERT INTO hr_certifications (employee_id, name, issued, expires, doc_url, notes) VALUES (?,?,?,?,?,?)`)
+    .run(+b.employee_id, String(b.name).slice(0, 120), dt(b.issued), dt(b.expires), String(b.doc_url || '').slice(0, 500), String(b.notes || '').slice(0, 500));
+  hrEvent(+b.employee_id, 'certification', `Added ${b.name}${b.expires ? ' (expires ' + b.expires + ')' : ''}`, req.user.name);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.delete('/api/hcos/cert/:id', requireAuth, requireHR, (req, res) => { db.prepare(`DELETE FROM hr_certifications WHERE id=?`).run(req.params.id); res.json({ ok: true }); });
+app.post('/api/hcos/review', requireAuth, requireHR, (req, res) => {
+  const b = req.body || {};
+  if (!b.employee_id) return res.status(400).json({ error: 'Employee required.' });
+  const info = db.prepare(`INSERT INTO hr_reviews (employee_id, type, due_date) VALUES (?,?,?)`).run(+b.employee_id, String(b.type || 'Custom').slice(0, 30), /^\d{4}-\d{2}-\d{2}$/.test(b.due_date || '') ? b.due_date : appToday());
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.post('/api/hcos/review/:id/complete', requireAuth, requireHR, (req, res) => {
+  const r = db.prepare(`SELECT * FROM hr_reviews WHERE id=?`).get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'Not found.' });
+  const rating = Math.max(1, Math.min(10, +req.body?.rating || 0)) || null;
+  db.prepare(`UPDATE hr_reviews SET status='done', rating=?, summary=?, reviewer=?, completed_at=datetime('now') WHERE id=?`)
+    .run(rating, String(req.body?.summary || '').slice(0, 4000), req.user.name, r.id);
+  hrEvent(r.employee_id, 'review', `${r.type} review completed${rating ? ' — ' + rating + '/10' : ''}`, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/hcos/coaching', requireAuth, requireHR, (req, res) => {
+  const b = req.body || {};
+  if (!b.employee_id || !String(b.note || '').trim()) return res.status(400).json({ error: 'Employee and note required.' });
+  db.prepare(`INSERT INTO hr_coaching (employee_id, kind, note, by_name) VALUES (?,?,?,?)`)
+    .run(+b.employee_id, ['positive', 'corrective', 'observation'].includes(b.kind) ? b.kind : 'positive', String(b.note).slice(0, 2000), req.user.name);
+  hrEvent(+b.employee_id, 'coaching', `${b.kind || 'positive'} coaching logged`, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/hcos/case', requireAuth, requireHR, (req, res) => {
+  const b = req.body || {};
+  const kinds = ['Verbal', 'Written', 'Final Written', 'Suspension', 'Termination', 'PIP', 'Complaint', 'Investigation'];
+  if (!b.employee_id || !String(b.title || '').trim()) return res.status(400).json({ error: 'Employee and title required.' });
+  const info = db.prepare(`INSERT INTO hr_cases (employee_id, kind, title, detail, created_by) VALUES (?,?,?,?,?)`)
+    .run(+b.employee_id, kinds.includes(b.kind) ? b.kind : 'Verbal', String(b.title).slice(0, 200), String(b.detail || '').slice(0, 8000), req.user.name);
+  hrEvent(+b.employee_id, 'case', `${b.kind || 'Verbal'}: ${b.title}`, req.user.name);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.post('/api/hcos/case/:id/resolve', requireAuth, requireHR, (req, res) => {
+  const c = db.prepare(`SELECT * FROM hr_cases WHERE id=?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found.' });
+  db.prepare(`UPDATE hr_cases SET status='resolved', resolution=?, resolved_at=datetime('now') WHERE id=?`).run(String(req.body?.resolution || '').slice(0, 4000), c.id);
+  hrEvent(c.employee_id, 'case', `Resolved: ${c.title}`, req.user.name);
+  res.json({ ok: true });
+});
+app.get('/api/hcos/cases', requireAuth, requireHR, (req, res) => {
+  res.json({ cases: db.prepare(`SELECT c.*, e.first_name, e.last_name, e.entity FROM hr_cases c JOIN hr_employees e ON e.id=c.employee_id ORDER BY (c.status='resolved'), c.id DESC LIMIT 100`).all() });
+});
+app.post('/api/hcos/leave', requireAuth, requireHR, (req, res) => {
+  const b = req.body || {};
+  const kinds = ['PTO', 'Vacation', 'Sick', 'FMLA', 'Bereavement', 'Jury Duty', 'Parental', 'Military'];
+  if (!b.employee_id) return res.status(400).json({ error: 'Employee required.' });
+  const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : appToday();
+  const info = db.prepare(`INSERT INTO hr_leave (employee_id, kind, start_date, end_date, notes) VALUES (?,?,?,?,?)`)
+    .run(+b.employee_id, kinds.includes(b.kind) ? b.kind : 'PTO', dt(b.start_date), dt(b.end_date || b.start_date), String(b.notes || '').slice(0, 500));
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.post('/api/hcos/leave/:id/decide', requireAuth, requireHR, (req, res) => {
+  const l = db.prepare(`SELECT * FROM hr_leave WHERE id=?`).get(req.params.id);
+  if (!l) return res.status(404).json({ error: 'Not found.' });
+  const status = req.body?.status === 'denied' ? 'denied' : 'approved';
+  db.prepare(`UPDATE hr_leave SET status=?, approver=? WHERE id=?`).run(status, req.user.name, l.id);
+  hrEvent(l.employee_id, 'leave', `${l.kind} ${l.start_date}→${l.end_date} ${status}`, req.user.name);
+  res.json({ ok: true });
+});
+app.get('/api/hcos/leave', requireAuth, requireHR, (req, res) => {
+  res.json({ leave: db.prepare(`SELECT l.*, e.first_name, e.last_name, e.entity FROM hr_leave l JOIN hr_employees e ON e.id=l.employee_id ORDER BY (l.status!='requested'), l.id DESC LIMIT 100`).all() });
+});
+// AI copilot: answer HR questions grounded in the live HCOS data.
+app.post('/api/hcos/ask', requireAuth, requireHR, async (req, res) => {
+  if (!claudeConfigured()) return res.status(503).json({ error: 'AI is not configured.' });
+  const q = String(req.body?.question || '').trim();
+  if (!q) return res.status(400).json({ error: 'Ask a question.' });
+  const today = appToday();
+  const lines = [];
+  lines.push(`TODAY: ${today}`);
+  const emps = db.prepare(`SELECT id, entity, first_name, last_name, job_title, department, hire_date FROM hr_employees WHERE status='active' ORDER BY entity, last_name`).all();
+  lines.push(`\nEMPLOYEES (${emps.length}):`);
+  for (const e of emps) lines.push(`#${e.id} ${e.first_name} ${e.last_name} — ${e.job_title || 'no title'} @ ${e.entity}${e.hire_date ? ' · hired ' + e.hire_date : ''}`);
+  const revs = db.prepare(`SELECT r.type, r.due_date, e.first_name, e.last_name FROM hr_reviews r JOIN hr_employees e ON e.id=r.employee_id WHERE r.status='open' ORDER BY r.due_date LIMIT 60`).all();
+  lines.push(`\nOPEN REVIEWS:`); for (const r of revs) lines.push(`${r.first_name} ${r.last_name} — ${r.type} due ${r.due_date}`);
+  const certs = db.prepare(`SELECT c.name, c.expires, e.first_name, e.last_name FROM hr_certifications c JOIN hr_employees e ON e.id=c.employee_id ORDER BY COALESCE(c.expires,'9999') LIMIT 60`).all();
+  lines.push(`\nCERTIFICATIONS:`); for (const c of certs) lines.push(`${c.first_name} ${c.last_name} — ${c.name}${c.expires ? ' expires ' + c.expires : ''}`);
+  const cases = db.prepare(`SELECT c.kind, c.title, c.status, e.first_name, e.last_name FROM hr_cases c JOIN hr_employees e ON e.id=c.employee_id ORDER BY c.id DESC LIMIT 40`).all();
+  lines.push(`\nEMPLOYEE-RELATIONS CASES:`); for (const c of cases) lines.push(`${c.first_name} ${c.last_name} — ${c.kind}: ${c.title} (${c.status})`);
+  const lv = db.prepare(`SELECT l.kind, l.start_date, l.end_date, l.status, e.first_name, e.last_name FROM hr_leave l JOIN hr_employees e ON e.id=l.employee_id ORDER BY l.id DESC LIMIT 40`).all();
+  lines.push(`\nLEAVE:`); for (const l of lv) lines.push(`${l.first_name} ${l.last_name} — ${l.kind} ${l.start_date}→${l.end_date} (${l.status})`);
+  const ob = db.prepare(`SELECT t.task, t.due_date, t.done, e.first_name, e.last_name FROM hr_onboard_tasks t JOIN hr_employees e ON e.id=t.employee_id WHERE t.done=0 ORDER BY t.due_date LIMIT 60`).all();
+  lines.push(`\nOPEN ONBOARDING TASKS:`); for (const t of ob) lines.push(`${t.first_name} ${t.last_name} — ${t.task} due ${t.due_date}`);
+  try { res.json({ answer: await askAssistant(q, lines.join('\n').slice(0, 60000)) }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Certification expiry watch: daily digest at 60/30/14/7/1 days + expired (no repeats).
+async function checkCertReminders() {
+  if (!emailConfigured()) return { sent: false };
+  const today = appToday();
+  const rows = db.prepare(`SELECT c.*, e.first_name, e.last_name, e.entity FROM hr_certifications c JOIN hr_employees e ON e.id=c.employee_id WHERE c.expires IS NOT NULL AND e.status='active'`).all();
+  const due = [];
+  const upd = db.prepare(`UPDATE hr_certifications SET reminded=? WHERE id=?`);
+  for (const c of rows) {
+    const days = Math.round((Date.parse(c.expires + 'T00:00:00') - Date.parse(today + 'T00:00:00')) / 864e5);
+    let rem; try { rem = JSON.parse(c.reminded || '[]'); } catch { rem = []; }
+    if (!Array.isArray(rem)) rem = [];
+    const mark = days < 0 ? 'expired' : [60, 30, 14, 7, 1].find((t) => days <= t && !rem.includes(t));
+    if (mark == null || (mark === 'expired' && rem.includes('expired'))) continue;
+    rem.push(mark); upd.run(JSON.stringify(rem), c.id);
+    due.push({ c, days });
+  }
+  if (!due.length) return { sent: false };
+  const esc = htmlEsc;
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:560px"><h2 style="margin:0 0 6px">Certifications expiring — action needed</h2>
+    ${due.map((x) => `<div>• <strong>${esc(x.c.first_name + ' ' + x.c.last_name)}</strong> (${esc(x.c.entity)}) — ${esc(x.c.name)} · <span style="color:${x.days < 0 ? '#b00' : x.days <= 14 ? '#b00' : '#a60'}">${x.days < 0 ? Math.abs(x.days) + ' days EXPIRED' : x.days + ' days left'}</span></div>`).join('')}
+    <p style="color:#888;font-size:12px;margin-top:12px">Armada Care Standards — HR certification watch.</p></div>`;
+  const to = (getState('hr_email') || getState('census_email_to') || '').trim();
+  if (!to) return { sent: false };
+  try { await sendEmail({ to, subject: `HR: ${due.length} certification${due.length === 1 ? '' : 's'} need attention`, html }); return { sent: true, count: due.length }; }
+  catch (e) { return { sent: false, reason: e.message }; }
+}
+setInterval(() => { checkCertReminders().then((r) => { if (r.sent) console.log(`[hcos] cert reminders sent (${r.count})`); }).catch((e) => console.error('[hcos] certs:', e.message)); }, 12 * 3600 * 1000);
+setTimeout(() => { checkCertReminders().catch(() => {}); }, 150000);
 app.get('/api/facilities', requireAuth, requireOutpatient, (req, res) => res.json({ facilities: getFacilities(), sparkConfigured: sparkConfigured() }));
 app.post('/api/facilities', requireAuth, requireAdmin, (req, res) => {
   const list = Array.isArray(req.body?.facilities) ? req.body.facilities : null;

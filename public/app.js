@@ -196,7 +196,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',ownership:'command',corphub:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',ownership:'command',corphub:'command',hcos:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -343,6 +343,7 @@ function canSeeView(v){
   if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
   // Corporate hub: Chava, plus owner/leadership. Even non-corporate leadership gets it.
   if(v==='corphub') return !!(ME.role==='admin' || ME.corpAccess);
+  if(v==='hcos') return !!(ME.role==='admin' || ME.hrAccess);
   // Corporate role is walled to its own lane — the hub, ordering, maintenance.
   if(isCorporateRole()) return CORPORATE_VIEWS.includes(v) || UNIVERSAL_VIEWS.includes(v);
   // Recovery Housing is walled off: only the owner/admin and housing staff see it.
@@ -509,6 +510,7 @@ function show(v){
   if(v==='outpatient') loadOutpatient();
   if(v==='ownership') loadOwnership();
   if(v==='corphub') loadCorpHub();
+  if(v==='hcos') loadHcos();
   if(v==='rounds') loadRounds();
   if(v==='engagement') loadEngagement();
   if(v==='inventory') loadInventory();
@@ -5730,6 +5732,155 @@ function showPreviewBanner(){
   if(!b){ b=document.createElement('div'); b.id='previewBanner'; b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#5b3fa0;color:#fff;padding:9px 14px;text-align:center;font-family:system-ui,sans-serif;font-size:14px;box-shadow:0 -2px 10px rgba(0,0,0,.25)'; document.body.appendChild(b); }
   b.innerHTML='👁 Previewing the <strong>Corporate</strong> view — exactly what the corporate team (e.g. Chava, Executive Assistant) sees. <button onclick="exitPreview()" style="margin-left:10px;background:#fff;color:#5b3fa0;border:none;border-radius:5px;padding:5px 12px;cursor:pointer;font-weight:700">Exit preview</button>';
 }
+/* ───────── HCOS — Human Capital Operating System (HR command center) ───────── */
+let HCOS_TAB='dashboard', HCOS_PERSON=null, HCOS_PEOPLE=[];
+async function loadHcos(){
+  const host=$('hcos'); if(!host) return;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 HR — People OS</h3><p class="sub sans" style="margin:0">The whole employee lifecycle — hiring to onboarding to reviews, coaching, relations, certifications, and leave — in one command center.</p></div></div>
+    <div class="corp-tabs" id="hcosTabs">
+      ${['dashboard|📊 Dashboard','people|👤 People','reviews|📝 Reviews','relations|⚖️ Relations','certs|🎓 Certifications','leave|🌴 Leave','ask|🤖 Ask AI'].map(t=>{const[k,l]=t.split('|');return `<button class="${HCOS_TAB===k?'active':''}" onclick="hcosTab('${k}')">${l}</button>`;}).join('')}
+    </div></div>
+    <div id="hcosBody"><div class="hint">Loading…</div></div>`;
+  if(!loadHcos._obs){ let t=null; loadHcos._obs=new MutationObserver(()=>{ clearTimeout(t); t=setTimeout(corpDecorateTables,60); }); loadHcos._obs.observe(host,{childList:true,subtree:true}); }
+  renderHcosTab();
+}
+function hcosTab(k){ HCOS_TAB=k; HCOS_PERSON=null; document.querySelectorAll('#hcosTabs button').forEach(b=>b.classList.toggle('active', b.getAttribute('onclick').includes("'"+k+"'"))); renderHcosTab(); }
+async function renderHcosTab(){
+  const body=$('hcosBody'); if(!body) return; body.innerHTML='<div class="hint">Loading…</div>';
+  if(HCOS_TAB==='dashboard') return renderHcosDash(body);
+  if(HCOS_TAB==='people') return renderHcosPeople(body);
+  if(HCOS_TAB==='reviews') return renderHcosReviews(body);
+  if(HCOS_TAB==='relations') return renderHcosRelations(body);
+  if(HCOS_TAB==='certs') return renderHcosCerts(body);
+  if(HCOS_TAB==='leave') return renderHcosLeave(body);
+  if(HCOS_TAB==='ask') return renderHcosAsk(body);
+}
+async function renderHcosDash(body){
+  let d; try{ d=await api('/hcos/overview'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const box=(n,l,tab,col)=>`<div class="ret-card" ${tab?`style="cursor:pointer" onclick="hcosTab('${tab}')"`:''}><div class="n"${col?` style="color:${col}"`:''}>${n}</div><div class="l">${l}</div></div>`;
+  const taskRow=(t)=>`<div class="pc-note">☐ <strong>${esc(t.task)}</strong> — ${esc(t.first_name+' '+t.last_name)} <span class="hint">· due ${esc(t.due_date||'')}</span></div>`;
+  body.innerHTML=`
+    <div class="ret-cards" style="margin-top:4px">
+      ${box(d.headcount,'Employees','people')}${box(d.pipelineTotal,'In hiring pipeline')}${box(d.newHires,'New hires this month','people')}${box(d.onboarding.length,'In onboarding','people',(d.onboarding.length?'#a60':''))}
+      ${box(d.reviewsOverdue,'Reviews overdue','reviews',(d.reviewsOverdue?'var(--danger)':'var(--good)'))}${box(d.certsExpiring.length,'Certs expiring ≤60d','certs',(d.certsExpiring.length?'#a60':'var(--good)'))}${box(d.openCases,'Open HR cases','relations',(d.openCases?'#a60':''))}${box(d.onLeave,'On leave today','leave')}
+      ${box(d.leaveRequests,'Leave requests','leave',(d.leaveRequests?'#a60':''))}${box(d.coachingMonth,'Coaching notes this month')}</div>
+    ${d.tasksToday.length?`<div class="card" style="border-left:4px solid var(--gold)"><h3 style="margin-top:0">📥 HR inbox — due now <span class="hint" style="font-weight:400">· ${d.tasksToday.length}</span></h3>${d.tasksToday.slice(0,12).map(taskRow).join('')}<div class="hint" style="margin-top:4px">Open the person in 👤 People to check items off.</div></div>`:''}
+    ${d.reviewsDue.length?`<div class="card"><h3 style="margin-top:0">📝 Reviews due in 14 days</h3><table class="tbl"><tr><th>Employee</th><th>Review</th><th>Due</th></tr>${d.reviewsDue.map(r=>`<tr><td><strong>${esc(r.first_name+' '+r.last_name)}</strong><div class="hint">${esc(r.entity)}</div></td><td>${esc(r.type)}</td><td style="color:${r.due_date<d.today?'var(--danger)':'inherit'}">${esc(r.due_date)}</td></tr>`).join('')}</table></div>`:''}
+    ${d.certsExpiring.length?`<div class="card"><h3 style="margin-top:0">🎓 Certifications expiring</h3><table class="tbl"><tr><th>Employee</th><th>Certification</th><th>Expires</th></tr>${d.certsExpiring.map(c=>`<tr><td><strong>${esc(c.first_name+' '+c.last_name)}</strong><div class="hint">${esc(c.entity)}</div></td><td>${esc(c.name)}</td><td style="color:${c.expires<d.today?'var(--danger)':'#a60'}">${esc(c.expires)}</td></tr>`).join('')}</table></div>`:''}
+    ${d.onboarding.length?`<div class="card"><h3 style="margin-top:0">🚀 Onboarding in progress</h3>${d.onboarding.map(o=>{const pct=o.total?Math.round(o.done/o.total*100):0;return `<div class="pc-note" style="cursor:pointer" onclick="openHcosPerson(${o.id})"><strong>${esc(o.first_name+' '+o.last_name)}</strong> <span class="hint">· ${esc(o.entity)}${o.hire_date?' · hired '+esc(o.hire_date):''}</span><div style="background:var(--line);border-radius:6px;height:8px;margin-top:5px"><div style="width:${pct}%;background:var(--good);height:8px;border-radius:6px"></div></div><span class="hint">${o.done}/${o.total} · ${pct}%</span></div>`;}).join('')}</div>`:''}
+    ${(d.pipeline||[]).length?`<div class="card"><h3 style="margin-top:0">🧲 Hiring pipeline <span class="hint" style="font-weight:400">· <a href="#" onclick="show('hiring');return false">open Hiring ↗</a></span></h3><div class="hint">${d.pipeline.map(p=>`<strong>${esc(p.stage)}</strong>: ${p.n}`).join(' &nbsp;·&nbsp; ')}</div></div>`:''}`;
+}
+async function renderHcosPeople(body){
+  let d; try{ d=await api('/hcos/people'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  HCOS_PEOPLE=d.people||[];
+  const q=(window._hcosQ||'').toLowerCase(); const loc=window._hcosLoc||'';
+  let rows=HCOS_PEOPLE.filter(p=>(!q||((p.first_name+' '+p.last_name+' '+(p.job_title||'')).toLowerCase().includes(q)))&&(!loc||p.entity===loc));
+  body.innerHTML=`<div class="card"><div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+      <input placeholder="Search name or title (Enter)" value="${esc(window._hcosQ||'')}" onchange="window._hcosQ=this.value;renderHcosTab()" style="min-width:180px"/>
+      <select onchange="window._hcosLoc=this.value;renderHcosTab()"><option value="">All locations</option>${(d.locations||[]).map(l=>`<option ${loc===l?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
+    <table class="tbl"><tr><th>Employee</th><th>Title</th><th>Hired</th><th></th></tr>${rows.map(p=>`<tr><td><strong>${esc(p.first_name+' '+p.last_name)}</strong><div class="hint">${esc(p.entity)}</div></td><td class="hint">${esc(p.job_title||'')}</td><td class="hint">${esc(p.hire_date||'—')}</td><td><button class="btn btn-gold btn-sm sans" onclick="openHcosPerson(${p.id})">Open</button></td></tr>`).join('')}</table></div>`;
+}
+async function openHcosPerson(id){
+  HCOS_PERSON=id; const body=$('hcosBody'); if(!body) return;
+  body.innerHTML='<div class="hint">Loading profile…</div>';
+  let d; try{ d=await api('/hcos/person/'+id); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const e=d.employee;
+  const name=esc((e.first_name||'')+' '+(e.last_name||''));
+  const obDone=d.onboard.filter(t=>t.done).length, obPct=d.onboard.length?Math.round(obDone/d.onboard.length*100):null;
+  const certRow=(c)=>{const days=c.expires?Math.round((Date.parse(c.expires)-Date.now())/864e5):null;return `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.expires||'—')}${days!=null?` <span style="color:${days<0?'var(--danger)':days<=30?'#a60':'var(--good)'}">(${days<0?Math.abs(days)+'d over':days+'d'})</span>`:''}</td><td>${c.doc_url?`<a href="${esc(c.doc_url)}" target="_blank" rel="noopener">📄</a>`:''}</td><td><button class="btn btn-ghost btn-sm sans" onclick="delHcosCert(${c.id},${e.id})">🗑</button></td></tr>`;};
+  const evIcon={onboarding:'🚀',review:'📝',coaching:'💬','case':'⚖️',leave:'🌴',certification:'🎓'};
+  body.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">${name}</h3><p class="sub sans" style="margin:0">${esc(e.job_title||'no title')} · ${esc(e.entity)}${e.hire_date?' · hired '+esc(e.hire_date):''}${e.manager?' · mgr '+esc(e.manager):''}</p></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm sans" onclick="hcosTab('people')">← People</button>${!d.onboard.length?`<button class="btn btn-gold btn-sm sans" onclick="startOnboarding(${e.id})">🚀 Start onboarding</button>`:''}</div></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">
+      <label class="hint">Hire date<br><input id="hpHire" type="date" value="${esc((e.hire_date||'').slice(0,10))}"/></label>
+      <label class="hint">Title<br><input id="hpTitle" value="${esc(e.job_title||'')}"/></label>
+      <label class="hint">Department<br><input id="hpDept" value="${esc(e.department||'')}"/></label>
+      <label class="hint">Manager<br><input id="hpMgr" value="${esc(e.manager||'')}"/></label>
+      <label class="hint">Email<br><input id="hpEmail" value="${esc(e.email||'')}"/></label>
+      <label class="hint">Phone<br><input id="hpPhone" value="${esc(e.phone||'')}"/></label>
+      <button class="btn btn-gold btn-sm sans" onclick="saveHcosPerson(${e.id})">Save</button><span id="hpMsg" class="hint" style="align-self:center"></span></div></div>
+  ${d.onboard.length?`<div class="card"><h3 style="margin-top:0">🚀 Onboarding <span class="hint" style="font-weight:400">· ${obDone}/${d.onboard.length} (${obPct}%)</span></h3>${d.onboard.map(t=>`<div class="pc-note" style="cursor:pointer;${t.done?'opacity:.55':''}" onclick="toggleObTask(${t.id},${e.id})">${t.done?'✅':'☐'} ${esc(t.task)} <span class="hint">· due ${esc(t.due_date||'')}</span></div>`).join('')}</div>`:''}
+  <div class="card"><h3 style="margin-top:0">📝 Reviews</h3>
+    ${d.reviews.length?`<table class="tbl"><tr><th>Review</th><th>Due</th><th>Status</th><th></th></tr>${d.reviews.map(r=>`<tr><td><strong>${esc(r.type)}</strong>${r.summary?`<div class="hint">${esc(r.summary.slice(0,140))}</div>`:''}</td><td>${esc(r.due_date||'')}</td><td>${r.status==='done'?`<span style="color:var(--good)">✓ done${r.rating?' · '+r.rating+'/10':''}</span>`:'<span class="hint">open</span>'}</td><td>${r.status==='open'?`<button class="btn btn-gold btn-sm sans" onclick="completeReview(${r.id},${e.id})">Complete</button>`:''}</td></tr>`).join('')}</table>`:'<div class="hint">No reviews scheduled — Start onboarding schedules the 30/60/90/6-month/annual cadence.</div>'}</div>
+  <div class="card"><h3 style="margin-top:0">💬 Coaching log</h3>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><select id="hcKind"><option>positive</option><option>corrective</option><option>observation</option></select><input id="hcNote" placeholder="What happened / what was coached" style="min-width:220px"/><button class="btn btn-gold btn-sm sans" onclick="addCoaching(${e.id})">Log</button></div>
+    ${d.coaching.map(c=>`<div class="pc-note">${c.kind==='positive'?'🌟':c.kind==='corrective'?'🔧':'👁'} ${esc(c.note)} <span class="hint">· ${esc(c.by_name||'')} · ${esc((c.created_at||'').slice(0,10))}</span></div>`).join('')||'<div class="hint">No coaching notes yet — great managers log the positive ones too.</div>'}</div>
+  <div class="card"><h3 style="margin-top:0">🎓 Certifications</h3>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><input id="hcCertName" placeholder="e.g. CPR, HIPAA, RN license" style="min-width:160px"/><label class="hint">Expires <input id="hcCertExp" type="date"/></label><input id="hcCertUrl" placeholder="Link to copy (optional)" style="min-width:140px"/><button class="btn btn-gold btn-sm sans" onclick="addHcosCert(${e.id})">Add</button></div>
+    ${d.certs.length?`<table class="tbl"><tr><th>Certification</th><th>Expires</th><th>Copy</th><th></th></tr>${d.certs.map(certRow).join('')}</table>`:'<div class="hint">None on file.</div>'}</div>
+  <div class="card"><h3 style="margin-top:0">⚖️ Cases ${d.cases.length?`<span class="hint" style="font-weight:400">· ${d.cases.filter(c=>c.status==='open').length} open</span>`:''}</h3>
+    ${d.cases.map(c=>`<div class="pc-note"><strong>${esc(c.kind)}</strong>: ${esc(c.title)} ${c.status==='open'?'<span class="risk risk-elev">open</span>':'<span style="color:var(--good)">resolved</span>'}${c.detail?`<div class="hint">${esc(c.detail.slice(0,200))}</div>`:''}${c.status==='open'?`<div style="margin-top:4px"><button class="btn btn-ghost btn-sm sans" onclick="resolveCase(${c.id},${e.id})">Resolve</button></div>`:''}</div>`).join('')||'<div class="hint">No cases — as it should be.</div>'}
+    <div class="hint" style="margin-top:4px">New write-up / PIP: use the ⚖️ Relations tab.</div></div>
+  <div class="card"><h3 style="margin-top:0">🕐 Timeline</h3>${d.events.map(v=>`<div class="hint" style="padding:3px 0">${evIcon[v.kind]||'•'} ${esc(v.detail||v.kind)} <span style="color:var(--muted)">· ${esc(v.by_name||'')} · ${esc((v.created_at||'').slice(0,16))}</span></div>`).join('')||'<div class="hint">Nothing logged yet.</div>'}</div>`;
+}
+async function saveHcosPerson(id){ const g=x=>($(x)||{}).value; try{ await api('/hcos/person/'+id,{method:'POST',body:JSON.stringify({hire_date:g('hpHire'),job_title:g('hpTitle'),department:g('hpDept'),manager:g('hpMgr'),email:g('hpEmail'),phone:g('hpPhone')})}); if($('hpMsg'))$('hpMsg').textContent='✓ Saved'; }catch(e){ if($('hpMsg'))$('hpMsg').textContent=e.message; } }
+async function startOnboarding(id){ const hd=($('hpHire')||{}).value||''; try{ await api('/hcos/person/'+id+'/start-onboarding',{method:'POST',body:JSON.stringify({hire_date:hd})}); openHcosPerson(id); }catch(e){ alert(e.message); } }
+async function toggleObTask(tid,eid){ try{ await api('/hcos/onboard/task/'+tid+'/toggle',{method:'POST'}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
+async function completeReview(rid,eid){ const rating=prompt('Rating 1–10 (optional):')||''; const summary=prompt('Summary (what was discussed / plan):')||''; try{ await api('/hcos/review/'+rid+'/complete',{method:'POST',body:JSON.stringify({rating,summary})}); if(eid)openHcosPerson(eid); }catch(e){ alert(e.message); } }
+async function addCoaching(eid){ const note=($('hcNote')||{}).value||''; if(!note.trim())return; try{ await api('/hcos/coaching',{method:'POST',body:JSON.stringify({employee_id:eid,kind:($('hcKind')||{}).value,note})}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
+async function addHcosCert(eid){ const name=($('hcCertName')||{}).value||''; if(!name.trim())return; try{ await api('/hcos/cert',{method:'POST',body:JSON.stringify({employee_id:eid,name,expires:($('hcCertExp')||{}).value||'',doc_url:($('hcCertUrl')||{}).value||''})}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
+async function delHcosCert(cid,eid){ if(!confirm('Remove this certification?'))return; try{ await api('/hcos/cert/'+cid,{method:'DELETE'}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
+async function resolveCase(cid,eid){ const resolution=prompt('Resolution / outcome:')||''; try{ await api('/hcos/case/'+cid+'/resolve',{method:'POST',body:JSON.stringify({resolution})}); if(eid)openHcosPerson(eid);else renderHcosTab(); }catch(e){ alert(e.message); } }
+async function renderHcosReviews(body){
+  let d; try{ d=await api('/hcos/overview'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">📝 Reviews due <span class="hint" style="font-weight:400">· next 14 days${d.reviewsOverdue?` · <span style="color:var(--danger)">${d.reviewsOverdue} overdue</span>`:''}</span></h3>
+    ${d.reviewsDue.length?`<table class="tbl"><tr><th>Employee</th><th>Review</th><th>Due</th><th></th></tr>${d.reviewsDue.map(r=>`<tr><td><strong>${esc(r.first_name+' '+r.last_name)}</strong><div class="hint">${esc(r.entity)}</div></td><td>${esc(r.type)}</td><td style="color:${r.due_date<d.today?'var(--danger)':'inherit'}">${esc(r.due_date)}</td><td><button class="btn btn-gold btn-sm sans" onclick="completeReview(${r.id},0);setTimeout(renderHcosTab,400)">Complete</button></td></tr>`).join('')}</table>`:'<div class="hint">Nothing due in the next two weeks. 🎉</div>'}
+    <div class="hint" style="margin-top:6px">Reviews are scheduled automatically (30/60/90/6-month/annual) when onboarding starts. Open a person in 👤 People to see their full cadence.</div></div>`;
+}
+async function renderHcosRelations(body){
+  let d; try{ d=await api('/hcos/cases'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  if(!HCOS_PEOPLE.length){ try{ const p=await api('/hcos/people'); HCOS_PEOPLE=p.people||[]; }catch(_e){} }
+  const kinds=['Verbal','Written','Final Written','Suspension','Termination','PIP','Complaint','Investigation'];
+  const cases=d.cases||[];
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">⚖️ New case <span class="hint" style="font-weight:400">— progressive discipline: Verbal → Written → Final → Suspension → Termination</span></h3>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+        <select id="caseEmp">${HCOS_PEOPLE.map(p=>`<option value="${p.id}">${esc(p.first_name+' '+p.last_name)} — ${esc(p.entity)}</option>`).join('')}</select>
+        <select id="caseKind">${kinds.map(k=>`<option>${k}</option>`).join('')}</select>
+        <input id="caseTitle" placeholder="Title (e.g. Attendance — 3rd no-call)" style="min-width:200px"/>
+        <input id="caseDetail" placeholder="Details — facts, dates, witnesses, expectations" style="width:100%"/>
+        <button class="btn btn-gold sans" onclick="addHcosCase()">Create case</button></div><span id="caseMsg" class="hint"></span></div>
+    <div class="card"><h3 style="margin-top:0">Cases <span class="hint" style="font-weight:400">· ${cases.filter(c=>c.status==='open').length} open</span></h3>
+      ${cases.length?`<table class="tbl"><tr><th>Employee</th><th>Type</th><th>Case</th><th>Status</th><th></th></tr>${cases.map(c=>`<tr><td><strong>${esc(c.first_name+' '+c.last_name)}</strong><div class="hint">${esc(c.entity)}</div></td><td>${esc(c.kind)}</td><td>${esc(c.title)}${c.detail?`<div class="hint">${esc(c.detail.slice(0,120))}</div>`:''}</td><td>${c.status==='open'?'<span class="risk risk-elev">open</span>':'<span style="color:var(--good)">resolved</span>'}</td><td>${c.status==='open'?`<button class="btn btn-ghost btn-sm sans" onclick="resolveCase(${c.id},0);setTimeout(renderHcosTab,400)">Resolve</button>`:''}</td></tr>`).join('')}</table>`:'<div class="hint">No cases on record.</div>'}</div>`;
+}
+async function addHcosCase(){ const b={employee_id:($('caseEmp')||{}).value,kind:($('caseKind')||{}).value,title:($('caseTitle')||{}).value||'',detail:($('caseDetail')||{}).value||''}; if(!b.title.trim()){ if($('caseMsg'))$('caseMsg').textContent='Add a title.'; return; } try{ await api('/hcos/case',{method:'POST',body:JSON.stringify(b)}); renderHcosTab(); }catch(e){ if($('caseMsg'))$('caseMsg').textContent=e.message; } }
+async function renderHcosCerts(body){
+  let d; try{ d=await api('/hcos/overview'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  body.innerHTML=`<div class="card"><h3 style="margin-top:0">🎓 Certifications expiring ≤60 days <span class="hint" style="font-weight:400">· auto-emails HR at 60/30/14/7/1 days</span></h3>
+    ${d.certsExpiring.length?`<table class="tbl"><tr><th>Employee</th><th>Certification</th><th>Expires</th></tr>${d.certsExpiring.map(c=>`<tr><td><strong>${esc(c.first_name+' '+c.last_name)}</strong><div class="hint">${esc(c.entity)}</div></td><td>${esc(c.name)}</td><td style="color:${c.expires<d.today?'var(--danger)':'#a60'};font-weight:600">${esc(c.expires)}</td></tr>`).join('')}</table>`:'<div class="hint">Nothing expiring in 60 days. Add certifications on each person’s profile (👤 People → open → Certifications) and the watch takes over.</div>'}</div>`;
+}
+async function renderHcosLeave(body){
+  let d; try{ d=await api('/hcos/leave'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  if(!HCOS_PEOPLE.length){ try{ const p=await api('/hcos/people'); HCOS_PEOPLE=p.people||[]; }catch(_e){} }
+  const kinds=['PTO','Vacation','Sick','FMLA','Bereavement','Jury Duty','Parental','Military'];
+  const lv=d.leave||[];
+  const pill=(s)=>s==='requested'?'<span class="risk risk-elev">requested</span>':s==='approved'?'<span style="color:var(--good)">✓ approved</span>':'<span class="hint">denied</span>';
+  body.innerHTML=`<div class="card"><details ${lv.length?'':'open'}><summary><strong>＋ Log a leave request</strong></summary><div style="margin-top:8px">
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+        <select id="lvEmp">${HCOS_PEOPLE.map(p=>`<option value="${p.id}">${esc(p.first_name+' '+p.last_name)} — ${esc(p.entity)}</option>`).join('')}</select>
+        <select id="lvKind">${kinds.map(k=>`<option>${k}</option>`).join('')}</select>
+        <label class="hint">From <input id="lvStart" type="date"/></label>
+        <label class="hint">To <input id="lvEnd" type="date"/></label>
+        <input id="lvNotes" placeholder="Notes" style="min-width:140px"/>
+        <button class="btn btn-gold btn-sm sans" onclick="addHcosLeave()">Add</button></div></div></details></div>
+    <div class="card"><h3 style="margin-top:0">🌴 Leave</h3>
+      ${lv.length?`<table class="tbl"><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Status</th><th></th></tr>${lv.map(l=>`<tr><td><strong>${esc(l.first_name+' '+l.last_name)}</strong><div class="hint">${esc(l.entity)}</div></td><td>${esc(l.kind)}</td><td>${esc(l.start_date)} → ${esc(l.end_date)}</td><td>${pill(l.status)}</td><td>${l.status==='requested'?`<button class="btn btn-gold btn-sm sans" onclick="decideLeave(${l.id},'approved')">Approve</button> <button class="btn btn-ghost btn-sm sans" onclick="decideLeave(${l.id},'denied')">Deny</button>`:''}</td></tr>`).join('')}</table>`:'<div class="hint">No leave on record.</div>'}</div>`;
+}
+async function addHcosLeave(){ const b={employee_id:($('lvEmp')||{}).value,kind:($('lvKind')||{}).value,start_date:($('lvStart')||{}).value,end_date:($('lvEnd')||{}).value,notes:($('lvNotes')||{}).value||''}; try{ await api('/hcos/leave',{method:'POST',body:JSON.stringify(b)}); renderHcosTab(); }catch(e){ alert(e.message); } }
+async function decideLeave(id,status){ try{ await api('/hcos/leave/'+id+'/decide',{method:'POST',body:JSON.stringify({status})}); renderHcosTab(); }catch(e){ alert(e.message); } }
+async function renderHcosAsk(body){
+  body.innerHTML=`<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">🤖 HR copilot</h3>
+    <p class="sub sans" style="margin:0 0 6px">Ask anything about your people — answers come from the live HR data.</p>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px"><input id="hrQ" placeholder="Who needs reviews this week?" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')askHcos()"/><button class="btn btn-gold btn-sm sans" onclick="askHcos()">Ask</button></div>
+    <div class="toolbar chip-row" style="justify-content:flex-start;gap:4px;margin-top:4px">${['Who needs reviews this week?','Whose certifications expire soon?','Who is on leave right now?','Summarize open HR cases','Who was hired in the last 60 days?','Draft a PIP for attendance issues'].map(s=>`<button class="btn btn-ghost btn-sm sans" style="font-size:11px" onclick="$('hrQ').value=this.textContent;askHcos()">${esc(s)}</button>`).join('')}</div>
+    <div id="hrAns"></div></div>`;
+}
+async function askHcos(){
+  const q=($('hrQ')||{}).value||''; if(!q.trim())return;
+  const el=$('hrAns'); if(el)el.innerHTML='<div class="hint" style="margin-top:8px">Reading the HR data…</div>';
+  try{ const r=await api('/hcos/ask',{method:'POST',body:JSON.stringify({question:q})}); if(el)el.innerHTML=`<div class="pc-note" style="margin-top:8px;white-space:pre-wrap;background:#fff">${esc(r.answer)}</div>`; }
+  catch(e){ if(el)el.innerHTML='<div class="hint" style="margin-top:8px;color:var(--danger)">'+esc(e.message)+'</div>'; }
+}
+
 let CORP_TAB='dashboard', CORP_FAC='', CORP_LOCS=[];
 async function loadCorpHub(){
   const host=$('corphub'); if(!host) return;
@@ -5749,7 +5900,7 @@ async function loadCorpHub(){
 // turn rows into labeled, tap-friendly cards. Tables that must stay grids (e.g. the
 // insurance coverage matrix) opt out with class="nomcard".
 function corpDecorateTables(){
-  document.querySelectorAll('#corphub table.tbl:not(.nomcard)').forEach(t=>{
+  document.querySelectorAll('.mhub table.tbl:not(.nomcard)').forEach(t=>{
     const ths=[...t.querySelectorAll('tr th')].map(th=>th.textContent.trim());
     if(!ths.length) return;
     t.classList.add('m-cards');

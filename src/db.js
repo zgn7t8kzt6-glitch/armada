@@ -1583,6 +1583,11 @@ addColumn('order_requests', 'landlord_emailed', 'TEXT'); // when we auto-emailed
 addColumn('entity_records', 'status', 'TEXT');           // active | closed (archive)
 addColumn('leases', 'file_id', 'INTEGER');               // uploaded lease file (corp_files)
 addColumn('insurance_policies', 'file_id', 'INTEGER');   // uploaded policy file (corp_files)
+addColumn('hr_employees', 'hire_date', 'TEXT');          // drives onboarding + review scheduling
+addColumn('hr_employees', 'email', 'TEXT');
+addColumn('hr_employees', 'phone', 'TEXT');
+addColumn('hr_employees', 'department', 'TEXT');
+addColumn('hr_employees', 'manager', 'TEXT');
 // Uploaded corporate documents (insurance contracts, leases). Stored as base64 so the
 // AI can read them and they're downloadable.
 db.exec(`CREATE TABLE IF NOT EXISTS corp_files (
@@ -1899,6 +1904,85 @@ db.exec(`CREATE TABLE IF NOT EXISTS payment_methods (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// ── HCOS: Human Capital Operating System — the employee lifecycle spine ────────
+// Certifications (HIPAA, CPR, licenses) with expiration watch; reviews (30/60/90/
+// 6-month/annual); coaching log; employee-relations cases (progressive discipline +
+// PIP); leave; onboarding checklists; and a per-employee event timeline.
+db.exec(`CREATE TABLE IF NOT EXISTS hr_certifications (
+  id INTEGER PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  issued TEXT,
+  expires TEXT,
+  doc_url TEXT,
+  notes TEXT,
+  reminded TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_hrcert_exp ON hr_certifications(expires);
+CREATE TABLE IF NOT EXISTS hr_reviews (
+  id INTEGER PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,                    -- 30-day | 60-day | 90-day | 6-month | Annual | Custom
+  due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'open',    -- open | done
+  rating INTEGER,                         -- 1-10
+  summary TEXT,
+  reviewer TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_hrrev_due ON hr_reviews(status, due_date);
+CREATE TABLE IF NOT EXISTS hr_coaching (
+  id INTEGER PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'positive',  -- positive | corrective | observation
+  note TEXT NOT NULL,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS hr_cases (
+  id INTEGER PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                     -- Verbal | Written | Final Written | Suspension | Termination | PIP | Complaint | Investigation
+  title TEXT NOT NULL,
+  detail TEXT,
+  status TEXT NOT NULL DEFAULT 'open',    -- open | resolved
+  resolution TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS hr_leave (
+  id INTEGER PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'PTO',       -- PTO | Vacation | Sick | FMLA | Bereavement | Jury Duty | Parental | Military
+  start_date TEXT,
+  end_date TEXT,
+  status TEXT NOT NULL DEFAULT 'requested', -- requested | approved | denied
+  approver TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS hr_onboard_tasks (
+  id INTEGER PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  task TEXT NOT NULL,
+  due_date TEXT,
+  assigned_to TEXT,
+  done INTEGER NOT NULL DEFAULT 0,
+  done_at TEXT,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS hr_events (
+  id INTEGER PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  detail TEXT,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_hrev_emp ON hr_events(employee_id, id);`);
 // Insurance brokers / agents — who to call per policy.
 db.exec(`CREATE TABLE IF NOT EXISTS insurance_brokers (
   id INTEGER PRIMARY KEY,

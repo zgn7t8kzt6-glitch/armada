@@ -376,20 +376,26 @@ app.get('/api/opscenter', requireAuth, (req, res) => {
   const t = [];
   const add = (fn) => { try { const x = fn(); if (x) t.push(x); } catch { /* tile skipped */ } };
   const one = (sql, ...a) => db.prepare(sql).get(...a).n;
-  // RIGHT NOW — facility pulse (detox today; per-facility once scoping flips)
-  add(() => ({ group: 'now', key: 'census', label: 'Census now', n: one(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND merged_into IS NULL`), view: 'command' }));
-  add(() => { const beds = one(`SELECT COUNT(*) n FROM beds`); if (!beds) return null; const occ = one(`SELECT COUNT(*) n FROM beds WHERE status='Occupied'`); return { group: 'now', key: 'beds', label: 'Beds available', n: beds - occ, sub: `${occ}/${beds} occupied`, view: 'bedboard' }; });
-  add(() => ({ group: 'now', key: 'admits', label: 'Admissions today', n: one(`SELECT COUNT(DISTINCT COALESCE(kipu_id,name)) n FROM clients WHERE merged_into IS NULL AND substr(admit,1,10)=?`, today), view: 'admitcheck' }));
-  add(() => ({ group: 'now', key: 'arrivals', label: 'Expected arrivals', n: one(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date=? AND status='expected'`, today), view: 'arrivals' }));
-  add(() => ({ group: 'now', key: 'penddc', label: 'Pending discharges', n: one(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= ?`, addDays(today, 1)), view: 'dischargepage' }));
-  add(() => { const n = one(`SELECT COUNT(*) n FROM incidents WHERE status='Open'`); return { group: 'now', key: 'incidents', label: 'Open incidents', n, alert: n > 0, view: 'incidents' }; });
+  // Optional facility filter: tiles whose tables carry facility_id scope to it;
+  // the rest stay org-wide and say so — hiding work would be worse than mixing it.
+  const fid = req.query.facility ? +req.query.facility : null;
+  const fac = fid ? db.prepare(`SELECT * FROM org_facilities WHERE id = ?`).get(fid) : null;
+  const F = fid ? ` AND facility_id=${fid}` : '';
+  // RIGHT NOW — facility pulse
+  add(() => ({ group: 'now', key: 'census', label: 'Census now', n: one(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND merged_into IS NULL${F}`), view: 'command' }));
+  add(() => { const beds = one(`SELECT COUNT(*) n FROM beds`); if (!beds) return null; const occ = one(`SELECT COUNT(*) n FROM beds WHERE status='Occupied'`); return { group: 'now', key: 'beds', label: 'Beds available', n: beds - occ, sub: `${occ}/${beds} occupied${fid ? ' · org-wide' : ''}`, view: 'bedboard' }; });
+  add(() => ({ group: 'now', key: 'admits', label: 'Admissions today', n: one(`SELECT COUNT(DISTINCT COALESCE(kipu_id,name)) n FROM clients WHERE merged_into IS NULL AND substr(admit,1,10)=?${F}`, today), view: 'admitcheck' }));
+  add(() => ({ group: 'now', key: 'arrivals', label: 'Expected arrivals', n: one(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date=? AND status='expected'${F}`, today), view: 'arrivals' }));
+  add(() => ({ group: 'now', key: 'penddc', label: 'Pending discharges', n: one(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= ?${F}`, addDays(today, 1)), view: 'dischargepage' }));
+  add(() => { const n = one(`SELECT COUNT(*) n FROM incidents WHERE status='Open'${F}`); return { group: 'now', key: 'incidents', label: 'Open incidents', n, alert: n > 0, view: 'incidents' }; });
   // WORK QUEUES
-  add(() => ({ group: 'queues', key: 'orders', label: 'Orders to place', n: one(`SELECT COUNT(*) n FROM order_requests WHERE status='requested'`), view: 'corphub', tab: 'orders' }));
+  add(() => ({ group: 'queues', key: 'orders', label: 'Orders to place', n: fac ? one(`SELECT COUNT(*) n FROM order_requests WHERE status='requested' AND facility=?`, fac.name) : one(`SELECT COUNT(*) n FROM order_requests WHERE status='requested'`), view: 'corphub', tab: 'orders' }));
   add(() => ({ group: 'queues', key: 'maint', label: 'Maintenance open', n: one(`SELECT COUNT(*) n FROM maintenance_requests WHERE status IN ('open','in_progress')`), view: 'maintenance' }));
   add(() => ({ group: 'queues', key: 'concierge', label: 'Concierge open', n: one(`SELECT COUNT(*) n FROM requests WHERE status NOT IN ('done','closed','cancelled')`), view: 'concierge' }));
   add(() => ({ group: 'queues', key: 'obtasks', label: 'HR tasks due', n: one(`SELECT COUNT(*) n FROM hr_onboard_tasks WHERE done=0 AND due_date <= ?`, today), view: 'hcos', tab: 'people' }));
   add(() => ({ group: 'queues', key: 'corptasks', label: 'Projects in motion', n: one(`SELECT COUNT(*) n FROM corp_tasks WHERE status IN ('todo','doing','blocked')`), view: 'corphub', tab: 'projects' }));
-  add(() => ({ group: 'queues', key: 'docgap', label: 'Doc-gap discharges (7d)', n: one(`SELECT COUNT(*) n FROM clients WHERE discharge_doc_gap=1 AND substr(discharge_date,1,10) >= date(?, '-6 day')`, today), view: 'retention', sub: 'billing-readiness' }));
+  add(() => ({ group: 'queues', key: 'docgap', label: 'Doc-gap discharges (7d)', n: one(`SELECT COUNT(*) n FROM clients WHERE discharge_doc_gap=1 AND substr(discharge_date,1,10) >= date(?, '-6 day')${F}`, today), view: 'retention', sub: 'billing-readiness' }));
+  add(() => { const n = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date <= ?${F}`, addDays(today, 7)); const exp = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date < ?${F}`, today); return { group: 'queues', key: 'auths', label: 'Auth renewals ≤7d', n, alert: exp > 0, sub: exp ? `${exp} already expired` : undefined, view: 'authreg' }; });
   // PEOPLE & COMPLIANCE
   add(() => { const n = one(`SELECT COUNT(*) n FROM hr_reviews WHERE status='open' AND due_date < ?`, today); return { group: 'people', key: 'reviews', label: 'Reviews overdue', n, alert: n > 0, view: 'hcos', tab: 'reviews' }; });
   add(() => { const n = one(`SELECT COUNT(*) n FROM hr_certifications c JOIN hr_employees e ON e.id=c.employee_id AND e.status='active' WHERE c.expires IS NOT NULL AND c.expires <= ?`, addDays(today, 30)); return { group: 'people', key: 'certs', label: 'Certs expiring ≤30d', n, alert: n > 0, view: 'hcos', tab: 'certs' }; });
@@ -484,6 +490,96 @@ app.post('/api/org/permissions', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── AUTHORIZATION / UR REGISTER — the first Operational Intelligence screen ────
+// Every row renders Information (the auth), Intelligence (grounded facts the
+// platform can compute: days left, days used vs approved, linked-chart doc gaps),
+// and Action (renew / deny / close / view patient). Intelligence is rule-based
+// and cites only what's in the data — nothing invented (Principle 12).
+function canSeeAuth(user) { return !!user && (user.role === 'admin' || hasPerm(user, 'ur') || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Case Manager'].includes(user.job_role)); }
+const requireAuthReg = (req, res, next) => { if (!canSeeAuth(req.user)) return res.status(403).json({ error: 'UR / leadership access only.' }); next(); };
+const AUTH_LEVELS = ['DTX', 'RES', 'PHP', 'IOP', 'OP'];
+function authIntel(a, today) {
+  const intel = [];
+  const daysLeft = a.end_date ? Math.round((Date.parse(a.end_date + 'T00:00:00') - Date.parse(today + 'T00:00:00')) / 864e5) : null;
+  if (daysLeft != null) {
+    if (daysLeft < 0 && ['active', 'renewed'].includes(a.status)) intel.push(`⛔ Expired ${-daysLeft} day${daysLeft === -1 ? '' : 's'} ago — every uncovered day is unbillable.`);
+    else if (daysLeft === 0) intel.push('⏰ Expires TODAY — renew before end of business.');
+    else if (daysLeft <= 2) intel.push(`⏰ Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} — start the renewal call now.`);
+    else if (daysLeft <= 7) intel.push(`Expires in ${daysLeft} days — inside the renewal window.`);
+  }
+  if (a.client_id) {
+    try {
+      const c = db.prepare(`SELECT admit, active, discharge_doc_gap, discharge_date FROM clients WHERE id = ?`).get(a.client_id);
+      if (c) {
+        if (c.active && c.admit && a.approved_days) {
+          const used = Math.round((Date.parse(today + 'T00:00:00') - Date.parse(String(c.admit).slice(0, 10) + 'T00:00:00')) / 864e5);
+          if (used > a.approved_days) intel.push(`📋 ${used} days in care vs ${a.approved_days} approved — ${used - a.approved_days} day${used - a.approved_days === 1 ? '' : 's'} beyond the authorization.`);
+          else if (used >= 0) intel.push(`${used} of ${a.approved_days} approved days used.`);
+        }
+        if (c.discharge_doc_gap) intel.push('⚠️ Linked chart has a documentation gap — resolve before the payor review.');
+        if (!c.active && ['active', 'renewed'].includes(a.status)) intel.push(`Patient discharged ${c.discharge_date || ''} — close this authorization.`);
+      }
+    } catch { /* intelligence is optional, never blocking */ }
+  }
+  if (a.next_review && a.next_review <= today) intel.push(`📞 Concurrent review was due ${a.next_review}.`);
+  return { daysLeft, intel };
+}
+app.get('/api/auth-register', requireAuth, requireAuthReg, (req, res) => {
+  const today = appToday();
+  const rows = db.prepare(`SELECT a.*, f.name AS facility_name FROM authorizations a LEFT JOIN org_facilities f ON f.id = a.facility_id ORDER BY (a.status IN ('denied','closed')), a.end_date`).all();
+  const auths = rows.map((a) => {
+    const { daysLeft, intel } = authIntel(a, today);
+    let flag = 'ok';
+    if (['denied', 'closed'].includes(a.status)) flag = 'done';
+    else if (daysLeft != null && daysLeft < 0) flag = 'expired';
+    else if (daysLeft != null && daysLeft <= 7) flag = 'expiring';
+    return { ...a, daysLeft, intel, flag };
+  });
+  res.json({ today, auths, levels: AUTH_LEVELS, facilities: orgFacilities().filter((f) => f.type !== 'corporate') });
+});
+app.post('/api/auth-register', requireAuth, requireAuthReg, (req, res) => {
+  const b = req.body || {};
+  if (!String(b.patient_label || '').trim() && !b.client_id) return res.status(400).json({ error: 'A patient (label or linked chart) is required.' });
+  let label = String(b.patient_label || '').trim().slice(0, 40);
+  if (b.client_id && !label) {
+    const c = db.prepare(`SELECT name FROM clients WHERE id = ?`).get(+b.client_id);
+    label = c ? nameInitials(c.name) : '';
+  }
+  const dt = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null);
+  const info = db.prepare(`INSERT INTO authorizations (client_id, patient_label, facility_id, payor, auth_number, level_of_care, approved_days, start_date, end_date, reviewer, next_review, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(b.client_id ? +b.client_id : null, label, b.facility_id ? +b.facility_id : null, String(b.payor || '').slice(0, 80), String(b.auth_number || '').slice(0, 60), AUTH_LEVELS.includes(b.level_of_care) ? b.level_of_care : null, b.approved_days ? +b.approved_days : null, dt(b.start_date), dt(b.end_date), String(b.reviewer || '').slice(0, 80), dt(b.next_review), String(b.notes || '').slice(0, 1000));
+  publishEvent({ event: 'auth.created', entity: 'authorization', entity_id: info.lastInsertRowid, facility_id: b.facility_id ? +b.facility_id : null, actor: req.user.username, summary: `Auth opened · ${label} · ${b.payor || 'payor tbd'}${b.end_date ? ' · expires ' + b.end_date : ''}` });
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.patch('/api/auth-register/:id', requireAuth, requireAuthReg, (req, res) => {
+  const a = db.prepare(`SELECT * FROM authorizations WHERE id = ?`).get(req.params.id);
+  if (!a) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  const dt = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null);
+  // Renew shortcut: extend by N days from the later of today / current end.
+  if (b.renew_days) {
+    const base = (a.end_date && a.end_date > appToday()) ? a.end_date : appToday();
+    const newEnd = addDays(base, +b.renew_days);
+    const addDaysApproved = (a.approved_days || 0) + (+b.renew_days);
+    db.prepare(`UPDATE authorizations SET end_date=?, approved_days=?, status='renewed', updated_at=datetime('now') WHERE id=?`).run(newEnd, addDaysApproved, a.id);
+    publishEvent({ event: 'auth.renewed', entity: 'authorization', entity_id: a.id, facility_id: a.facility_id, actor: req.user.username, summary: `Auth renewed +${b.renew_days}d · ${a.patient_label} · now to ${newEnd}` });
+    audit({ user: req.user, action: 'AUTH_RENEW', entity: 'authorization', entity_id: a.id, detail: `+${b.renew_days}d → ${newEnd}`, ip: req.ip });
+    return res.json({ ok: true, end_date: newEnd });
+  }
+  const status = ['active', 'renewed', 'denied', 'expired', 'closed'].includes(b.status) ? b.status : a.status;
+  db.prepare(`UPDATE authorizations SET status=?, payor=COALESCE(?,payor), auth_number=COALESCE(?,auth_number), level_of_care=COALESCE(?,level_of_care), approved_days=COALESCE(?,approved_days), start_date=COALESCE(?,start_date), end_date=COALESCE(?,end_date), reviewer=COALESCE(?,reviewer), next_review=COALESCE(?,next_review), notes=COALESCE(?,notes), updated_at=datetime('now') WHERE id=?`)
+    .run(status, b.payor != null ? String(b.payor).slice(0, 80) : null, b.auth_number != null ? String(b.auth_number).slice(0, 60) : null, AUTH_LEVELS.includes(b.level_of_care) ? b.level_of_care : null, b.approved_days ? +b.approved_days : null, dt(b.start_date), dt(b.end_date), b.reviewer != null ? String(b.reviewer).slice(0, 80) : null, dt(b.next_review), b.notes != null ? String(b.notes).slice(0, 1000) : null, a.id);
+  if (status !== a.status && ['denied', 'closed'].includes(status)) {
+    publishEvent({ event: 'auth.' + status, entity: 'authorization', entity_id: a.id, facility_id: a.facility_id, actor: req.user.username, summary: `Auth ${status} · ${a.patient_label} · ${a.payor || ''}` });
+  }
+  res.json({ ok: true });
+});
+app.delete('/api/auth-register/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare(`DELETE FROM authorizations WHERE id = ?`).run(req.params.id);
+  audit({ user: req.user, action: 'AUTH_DELETE', entity: 'authorization', entity_id: +req.params.id, ip: req.ip });
+  res.json({ ok: true });
+});
+
 app.get('/api/org/facilities', requireAuth, (req, res) => {
   res.json({ facilities: orgFacilities(), departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
 });
@@ -522,7 +618,21 @@ function policyStatus(p, today) {
 function daysToExpiry(exp, today) { if (!exp) return null; return Math.round((Date.parse(String(exp).slice(0, 10) + 'T00:00:00') - Date.parse(today + 'T00:00:00')) / 864e5); }
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
-  if (user) { user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); user.opsAccess = canSeeOps(user); }
+  if (user) {
+    user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); user.opsAccess = canSeeOps(user); user.authAccess = canSeeAuth(user);
+    // Facility scope for the shell chip: explicit user_facility_access rows win;
+    // org-wide roles fall back to every operating facility; everyone else to detox.
+    try {
+      let facs = db.prepare(`SELECT f.id, f.name FROM user_facility_access ua JOIN org_facilities f ON f.id = ua.facility_id WHERE ua.user_id = ? AND f.active = 1 ORDER BY f.sort, f.id`).all(user.id);
+      if (!facs.length) {
+        const orgWide = user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(user.job_role || '');
+        facs = orgWide
+          ? db.prepare(`SELECT id, name FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id`).all()
+          : db.prepare(`SELECT id, name FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id LIMIT 1`).all();
+      }
+      user.facilities = facs;
+    } catch { user.facilities = []; }
+  }
   res.json({ user: user || null });
 });
 

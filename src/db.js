@@ -2128,6 +2128,30 @@ try {
   }
 } catch (e) { console.error('[bhos] foundation seed:', e.message); }
 
+// ── Authorization / UR register (Revenue OS) — the first Operational Intelligence
+// screen. Tracks every payor authorization: level, approved days, expiration.
+// patient_label stays initials-only so the register is safe on corporate-scope
+// screens (Guard the Vault); the client link carries the full chart when allowed.
+db.exec(`CREATE TABLE IF NOT EXISTS authorizations (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER REFERENCES clients(id),
+  patient_label TEXT,                       -- initials / short label for display
+  facility_id INTEGER REFERENCES org_facilities(id),
+  payor TEXT,
+  auth_number TEXT,
+  level_of_care TEXT,                       -- DTX | RES | PHP | IOP | OP
+  approved_days INTEGER,
+  start_date TEXT,
+  end_date TEXT,                            -- when the authorization runs out
+  status TEXT NOT NULL DEFAULT 'active',    -- active | renewed | denied | expired | closed
+  reviewer TEXT,                            -- UR contact / reviewer on the payor side
+  next_review TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_auth_end ON authorizations(end_date);`);
+
 // Insurance brokers / agents — who to call per policy.
 db.exec(`CREATE TABLE IF NOT EXISTS insurance_brokers (
   id INTEGER PRIMARY KEY,

@@ -197,7 +197,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
   // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',ownership:'command',corphub:'command',hcos:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',ownership:'command',corphub:'command',hcos:'command',authreg:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -344,6 +344,8 @@ function canSeeView(v){
   if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
   // Operations Center: leadership's live board (admin/ED/DoO/Clinical Director/HR/EA).
   if(v==='opscenter') return !!(ME.role==='admin' || ME.opsAccess);
+  // Authorization register (Revenue OS): UR-permitted roles + clinical leadership.
+  if(v==='authreg') return !!(ME.role==='admin' || ME.authAccess);
   // Corporate hub: Chava, plus owner/leadership. Even non-corporate leadership gets it.
   if(v==='corphub') return !!(ME.role==='admin' || ME.corpAccess);
   if(v==='hcos') return !!(ME.role==='admin' || ME.hrAccess);
@@ -457,12 +459,13 @@ function show(v){
   renderHubTabs(v);
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
   if(v==='opscenter') loadOpsCenter();
+  if(v==='authreg') loadAuthReg();
   if(v==='command') loadCommand();
   if(v==='finance') loadFinance();
   if(v==='expenses') loadExpenses();
@@ -5649,8 +5652,9 @@ async function loadOwnership(){
     <div class="card"><h3 style="margin-top:0">Spark${d.sparkPending?' <span class="hint" style="font-weight:400;color:#a60">· connection pending</span>':''}</h3>${d.sparkPending?'<div class="pc-note" style="color:#a60;margin-bottom:6px">These come online the moment you give me the Spark Kipu credentials — the rows are already wired.</div>':''}${tbl(spark)}</div>
     ${ME.role==='admin'?`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Employees — by location</h3><p class="sub sans" style="margin:0">Everyone across every entity, with job title &amp; salary. Owner-only.</p></div></div><div id="ownHr"><div class="hint">Loading roster…</div></div></div>`:''}
     ${ME.role==='admin'?`<div class="card"><h3 style="margin-top:0">🏢 Facilities registry <span class="hint" style="font-weight:400">— canonical (BHOS spine)</span></h3><p class="sub sans" style="margin:0 0 6px">The official facility list every module keys on going forward. Holdings (CGSS/SZS/Propco) are corporate entities, not facilities.</p><div id="orgFacs"><div class="hint">Loading…</div></div></div>`:''}
+    ${ME.role==='admin'?`<div class="card"><h3 style="margin-top:0">🔐 Permission matrix <span class="hint" style="font-weight:400">— live: a check here opens that module for the role, instantly</span></h3><p class="sub sans" style="margin:0 0 6px">Roles × modules. Corporate &amp; HR enforce from this matrix today; other modules light up as Phase 2 rolls on (clinical last). Every change is audited.</p><div id="orgPerms"><div class="hint">Loading…</div></div></div>`:''}
     ${ME.role==='admin'?`<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">⚙️ Kipu facility mapping <span class="hint" style="font-weight:400">— owner only (legacy; converges into the registry)</span></h3><p class="sub sans">If a facility shows no data, its Kipu location name here may not match Kipu. Use “List locations” in Akron Outpatient settings to see exact names, then fix them here.</p><div id="ownFacilities" class="hint">Loading…</div></div>`:''}`;
-  if(ME.role==='admin'){ loadFacilityEditor(); loadHrRoster(); loadOrgFacs(); }
+  if(ME.role==='admin'){ loadFacilityEditor(); loadHrRoster(); loadOrgFacs(); loadOrgPerms(); }
 }
 let HR_SHOW_SAL=false;
 async function loadHrRoster(){
@@ -5725,6 +5729,88 @@ async function loadOrgFacs(){
 async function saveOrgFac(id){
   const b={}; document.querySelectorAll(`[data-of="${id}"]`).forEach(el=>{ b[el.dataset.k]=el.value; });
   try{ await api('/org/facilities/'+id,{method:'POST',body:JSON.stringify(b)}); loadOrgFacs(); }catch(e){ alert(e.message); }
+}
+// ── Permission matrix editor: roles × modules; a check GRANTS the module live ──
+let PERM_DATA=null;
+async function loadOrgPerms(){
+  const host=$('orgPerms'); if(!host) return;
+  let d; try{ d=await api('/org/permissions'); }catch(e){ host.textContent=e.message; return; }
+  PERM_DATA=d;
+  const has=(role,mod)=> (d.permissions||[]).some(p=>p.role===role&&p.module===mod&&p.action==='view'&&p.allowed);
+  const MOD_LABEL={corporate:'Corp Hub',facility_ops:'Facility',admissions:'Admissions',census:'Census',clinical:'Clinical',casemgmt:'Case Mgmt',peer:'Peer',ur:'UR/Auth',billing:'Billing',hr:'HR',finance:'Finance',bd:'BizDev',compliance:'Compliance',scheduling:'Schedule',documents:'Docs',tasks:'Tasks',reports:'Reports',admin:'Admin'};
+  const roles=(d.roles||[]).filter(r=>r!=='admin');
+  host.innerHTML=`<div style="overflow-x:auto"><table class="tbl nomcard" style="min-width:900px"><tr><th style="position:sticky;left:0;background:var(--paper)">Role</th>${d.modules.map(m=>`<th style="font-size:10px">${esc(MOD_LABEL[m]||m)}</th>`).join('')}</tr>
+    ${roles.map(r=>`<tr><td style="position:sticky;left:0;background:var(--paper)"><strong style="font-size:12px">${esc(r)}</strong></td>${d.modules.map(m=>`<td style="text-align:center"><input type="checkbox" ${has(r,m)?'checked':''} onchange="setPerm('${r.replace(/'/g,"\\'")}','${m}',this.checked)"/></td>`).join('')}</tr>`).join('')}</table></div>
+  <div class="hint" style="margin-top:4px">The owner (admin) always has everything. Enforced today: <strong>Corp Hub</strong>, <strong>HR</strong>, <strong>UR/Auth</strong>; the rest are staged for Phase 2 rollout.</div>`;
+}
+async function setPerm(role,module,allowed){
+  try{ await api('/org/permissions',{method:'POST',body:JSON.stringify({role,module,allowed})}); }catch(e){ alert(e.message); loadOrgPerms(); }
+}
+
+/* ── AUTHORIZATION REGISTER — the first Operational Intelligence screen ─────────
+   Every card: INFORMATION (the auth) · INTELLIGENCE (grounded facts only) ·
+   ACTION (renew / deny / close / open the chart). Constitution, Article V. */
+let AUTH_DATA=null, AUTH_SHOWFORM=false;
+async function loadAuthReg(){
+  const host=$('authreg'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="skel" style="width:260px;height:22px;margin-bottom:14px"></div><div class="skel" style="height:70px;margin-bottom:8px"></div><div class="skel" style="height:70px"></div></div>';
+  let d; try{ d=await api('/auth-register'); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'</div></div>'; return; }
+  AUTH_DATA=d;
+  const flagBadge=(a)=>a.flag==='expired'?'<span class="badge-crit">expired</span>':a.flag==='expiring'?`<span class="badge-warn">${a.daysLeft===0?'today':a.daysLeft+'d left'}</span>`:a.flag==='done'?`<span class="badge-idle">${esc(a.status)}</span>`:(a.daysLeft!=null?`<span class="badge-ok">${a.daysLeft}d left</span>`:'<span class="badge-idle">no end date</span>');
+  const card=(a)=>`<div class="card" style="${a.flag==='expired'?'border-left:4px solid var(--crit)':a.flag==='expiring'?'border-left:4px solid var(--warn)':''}">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(a.patient_label||'—')} ${flagBadge(a)} <span class="hint" style="font-weight:400">· ${esc(a.payor||'payor tbd')}${a.level_of_care?' · '+esc(a.level_of_care):''}</span></h3></div>
+      ${a.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="openJourney(${a.client_id})">📂 View patient</button>`:''}</div>
+    <div class="hint" style="margin-top:4px">${a.auth_number?'Auth #'+esc(a.auth_number)+' · ':''}${a.approved_days?a.approved_days+' approved days · ':''}${a.start_date?esc(a.start_date)+' → ':''}${a.end_date?esc(a.end_date):'open-ended'}${a.reviewer?' · reviewer: '+esc(a.reviewer):''}${a.facility_name?' · '+esc(a.facility_name):''}${a.notes?'<div>'+esc(a.notes)+'</div>':''}</div>
+    ${a.intel&&a.intel.length?`<div class="oi-intel"><div class="oi-tag">Armada intelligence</div>${a.intel.map(i=>`<div style="font-size:13px;margin-top:3px">${esc(i)}</div>`).join('')}</div>`:''}
+    ${a.flag!=='done'?`<div class="oi-action">
+      <button class="btn btn-gold btn-sm sans" onclick="authRenew(${a.id})">↻ Renew…</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="authSet(${a.id},'denied')">Denied</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="authSet(${a.id},'closed')">Close</button>
+      ${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="authDel(${a.id})">🗑</button>`:''}
+    </div>`:''}</div>`;
+  const open=(d.auths||[]).filter(a=>a.flag!=='done'), done=(d.auths||[]).filter(a=>a.flag==='done');
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🛡 Authorization Register</h3><p class="sub sans" style="margin:0">Every payor authorization: what's approved, what's expiring, what to do about it — nothing lapses unseen.</p></div>
+    <button class="btn btn-gold btn-sm sans" onclick="AUTH_SHOWFORM=!AUTH_SHOWFORM;renderAuthForm()">＋ Add authorization</button></div>
+    <div id="authForm"></div></div>
+    ${open.length?open.map(card).join(''):'<div class="card"><div class="empty"><div class="e-ico">🛡</div>No open authorizations tracked yet.<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="AUTH_SHOWFORM=true;renderAuthForm()">Add the first one</button></div></div></div>'}
+    ${done.length?`<div class="card"><details><summary style="cursor:pointer"><strong>History</strong> <span class="hint">· ${done.length} closed/denied</span></summary>${done.map(card).join('')}</details></div>`:''}`;
+  renderAuthForm();
+}
+function renderAuthForm(){
+  const host=$('authForm'); if(!host) return;
+  if(!AUTH_SHOWFORM){ host.innerHTML=''; return; }
+  const d=AUTH_DATA||{levels:[],facilities:[]};
+  host.innerHTML=`<div class="pc-note" style="margin-top:8px"><div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+    <input id="au_label" placeholder="Patient initials (e.g. JD)" style="width:150px"/>
+    <input id="au_payor" placeholder="Payor / insurance" style="width:150px"/>
+    <input id="au_num" placeholder="Auth #" style="width:110px"/>
+    <select id="au_loc"><option value="">Level…</option>${(d.levels||[]).map(l=>`<option>${l}</option>`).join('')}</select>
+    <select id="au_fac"><option value="">Facility…</option>${(d.facilities||[]).map(f=>`<option value="${f.id}">${esc(f.name)}</option>`).join('')}</select>
+    <input id="au_days" type="number" placeholder="Days" style="width:70px"/>
+    <label class="hint">Start <input id="au_start" type="date"/></label>
+    <label class="hint">Expires <input id="au_end" type="date"/></label>
+    <input id="au_reviewer" placeholder="Reviewer" style="width:120px"/>
+    <input id="au_notes" placeholder="Notes" style="min-width:170px"/>
+    <button class="btn btn-gold btn-sm sans" onclick="authAdd()">Save</button></div>
+    <div class="hint" style="margin-top:4px">Initials only — the register is visible to corporate-scope leadership. Link the full chart later from the patient's page if needed.</div></div>`;
+}
+async function authAdd(){
+  const v=(id)=>($(id)||{}).value||'';
+  const b={patient_label:v('au_label'),payor:v('au_payor'),auth_number:v('au_num'),level_of_care:v('au_loc'),facility_id:v('au_fac')||null,approved_days:v('au_days'),start_date:v('au_start'),end_date:v('au_end'),reviewer:v('au_reviewer'),notes:v('au_notes')};
+  if(!b.patient_label.trim()) return alert('Patient initials required.');
+  try{ await api('/auth-register',{method:'POST',body:JSON.stringify(b)}); AUTH_SHOWFORM=false; loadAuthReg(); }catch(e){ alert(e.message); }
+}
+async function authRenew(id){
+  const days=prompt('Renew for how many days?','7'); if(!days||!+days) return;
+  try{ await api('/auth-register/'+id,{method:'PATCH',body:JSON.stringify({renew_days:+days})}); loadAuthReg(); }catch(e){ alert(e.message); }
+}
+async function authSet(id,status){
+  if(status!=='closed'&&!confirm('Mark this authorization '+status+'?')) return;
+  try{ await api('/auth-register/'+id,{method:'PATCH',body:JSON.stringify({status})}); loadAuthReg(); }catch(e){ alert(e.message); }
+}
+async function authDel(id){
+  if(!confirm('Delete this authorization row entirely? (Closing is usually right.)')) return;
+  try{ await api('/auth-register/'+id,{method:'DELETE'}); loadAuthReg(); }catch(e){ alert(e.message); }
 }
 async function loadFacilityEditor(){
   const host=$('ownFacilities'); if(!host) return;
@@ -5915,13 +6001,7 @@ function renderShellContext(){
     pill.classList.toggle('previewing', prev);
     pill.style.display='';
   }
-  const chip=$('facChip');
-  if(chip){
-    // Scope display (Phase-2 per-user scoping deepens this via user_facility_access).
-    const label = (ME.role==='admin'||['Executive Director','Executive Assistant'].includes(ME.job_role)) ? 'All facilities'
-      : isHousingRole() ? 'Hilltop — Akron House' : 'Armada Detox of Akron';
-    $('facChipName').textContent=label; chip.style.display='';
-  }
+  renderFacChip();
   if($('todayBtn')){ $('todayBtn').style.display=''; refreshTodayBadge(); setInterval(refreshTodayBadge, 120000); }
   if((ME.opsAccess||ME.role==='admin') && $('opsBell')){ $('opsBell').style.display=''; refreshOpsBadge(); setInterval(refreshOpsBadge, 90000); }
   if(!renderShellContext._keys){
@@ -5931,6 +6011,27 @@ function renderShellContext(){
       if(e.key==='Escape'){ closeSearch(); closeToday(); }
     });
   }
+}
+// Facility chip: real scope from user_facility_access (via /api/me). One facility →
+// a plain label; several → a picker that scopes the Operations Center live.
+let OPS_FAC='';
+function renderFacChip(){
+  const chip=$('facChip'); if(!chip) return;
+  const facs=ME.facilities||[];
+  if(facs.length<=1){
+    $('facChipName').textContent = facs.length ? facs[0].name : 'Armada';
+    chip.style.display='';
+    return;
+  }
+  chip.innerHTML=`🏥 <select id="facChipSel" onchange="facScopeChange(this.value)" style="border:none;background:transparent;font:inherit;color:inherit;max-width:170px;cursor:pointer">
+    <option value="">All facilities (${facs.length})</option>
+    ${facs.map(f=>`<option value="${f.id}" ${String(OPS_FAC)===String(f.id)?'selected':''}>${esc(f.name)}</option>`).join('')}</select>`;
+  chip.style.display='';
+}
+function facScopeChange(v){
+  OPS_FAC=v||'';
+  const active=document.querySelector('.view.active');
+  if(active&&active.id==='opscenter') loadOpsCenter();
 }
 let TODAY_ITEMS=[];
 async function refreshTodayBadge(){
@@ -5990,7 +6091,7 @@ function ksearchGo(i){
 async function loadOpsCenter(){
   const host=$('opscenter'); if(!host) return;
   host.innerHTML='<div class="card"><div class="skel" style="width:220px;height:22px;margin-bottom:14px"></div><div class="skel-tiles">'+'<div class="skel"></div>'.repeat(5)+'</div></div><div class="card"><div class="skel-tiles">'+'<div class="skel"></div>'.repeat(5)+'</div></div>';
-  let d; try{ d=await api('/opscenter'); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="loadOpsCenter()">Retry</button></div></div></div>'; return; }
+  let d; try{ d=await api('/opscenter'+(OPS_FAC?'?facility='+encodeURIComponent(OPS_FAC):'')); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="loadOpsCenter()">Retry</button></div></div></div>'; return; }
   const tiles=d.tiles||[];
   const groups=[
     ['now','🟢 Right now','the facility pulse this minute'],

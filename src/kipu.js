@@ -1858,3 +1858,38 @@ export async function kipuPullAuths() {
   }
   return { clients: clients.length, checked, created, updated, skipped, errors: errors.slice(0, 5) };
 }
+
+// One client's chart activity for a single DATE — the raw material of the
+// Billing Readiness check. Returns list-level rows (name = Kipu note type,
+// status, created_at); when the account's list rows carry no dates, falls back
+// to reading the newest few note DETAILS for their dates so the day can still
+// be judged. dated:false + notes:[] means "couldn't determine" — the caller
+// must show that as a sync problem, never as complete.
+export async function kipuDayEncounters(casefileId, date) {
+  let list;
+  try { list = await evalListRaw(casefileId, { all: false }); }
+  catch (e) { return { ok: false, error: e.message }; }
+  const anyDated = list.some((x) => x.created_at);
+  if (anyDated) {
+    const notes = list
+      .filter((x) => String(x.created_at || '').slice(0, 10) === date)
+      .map((x) => ({ id: x.id ?? x.evaluation_id, name: String(x.name || ''), status: String(x.status || ''), time: (String(x.created_at).match(/[T ](\d{2}:\d{2})/) || [])[1] || '' }));
+    return { ok: true, dated: true, notes };
+  }
+  // No dates on the list — read the newest few details (higher id = newer).
+  const recent = list.filter((x) => x.id ?? x.evaluation_id).sort((a, b) => (+(b.id ?? b.evaluation_id) || 0) - (+(a.id ?? a.evaluation_id) || 0)).slice(0, 8);
+  const out = [];
+  await mapLimit(recent, 4, async (x) => {
+    try {
+      const ev = await fetchEvalDetail(casefileId, x.id ?? x.evaluation_id);
+      const d = String(ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '').slice(0, 10);
+      if (d === date) out.push({ id: x.id ?? x.evaluation_id, name: String(x.name || ''), status: String(x.status || ev?.status || ''), time: (String(ev?.created_at || '').match(/[T ](\d{2}:\d{2})/) || [])[1] || '', author: evalAuthor(x, ev) });
+    } catch { /* skip note */ }
+  });
+  return { ok: true, dated: false, notes: out };
+}
+// Author of one specific note (used only for the note that qualified the day).
+export async function kipuNoteAuthor(casefileId, evalId) {
+  try { const ev = await fetchEvalDetail(casefileId, evalId); return evalAuthor(ev) || null; }
+  catch { return null; }
+}

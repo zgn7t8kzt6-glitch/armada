@@ -196,7 +196,7 @@ const GROUP_OF={
   // Discharge — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
   // Revenue — Revenue OS: authorizations, money in, outpatient economics
-  authreg:'revenue',outpatient:'revenue',finance:'revenue',expenses:'revenue',
+  authreg:'revenue',billingready:'revenue',outpatient:'revenue',finance:'revenue',expenses:'revenue',
   // Hilltop — the recovery-residence suite (separate world)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
@@ -357,6 +357,8 @@ function canSeeView(v){
   if(v==='opscenter') return !!(ME.role==='admin' || ME.opsAccess);
   // Authorization register (Revenue OS): UR-permitted roles + clinical leadership.
   if(v==='authreg') return !!(ME.role==='admin' || ME.authAccess);
+  // Billing readiness: leadership + clinical staff (rows scoped server-side).
+  if(v==='billingready') return !!(ME.role==='admin' || ME.billingAccess);
   // Corporate hub: Chava, plus owner/leadership. Even non-corporate leadership gets it.
   if(v==='corphub') return !!(ME.role==='admin' || ME.corpAccess);
   if(v==='hcos') return !!(ME.role==='admin' || ME.hrAccess);
@@ -472,13 +474,14 @@ function show(v){
   renderHubTabs(v);
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',billingready:'Billing Readiness',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
   if(v==='opscenter') loadOpsCenter();
   if(v==='authreg') loadAuthReg();
+  if(v==='billingready') loadBillingReady();
   if(v==='command') loadCommand();
   if(v==='finance') loadFinance();
   if(v==='expenses') loadExpenses();
@@ -5849,6 +5852,99 @@ async function authDel(id){
   if(!confirm('Delete this authorization row entirely? (Closing is usually right.)')) return;
   try{ await api('/auth-register/'+id,{method:'DELETE'}); loadAuthReg(); }catch(e){ alert(e.message); }
 }
+/* ── BILLING READINESS — every client day needs one qualifying encounter.
+   Dashboard + 4 PM alert workflow + admin mapping. Kipu is read-only here. ── */
+let BR_DATE='', BR_FILTER='all', BR_DATA=null, BR_OPEN=null;
+async function loadBillingReady(){
+  const host=$('billingready'); if(!host) return;
+  if(!BR_DATE) BR_DATE=today();
+  host.innerHTML='<div class="card"><div class="skel" style="width:260px;height:22px;margin-bottom:14px"></div><div class="skel-tiles">'+'<div class="skel"></div>'.repeat(5)+'</div></div>';
+  let d; try{ d=await api('/billingready?date='+BR_DATE); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'</div></div>'; return; }
+  BR_DATA=d;
+  const s=d.summary||{};
+  const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const stBadge=(r)=>({complete:'<span class="badge-ok">complete</span>',missing:'<span class="badge-crit">missing</span>',needs_review:'<span class="badge-warn">needs review</span>',exception:'<span class="badge-info">exception</span>',sync_error:'<span class="badge-crit">sync error</span>'}[r.status]||esc(r.status));
+  const alBadge=(a)=>a?({open:'<span class="badge-crit">alert open</span>',ack:'<span class="badge-warn">acknowledged</span>',in_progress:'<span class="badge-info">in progress</span>',resolved:'<span class="badge-ok">resolved</span>',exception:'<span class="badge-idle">exception</span>'}[a]||''):'';
+  const filters=[['all','All'],['missing','Missing'],['needs_review','Needs review'],['complete','Complete'],['sync_error','Sync errors'],['alerts','Open alerts']];
+  let rows=d.rows||[];
+  if(BR_FILTER==='alerts') rows=rows.filter(r=>r.alert&&!['resolved','exception'].includes(r.alert));
+  else if(BR_FILTER!=='all') rows=rows.filter(r=>r.status===BR_FILTER);
+  const rowH=(r)=>`<tr style="cursor:pointer" onclick="brOpen(${r.id})">
+    <td><strong>${esc(r.client)}</strong>${r.admittedToday?' <span class="badge-info">admitted today</span>':''}${r.dischargedToday?' <span class="badge-idle">discharged today</span>':''}<div class="hint">${esc(r.kipu?('#'+r.kipu):'no chart')}${r.loc?' · '+esc(r.loc):''}${r.program?' · '+esc(r.program):''}</div></td>
+    <td>${stBadge(r)} ${alBadge(r.alert)}</td>
+    <td>${r.status==='complete'?`<strong>${esc(r.type||'')}</strong><div class="hint">${esc(r.title||'')}${r.time?' · '+esc(r.time):''}${r.staff?' · '+esc(r.staff):''}</div>`:`<span class="hint">${esc(r.detail||r.exception||'')}</span>`}</td>
+    <td class="hint">${esc(r.therapist||'')}</td><td class="hint">${esc(r.case_manager||'')}</td>
+    <td>${r.notes?`💬${r.notes}`:''}</td></tr>`;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Billing Readiness</h3><p class="sub sans" style="margin:0">Every client day needs one qualifying encounter documented in Kipu. The check runs at ${(d.cfg&&d.cfg.checkHour)||16}:00 facility time — anything missing alerts the evening team. Kipu is read-only; notes live here.</p></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <label class="hint">Day <input type="date" id="brDate" value="${esc(BR_DATE)}" onchange="BR_DATE=this.value;loadBillingReady()"/></label>
+        ${d.leadership?`<button class="btn btn-gold btn-sm sans" onclick="brRun(this)">▶ Run check now</button>`:''}
+        ${d.leadership?`<a class="btn btn-ghost btn-sm sans" href="/api/billingready/export?since=${esc(BR_DATE)}&end=${esc(BR_DATE)}">⬇ CSV</a>`:''}
+      </div></div>
+      ${!d.kipu?'<div class="banner-warn" style="margin-top:8px">⚠️ Kipu is not connected — every client shows as a sync error rather than silently complete.</div>':''}
+      <div class="ret-cards" style="margin-top:8px">${box(s.active||0,'Active clients')}${box(s.complete||0,'Complete')}${box(s.missing||0,'Missing',(s.missing?'rc-high':''))}${box(s.review||0,'Needs review',(s.review?'rc-elev':''))}${box(s.pct!=null?s.pct+'%':'—','Completion')}${box(s.openAlerts||0,'Open alerts',(s.openAlerts?'rc-elev':''))}</div>
+      <div class="hint" style="margin-top:6px">${d.lastRun?`Last checked ${esc(d.lastRun.at)} by ${esc(d.lastRun.by||'scheduler')}.`:'No check has run for this day yet.'}${s.errors?` <span style="color:var(--crit)">· ${s.errors} sync error${s.errors===1?'':'s'} — those clients are NOT confirmed complete.</span>`:''}</div>
+    </div>
+    <div class="card"><div class="chip-row" style="display:flex;gap:6px;flex-wrap:wrap">${filters.map(([k,l])=>`<button class="btn ${BR_FILTER===k?'btn-gold':'btn-ghost'} btn-sm sans" onclick="BR_FILTER='${k}';loadBillingReady()">${l}</button>`).join('')}</div>
+      ${rows.length?`<table class="tbl" style="margin-top:8px"><tr><th>Client</th><th>Status</th><th>Today's encounter / why not</th><th>Therapist</th><th>Case manager</th><th></th></tr>${rows.map(rowH).join('')}</table>`
+        :`<div class="empty"><div class="e-ico">${(d.rows||[]).length?'🔍':'📋'}</div>${(d.rows||[]).length?'Nothing matches this filter.':'No status rows for this day yet.'}${d.leadership&&!(d.rows||[]).length?'<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="brRun(this)">Run the check</button></div>':''}</div>`}</div>
+    <div id="brDrawerHost"></div>
+    ${d.runs&&d.runs.length?`<div class="card"><details><summary style="cursor:pointer"><strong>Check history</strong> <span class="hint">· audit trail</span></summary><table class="tbl" style="margin-top:6px"><tr><th>Date</th><th>Ran at</th><th>By</th><th>Active</th><th>Complete</th><th>Missing</th><th>Review</th><th>Errors</th></tr>${d.runs.map(r=>`<tr><td>${esc(r.date)}</td><td class="hint">${esc(r.ran_at)}</td><td class="hint">${esc(r.by_name||'')}</td><td>${r.active_n}</td><td>${r.complete_n}</td><td>${r.missing_n}</td><td>${r.review_n}</td><td>${r.error_n||0}</td></tr>`).join('')}</table></details></div>`:''}
+    ${d.cfg?brSettingsCard(d.cfg):''}`;
+}
+function brSettingsCard(c){
+  return `<div class="card"><details><summary style="cursor:pointer"><strong>⚙️ Qualifying-encounter mapping</strong> <span class="hint">· admin — how Kipu note types are judged</span></summary>
+    <div class="hint" style="margin:6px 0">Case-insensitive contains-match on the Kipu note type name. Judged in order: Needs-review → Qualifying → Nursing (toggle) → Non-qualifying. <strong>Anything unmatched lands in Needs Review</strong> — nothing unknown ever counts as billable.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+      <label class="hint">Qualifying<textarea id="brQ" rows="5" style="width:100%">${esc((c.qualify||[]).join('\n'))}</textarea></label>
+      <label class="hint">Non-qualifying<textarea id="brD" rows="5" style="width:100%">${esc((c.disqualify||[]).join('\n'))}</textarea></label>
+      <label class="hint">Needs review<textarea id="brR" rows="5" style="width:100%">${esc((c.review||[]).join('\n'))}</textarea></label>
+      <label class="hint">Nursing patterns<textarea id="brN" rows="5" style="width:100%">${esc((c.nursing||[]).join('\n'))}</textarea></label></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:10px;flex-wrap:wrap;margin-top:8px">
+      <label class="hint"><input type="checkbox" id="brNQ" ${c.nursingQualifies?'checked':''}/> Nursing encounters qualify (3.5 default: OFF)</label>
+      <label class="hint"><input type="checkbox" id="brRC" ${c.requireCompleted?'checked':''}/> Note must be completed/signed</label>
+      <label class="hint">Check hour <input type="number" id="brHour" value="${c.checkHour}" min="0" max="23" style="width:60px"/>:00</label>
+      <label class="hint">Alert email <input id="brEmail" value="${esc(c.email||'')}" placeholder="defaults to ops list" style="min-width:200px"/></label>
+      <button class="btn btn-gold btn-sm sans" onclick="brSaveCfg()">Save mapping</button></div></details></div>`;
+}
+async function brSaveCfg(){
+  const lines=(id)=>(($(id)||{}).value||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  try{
+    await api('/billingready/settings',{method:'POST',body:JSON.stringify({qualify:lines('brQ'),disqualify:lines('brD'),review:lines('brR'),nursing:lines('brN'),nursingQualifies:($('brNQ')||{}).checked,requireCompleted:($('brRC')||{}).checked,checkHour:+(($('brHour')||{}).value||16),email:($('brEmail')||{}).value||''})});
+    loadBillingReady();
+  }catch(e){ alert(e.message); }
+}
+async function brRun(btn){
+  btn.disabled=true; btn.textContent='Checking every chart…';
+  try{ const r=await api('/billingready/run',{method:'POST',body:JSON.stringify({date:BR_DATE})}); if(r.error) alert(r.error); }catch(e){ alert(e.message); }
+  loadBillingReady();
+}
+function brClose(){ const el=document.getElementById('brDrawer'); if(el) el.remove(); BR_OPEN=null; }
+async function brOpen(id){
+  brClose(); BR_OPEN=id;
+  const r=(BR_DATA.rows||[]).find(x=>x.id===id); if(!r) return;
+  let notes=[]; try{ notes=(await api('/billingready/notes/'+id)).notes||[]; }catch(_e){}
+  const host=document.getElementById('brDrawerHost'); if(!host) return;
+  const quick=['Therapist notified','Group note pending','Client absent / on pass','Evening staff assigned'];
+  host.innerHTML=`<div class="card" id="brDrawer" style="border-left:4px solid var(--gold)">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(r.client)} <span class="hint" style="font-weight:400">· ${esc(BR_DATA.date)}${r.loc?' · '+esc(r.loc):''}</span></h3>
+      <div class="hint">${r.therapist?'Therapist: '+esc(r.therapist)+' · ':''}${r.case_manager?'CM: '+esc(r.case_manager)+' · ':''}${r.status==='complete'?esc(r.type+' · '+(r.title||'')+(r.time?' · '+r.time:'')+(r.staff?' · '+r.staff:'')):esc(r.detail||'')}</div></div>
+      <button class="iconbtn" onclick="brClose()">✕</button></div>
+    <div class="oi-action">
+      <button class="btn btn-ghost btn-sm sans" onclick="brSet(${id},'ack')">👁 Acknowledge</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="brSet(${id},'in_progress')">⏳ In progress</button>
+      <button class="btn btn-gold btn-sm sans" onclick="brSet(${id},'resolved')">✓ Resolved</button>
+      <button class="btn btn-ghost btn-sm sans" onclick="brException(${id})">Exception…</button></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:8px">
+      ${quick.map(q=>`<button class="btn btn-ghost btn-sm sans" onclick="brNote(${id},'${q.replace(/'/g,"\\'")}')">${q}</button>`).join('')}
+      <input id="brNoteText" placeholder="Add a note…" style="min-width:180px"/><button class="btn btn-ghost btn-sm sans" onclick="brNote(${id},($('brNoteText')||{}).value)">Add</button></div>
+    ${notes.length?`<div class="ops-feed" style="margin-top:8px">${notes.map(n=>`<div class="q-row"><div class="q-main"><div class="q-title">${esc(n.note)}</div><div class="q-sub">${esc(n.by_name||'')} · ${esc(n.at)}</div></div></div>`).join('')}</div>`:''}</div>`;
+  host.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+async function brSet(id,state){ try{ await api('/billingready/alert/'+id,{method:'POST',body:JSON.stringify({state})}); }catch(e){ alert(e.message);} loadBillingReady(); }
+async function brException(id){ const reason=prompt('Exception reason (e.g. client on pass, admitted 11pm):'); if(!reason) return; try{ await api('/billingready/alert/'+id,{method:'POST',body:JSON.stringify({state:'exception',note:reason})}); }catch(e){ alert(e.message);} loadBillingReady(); }
+async function brNote(id,text){ if(!String(text||'').trim()) return; try{ await api('/billingready/alert/'+id,{method:'POST',body:JSON.stringify({note:text})}); }catch(e){ alert(e.message);} brOpen(id); }
+
 function authNote(html){ const m=$('authMsg'); if(m) m.innerHTML='<div class="pc-note" style="margin-top:6px">'+html+'</div>'; }
 async function authKipuSync(btn){
   btn.disabled=true; btn.textContent='⟳ Pulling…';

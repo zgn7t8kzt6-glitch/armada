@@ -2152,6 +2152,43 @@ db.exec(`CREATE TABLE IF NOT EXISTS authorizations (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_end ON authorizations(end_date);`);
 
+// ── Billing Readiness (Revenue OS) — one row per active client per day: did the
+// chart get at least one QUALIFYING encounter documented in Kipu? Kipu stays the
+// EMR of record (read-only); alert workflow + staff notes live here. A day with
+// no row or a sync failure is NEVER shown as complete (fail-visible, not silent).
+db.exec(`CREATE TABLE IF NOT EXISTS billing_ready_status (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  facility_id INTEGER REFERENCES org_facilities(id),
+  status TEXT NOT NULL DEFAULT 'missing',   -- complete | missing | needs_review | exception | sync_error
+  encounter_type TEXT,                      -- Group | Individual | Case Management | Nursing | Other
+  encounter_title TEXT,                     -- the Kipu note type that qualified
+  encounter_time TEXT,
+  encounter_staff TEXT,
+  alert_state TEXT,                         -- null | open | ack | in_progress | resolved | exception
+  exception_reason TEXT,
+  detail TEXT,                              -- why needs_review / sync_error (human line)
+  checked_at TEXT,
+  UNIQUE(date, client_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bready_date ON billing_ready_status(date);
+CREATE TABLE IF NOT EXISTS billing_ready_notes (
+  id INTEGER PRIMARY KEY,
+  status_id INTEGER NOT NULL REFERENCES billing_ready_status(id) ON DELETE CASCADE,
+  by_name TEXT,
+  note TEXT NOT NULL,
+  at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS billing_ready_runs (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,
+  ran_at TEXT NOT NULL DEFAULT (datetime('now')),
+  by_name TEXT,                             -- who triggered (or 'scheduler')
+  active_n INTEGER, complete_n INTEGER, missing_n INTEGER, review_n INTEGER, error_n INTEGER,
+  note TEXT
+);`);
+
 // Insurance brokers / agents — who to call per policy.
 db.exec(`CREATE TABLE IF NOT EXISTS insurance_brokers (
   id INTEGER PRIMARY KEY,

@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -405,6 +405,12 @@ app.get('/api/opscenter', requireAuth, (req, res) => {
     const parts = [gaps ? `${gaps} doc-gap` : null, expAuth ? `${expAuth} expired auth` : null, over ? `${over} beyond auth` : null].filter(Boolean);
     return { group: 'queues', key: 'billing', label: 'Billing blockers', n: gaps + expAuth + over, alert: (expAuth + over) > 0, sub: parts.join(' · ') || undefined, view: (expAuth || over) ? 'authreg' : 'retention' };
   });
+  add(() => {
+    const ran = db.prepare(`SELECT COUNT(*) n FROM billing_ready_status WHERE date=?${F}`).get(today).n;
+    if (!ran) return { group: 'queues', key: 'encounters', label: 'Encounters check', n: 0, sub: 'not run yet today', view: 'billingready' };
+    const miss = one(`SELECT COUNT(*) n FROM billing_ready_status WHERE date=? AND status IN ('missing','sync_error')${F}`, today);
+    return { group: 'queues', key: 'encounters', label: 'Encounters missing today', n: miss, alert: miss > 0, sub: 'billable-day watch', view: 'billingready' };
+  });
   add(() => { const n = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date <= ?${fid ? ` AND facility_id=${fid}` : ''}`, addDays(today, 7)); const exp = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date < ?${fid ? ` AND facility_id=${fid}` : ''}`, today); return { group: 'queues', key: 'auths', label: 'Auth renewals ≤7d', n, alert: exp > 0, sub: exp ? `${exp} already expired` : undefined, view: 'authreg' }; });
   // PEOPLE & COMPLIANCE
   add(() => { const n = one(`SELECT COUNT(*) n FROM hr_reviews WHERE status='open' AND due_date < ?`, today); return { group: 'people', key: 'reviews', label: 'Reviews overdue', n, alert: n > 0, view: 'hcos', tab: 'reviews' }; });
@@ -653,6 +659,221 @@ app.post('/api/auth-register/settings', requireAuth, requireAdmin, (req, res) =>
   res.json({ ok: true });
 });
 
+/* ═══ BILLING READINESS (Revenue OS) — every client day needs one qualifying
+   encounter documented in Kipu before the day is lost. Kipu is read-only here;
+   alert workflow + staff notes live in Armada. Fail-visible: a sync problem or
+   an unmapped note type can only ever show as sync_error / needs_review. ═══ */
+function billingCfg() {
+  const dflt = {
+    // Note-type patterns (case-insensitive substring). Order of play:
+    // review → qualify → nursing (toggle) → disqualify → UNMATCHED = needs_review.
+    qualify: ['group', 'individual', 'psychotherapy', 'counsel', 'case manage', 'case mgmt', 'family session', 'therapy'],
+    nursing: ['nursing'],
+    disqualify: ['vitals', 'medication', 'med admin', 'mar ', 'medical', 'physician', 'h&p', 'history and physical', 'admission', 'consent', 'orientation', 'administrative', 'lab', 'urinalysis', 'ua screen', 'intake', 'screening', 'assessment', 'treatment plan', 'biopsych'],
+    review: [],
+    nursingQualifies: false,   // ASAM 3.5: medical/nursing-only does NOT bill by default
+    requireCompleted: true,    // an in-progress qualifying note = needs_review, not complete
+    checkHour: 16,             // 4:00 PM facility time
+    email: '',
+  };
+  try { const c = JSON.parse(getState('billing_ready_cfg') || 'null'); return c ? { ...dflt, ...c } : dflt; } catch { return dflt; }
+}
+function classifyEncounter(name, cfg) {
+  const n = String(name || '').toLowerCase();
+  const hit = (arr) => (arr || []).some((p) => p && n.includes(String(p).toLowerCase()));
+  if (hit(cfg.review)) return { cls: 'review', type: 'Other' };
+  if (hit(cfg.qualify)) {
+    const type = /group/.test(n) ? 'Group' : /case/.test(n) ? 'Case Management' : /individual|psychotherapy|counsel|therapy/.test(n) ? 'Individual' : 'Other';
+    return { cls: 'qualify', type };
+  }
+  // Disqualify beats the nursing toggle: "Nursing ASSESSMENT" stays non-billable
+  // even when plain nursing encounters are configured to qualify.
+  if (hit(cfg.disqualify)) return { cls: 'disqualify', type: hit(cfg.nursing) ? 'Nursing' : 'Other' };
+  if (hit(cfg.nursing)) return cfg.nursingQualifies ? { cls: 'qualify', type: 'Nursing' } : { cls: 'disqualify', type: 'Nursing' };
+  return { cls: 'unmatched', type: 'Other' };   // unknown note type → a human looks
+}
+// Who may see the board, and which rows. Leadership: all. Therapist / Case
+// Manager: their assigned clients. Evening/floor staff: everything unresolved.
+function canSeeBilling(user) {
+  return !!user && (user.role === 'admin' || hasPerm(user, 'billing')
+    || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR', 'Therapist', 'Case Manager', 'Nurse', 'BHT / Tech'].includes(user.job_role));
+}
+const requireBilling = (req, res, next) => { if (!canSeeBilling(req.user)) return res.status(403).json({ error: 'Clinical or leadership access only.' }); next(); };
+function billingLeadership(user) { return user.role === 'admin' || hasPerm(user, 'billing') || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR'].includes(user.job_role); }
+function billingScopeRows(user, rows) {
+  if (billingLeadership(user)) return rows;
+  const mine = (v) => String(v || '').toLowerCase().includes(String(user.name || '§none').toLowerCase());
+  if (user.job_role === 'Therapist') return rows.filter((r) => mine(r.therapist));
+  if (user.job_role === 'Case Manager') return rows.filter((r) => mine(r.case_manager));
+  // Evening / floor staff: everything still needing action.
+  return rows.filter((r) => ['missing', 'needs_review', 'sync_error'].includes(r.status) || (r.alert_state && !['resolved', 'exception'].includes(r.alert_state)));
+}
+// The sweep: judge every active client's day from their Kipu chart.
+let _billingRunning = false;
+async function runBillingSweep({ date, byName = 'scheduler' } = {}) {
+  if (_billingRunning) return { ok: false, error: 'A check is already running.' };
+  _billingRunning = true;
+  try {
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : appToday();
+    const cfg = billingCfg();
+    // Active clients + anyone discharged TODAY (their last day still needs its encounter).
+    const actives = db.prepare(`SELECT id, name, pref, kipu_id, facility_id, program, loc, therapist, case_manager, admit, discharge_date FROM clients WHERE merged_into IS NULL AND (active = 1 OR substr(COALESCE(discharge_date,''),1,10) = ?)`).all(day);
+    const upsert = db.prepare(`INSERT INTO billing_ready_status (date, client_id, facility_id, status, encounter_type, encounter_title, encounter_time, encounter_staff, detail, checked_at)
+      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
+      ON CONFLICT(date, client_id) DO UPDATE SET status=excluded.status, encounter_type=excluded.encounter_type, encounter_title=excluded.encounter_title, encounter_time=excluded.encounter_time, encounter_staff=excluded.encounter_staff, detail=excluded.detail, checked_at=excluded.checked_at
+      WHERE billing_ready_status.status != 'exception'`);   // a human exception outranks the machine
+    const prevState = db.prepare(`SELECT id, status, alert_state FROM billing_ready_status WHERE date=? AND client_id=?`);
+    let complete = 0, missing = 0, review = 0, errors = 0;
+    const judgeOne = async (c) => {
+      let status = 'missing', type = null, title = null, time = null, staff = null, detail = null;
+      if (!kipuConfigured()) { status = 'sync_error'; detail = 'Kipu is not connected.'; }
+      else if (!c.kipu_id) { status = 'sync_error'; detail = 'No Kipu chart linked to this client.'; }
+      else {
+        const r = await kipuDayEncounters(c.kipu_id, day);
+        if (!r.ok) { status = 'sync_error'; detail = 'Kipu fetch failed: ' + (r.error || 'unknown'); }
+        else {
+          const judged = (r.notes || []).map((n) => ({ ...n, ...classifyEncounter(n.name, cfg) }));
+          const done = (n) => !cfg.requireCompleted || !n.status || /complete|signed|final/i.test(n.status);
+          const q = judged.filter((n) => n.cls === 'qualify' && done(n)).sort((a, b) => String(a.time || '99').localeCompare(String(b.time || '99')))[0];
+          const qOpen = judged.find((n) => n.cls === 'qualify' && !done(n));
+          const unk = judged.find((n) => n.cls === 'unmatched' || n.cls === 'review');
+          if (q) {
+            status = 'complete'; type = q.type; title = q.name; time = q.time || null;
+            staff = q.author || null;
+            if (!staff && q.id) staff = await kipuNoteAuthor(c.kipu_id, q.id);
+          } else if (qOpen) { status = 'needs_review'; type = qOpen.type; title = qOpen.name; time = qOpen.time || null; detail = 'Qualifying note exists but is still in progress — finish/sign it.'; }
+          else if (unk) { status = 'needs_review'; type = unk.type; title = unk.name; time = unk.time || null; detail = unk.cls === 'review' ? 'Note type is mapped to Needs Review.' : `Unmapped note type "${unk.name}" — map it in settings.`; }
+          else { status = 'missing'; detail = judged.length ? 'Only non-qualifying documentation today (' + [...new Set(judged.map((n) => n.name))].slice(0, 3).join(', ') + ').' : 'No documentation found for this date.'; }
+        }
+      }
+      const prev = prevState.get(day, c.id);
+      upsert.run(day, c.id, c.facility_id, status, type, title, time, staff, detail);
+      if (status === 'complete') complete++;
+      else if (status === 'needs_review') review++;
+      else if (status === 'sync_error') errors++;
+      else missing++;
+      const row = prevState.get(day, c.id);
+      if (!row) return;
+      // Alert lifecycle: open on first miss; auto-resolve when documentation lands late.
+      if (['missing', 'sync_error'].includes(status) && (!prev || !prev.alert_state)) {
+        db.prepare(`UPDATE billing_ready_status SET alert_state='open' WHERE id=?`).run(row.id);
+      } else if (status === 'complete' && prev && prev.alert_state && !['resolved', 'exception'].includes(prev.alert_state)) {
+        db.prepare(`UPDATE billing_ready_status SET alert_state='resolved' WHERE id=?`).run(row.id);
+        db.prepare(`INSERT INTO billing_ready_notes (status_id, by_name, note) VALUES (?,?,?)`).run(row.id, 'system', 'Documentation found on re-check — alert auto-resolved.');
+      }
+    };
+    // Small concurrency so a 40-client sweep doesn't hammer Kipu.
+    const queue = [...actives];
+    await Promise.all(Array.from({ length: 5 }, async () => { let c; while ((c = queue.shift())) { try { await judgeOne(c); } catch { errors++; } } }));
+    db.prepare(`INSERT INTO billing_ready_runs (date, by_name, active_n, complete_n, missing_n, review_n, error_n) VALUES (?,?,?,?,?,?,?)`)
+      .run(day, byName, actives.length, complete, missing, review, errors);
+    publishEvent({ event: 'billing.day_checked', entity: 'billing', actor: byName, summary: `Billing readiness ${day}: ${complete}/${actives.length} complete · ${missing} missing · ${review} review${errors ? ' · ' + errors + ' sync errors' : ''}` });
+    if (missing + errors > 0) publishEvent({ event: 'billing.day_at_risk', entity: 'billing', actor: 'system', summary: `${missing + errors} client day${missing + errors === 1 ? '' : 's'} at risk for ${day}` });
+    // End-of-day email to the evening team (names are internal-operational — same policy as the census email).
+    if ((missing + review + errors) > 0 && emailConfigured()) {
+      const rows = db.prepare(`SELECT s.*, c.pref, c.name, c.therapist, c.case_manager, c.program, c.loc FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=? AND s.status IN ('missing','needs_review','sync_error') ORDER BY s.status`).all(day);
+      const esc3 = htmlEsc;
+      const line = (r) => `<div>• <strong>${esc3(r.pref || r.name)}</strong>${r.loc ? ' · ' + esc3(r.loc) : ''} — ${r.status === 'missing' ? '<span style="color:#b00">no qualifying encounter</span>' : esc3(r.detail || r.status)}${r.therapist ? ' · therapist: ' + esc3(r.therapist) : ''}${r.case_manager ? ' · CM: ' + esc3(r.case_manager) : ''}</div>`;
+      const to = (cfg.email || '').trim() || insuranceRecipients();
+      sendEmail({ to, subject: `Billing readiness ${day}: ${missing} missing, ${review} to review${errors ? ', ' + errors + ' sync errors' : ''}`, html: `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:620px"><h2 style="margin:0 0 4px">Documentation needed before end of day</h2><p style="color:#666;margin:0 0 12px">Billing readiness check · ${esc3(day)} · every client day needs one qualifying encounter</p>${rows.map(line).join('')}<p style="color:#555;margin-top:14px;font-size:13px">Open the app → Revenue → Billing Readiness to work the list and resolve alerts.</p></div>` }).catch((e) => console.error('[billing] email:', e.message));
+    }
+    return { ok: true, date: day, active: actives.length, complete, missing, review, errors };
+  } finally { _billingRunning = false; }
+}
+// Scheduler: at the configured hour (facility time), run once per day.
+setInterval(() => {
+  try {
+    const cfg = billingCfg();
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ }));
+    const today = appToday();
+    if (now.getHours() >= (cfg.checkHour ?? 16) && getState('billing_ready_ran') !== today) {
+      setState('billing_ready_ran', today);
+      runBillingSweep({ date: today }).then((r) => console.log('[billing] scheduled check:', JSON.stringify(r))).catch((e) => console.error('[billing] check:', e.message));
+    }
+  } catch (e) { console.error('[billing] scheduler:', e.message); }
+}, 5 * 60 * 1000);
+app.get('/api/billingready', requireAuth, requireBilling, (req, res) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  const all = db.prepare(`SELECT s.*, c.pref, c.name AS client_name, c.kipu_id, c.program, c.loc, c.therapist, c.case_manager, c.admit, c.discharge_date, c.active AS client_active,
+      (SELECT COUNT(*) FROM billing_ready_notes n WHERE n.status_id=s.id) note_count
+    FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=? ORDER BY (s.status='complete'), c.name`).all(day);
+  const rows = billingScopeRows(req.user, all).map((r) => ({
+    id: r.id, client: r.pref || r.client_name, kipu: (r.kipu_id || '').split(':')[0], program: r.program || '', loc: r.loc || '',
+    therapist: r.therapist || '', case_manager: r.case_manager || '', status: r.status, type: r.encounter_type || '', title: r.encounter_title || '',
+    time: r.encounter_time || '', staff: r.encounter_staff || '', alert: r.alert_state || '', exception: r.exception_reason || '', detail: r.detail || '',
+    admittedToday: String(r.admit || '').slice(0, 10) === day, dischargedToday: String(r.discharge_date || '').slice(0, 10) === day, notes: r.note_count,
+  }));
+  const sum = (st) => all.filter((r) => r.status === st).length;
+  const lastRun = db.prepare(`SELECT * FROM billing_ready_runs WHERE date=? ORDER BY id DESC LIMIT 1`).get(day);
+  const out = {
+    date: day, rows, leadership: billingLeadership(req.user),
+    summary: { active: all.length, complete: sum('complete'), missing: sum('missing'), review: sum('needs_review'), errors: sum('sync_error'), exceptions: sum('exception'),
+      pct: all.length ? Math.round(sum('complete') / all.length * 100) : null,
+      openAlerts: all.filter((r) => r.alert_state && !['resolved', 'exception'].includes(r.alert_state)).length,
+      resolved: all.filter((r) => r.alert_state === 'resolved').length },
+    lastRun: lastRun ? { at: lastRun.ran_at, by: lastRun.by_name } : null,
+    runs: billingLeadership(req.user) ? db.prepare(`SELECT * FROM billing_ready_runs ORDER BY id DESC LIMIT 8`).all() : undefined,
+    kipu: kipuConfigured(),
+  };
+  if (req.user.role === 'admin') out.cfg = billingCfg();
+  res.json(out);
+});
+app.post('/api/billingready/run', requireAuth, requireBilling, async (req, res) => {
+  if (!billingLeadership(req.user)) return res.status(403).json({ error: 'Leadership can run checks.' });
+  try {
+    const r = await runBillingSweep({ date: req.body?.date, byName: req.user.name });
+    audit({ user: req.user, action: 'BILLING_CHECK', detail: JSON.stringify(r).slice(0, 200), ip: req.ip });
+    res.json(r);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/billingready/alert/:id', requireAuth, requireBilling, (req, res) => {
+  const row = db.prepare(`SELECT * FROM billing_ready_status WHERE id=?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found.' });
+  const state = ['open', 'ack', 'in_progress', 'resolved', 'exception'].includes(req.body?.state) ? req.body.state : null;
+  const note = String(req.body?.note || '').slice(0, 500);
+  if (state) {
+    db.prepare(`UPDATE billing_ready_status SET alert_state=?, status=CASE WHEN ?='exception' THEN 'exception' ELSE status END, exception_reason=CASE WHEN ?='exception' THEN COALESCE(NULLIF(?,''), exception_reason) ELSE exception_reason END WHERE id=?`)
+      .run(state, state, state, note, row.id);
+    db.prepare(`INSERT INTO billing_ready_notes (status_id, by_name, note) VALUES (?,?,?)`).run(row.id, req.user.name, `→ ${state}${note ? ': ' + note : ''}`);
+    audit({ user: req.user, action: 'BILLING_ALERT', entity: 'billing_ready', entity_id: row.id, detail: state + (note ? ': ' + note : ''), ip: req.ip });
+  } else if (note) {
+    db.prepare(`INSERT INTO billing_ready_notes (status_id, by_name, note) VALUES (?,?,?)`).run(row.id, req.user.name, note);
+  }
+  res.json({ ok: true, notes: db.prepare(`SELECT by_name, note, at FROM billing_ready_notes WHERE status_id=? ORDER BY id`).all(row.id) });
+});
+app.get('/api/billingready/notes/:id', requireAuth, requireBilling, (req, res) => {
+  res.json({ notes: db.prepare(`SELECT by_name, note, at FROM billing_ready_notes WHERE status_id=? ORDER BY id`).all(req.params.id) });
+});
+app.get('/api/billingready/export', requireAuth, requireBilling, (req, res) => {
+  if (!billingLeadership(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : appToday();
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : since;
+  const rows = db.prepare(`SELECT s.date, c.name client, c.kipu_id, c.program, c.loc, c.therapist, c.case_manager, s.status, s.encounter_type, s.encounter_title, s.encounter_time, s.encounter_staff, s.alert_state, s.exception_reason, s.detail, s.checked_at
+    FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date >= ? AND s.date <= ? ORDER BY s.date, c.name`).all(since, end);
+  const csvCell = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const head = ['date', 'client', 'kipu_id', 'program', 'level_of_care', 'therapist', 'case_manager', 'status', 'encounter_type', 'encounter_title', 'encounter_time', 'encounter_staff', 'alert_state', 'exception_reason', 'detail', 'checked_at'];
+  const csv = [head.join(','), ...rows.map((r) => head.map((h) => csvCell(r[h === 'level_of_care' ? 'loc' : h])).join(','))].join('\n');
+  audit({ user: req.user, action: 'BILLING_EXPORT', detail: `${since}..${end} (${rows.length} rows)`, ip: req.ip });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="billing-readiness-${since}_${end}.csv"`);
+  res.send(csv);
+});
+app.post('/api/billingready/settings', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const list = (v) => Array.isArray(v) ? v.map((x) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 60) : undefined;
+  const cur = billingCfg();
+  const next = { ...cur,
+    ...(list(b.qualify) ? { qualify: list(b.qualify) } : {}), ...(list(b.disqualify) ? { disqualify: list(b.disqualify) } : {}),
+    ...(list(b.review) ? { review: list(b.review) } : {}), ...(list(b.nursing) ? { nursing: list(b.nursing) } : {}),
+    ...(b.nursingQualifies != null ? { nursingQualifies: !!b.nursingQualifies } : {}),
+    ...(b.requireCompleted != null ? { requireCompleted: !!b.requireCompleted } : {}),
+    ...(b.checkHour != null && +b.checkHour >= 0 && +b.checkHour <= 23 ? { checkHour: +b.checkHour } : {}),
+    ...(b.email != null ? { email: String(b.email).slice(0, 300) } : {}) };
+  setState('billing_ready_cfg', JSON.stringify(next));
+  audit({ user: req.user, action: 'BILLING_CFG', detail: 'mapping/settings updated', ip: req.ip });
+  res.json({ ok: true, cfg: next });
+});
+
 app.get('/api/org/facilities', requireAuth, (req, res) => {
   res.json({ facilities: orgFacilities(), departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
 });
@@ -692,7 +913,7 @@ function daysToExpiry(exp, today) { if (!exp) return null; return Math.round((Da
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
   if (user) {
-    user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); user.opsAccess = canSeeOps(user); user.authAccess = canSeeAuth(user);
+    user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); user.opsAccess = canSeeOps(user); user.authAccess = canSeeAuth(user); user.billingAccess = canSeeBilling(user);
     // Facility scope for the shell chip: explicit user_facility_access rows win;
     // org-wide roles fall back to every operating facility; everyone else to detox.
     try {

@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -394,8 +394,18 @@ app.get('/api/opscenter', requireAuth, (req, res) => {
   add(() => ({ group: 'queues', key: 'concierge', label: 'Concierge open', n: one(`SELECT COUNT(*) n FROM requests WHERE status NOT IN ('done','closed','cancelled')`), view: 'concierge' }));
   add(() => ({ group: 'queues', key: 'obtasks', label: 'HR tasks due', n: one(`SELECT COUNT(*) n FROM hr_onboard_tasks WHERE done=0 AND due_date <= ?`, today), view: 'hcos', tab: 'people' }));
   add(() => ({ group: 'queues', key: 'corptasks', label: 'Projects in motion', n: one(`SELECT COUNT(*) n FROM corp_tasks WHERE status IN ('todo','doing','blocked')`), view: 'corphub', tab: 'projects' }));
-  add(() => ({ group: 'queues', key: 'docgap', label: 'Doc-gap discharges (7d)', n: one(`SELECT COUNT(*) n FROM clients WHERE discharge_doc_gap=1 AND substr(discharge_date,1,10) >= date(?, '-6 day')${F}`, today), view: 'retention', sub: 'billing-readiness' }));
-  add(() => { const n = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date <= ?${F}`, addDays(today, 7)); const exp = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date < ?${F}`, today); return { group: 'queues', key: 'auths', label: 'Auth renewals ≤7d', n, alert: exp > 0, sub: exp ? `${exp} already expired` : undefined, view: 'authreg' }; });
+  // Billing blockers — the fused Revenue OS lens: doc-gap discharges + expired
+  // auths + patients in care beyond their approved days. Drill lands where the
+  // most actionable blocker lives.
+  add(() => {
+    const gaps = one(`SELECT COUNT(*) n FROM clients WHERE discharge_doc_gap=1 AND substr(discharge_date,1,10) >= date(?, '-6 day')${F}`, today);
+    const expAuth = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date < ?${fid ? ` AND facility_id=${fid}` : ''}`, today);
+    let over = 0;
+    try { over = one(`SELECT COUNT(*) n FROM authorizations a JOIN clients c ON c.id=a.client_id WHERE a.status IN ('active','renewed') AND a.approved_days IS NOT NULL AND c.active=1 AND (a.end_date IS NULL OR a.end_date >= ?) AND julianday(?) - julianday(substr(c.admit,1,10)) > a.approved_days${fid ? ` AND c.facility_id=${fid}` : ''}`, today, today); } catch { /* optional */ }
+    const parts = [gaps ? `${gaps} doc-gap` : null, expAuth ? `${expAuth} expired auth` : null, over ? `${over} beyond auth` : null].filter(Boolean);
+    return { group: 'queues', key: 'billing', label: 'Billing blockers', n: gaps + expAuth + over, alert: (expAuth + over) > 0, sub: parts.join(' · ') || undefined, view: (expAuth || over) ? 'authreg' : 'retention' };
+  });
+  add(() => { const n = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date <= ?${fid ? ` AND facility_id=${fid}` : ''}`, addDays(today, 7)); const exp = one(`SELECT COUNT(*) n FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL AND end_date < ?${fid ? ` AND facility_id=${fid}` : ''}`, today); return { group: 'queues', key: 'auths', label: 'Auth renewals ≤7d', n, alert: exp > 0, sub: exp ? `${exp} already expired` : undefined, view: 'authreg' }; });
   // PEOPLE & COMPLIANCE
   add(() => { const n = one(`SELECT COUNT(*) n FROM hr_reviews WHERE status='open' AND due_date < ?`, today); return { group: 'people', key: 'reviews', label: 'Reviews overdue', n, alert: n > 0, view: 'hcos', tab: 'reviews' }; });
   add(() => { const n = one(`SELECT COUNT(*) n FROM hr_certifications c JOIN hr_employees e ON e.id=c.employee_id AND e.status='active' WHERE c.expires IS NOT NULL AND c.expires <= ?`, addDays(today, 30)); return { group: 'people', key: 'certs', label: 'Certs expiring ≤30d', n, alert: n > 0, view: 'hcos', tab: 'certs' }; });
@@ -535,7 +545,7 @@ app.get('/api/auth-register', requireAuth, requireAuthReg, (req, res) => {
     else if (daysLeft != null && daysLeft <= 7) flag = 'expiring';
     return { ...a, daysLeft, intel, flag };
   });
-  res.json({ today, auths, levels: AUTH_LEVELS, facilities: orgFacilities().filter((f) => f.type !== 'corporate') });
+  res.json({ today, auths, levels: AUTH_LEVELS, facilities: orgFacilities().filter((f) => f.type !== 'corporate'), kipu: kipuConfigured(), authEmail: req.user.role === 'admin' ? (getState('auth_email') || '') : undefined });
 });
 app.post('/api/auth-register', requireAuth, requireAuthReg, (req, res) => {
   const b = req.body || {};
@@ -577,6 +587,69 @@ app.patch('/api/auth-register/:id', requireAuth, requireAuthReg, (req, res) => {
 app.delete('/api/auth-register/:id', requireAuth, requireAdmin, (req, res) => {
   db.prepare(`DELETE FROM authorizations WHERE id = ?`).run(req.params.id);
   audit({ user: req.user, action: 'AUTH_DELETE', entity: 'authorization', entity_id: +req.params.id, ip: req.ip });
+  res.json({ ok: true });
+});
+// Renewal watch — the insurance-ladder pattern at UR speed: 7/3/1/0 days + expired.
+// Each crossing emails the UR list once (reminded marks dedupe) and publishes
+// auth.expiring to the event spine.
+const AUTH_THRESHOLDS = [7, 3, 1, 0];
+function authRecipients() { return (getState('auth_email') || '').trim() || insuranceRecipients(); }
+async function checkAuthReminders({ force = false } = {}) {
+  const today = appToday();
+  const rows = db.prepare(`SELECT * FROM authorizations WHERE status IN ('active','renewed') AND end_date IS NOT NULL`).all();
+  const dueSoon = [], expired = [];
+  const marks = [];
+  for (const a of rows) {
+    const days = daysToExpiry(a.end_date, today);
+    if (days == null) continue;
+    let reminded; try { reminded = JSON.parse(a.reminded || '[]'); } catch { reminded = []; }
+    if (!Array.isArray(reminded)) reminded = [];
+    if (days < 0) {
+      if (!reminded.includes('expired')) {
+        expired.push({ a, days }); reminded.push('expired'); marks.push({ id: a.id, reminded });
+        publishEvent({ event: 'auth.expiring', entity: 'authorization', entity_id: a.id, facility_id: a.facility_id, actor: 'system', summary: `Auth EXPIRED · ${a.patient_label} · ${a.payor || ''}` });
+      }
+      continue;
+    }
+    const crossed = AUTH_THRESHOLDS.filter((t) => days <= t && !reminded.includes(t));
+    if (crossed.length) {
+      dueSoon.push({ a, days }); reminded.push(...crossed); marks.push({ id: a.id, reminded });
+      publishEvent({ event: 'auth.expiring', entity: 'authorization', entity_id: a.id, facility_id: a.facility_id, actor: 'system', summary: `Auth expires in ${days}d · ${a.patient_label} · ${a.payor || ''}` });
+    }
+  }
+  const upd = db.prepare(`UPDATE authorizations SET reminded=? WHERE id=?`);
+  for (const m of marks) upd.run(JSON.stringify(m.reminded), m.id);
+  if (!force && !dueSoon.length && !expired.length) return { sent: false, reason: 'nothing newly due' };
+  if (!dueSoon.length && !expired.length) return { sent: false, reason: 'nothing newly due' };
+  if (!emailConfigured()) return { sent: false, reason: 'email not configured (events still published)', dueSoon: dueSoon.length, expired: expired.length };
+  const esc2 = htmlEsc;
+  const line = (x) => `<div>• <strong>${esc2(x.a.patient_label || '—')}</strong> — ${esc2(x.a.payor || 'payor tbd')}${x.a.level_of_care ? ' · ' + esc2(x.a.level_of_care) : ''}${x.a.auth_number ? ' · #' + esc2(x.a.auth_number) : ''} · expires <strong>${esc2(x.a.end_date)}</strong> — <span style="color:${x.days < 0 ? '#b00' : '#a60'}">${x.days < 0 ? Math.abs(x.days) + ' days AGO' : x.days === 0 ? 'TODAY' : x.days + ' days left'}</span>${x.a.reviewer ? ' · reviewer: ' + esc2(x.a.reviewer) : ''}</div>`;
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:600px">
+    <h2 style="margin:0 0 4px">Authorization renewals — action needed</h2>
+    <p style="color:#666;margin:0 0 12px">Automated UR watch · ${esc2(today)}</p>
+    ${expired.length ? `<h3 style="color:#b00;margin:12px 0 4px">⛔ EXPIRED — every uncovered day is unbillable</h3>${expired.map(line).join('')}` : ''}
+    ${dueSoon.length ? `<h3 style="color:#a60;margin:14px 0 4px">Renewal window</h3>${dueSoon.map(line).join('')}` : ''}
+    <p style="color:#555;margin-top:16px;font-size:13px">Open the app → Authorizations to renew, reassign, or close each one.</p>
+    <p style="color:#888;font-size:12px">Sent automatically by Armada — UR watch.</p></div>`;
+  try { await sendEmail({ to: authRecipients(), subject: `Authorizations: ${expired.length ? expired.length + ' EXPIRED, ' : ''}${dueSoon.length} in the renewal window`, html }); return { sent: true, dueSoon: dueSoon.length, expired: expired.length }; }
+  catch (e) { return { sent: false, reason: e.message, dueSoon: dueSoon.length, expired: expired.length }; }
+}
+setTimeout(() => { checkAuthReminders().then((r) => { if (r.sent) console.log(`[auth] UR reminders sent (${r.dueSoon} soon, ${r.expired} expired)`); }).catch((e) => console.error('[auth] reminders:', e.message)); }, 180000);
+setInterval(() => { checkAuthReminders().then((r) => { if (r.sent) console.log(`[auth] UR reminders sent (${r.dueSoon} soon, ${r.expired} expired)`); }).catch((e) => console.error('[auth] reminders:', e.message)); }, 12 * 3600 * 1000);
+app.post('/api/auth-register/run-reminders', requireAuth, requireAuthReg, async (req, res) => {
+  try { res.json(await checkAuthReminders({ force: false })); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Pull authorizations straight from Kipu's UR records for every active client.
+app.post('/api/auth-register/sync-kipu', requireAuth, requireAuthReg, async (req, res) => {
+  if (!kipuConfigured()) return res.status(400).json({ error: 'Kipu is not connected.' });
+  try {
+    const r = await kipuPullAuths();
+    audit({ user: req.user, action: 'AUTH_KIPU_SYNC', detail: `${r.created} new, ${r.updated} updated of ${r.checked} charts`, ip: req.ip });
+    res.json(r);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/auth-register/settings', requireAuth, requireAdmin, (req, res) => {
+  setState('auth_email', String(req.body?.email || '').slice(0, 300));
   res.json({ ok: true });
 });
 

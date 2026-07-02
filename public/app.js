@@ -5769,8 +5769,13 @@ async function loadAuthReg(){
       ${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" onclick="authDel(${a.id})">🗑</button>`:''}
     </div>`:''}</div>`;
   const open=(d.auths||[]).filter(a=>a.flag!=='done'), done=(d.auths||[]).filter(a=>a.flag==='done');
-  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🛡 Authorization Register</h3><p class="sub sans" style="margin:0">Every payor authorization: what's approved, what's expiring, what to do about it — nothing lapses unseen.</p></div>
-    <button class="btn btn-gold btn-sm sans" onclick="AUTH_SHOWFORM=!AUTH_SHOWFORM;renderAuthForm()">＋ Add authorization</button></div>
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🛡 Authorization Register</h3><p class="sub sans" style="margin:0">Every payor authorization: what's approved, what's expiring, what to do about it — nothing lapses unseen. Automated watch emails at 7/3/1/0 days and on expiry.</p></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${d.kipu?`<button class="btn btn-ghost btn-sm sans" onclick="authKipuSync(this)" title="Import authorizations from Kipu UR records for every active client">⟳ Pull from Kipu</button>`:''}
+      <button class="btn btn-ghost btn-sm sans" onclick="authRunReminders(this)" title="Run the renewal watch now">✉️ Run watch now</button>
+      <button class="btn btn-gold btn-sm sans" onclick="AUTH_SHOWFORM=!AUTH_SHOWFORM;renderAuthForm()">＋ Add authorization</button></div></div>
+    <div id="authMsg"></div>
+    ${ME.role==='admin'?`<div class="toolbar" style="justify-content:flex-start;gap:6px;margin-top:6px"><label class="hint">UR watch emails go to <input id="authEmailSet" value="${esc(d.authEmail||'')}" placeholder="defaults to insurance list" style="min-width:230px"/></label><button class="btn btn-ghost btn-sm sans" onclick="authSaveEmail()">Save</button></div>`:''}
     <div id="authForm"></div></div>
     ${open.length?open.map(card).join(''):'<div class="card"><div class="empty"><div class="e-ico">🛡</div>No open authorizations tracked yet.<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="AUTH_SHOWFORM=true;renderAuthForm()">Add the first one</button></div></div></div>'}
     ${done.length?`<div class="card"><details><summary style="cursor:pointer"><strong>History</strong> <span class="hint">· ${done.length} closed/denied</span></summary>${done.map(card).join('')}</details></div>`:''}`;
@@ -5811,6 +5816,26 @@ async function authSet(id,status){
 async function authDel(id){
   if(!confirm('Delete this authorization row entirely? (Closing is usually right.)')) return;
   try{ await api('/auth-register/'+id,{method:'DELETE'}); loadAuthReg(); }catch(e){ alert(e.message); }
+}
+function authNote(html){ const m=$('authMsg'); if(m) m.innerHTML='<div class="pc-note" style="margin-top:6px">'+html+'</div>'; }
+async function authKipuSync(btn){
+  btn.disabled=true; btn.textContent='⟳ Pulling…';
+  try{
+    const r=await api('/auth-register/sync-kipu',{method:'POST'});
+    authNote(`Kipu UR pull: <strong>${r.created} new</strong>, ${r.updated} updated · ${r.checked}/${r.clients} charts read${r.skipped?` · ${r.skipped} rows skipped (unrecognized shape)`:''}${(r.errors&&r.errors.length)?`<div class="hint">${r.errors.map(esc).join('<br>')}</div>`:''}`);
+    if(r.created||r.updated) loadAuthReg(); else { btn.disabled=false; btn.textContent='⟳ Pull from Kipu'; }
+  }catch(e){ authNote('⚠️ '+esc(e.message)); btn.disabled=false; btn.textContent='⟳ Pull from Kipu'; }
+}
+async function authRunReminders(btn){
+  btn.disabled=true;
+  try{
+    const r=await api('/auth-register/run-reminders',{method:'POST'});
+    authNote(r.sent?`✉️ Watch email sent — ${r.expired||0} expired, ${r.dueSoon||0} in the window.`:`Watch ran: ${esc(r.reason||'nothing newly due')}.`);
+  }catch(e){ authNote('⚠️ '+esc(e.message)); }
+  btn.disabled=false;
+}
+async function authSaveEmail(){
+  try{ await api('/auth-register/settings',{method:'POST',body:JSON.stringify({email:($('authEmailSet')||{}).value||''})}); authNote('✓ UR watch recipients saved.'); }catch(e){ alert(e.message); }
 }
 async function loadFacilityEditor(){
   const host=$('ownFacilities'); if(!host) return;

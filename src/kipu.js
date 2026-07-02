@@ -1801,3 +1801,57 @@ export async function kipuOutpatientFieldInspect(locationName, sampleN = 6) {
   }
   return { sample: out };
 }
+
+// Pull utilization-review / authorization rows from Kipu for every active Kipu
+// client and upsert them into the app's authorization register. Field names vary
+// by Kipu configuration, so everything is picked from a list of candidates (the
+// house pattern) — a shape we haven't seen yields skips, never bad rows. Dedupe:
+// a client's auth matches on auth_number when present, else on the end date.
+export async function kipuPullAuths() {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const dt = (v) => { const s = localDateOf(v); return /^\d{4}-\d{2}-\d{2}$/.test(s || '') ? s : null; };
+  const phi = process.env.KIPU_PHI_LEVEL || 'high';
+  const clients = db.prepare(`SELECT id, name, kipu_id FROM clients WHERE active = 1 AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
+  let checked = 0, created = 0, updated = 0, skipped = 0;
+  const errors = [];
+  const findByNum = db.prepare(`SELECT id FROM authorizations WHERE client_id = ? AND auth_number = ?`);
+  const findByEnd = db.prepare(`SELECT id FROM authorizations WHERE client_id = ? AND end_date = ?`);
+  const ins = db.prepare(`INSERT INTO authorizations (client_id, patient_label, payor, auth_number, level_of_care, approved_days, start_date, end_date, reviewer, next_review, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+  const upd = db.prepare(`UPDATE authorizations SET payor=COALESCE(?,payor), level_of_care=COALESCE(?,level_of_care), approved_days=COALESCE(?,approved_days), start_date=COALESCE(?,start_date), end_date=COALESCE(?,end_date), reviewer=COALESCE(?,reviewer), next_review=COALESCE(?,next_review), updated_at=datetime('now') WHERE id=?`);
+  for (const c of clients) {
+    const kid = String(c.kipu_id);
+    const master = kid.split(':')[0];
+    const uuid = kid.includes(':') ? kid.slice(kid.indexOf(':') + 1) : kid;
+    let data;
+    try {
+      data = await kipuGet(`/api/patients/${master}/utilization_reviews?phi_level=${phi}&patient_master_id=${encodeURIComponent(uuid)}`);
+    } catch (e) { errors.push(`${nameInitials(c.name)}: ${e.message}`.slice(0, 120)); continue; }
+    checked++;
+    const list = data?.utilization_reviews || data?.reviews || data?.urs || data?.ur || (Array.isArray(data) ? data : []);
+    if (!Array.isArray(list)) { skipped++; continue; }
+    for (const r of list) {
+      const authNum = pick(r, 'authorization_number', 'auth_number', 'authorization', 'authorization_no', 'number', 'certification_number');
+      const endDate = dt(pick(r, 'end_date', 'authorized_through', 'auth_through', 'to', 'expiration_date', 'next_review_date', 'thru_date'));
+      const startDate = dt(pick(r, 'start_date', 'authorized_from', 'auth_from', 'from', 'effective_date'));
+      const payor = pick(r, 'insurance', 'insurance_company', 'payor', 'payer', 'insurance_name', 'company');
+      const loc = pick(r, 'level_of_care', 'loc', 'authorized_level', 'level');
+      const daysRaw = pick(r, 'authorized_days', 'approved_days', 'days', 'number_of_days', 'days_authorized');
+      const reviewer = pick(r, 'reviewer', 'care_manager', 'ur_contact', 'contact', 'reviewer_name');
+      const nextRev = dt(pick(r, 'next_review_date', 'next_review', 'review_date'));
+      if (!authNum && !endDate) { skipped++; continue; }   // nothing to key on — unknown shape
+      const days = daysRaw != null && /^\d+$/.test(String(daysRaw)) ? +daysRaw : null;
+      const locNorm = loc ? String(loc).toUpperCase().replace(/[^A-Z]/g, '').replace(/^SA/, '') : null;
+      const level = ['DTX', 'RES', 'PHP', 'IOP', 'OP'].find((l) => locNorm && locNorm.includes(l)) || null;
+      const existing = (authNum && findByNum.get(c.id, String(authNum))) || (endDate && findByEnd.get(c.id, endDate)) || null;
+      if (existing) {
+        upd.run(payor ? String(payor).slice(0, 80) : null, level, days, startDate, endDate, reviewer ? String(reviewer).slice(0, 80) : null, nextRev, existing.id);
+        updated++;
+      } else {
+        ins.run(c.id, nameInitials(c.name), payor ? String(payor).slice(0, 80) : '', authNum ? String(authNum).slice(0, 60) : '', level, days, startDate, endDate, reviewer ? String(reviewer).slice(0, 80) : '', nextRev, 'imported from Kipu UR');
+        created++;
+        publishEvent({ event: 'auth.created', entity: 'authorization', entity_id: c.id, actor: 'kipu', summary: `Auth imported · ${nameInitials(c.name)} · ${payor || 'payor tbd'}${endDate ? ' · expires ' + endDate : ''}` });
+      }
+    }
+  }
+  return { clients: clients.length, checked, created, updated, skipped, errors: errors.slice(0, 5) };
+}

@@ -2654,3 +2654,4 @@ addColumn('hr_employees', 'birthday', 'TEXT');           // MM-DD or YYYY-MM-DD 
 addColumn('hr_employees', 'term_date', 'TEXT');          // offboarding: last day
 addColumn('hr_employees', 'term_reason', 'TEXT');        // Resignation | Retirement | Layoff | Termination
 addColumn('hr_onboard_tasks', 'phase', 'TEXT');          // null/'onboard' | 'offboard'
+addColumn('authorizations', 'reminded', 'TEXT');         // JSON of reminder thresholds already sent

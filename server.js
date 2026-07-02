@@ -913,6 +913,65 @@ function saveQuickNote({ user, client_id, appointment_id = null, request_id = nu
       String(body || '').slice(0, 2000), needs_expansion ? 1 : 0);
   return info.lastInsertRowid;
 }
+// Availability: a staff member's working windows + committed blocks for a date.
+function dowOf(date) { return new Date(date + 'T12:00:00Z').getUTCDay(); }
+function staffDay(staff, date) {
+  const dow = dowOf(date);
+  const hours = db.prepare(`SELECT start_time s, end_time e FROM staff_hours WHERE staff_name=? AND dow=? ORDER BY start_time`).all(staff, dow);
+  const blocks = db.prepare(`SELECT start_time s, end_time e, label FROM staff_blocks WHERE staff_name=? AND (dow=? OR date=?) ORDER BY start_time`).all(staff, dow, date);
+  const appts = db.prepare(`SELECT time s, duration_min, kind FROM appointments WHERE staff_name=? AND date=? AND status IN ('scheduled','checked_in','in_session') ORDER BY time`).all(staff, date)
+    .map((a) => ({ s: a.s, e: addMinHM(a.s, a.duration_min || 30), label: a.kind }));
+  const hasHours = db.prepare(`SELECT COUNT(*) n FROM staff_hours WHERE staff_name=?`).get(staff).n > 0;
+  return { dow, hours, blocks, appts, hasHours };
+}
+app.get('/api/appts/availability', requireAuth, requireAppts, (req, res) => {
+  const staff = String(req.query.staff || '').slice(0, 80);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  if (!staff) return res.status(400).json({ error: 'staff required' });
+  const d = staffDay(staff, date);
+  const line = [
+    d.hasHours ? (d.hours.length ? 'works ' + d.hours.map((h) => h.s + '–' + h.e).join(', ') : 'NOT scheduled to work this day') : 'no working hours on file',
+    ...d.blocks.map((b) => (b.label || 'blocked') + ' ' + b.s + '–' + b.e),
+    d.appts.length ? d.appts.length + ' appointment' + (d.appts.length === 1 ? '' : 's') : null,
+  ].filter(Boolean).join(' · ');
+  res.json({ staff, date, ...d, line });
+});
+// Per-staff setup: weekly hours + blocks. Leadership edits anyone; you edit yourself.
+app.get('/api/appts/staffsetup', requireAuth, requireAppts, (req, res) => {
+  const staff = String(req.query.staff || '').slice(0, 80);
+  res.json({
+    staff,
+    hours: db.prepare(`SELECT id, dow, start_time, end_time FROM staff_hours WHERE staff_name=? ORDER BY dow, start_time`).all(staff),
+    blocks: db.prepare(`SELECT id, dow, date, start_time, end_time, label FROM staff_blocks WHERE staff_name=? ORDER BY COALESCE(dow, 9), date, start_time`).all(staff),
+  });
+});
+app.post('/api/appts/staffsetup', requireAuth, requireAppts, (req, res) => {
+  const b = req.body || {};
+  const staff = String(b.staff_name || '').slice(0, 80);
+  if (!staff) return res.status(400).json({ error: 'staff_name required' });
+  if (!apptsLeadership(req.user) && staff.toLowerCase() !== String(req.user.name || '').toLowerCase()) {
+    return res.status(403).json({ error: 'You can edit your own availability; leadership edits anyone\'s.' });
+  }
+  const HM = (v) => /^\d{2}:\d{2}$/.test(v || '') ? v : null;
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM staff_hours WHERE staff_name=?`).run(staff);
+    db.prepare(`DELETE FROM staff_blocks WHERE staff_name=?`).run(staff);
+    const insH = db.prepare(`INSERT OR IGNORE INTO staff_hours (staff_name, dow, start_time, end_time) VALUES (?,?,?,?)`);
+    for (const h of (Array.isArray(b.hours) ? b.hours : []).slice(0, 30)) {
+      if (h.dow >= 0 && h.dow <= 6 && HM(h.start_time) && HM(h.end_time) && h.start_time < h.end_time) insH.run(staff, +h.dow, h.start_time, h.end_time);
+    }
+    const insB = db.prepare(`INSERT INTO staff_blocks (staff_name, dow, date, start_time, end_time, label) VALUES (?,?,?,?,?,?)`);
+    for (const k of (Array.isArray(b.blocks) ? b.blocks : []).slice(0, 60)) {
+      const dt = /^\d{4}-\d{2}-\d{2}$/.test(k.date || '') ? k.date : null;
+      const dow = (!dt && k.dow >= 0 && k.dow <= 6) ? +k.dow : null;
+      if ((dt != null || dow != null) && HM(k.start_time) && HM(k.end_time) && k.start_time < k.end_time) insB.run(staff, dow, dt, k.start_time, k.end_time, String(k.label || '').slice(0, 80));
+    }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* ignore */ } return res.status(500).json({ error: e.message }); }
+  audit({ user: req.user, action: 'STAFF_AVAIL', detail: staff, ip: req.ip });
+  res.json({ ok: true });
+});
 app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
   const today = appToday();
@@ -977,8 +1036,20 @@ app.post('/api/appts', requireAuth, requireAppts, (req, res) => {
   const b = req.body || {};
   if (!b.client_id || !/^\d{4}-\d{2}-\d{2}$/.test(b.date || '') || !/^\d{2}:\d{2}$/.test(b.time || '')) return res.status(400).json({ error: 'Client, date and time are required.' });
   const staff = String(b.staff_name || req.user.name).slice(0, 80);
-  // Same-staff overlap check — a double-booked promise is a broken promise waiting.
   const dur = Math.min(Math.max(+b.duration_min || 30, 5), 240);
+  // A booking is a promise — it must land inside the person's working hours and
+  // outside their committed blocks (the groups they run). Leadership can force
+  // past a warning, but never blindly.
+  if (!b.force) {
+    const av = staffDay(staff, b.date);
+    const endT = addMinHM(b.time, dur);
+    if (av.hasHours) {
+      const inside = av.hours.some((h) => b.time >= h.s && endT <= h.e);
+      if (!inside) return res.status(409).json({ error: `${staff} isn't scheduled to work then${av.hours.length ? ' (works ' + av.hours.map((h) => h.s + '–' + h.e).join(', ') + ' that day)' : ' (off that day)'}. Book anyway?`, clash: true });
+    }
+    const blocked = av.blocks.find((k) => k.s < endT && b.time < k.e);
+    if (blocked) return res.status(409).json({ error: `${staff} has ${blocked.label || 'a committed block'} ${blocked.s}–${blocked.e} then. Book anyway?`, clash: true });
+  }
   const clash = db.prepare(`SELECT id, time, duration_min FROM appointments WHERE date=? AND staff_name=? AND status IN ('scheduled','checked_in','in_session')`).all(b.date, staff)
     .some((a) => { const s1 = a.time, e1 = addMinHM(a.time, a.duration_min || 30), s2 = b.time, e2 = addMinHM(b.time, dur); return s1 < e2 && s2 < e1; });
   if (clash && !b.force) return res.status(409).json({ error: `${staff} already has an appointment overlapping ${b.time}. Book anyway?`, clash: true });

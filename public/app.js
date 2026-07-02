@@ -5866,7 +5866,7 @@ async function loadAppts(){
   host.innerHTML='<div class="card"><div class="skel" style="width:240px;height:22px;margin-bottom:14px"></div><div class="skel" style="height:70px"></div></div>';
   let d; try{ d=await api('/appts?date='+AP_DATE); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'</div></div>'; return; }
   AP_DATA=d;
-  const tabs=[['queue','🛎 Queue'+(d.queue.length?' ('+d.queue.length+')':'')],['cal','📅 Calendar'],['myday','📥 My follow-ups'+((d.pending.length+d.missed.length)?' ('+(d.pending.length+d.missed.length)+')':'')]];
+  const tabs=[['queue','🛎 Queue'+(d.queue.length?' ('+d.queue.length+')':'')],['cal','📅 Calendar'],['myday','📥 My follow-ups'+((d.pending.length+d.missed.length)?' ('+(d.pending.length+d.missed.length)+')':'')],['avail','🕐 Availability']];
   if(d.leadership) tabs.push(['sup','📊 Supervisor']);
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Scheduling &amp; Queue</h3><p class="sub sans" style="margin:0">Every request gets a promise; every meeting gets a note before it closes; every miss gets rescheduled — predictable service, not interruptions.${d.estWaitMin!=null?' Typical response lately: <strong>~'+d.estWaitMin+' min</strong>.':''}</p></div></div>
     <div class="corp-tabs" style="margin-top:8px">${tabs.map(([k,l])=>`<button class="${AP_TAB===k?'active':''}" onclick="AP_TAB='${k}';renderAppts()">${l}</button>`).join('')}</div>
@@ -5879,6 +5879,7 @@ function renderAppts(){
   if(AP_TAB==='queue') return apQueue(b);
   if(AP_TAB==='cal') return apCal(b);
   if(AP_TAB==='myday') return apMyDay(b);
+  if(AP_TAB==='avail') return apAvail(b);
   if(AP_TAB==='sup') return apSup(b);
 }
 function apQueue(b){
@@ -5932,11 +5933,20 @@ function apBookForm(){
   h.innerHTML=`<div class="pc-note" style="margin-top:8px"><div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
     <select id="apC">${d.clients.map(c=>`<option value="${c.id}">${esc(c.label)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
     <select id="apK">${d.kinds.map(k=>`<option>${k}</option>`).join('')}</select>
-    <select id="apS">${[ME.name,...d.staff.filter(s=>s!==ME.name)].map(s=>`<option>${esc(s)}</option>`).join('')}</select>
-    <input type="date" id="apD" value="${esc(AP_DATE)}"/><input type="time" id="apT" value="10:00"/>
+    <select id="apS" onchange="apAvailHint()">${[ME.name,...d.staff.filter(s=>s!==ME.name)].map(s=>`<option>${esc(s)}</option>`).join('')}</select>
+    <input type="date" id="apD" value="${esc(AP_DATE)}" onchange="apAvailHint()"/><input type="time" id="apT" value="10:00"/>
     <select id="apDur"><option value="15">15m</option><option value="30" selected>30m</option><option value="45">45m</option><option value="60">60m</option></select>
     <button class="btn btn-gold btn-sm sans" onclick="apBook(false)">Book &amp; promise</button></div>
-    <div class="hint" style="margin-top:4px">Booking = a promise to the client. Misses must be rescheduled — that's the deal.</div></div>`;
+    <div class="hint" id="apAvailLine" style="margin-top:4px"></div>
+    <div class="hint" style="margin-top:2px">Booking = a promise to the client. Misses must be rescheduled — that's the deal.</div></div>`;
+  apAvailHint();
+}
+async function apAvailHint(){
+  const el=$('apAvailLine'); if(!el) return;
+  const staff=($('apS')||{}).value, date=($('apD')||{}).value;
+  if(!staff||!date){ el.textContent=''; return; }
+  try{ const d=await api('/appts/availability?staff='+encodeURIComponent(staff)+'&date='+encodeURIComponent(date)); el.innerHTML='🕐 <strong>'+esc(staff)+'</strong> that day: '+esc(d.line||'—'); }
+  catch(_e){ el.textContent=''; }
 }
 async function apBook(force){
   const v=(id)=>($(id)||{}).value;
@@ -5999,6 +6009,46 @@ async function apExpandNote(id){
   const body=prompt('Full case note (replaces the quick note body):'); if(body==null) return;
   try{ await api('/quicknotes/'+id,{method:'PATCH',body:JSON.stringify({body})}); }catch(e){ alert(e.message); }
   loadAppts();
+}
+const AP_DOWS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+let AV_STAFF='';
+function apAvail(b){
+  const d=AP_DATA;
+  const who=AV_STAFF||ME.name;
+  b.innerHTML=`<div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <label class="hint">Staff <select id="avWho" onchange="AV_STAFF=this.value;apAvail($('apBody'))">${[ME.name,...d.staff.filter(s=>s!==ME.name)].map(s=>`<option ${s===who?'selected':''}>${esc(s)}</option>`).join('')}</select></label>
+      <span class="hint">Working hours + the groups they run. Booking outside these warns before it promises.</span></div>
+    <div id="avBody"><div class="skel" style="height:60px;margin-top:8px"></div></div>`;
+  apAvailLoad(who);
+}
+async function apAvailLoad(who){
+  const host=$('avBody'); if(!host) return;
+  let d; try{ d=await api('/appts/staffsetup?staff='+encodeURIComponent(who)); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  const hrs={}; (d.hours||[]).forEach(h=>{ hrs[h.dow]={s:h.start_time,e:h.end_time}; });
+  host.innerHTML=`<h3 style="margin:10px 0 4px">Working hours</h3>
+    <table class="tbl nomcard" style="max-width:430px">${AP_DOWS.map((nm,i)=>`<tr><td style="width:60px"><label class="hint"><input type="checkbox" class="avOn" data-dow="${i}" ${hrs[i]?'checked':''}/> ${nm}</label></td>
+      <td><input type="time" class="avS" data-dow="${i}" value="${hrs[i]?hrs[i].s:'08:00'}" style="width:105px"/></td>
+      <td><input type="time" class="avE" data-dow="${i}" value="${hrs[i]?hrs[i].e:'16:00'}" style="width:105px"/></td></tr>`).join('')}</table>
+    <h3 style="margin:14px 0 4px">Groups &amp; standing blocks</h3>
+    <div id="avBlocks">${(d.blocks||[]).map(k=>apBlockRow(k)).join('')}</div>
+    <button class="btn btn-ghost btn-sm sans" onclick="document.getElementById('avBlocks').insertAdjacentHTML('beforeend',apBlockRow({}))">＋ Add a block</button>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:10px"><button class="btn btn-gold btn-sm sans" onclick="apAvailSave('${who.replace(/'/g,"\\'")}')">Save availability</button><span id="avMsg" class="hint" style="align-self:center"></span></div>`;
+}
+function apBlockRow(k){
+  return `<div class="toolbar avBlock" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin:4px 0">
+    <select class="bDow"><option value="">One date…</option>${AP_DOWS.map((nm,i)=>`<option value="${i}" ${k.dow===i?'selected':''}>Every ${nm}</option>`).join('')}</select>
+    <input type="date" class="bDate" value="${esc(k.date||'')}" style="width:140px"/>
+    <input type="time" class="bS" value="${esc(k.start_time||'10:00')}" style="width:100px"/>
+    <input type="time" class="bE" value="${esc(k.end_time||'11:00')}" style="width:100px"/>
+    <input class="bL" placeholder="e.g. Men's Process Group" value="${esc(k.label||'')}" style="min-width:170px"/>
+    <button class="btn btn-ghost btn-sm sans" onclick="this.closest('.avBlock').remove()">🗑</button></div>`;
+}
+async function apAvailSave(who){
+  const hours=[];
+  document.querySelectorAll('.avOn').forEach(c=>{ if(c.checked){ const dow=+c.dataset.dow; hours.push({dow,start_time:document.querySelector('.avS[data-dow="'+dow+'"]').value,end_time:document.querySelector('.avE[data-dow="'+dow+'"]').value}); } });
+  const blocks=[...document.querySelectorAll('.avBlock')].map(r=>({dow:r.querySelector('.bDow').value===''?null:+r.querySelector('.bDow').value,date:r.querySelector('.bDate').value||null,start_time:r.querySelector('.bS').value,end_time:r.querySelector('.bE').value,label:r.querySelector('.bL').value})).filter(k=>(k.dow!=null||k.date)&&k.start_time&&k.end_time);
+  try{ await api('/appts/staffsetup',{method:'POST',body:JSON.stringify({staff_name:who,hours,blocks})}); const m=$('avMsg'); if(m) m.textContent='✓ Saved — bookings now enforce this.'; }
+  catch(e){ alert(e.message); }
 }
 function apSup(b){
   const s=(AP_DATA||{}).supervisor; if(!s){ b.innerHTML='<div class="hint">Leadership only.</div>'; return; }

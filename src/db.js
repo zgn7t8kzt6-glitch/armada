@@ -2229,6 +2229,27 @@ CREATE TABLE IF NOT EXISTS quick_notes (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
 
+// ── Staff availability for scheduling: weekly working hours + committed blocks
+// (the groups they run, standing meetings). Booking an appointment checks BOTH —
+// you cannot promise a client someone who is off, or mid-group.
+db.exec(`CREATE TABLE IF NOT EXISTS staff_hours (
+  id INTEGER PRIMARY KEY,
+  staff_name TEXT NOT NULL,
+  dow INTEGER NOT NULL,              -- 0=Sun … 6=Sat
+  start_time TEXT NOT NULL,          -- HH:MM
+  end_time TEXT NOT NULL,
+  UNIQUE(staff_name, dow, start_time)
+);
+CREATE TABLE IF NOT EXISTS staff_blocks (
+  id INTEGER PRIMARY KEY,
+  staff_name TEXT NOT NULL,
+  dow INTEGER,                       -- weekly recurring (null when one-off)
+  date TEXT,                         -- one-off date (null when weekly)
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  label TEXT                         -- e.g. "Men's Process Group"
+);`);
+
 // Insurance brokers / agents — who to call per policy.
 db.exec(`CREATE TABLE IF NOT EXISTS insurance_brokers (
   id INTEGER PRIMARY KEY,

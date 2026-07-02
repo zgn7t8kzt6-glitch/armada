@@ -19,7 +19,7 @@ import {
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
-import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
+import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
 
@@ -4261,23 +4261,31 @@ function normalizeInbound(b) {
 function inboundAttachmentsText(body) {
   const arrs = [body?.attachments, body?.Attachments, body?.attachment ? [body.attachment] : null].filter(Array.isArray);
   const list = (arrs[0] || []).slice(0, 4);
-  const parts = [], names = [];
+  const parts = [], names = [], media = [];   // media: photos/screenshots/PDFs → AI vision
+  const IMG_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
   for (const a of list) {
     try {
       const name = String(a.name || a.Name || a.filename || a.fileName || 'attachment').slice(0, 120);
-      const b64 = a.contentBytes || a.ContentBytes || a.content || a.data || a.content_b64 || '';
-      if (!b64 || typeof b64 !== 'string' || b64.length > 8_000_000) continue;   // ~6MB decoded cap
-      const buf = Buffer.from(b64.replace(/^data:[^;]+;base64,/, ''), 'base64');
-      if (/\.(xlsx|xlsm)$/i.test(name)) {
-        const text = workbookText(buf);
+      const clean = String(a.contentBytes || a.ContentBytes || a.content || a.data || a.content_b64 || '');
+      if (!clean || clean.length > 8_000_000) continue;   // ~6MB decoded cap
+      const b64 = clean.replace(/^data:[^;]+;base64,/, '');
+      const ext = (name.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || '';
+      if (ext === 'xlsx' || ext === 'xlsm') {
+        const text = workbookText(Buffer.from(b64, 'base64'));
         if (text.trim()) { parts.push(`[Attached spreadsheet: ${name}]\n${text}`); names.push(name); }
-      } else if (/\.(csv|txt)$/i.test(name)) {
-        const text = buf.toString('utf8').slice(0, 20000);
+      } else if (ext === 'csv' || ext === 'txt') {
+        const text = Buffer.from(b64, 'base64').toString('utf8').slice(0, 20000);
         if (text.trim()) { parts.push(`[Attached file: ${name}]\n${text}`); names.push(name); }
+      } else if (IMG_EXT[ext]) {
+        media.push({ base64: b64, mediaType: IMG_EXT[ext], name }); names.push(name);
+      } else if (ext === 'pdf') {
+        media.push({ base64: b64, mediaType: 'application/pdf', name }); names.push(name);
+      } else if (ext) {
+        parts.push(`[Attachment "${name}" is a .${ext} — the app reads .xlsx, .csv, photos (.png/.jpg) and PDFs.]`);
       }
     } catch (e) { parts.push(`[Attachment could not be read: ${e.message}]`); }
   }
-  return { text: parts.join('\n\n'), names };
+  return { text: parts.join('\n\n'), names, media };
 }
 // Outlook often uploads an "attachment" to OneDrive/SharePoint and sends only a
 // LINK — no bytes in the payload. Microsoft's shares API can fetch anonymous
@@ -4330,9 +4338,14 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
   for (const r of routes) if (r.kind === 'address' && (r.value === plus || r.value === localPart || msg.to.includes(r.value))) { entity = r.entity; break; }
   if (!entity) { const sr = routes.find((r) => r.kind === 'sender' && r.value === msg.from); if (sr) { entity = sr.entity; requester = sr.label || msg.from; } }
   if (!entity) entity = getState('order_intake_default') || DETOX_LOCATION;
-  // Parse the email into line items (AI); fall back to one item = the whole email.
+  // Parse the email into line items (AI). Photos/screenshots/PDFs of order sheets
+  // go through vision; plain text through the text parser. Fall back to one
+  // reviewable order carrying everything we received.
   let parsed = null;
-  if (claudeConfigured()) { try { parsed = await extractOrderItems(msg.subject, msg.text); } catch { parsed = null; } }
+  if (claudeConfigured()) {
+    try { parsed = attach.media.length ? await extractOrderItemsDoc(msg.subject, msg.text, attach.media) : await extractOrderItems(msg.subject, msg.text); }
+    catch { parsed = null; }
+  }
   let created = 0;
   const itemNames = [];
   const insert = db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, vendor, link, priority, status, notes, requested_by, source) VALUES (?,?,?,?,?,?,?, 'requested', ?, ?, 'email')`);
@@ -4347,7 +4360,10 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
   }
   if (!created) {   // couldn't parse (or AI off) — capture the whole email as one order to review
     const label = (msg.subject || 'Emailed order') + (attach.names.length ? ` (+${attach.names.join(', ')})` : '');
-    insert.run(entity, label.slice(0, 200), '', 'Other', '', '', 'Normal', `via email from ${requester}. Original:\n${msg.text}`.slice(0, 1000), requester);
+    let diag = '';
+    if (attach.media.length) diag = `\n[${attach.media.map((m) => m.name).join(', ')} attached — the AI reader couldn't parse it this time; open the original email.]`;
+    else if (!attach.names.length && !cloud.tried && /attach/i.test(msg.subject + ' ' + msg.text)) diag = '\n[The email mentions an attachment but NONE reached the app — the mail flow may not be forwarding attachments yet (Power Automate trigger: Include Attachments = Yes, and map the Attachments field — step 3b of the setup instructions).]';
+    insert.run(entity, label.slice(0, 200), '', 'Other', '', '', 'Normal', `via email from ${requester}. Original:\n${msg.text}${diag}`.slice(0, 1000), requester);
     itemNames.push(label);
     created = 1;
   }

@@ -368,6 +368,26 @@ export async function extractOrderItems(subject, body) {
   return JSON.parse(t.text);
 }
 
+// Order emails where the list lives in a PHOTO/SCREENSHOT of a spreadsheet or a
+// PDF — read the pixels with vision, same schema as the text parser.
+export async function extractOrderItemsDoc(subject, bodyText, media) {
+  const client = await getClient();
+  const blocks = (media || []).slice(0, 3).map((m) => String(m.mediaType || '').startsWith('image/')
+    ? { type: 'image', source: { type: 'base64', media_type: m.mediaType, data: m.base64 } }
+    : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: m.base64 } });
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 3000,
+    system: G + 'You turn a staff member\'s emailed supply request into a clean list of order line-items. The order may be inside an attached photo/screenshot of a spreadsheet or a PDF — read every row of it. Only include things actually being requested to be ordered. Never invent items, vendors, or quantities that are not there.',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: ORDER_ITEMS_SCHEMA } },
+    messages: [{ role: 'user', content: [...blocks, { type: 'text', text: `Parse this order email — the items are likely in the attached image/PDF.\n\nSUBJECT: ${subject || '(none)'}\n\nBODY:\n${String(bodyText || '').slice(0, 8000)}` }] }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The request was declined.');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) throw new Error('Could not read the attachment.');
+  return JSON.parse(t.text);
+}
+
 // ---- Document extraction: read an uploaded PDF/image and pull structured fields ----
 async function extractFromDoc(base64, mediaType, system, schema, instruction) {
   const client = await getClient();

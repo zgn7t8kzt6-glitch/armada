@@ -340,6 +340,30 @@ function orgLocations() {
   try { const rows = db.prepare(`SELECT DISTINCT entity FROM hr_employees WHERE entity != '' ORDER BY entity`).all().map((r) => r.entity); if (rows.length) return rows; } catch { /* table may be empty */ }
   return ORG_LOCATIONS_FALLBACK;
 }
+// ── BHOS foundation: canonical facilities (org_facilities is the new spine) ──────
+function orgFacilities() { return db.prepare(`SELECT * FROM org_facilities WHERE active=1 ORDER BY sort, id`).all(); }
+// Resolve an entity-name spelling to its canonical facility (via entity_aliases).
+function facilityForEntity(name) {
+  const want = String(name || '').trim().toLowerCase();
+  if (!want) return null;
+  for (const f of orgFacilities()) {
+    if (f.name.toLowerCase() === want) return f;
+    try { for (const a of JSON.parse(f.entity_aliases || '[]')) if (String(a).toLowerCase() === want) return f; } catch { /* bad json */ }
+  }
+  return null;
+}
+app.get('/api/org/facilities', requireAuth, (req, res) => {
+  res.json({ facilities: orgFacilities(), departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
+});
+app.post('/api/org/facilities/:id', requireAuth, requireAdmin, (req, res) => {
+  const f = db.prepare(`SELECT * FROM org_facilities WHERE id=?`).get(req.params.id);
+  if (!f) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  db.prepare(`UPDATE org_facilities SET name=COALESCE(?,name), brand=COALESCE(?,brand), region=COALESCE(?,region), type=COALESCE(?,type), kipu_location_name=COALESCE(?,kipu_location_name), beds=?, active=COALESCE(?,active) WHERE id=?`)
+    .run(b.name!=null?String(b.name).slice(0,120):null, b.brand!=null?String(b.brand).slice(0,40):null, b.region!=null?String(b.region).slice(0,40):null, b.type!=null?String(b.type).slice(0,30):null, b.kipu_location_name!=null?String(b.kipu_location_name).slice(0,120):null, (b.beds===''||b.beds==null)?f.beds:+b.beds, b.active!=null?(b.active?1:0):null, f.id);
+  res.json({ ok: true });
+});
+
 // Insurance: the coverage lines we track, and which are REQUIRED so the matrix can
 // flag any entity that's missing one (configurable by the owner).
 const COVERAGE_TYPES = ['General Liability', 'Professional Liability', 'Property', 'Workers Compensation', 'Commercial Auto', 'Umbrella / Excess', 'Cyber Liability', 'Directors & Officers', 'Employment Practices (EPLI)', 'Abuse & Molestation'];

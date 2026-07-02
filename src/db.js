@@ -1577,21 +1577,6 @@ addColumn('facilities', 'preferred', 'INTEGER');       // 1 = approved reciproca
 addColumn('clients', 'discharged_by_kipu', 'TEXT');    // who did the discharge in Kipu (best-effort), for accountability
 addColumn('maintenance_requests', 'photo', 'TEXT');    // (legacy single photo — superseded by maintenance_photos)
 addColumn('maintenance_requests', 'facility', 'TEXT'); // which location the work order is for (multi-facility)
-addColumn('leases', 'landlord_email', 'TEXT');            // where landlord-responsibility emails go
-addColumn('leases', 'landlord_categories', 'TEXT');      // comma list of categories the landlord covers
-addColumn('order_requests', 'landlord_emailed', 'TEXT'); // when we auto-emailed the landlord (dedupe)
-addColumn('entity_records', 'status', 'TEXT');           // active | closed (archive)
-addColumn('leases', 'file_id', 'INTEGER');               // uploaded lease file (corp_files)
-addColumn('insurance_policies', 'file_id', 'INTEGER');   // uploaded policy file (corp_files)
-addColumn('hr_employees', 'hire_date', 'TEXT');          // drives onboarding + review scheduling
-addColumn('hr_employees', 'email', 'TEXT');
-addColumn('hr_employees', 'phone', 'TEXT');
-addColumn('hr_employees', 'department', 'TEXT');
-addColumn('hr_employees', 'manager', 'TEXT');
-addColumn('hr_employees', 'birthday', 'TEXT');           // MM-DD or YYYY-MM-DD — celebrations
-addColumn('hr_employees', 'term_date', 'TEXT');          // offboarding: last day
-addColumn('hr_employees', 'term_reason', 'TEXT');        // Resignation | Retirement | Layoff | Termination
-addColumn('hr_onboard_tasks', 'phase', 'TEXT');          // null/'onboard' | 'offboard'
 // Phase 2-4 HCOS tables: policy documents + acknowledgements, requisitions,
 // pulse/eNPS surveys, compensation history.
 db.exec(`CREATE TABLE IF NOT EXISTS hr_documents (
@@ -2041,6 +2026,108 @@ CREATE TABLE IF NOT EXISTS hr_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_hrev_emp ON hr_events(employee_id, id);`);
+// ── BHOS FOUNDATION: canonical facilities, departments, access & permissions ────
+// Phase 1 of the multi-facility reorganization. Additive only: these tables are the
+// new spine; existing modules keep working unchanged until each one is switched to
+// facility scoping (Phase 2+). Holdings (CGSS, SZS, Propco) are NOT facilities —
+// they live in entity_records only.
+db.exec(`CREATE TABLE IF NOT EXISTS org_facilities (
+  id INTEGER PRIMARY KEY,
+  fkey TEXT UNIQUE,                 -- stable key, e.g. 'detox-akron'
+  name TEXT NOT NULL,
+  brand TEXT,                       -- Armada | Spark | Hilltop | Reverie | Corporate
+  region TEXT,                      -- Ohio | Indiana | Corporate
+  type TEXT,                        -- detox | outpatient | sober-living | corporate
+  kipu_location_name TEXT,          -- how Kipu names it (blank = not in Kipu)
+  entity_aliases TEXT,              -- JSON array of entity-name spellings that map here
+  beds INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS org_departments (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS user_facility_access (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  facility_id INTEGER NOT NULL REFERENCES org_facilities(id) ON DELETE CASCADE,
+  role TEXT,                        -- role at THIS facility (defaults to users.job_role)
+  UNIQUE(user_id, facility_id)
+);
+CREATE TABLE IF NOT EXISTS role_permissions (
+  id INTEGER PRIMARY KEY,
+  role TEXT NOT NULL,               -- job_role or 'admin'
+  module TEXT NOT NULL,             -- corporate|facility_ops|admissions|census|clinical|casemgmt|peer|ur|billing|hr|finance|bd|compliance|scheduling|documents|tasks|reports|admin
+  action TEXT NOT NULL DEFAULT 'view',  -- view|create|edit|approve|delete|export
+  scope TEXT NOT NULL DEFAULT 'facility', -- corporate|regional|facility|department|assigned_only|self_only
+  allowed INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(role, module, action)
+);`);
+// facility_id on the core operating records — nullable, backfilled to Armada Detox
+// of Akron below. NO existing query filters on these yet (Phase 2 flips scoping
+// module-by-module), so behavior is unchanged.
+addColumn('clients', 'facility_id', 'INTEGER');
+addColumn('shifts', 'facility_id', 'INTEGER');
+addColumn('inventory_items', 'facility_id', 'INTEGER');
+addColumn('incidents', 'facility_id', 'INTEGER');
+addColumn('expected_arrivals', 'facility_id', 'INTEGER');
+addColumn('admissions', 'facility_id', 'INTEGER');
+// One-time seed + backfill (gated).
+try {
+  const done = db.prepare(`SELECT value FROM app_state WHERE key='org_foundation_v1'`).get();
+  if (!done) {
+    const insF = db.prepare(`INSERT INTO org_facilities (fkey,name,brand,region,type,kipu_location_name,entity_aliases,sort) VALUES (?,?,?,?,?,?,?,?)`);
+    const F = [
+      ['detox-akron','Armada Detox of Akron','Armada','Ohio','detox','', ['Armada Detox of Akron','Armada Detox of Akron LLC']],
+      ['akron-house','Armada Recovery of Akron','Armada','Ohio','outpatient','Akron House Recovery', ['Akron House Recovery, LLC','Akron House Recovery LLC']],
+      ['dayton','Armada Recovery of Dayton','Armada','Ohio','outpatient','Dayton', ['Armada Recovery Dayton, LLC','Armada Recovery of Dayton LLC']],
+      ['hilltop-akron','Hilltop Recovery Home — Akron','Hilltop','Ohio','sober-living','', ['Hilltop Recovery Home, LLC - AKRON','Hilltop Recovery Home (AKRON) LLC']],
+      ['hilltop-dayton','Hilltop Recovery Home — Dayton','Hilltop','Ohio','sober-living','', ['Hilltop Recovery Dayton, LLC','Hilltop Recovery Home of DAYTON, LLC']],
+      ['spark-indy','Spark Recovery of Indianapolis','Spark','Indiana','outpatient','Indianapolis', ['Spark Recovery, LLC','Spark Recovery of Indiana, LLC']],
+      ['reverie-indy','Reverie Sober Living of Indianapolis','Reverie','Indiana','sober-living','', ['Reverie Sober Living of Indianapolis','Reverie Sober Living of Indianapolis LLC']],
+      ['wheatfield','Armada Recovery of Wheatfield','Armada','Indiana','outpatient','Wheatfield', ['Armada Recovery of Wheatfield LLC','Wheatfield Recovery Propco LLC']],
+      ['corporate','Armada Recovery LLC (Corporate)','Corporate','Corporate','corporate','', ['Armada Recovery LLC ("Corporate")','Armada Recovery  LLC','armada Recovery LLC ("Corporate")']],
+    ];
+    F.forEach((f,i)=>insF.run(f[0],f[1],f[2],f[3],f[4],f[5],JSON.stringify(f[6]),i));
+    const insD = db.prepare(`INSERT OR IGNORE INTO org_departments (name,sort) VALUES (?,?)`);
+    ['Nursing','Clinical / Therapy','Case Management','BHT / Direct Care','Front Desk / Admissions','Kitchen / Dietary','Housekeeping','Maintenance','Housing','Peer Support','Administration','HR','Finance','Business Development'].forEach((n,i)=>insD.run(n,i));
+    // Backfill: every existing operating record belongs to the detox facility.
+    const detox = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get().id;
+    for (const t of ['clients','shifts','inventory_items','incidents','expected_arrivals','admissions']) {
+      try { db.prepare(`UPDATE ${t} SET facility_id=? WHERE facility_id IS NULL`).run(detox); } catch { /* table may be empty */ }
+    }
+    // user_facility_access seed replicating today's walls: housing roles → Hilltop
+    // Akron; corporate/HR/leadership + admins → all facilities; everyone else → detox.
+    const facs = db.prepare(`SELECT id FROM org_facilities WHERE active=1`).all().map(r=>r.id);
+    const hilltopAkron = db.prepare(`SELECT id FROM org_facilities WHERE fkey='hilltop-akron'`).get().id;
+    const insA = db.prepare(`INSERT OR IGNORE INTO user_facility_access (user_id,facility_id,role) VALUES (?,?,?)`);
+    for (const u of db.prepare(`SELECT id, role, job_role FROM users WHERE active=1`).all()) {
+      const jr = u.job_role || '';
+      if (u.role==='admin' || ['Executive Director','Executive Assistant','HR'].includes(jr)) facs.forEach(f=>insA.run(u.id,f,jr||'admin'));
+      else if (['Housing Director','House Manager','Recovery Coach'].includes(jr)) insA.run(u.id,hilltopAkron,jr);
+      else insA.run(u.id,detox,jr);
+    }
+    // role_permissions seed (view-level, replicates current walls; enforcement is
+    // Phase 2 and switches on module-by-module — nothing reads these yet).
+    const insP = db.prepare(`INSERT OR IGNORE INTO role_permissions (role,module,action,scope) VALUES (?,?,'view',?)`);
+    const ALLM = ['corporate','facility_ops','admissions','census','clinical','casemgmt','peer','ur','billing','hr','finance','bd','compliance','scheduling','documents','tasks','reports','admin'];
+    for (const m of ALLM) { insP.run('admin',m,'corporate'); insP.run('Executive Director',m,'corporate'); }
+    for (const m of ['facility_ops','admissions','census','clinical','casemgmt','scheduling','compliance','tasks','reports']) insP.run('Director of Operations',m,'facility');
+    for (const m of ['clinical','census','casemgmt','admissions','compliance','tasks','reports','scheduling']) insP.run('Clinical Director',m,'facility');
+    for (const m of ['clinical','census','casemgmt','tasks']) { insP.run('Nurse',m,'facility'); insP.run('BHT / Tech',m,'facility'); insP.run('Therapist',m,'facility'); insP.run('Case Manager',m,'facility'); }
+    for (const m of ['admissions','census','bd','tasks']) insP.run('Front Desk',m,'facility');
+    for (const m of ['facility_ops','tasks']) { insP.run('Housekeeping',m,'facility'); insP.run('Catering / Dietary',m,'facility'); }
+    for (const m of ['facility_ops','census','clinical','casemgmt','peer','compliance','scheduling','tasks','reports']) { insP.run('Housing Director',m,'facility'); insP.run('House Manager',m,'facility'); }
+    for (const m of ['peer','casemgmt','tasks']) insP.run('Recovery Coach',m,'facility');
+    for (const m of ['facility_ops','finance','documents','tasks','compliance']) insP.run('Executive Assistant',m,'corporate');
+    for (const m of ['hr','documents','compliance','tasks','reports']) insP.run('HR',m,'corporate');
+    db.prepare(`INSERT OR REPLACE INTO app_state (key,value) VALUES ('org_foundation_v1', datetime('now'))`).run();
+    console.log('[bhos] foundation seeded: 9 facilities, departments, access map, permission matrix; facility_id backfilled to Armada Detox of Akron');
+  }
+} catch (e) { console.error('[bhos] foundation seed:', e.message); }
+
 // Insurance brokers / agents — who to call per policy.
 db.exec(`CREATE TABLE IF NOT EXISTS insurance_brokers (
   id INTEGER PRIMARY KEY,
@@ -2491,3 +2578,23 @@ export function audit({ user, action, entity = null, entity_id = null, detail = 
 }
 
 export default db;
+
+// ── Late-table column additions ────────────────────────────────────────────────
+// These tables are created above (corp/HCOS sections), AFTER the main addColumn
+// block — so their column migrations must run here, at the end of the schema, or a
+// brand-new database crashes on first boot ('no such table').
+addColumn('leases', 'landlord_email', 'TEXT');            // where landlord-responsibility emails go
+addColumn('leases', 'landlord_categories', 'TEXT');      // comma list of categories the landlord covers
+addColumn('order_requests', 'landlord_emailed', 'TEXT'); // when we auto-emailed the landlord (dedupe)
+addColumn('entity_records', 'status', 'TEXT');           // active | closed (archive)
+addColumn('leases', 'file_id', 'INTEGER');               // uploaded lease file (corp_files)
+addColumn('insurance_policies', 'file_id', 'INTEGER');   // uploaded policy file (corp_files)
+addColumn('hr_employees', 'hire_date', 'TEXT');          // drives onboarding + review scheduling
+addColumn('hr_employees', 'email', 'TEXT');
+addColumn('hr_employees', 'phone', 'TEXT');
+addColumn('hr_employees', 'department', 'TEXT');
+addColumn('hr_employees', 'manager', 'TEXT');
+addColumn('hr_employees', 'birthday', 'TEXT');           // MM-DD or YYYY-MM-DD — celebrations
+addColumn('hr_employees', 'term_date', 'TEXT');          // offboarding: last day
+addColumn('hr_employees', 'term_reason', 'TEXT');        // Resignation | Retirement | Layoff | Termination
+addColumn('hr_onboard_tasks', 'phase', 'TEXT');          // null/'onboard' | 'offboard'

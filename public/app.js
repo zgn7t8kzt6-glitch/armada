@@ -5634,16 +5634,19 @@ async function loadOwnership(){
   const armada=(d.facilities||[]).filter(f=>f.connection==='armada');
   const spark=(d.facilities||[]).filter(f=>f.connection==='spark');
   const tbl=(rows)=>`<table class="tbl"><tr><th>Facility</th><th>Census</th><th>Admits</th><th>Discharges</th><th>Occupancy</th></tr>${rows.map(facRow).join('')}</table>`;
-  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🏛️ Ownership — all locations</h3><p class="sub sans" style="margin:0">Consolidated census, admits &amp; discharges across every facility. Owner-only.</p></div>
+  const mods=[['📊 Executive','ownership',''],['👥 HR OS','hcos','show(\'hcos\')'],['🗂️ Corporate Hub','corphub','show(\'corphub\')'],['🏥 Outpatient','outpatient','show(\'outpatient\')'],['🧲 Hiring','hiring','show(\'hiring\')'],['🏥 Facility (Detox)','command','show(\'command\')']];
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🏢 Corporate Command Center</h3><p class="sub sans" style="margin:0">The parent-company view — census, movement, people &amp; money across every facility. Owner &amp; corporate only.</p></div>
       <div class="toolbar" style="gap:6px;margin:0"><div class="itabs"><button class="itab" onclick="ownPreset('mtd')">MTD</button><button class="itab" onclick="ownPreset(7)">7d</button><button class="itab" onclick="ownPreset(30)">30d</button></div></div></div>
       <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="hint">From <input type="date" id="own_since" value="${esc(OWN_PERIOD.since)}" onchange="ownPeriodChange()"/></label><label class="hint">To <input type="date" id="own_end" value="${esc(OWN_PERIOD.end)}" onchange="ownPeriodChange()"/></label></div>
       <div class="ret-cards" style="margin-top:8px">${box(t.census||0,'Total census',(t.census?'rc-elev':''))}${box(t.admits||0,'Admits in window')}${box(t.discharges||0,'Discharges')}${box(t.facilities||0,'Live facilities')}</div>
       ${(d.byBrand||[]).length>1?`<div class="hint" style="margin-top:6px">${(d.byBrand||[]).map(b=>`<strong>${esc(b.brand)}</strong>: ${b.census} census · ${b.admits} admits · ${b.discharges} disch.`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>
+    <div class="corp-tabs" style="margin:2px 0 0">${mods.map(m=>`<button ${m[1]==='ownership'?'class="active"':''} onclick="${m[2]||'void(0)'}">${m[0]}</button>`).join('')}</div>
     <div class="card"><h3 style="margin-top:0">Armada — Kipu <span class="hint" style="font-weight:400">· live</span></h3>${tbl(armada)}</div>
     <div class="card"><h3 style="margin-top:0">Spark${d.sparkPending?' <span class="hint" style="font-weight:400;color:#a60">· connection pending</span>':''}</h3>${d.sparkPending?'<div class="pc-note" style="color:#a60;margin-bottom:6px">These come online the moment you give me the Spark Kipu credentials — the rows are already wired.</div>':''}${tbl(spark)}</div>
     ${ME.role==='admin'?`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">👥 Employees — by location</h3><p class="sub sans" style="margin:0">Everyone across every entity, with job title &amp; salary. Owner-only.</p></div></div><div id="ownHr"><div class="hint">Loading roster…</div></div></div>`:''}
-    ${ME.role==='admin'?`<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">⚙️ Facility mapping <span class="hint" style="font-weight:400">— owner only</span></h3><p class="sub sans">If a facility shows no data, its Kipu location name here may not match Kipu. Use “List locations” in Akron Outpatient settings to see exact names, then fix them here.</p><div id="ownFacilities" class="hint">Loading…</div></div>`:''}`;
-  if(ME.role==='admin'){ loadFacilityEditor(); loadHrRoster(); }
+    ${ME.role==='admin'?`<div class="card"><h3 style="margin-top:0">🏢 Facilities registry <span class="hint" style="font-weight:400">— canonical (BHOS spine)</span></h3><p class="sub sans" style="margin:0 0 6px">The official facility list every module keys on going forward. Holdings (CGSS/SZS/Propco) are corporate entities, not facilities.</p><div id="orgFacs"><div class="hint">Loading…</div></div></div>`:''}
+    ${ME.role==='admin'?`<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">⚙️ Kipu facility mapping <span class="hint" style="font-weight:400">— owner only (legacy; converges into the registry)</span></h3><p class="sub sans">If a facility shows no data, its Kipu location name here may not match Kipu. Use “List locations” in Akron Outpatient settings to see exact names, then fix them here.</p><div id="ownFacilities" class="hint">Loading…</div></div>`:''}`;
+  if(ME.role==='admin'){ loadFacilityEditor(); loadHrRoster(); loadOrgFacs(); }
 }
 let HR_SHOW_SAL=false;
 async function loadHrRoster(){
@@ -5701,6 +5704,24 @@ async function saveHr(id){
 }
 function ownPreset(p){ const e=today(); if(p==='mtd'){ OWN_PERIOD={since:e.slice(0,8)+'01',end:e}; } else { const d=new Date(e+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-(p-1)); OWN_PERIOD={since:d.toISOString().slice(0,10),end:e}; } loadOwnership(); }
 function ownPeriodChange(){ OWN_PERIOD={since:($('own_since')||{}).value||OWN_PERIOD.since, end:($('own_end')||{}).value||OWN_PERIOD.end}; loadOwnership(); }
+async function loadOrgFacs(){
+  const host=$('orgFacs'); if(!host) return;
+  let d; try{ d=await api('/org/facilities'); }catch(e){ host.textContent=e.message; return; }
+  const fs=d.facilities||[];
+  host.innerHTML=`<table class="tbl"><tr><th>Facility</th><th>Brand</th><th>Region</th><th>Type</th><th>Beds</th><th>Kipu name</th><th></th></tr>${fs.map(f=>`<tr>
+    <td><strong>${esc(f.name)}</strong><div class="hint">${esc(f.fkey)}</div></td>
+    <td><input data-of="${f.id}" data-k="brand" value="${esc(f.brand||'')}" style="width:90px"/></td>
+    <td><input data-of="${f.id}" data-k="region" value="${esc(f.region||'')}" style="width:80px"/></td>
+    <td><input data-of="${f.id}" data-k="type" value="${esc(f.type||'')}" style="width:100px"/></td>
+    <td><input data-of="${f.id}" data-k="beds" value="${f.beds!=null?f.beds:''}" style="width:60px"/></td>
+    <td><input data-of="${f.id}" data-k="kipu_location_name" value="${esc(f.kipu_location_name||'')}" style="width:130px"/></td>
+    <td><button class="btn btn-ghost btn-sm sans" onclick="saveOrgFac(${f.id})">Save</button></td></tr>`).join('')}</table>
+  <div class="hint" style="margin-top:4px">Regions: Ohio · Indiana · Corporate. Every new module keys on this list (facility_id), so keep it accurate.</div>`;
+}
+async function saveOrgFac(id){
+  const b={}; document.querySelectorAll(`[data-of="${id}"]`).forEach(el=>{ b[el.dataset.k]=el.value; });
+  try{ await api('/org/facilities/'+id,{method:'POST',body:JSON.stringify(b)}); loadOrgFacs(); }catch(e){ alert(e.message); }
+}
 async function loadFacilityEditor(){
   const host=$('ownFacilities'); if(!host) return;
   let d; try{ d=await api('/facilities'); }catch(e){ host.textContent=e.message; return; }

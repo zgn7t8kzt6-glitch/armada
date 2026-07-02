@@ -1588,6 +1588,64 @@ addColumn('hr_employees', 'email', 'TEXT');
 addColumn('hr_employees', 'phone', 'TEXT');
 addColumn('hr_employees', 'department', 'TEXT');
 addColumn('hr_employees', 'manager', 'TEXT');
+addColumn('hr_employees', 'birthday', 'TEXT');           // MM-DD or YYYY-MM-DD — celebrations
+addColumn('hr_employees', 'term_date', 'TEXT');          // offboarding: last day
+addColumn('hr_employees', 'term_reason', 'TEXT');        // Resignation | Retirement | Layoff | Termination
+addColumn('hr_onboard_tasks', 'phase', 'TEXT');          // null/'onboard' | 'offboard'
+// Phase 2-4 HCOS tables: policy documents + acknowledgements, requisitions,
+// pulse/eNPS surveys, compensation history.
+db.exec(`CREATE TABLE IF NOT EXISTS hr_documents (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  category TEXT DEFAULT 'Policy',           -- Policy | Handbook | Safety | Benefits | Other
+  body TEXT,                                -- the policy text (shown for acknowledgement)
+  url TEXT,                                 -- or a link to the document
+  requires_ack INTEGER NOT NULL DEFAULT 1,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS hr_doc_acks (
+  id INTEGER PRIMARY KEY,
+  doc_id INTEGER NOT NULL REFERENCES hr_documents(id) ON DELETE CASCADE,
+  user_id INTEGER,
+  user_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(doc_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS hr_requisitions (
+  id INTEGER PRIMARY KEY,
+  position TEXT NOT NULL,
+  entity TEXT,
+  department TEXT,
+  salary_range TEXT,
+  urgency TEXT DEFAULT 'Normal',            -- Low | Normal | High | Urgent
+  replacement INTEGER NOT NULL DEFAULT 0,   -- 1 = replacing someone; 0 = new position
+  justification TEXT,
+  requested_by TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | rejected | filled
+  decided_by TEXT,
+  decided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS hr_pulse (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER,
+  user_name TEXT,
+  score INTEGER NOT NULL,                   -- 0-10 eNPS
+  comment TEXT,
+  month TEXT NOT NULL,                      -- YYYY-MM
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, month)
+);
+CREATE TABLE IF NOT EXISTS hr_comp_history (
+  id INTEGER PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  old_salary REAL,
+  new_salary REAL,
+  note TEXT,
+  by_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 // Uploaded corporate documents (insurance contracts, leases). Stored as base64 so the
 // AI can read them and they're downloadable.
 db.exec(`CREATE TABLE IF NOT EXISTS corp_files (

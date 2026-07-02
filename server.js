@@ -4358,30 +4358,42 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
       created++;
     }
   }
+  let fellBack = false, diagPlain = '';
   if (!created) {   // couldn't parse (or AI off) — capture the whole email as one order to review
-    const label = (msg.subject || 'Emailed order') + (attach.names.length ? ` (+${attach.names.join(', ')})` : '');
-    let diag = '';
-    if (attach.media.length) diag = `\n[${attach.media.map((m) => m.name).join(', ')} attached — the AI reader couldn't parse it this time; open the original email.]`;
-    else if (!attach.names.length && !cloud.tried && /attach/i.test(msg.subject + ' ' + msg.text)) diag = '\n[The email mentions an attachment but NONE reached the app — the mail flow may not be forwarding attachments yet (Power Automate trigger: Include Attachments = Yes, and map the Attachments field — step 3b of the setup instructions).]';
-    insert.run(entity, label.slice(0, 200), '', 'Other', '', '', 'Normal', `via email from ${requester}. Original:\n${msg.text}${diag}`.slice(0, 1000), requester);
+    fellBack = true;
+    const cleanSubject = String(msg.subject || '').replace(/^\s*((fwd?|re|fw)\s*:\s*)+/i, '').trim();
+    const label = (cleanSubject || 'Emailed order — needs review') + (attach.names.length ? ` (+${attach.names.join(', ')})` : '');
+    if (attach.media.length) diagPlain = `${attach.media.map((m) => m.name).join(', ')} arrived but couldn't be read automatically this time.`;
+    else if (!attach.names.length && !cloud.tried) diagPlain = 'No attachment reached the app — if you attached a file, the mail flow isn\'t forwarding attachments yet (IT: Power Automate trigger "Include Attachments = Yes" + map the Attachments field — step 3b of the setup instructions). If the order was in the email text, there wasn\'t a readable item list.';
+    insert.run(entity, label.slice(0, 200), '', 'Other', '', '', 'Normal', `via email from ${requester}. NEEDS HAND-REVIEW${diagPlain ? ' — ' + diagPlain : ''}\nOriginal:\n${msg.text}`.slice(0, 1000), requester);
     itemNames.push(label);
     created = 1;
   }
-  console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}${attach.names.length ? ' (spreadsheet: ' + attach.names.join(', ') + ')' : ''}${cloud.failed ? ' (' + cloud.failed + ' cloud link(s) unreadable)' : ''}`);
-  publishEvent({ event: 'email.order_received', entity: 'order', facility_id: facilityForEntity(entity)?.id ?? null, actor: msg.from, summary: `${created} item${created === 1 ? '' : 's'} emailed in · ${entity}` });
-  // Confirmation reply to the sender ("✓ Got it") — best-effort, never blocks intake.
+  console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}${fellBack ? ' (FALLBACK — nothing parsed)' : ''}${attach.names.length ? ' (attachments: ' + attach.names.join(', ') + ')' : ''}${cloud.failed ? ' (' + cloud.failed + ' cloud link(s) unreadable)' : ''}`);
+  publishEvent({ event: 'email.order_received', entity: 'order', facility_id: facilityForEntity(entity)?.id ?? null, actor: msg.from, summary: `${fellBack ? 'Order email needs hand-review' : created + ' item' + (created === 1 ? '' : 's') + ' emailed in'} · ${entity}` });
+  // Confirmation reply — HONEST: "got it" only when items were actually read.
+  // A fallback tells the sender we couldn't read it and exactly what to do.
   if (emailConfigured() && getState('order_intake_confirm') !== 'off' && /@/.test(msg.from)) {
     const esc = htmlEsc;
-    const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:520px">
+    const html = fellBack
+      ? `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:520px">
+      <p>⚠️ We received your email for <strong>${esc(entity)}</strong>, but <strong>couldn't read an item list</strong> from it.</p>
+      ${diagPlain ? `<p style="color:#a60">${esc(diagPlain)}</p>` : ''}
+      <p>It's parked on the corporate queue for a human to review, so it won't be lost — but to have your items ordered fastest:</p>
+      <div>• type the items in the email body ("2 cases nitrile gloves, 6 bags coffee"), or</div>
+      <div>• attach the Excel/CSV <strong>as a copy</strong> (paperclip → Browse this computer), or</div>
+      <div>• attach a clear photo of the list (.jpg/.png) or a PDF.</div>
+      <p style="color:#888;font-size:12px;margin-top:12px">Armada Care Standards — automated order intake.</p></div>`
+      : `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:520px">
       <p>✓ Got it — <strong>${created} item${created === 1 ? '' : 's'}</strong> queued for <strong>${esc(entity)}</strong>:</p>
       ${itemNames.map((n) => `<div>• ${esc(n)}</div>`).join('')}
       ${cloud.failed ? `<p style="color:#a60;margin-top:10px"><strong>P.S.</strong> — the OneDrive/SharePoint link in your email couldn't be opened (it requires sign-in). Next time, attach the file as a <strong>copy</strong> (paperclip → Browse this computer), or set the link to "Anyone with the link" — then we read the spreadsheet automatically.</p>` : ''}
       <p style="color:#555;margin-top:12px">Corporate will place the order and you'll hear if anything needs clarifying. No need to reply.</p>
       <p style="color:#888;font-size:12px">Armada Care Standards — automated order intake.</p></div>`;
-    sendEmail({ to: msg.from, subject: `✓ Order received — ${created} item${created === 1 ? '' : 's'} for ${entity}`, html, suppressCc: true })
+    sendEmail({ to: msg.from, subject: fellBack ? `⚠️ Order email received — we couldn't read the items (${entity})` : `✓ Order received — ${created} item${created === 1 ? '' : 's'} for ${entity}`, html, suppressCc: true })
       .catch((e) => console.error('[intake] confirm email:', e.message));
   }
-  res.json({ ok: true, entity, created });
+  res.json({ ok: true, entity, created, needsReview: fellBack });
 });
 app.get('/api/corp/intake', requireAuth, requireCorp, (req, res) => {
   const routes = db.prepare(`SELECT * FROM order_intake_routes WHERE active = 1 ORDER BY kind, value`).all();

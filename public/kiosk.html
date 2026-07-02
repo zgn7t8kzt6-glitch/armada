@@ -259,33 +259,39 @@ function thanks(msg){
 function meetView(){
   VIEW='meet';
   CLIENT=client();
+  KM_DEPT=''; KM_WHO='';
+  const reasons=['Housing','Family','Insurance / benefits','Medication questions','Legal / court','Work or school','My discharge plan','Transportation','How I\'m feeling','Cravings or urges','A conflict with someone','Paperwork I need','Something private'];
   $('kview').innerHTML=`<h1>Meet with your care team 🤝</h1>
-    <p class="ksub">Tell us who you need and we'll get you on their schedule — you'll see your place in line and the time we commit to.</p>
+    <p class="ksub">Tell us who you need and what it's about — so the right person comes ready to actually help, not just to say hi.</p>
     <label>Your name <span style="color:#c0392b">*</span></label>
     <select id="kmclient"><option value="">— choose your name —</option>${DATA.clients.map(c=>`<option value="${c.id}"${String(c.id)===String(CLIENT)?' selected':''}>${esc(c.pref||c.name)}${c.room?' · '+esc(c.room):''}</option>`).join('')}</select>
-    <label style="margin-top:10px;display:block">Who do you need?</label>
+    <label style="margin-top:10px;display:block">Who do you need? <span style="color:#c0392b">*</span></label>
     <div id="kmwho">
       <button class="kbtn" data-dept="Case Management" data-t="my case manager" onclick="kmPick(this)">📋  My case manager</button>
       <button class="kbtn" data-dept="Therapy" data-t="my therapist" onclick="kmPick(this)">🗣  My therapist</button>
       <button class="kbtn" data-dept="Case Management" data-t="someone from the care team" onclick="kmPick(this)">💬  Someone to talk to</button>
     </div>
-    <label style="margin-top:10px;display:block">What's it about? (optional)</label>
-    <textarea id="kmtext" placeholder="e.g. housing paperwork, family visit, how I'm feeling…"></textarea>
+    <label style="margin-top:10px;display:block">What's it about? (tap all that apply)</label>
+    <div id="kmreasons" style="display:flex;flex-wrap:wrap;gap:8px">${reasons.map(r=>`<button class="kbtn" style="width:auto;flex:0 0 auto;padding:12px 16px;margin:0" data-r="${esc(r)}" onclick="this.classList.toggle('kon');this.style.borderColor=this.classList.contains('kon')?'var(--gold)':'';this.style.background=this.classList.contains('kon')?'#faf3e6':''">${esc(r)}</button>`).join('')}</div>
+    <label style="margin-top:10px;display:block">Anything else? (optional)</label>
+    <textarea id="kmtext" placeholder="In your own words…"></textarea>
     <div id="kmerr" class="err"></div>
+    <button class="btn btn-gold big" style="width:100%;margin-top:10px" onclick="sendMeet()">Ask for the meeting</button>
     <button class="kbtn" onclick="home()">← Back</button>`;
 }
 let KM_DEPT='', KM_WHO='';
 function kmPick(b){
   KM_DEPT=b.dataset.dept; KM_WHO=b.dataset.t;
-  document.querySelectorAll('#kmwho .kbtn').forEach(x=>x.style.borderColor='');
-  b.style.borderColor='var(--gold)';
-  sendMeet();
+  document.querySelectorAll('#kmwho .kbtn').forEach(x=>{ x.style.borderColor=''; x.style.background=''; });
+  b.style.borderColor='var(--gold)'; b.style.background='#faf3e6';
 }
 async function sendMeet(){
   const cid=($('kmclient')||{}).value;
-  if(!cid){ if($('kmerr')) $('kmerr').textContent='Please choose your name first, then tap who you need.'; const sl=$('kmclient'); if(sl){ sl.focus(); sl.style.borderColor='#c0392b'; } return; }
+  if(!cid){ if($('kmerr')) $('kmerr').textContent='Please choose your name first.'; const sl=$('kmclient'); if(sl){ sl.focus(); sl.style.borderColor='#c0392b'; } return; }
+  if(!KM_DEPT){ if($('kmerr')) $('kmerr').textContent='Tap who you need — your case manager, therapist, or someone to talk to.'; return; }
+  const picked=[...document.querySelectorAll('#kmreasons .kon')].map(b=>b.dataset.r);
   const why=(($('kmtext')||{}).value||'').trim();
-  const text='Meeting request: '+KM_WHO+(why?' — '+why:'');
+  const text='Meeting request: '+KM_WHO+(picked.length?' — about: '+picked.join(', '):'')+(why?' — "'+why+'"':'');
   await kapi('request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,client_id:cid,department:KM_DEPT,text})});
   let wait=null; try{ const q=await kapi('queue?code='+encodeURIComponent(CODE)+'&client_id='+encodeURIComponent(cid)); wait=q.estWaitMin; }catch(e){}
   QCLIENT=cid;

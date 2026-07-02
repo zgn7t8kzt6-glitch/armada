@@ -10966,7 +10966,10 @@ app.post('/api/kiosk/request', requireKiosk, (req, res) => {
   // Distress detection: a client signalling they want to leave / are struggling
   // is a safety + Save moment — flag it loudly so a human goes to them now.
   const distress = /\b(leave|leaving|go home|sign out|ama|can'?t do this|done with this|want out|give up|hurt myself|kill myself|suicid|hopeless|panic|can'?t breathe|withdraw|sick)\b/i.test(text);
-  const priority = distress ? 'Urgent' : 'Normal';
+  // Checklist-driven urgency: cravings/urges from the meeting-request checklist is
+  // a relapse-risk signal in detox — bump it so the care team sees it first.
+  const elevated = /craving|urge to use|urges\b/i.test(text);
+  const priority = distress ? 'Urgent' : elevated ? 'High' : 'Normal';
   const dept = b.department || 'Front Desk / Concierge';
   const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, ?, ?)`)
     .run(b.client_id || null, dept, text, priority, 'Client (kiosk)');

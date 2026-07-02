@@ -5633,7 +5633,26 @@ async function loadAdmitCheck(){
     <div class="ret-cards">${box(f.census,'Patients here')}${box(f.scheduledToday,'Scheduled today')}${box(f.admittedToday,'Admitted today')}${box(f.dischargedToday,'Discharged today')}</div></div>
     <div class="card"><h3 style="margin-top:0">Admits — last 3 days</h3><table class="tbl"><tr><th>Patient</th><th>Stored admit date</th><th>Source</th><th>Status</th><th>Counts today?</th></tr>${admitRows}</table></div>
     <div class="card"><h3 style="margin-top:0">Discharges — last 3 days</h3><table class="tbl"><tr><th>Patient</th><th>Stored discharge date</th><th>Status</th><th>Source</th><th>Counts today?</th></tr>${dischRows}</table></div>
-    <div class="card"><h3 style="margin-top:0">Scheduled arrivals</h3><table class="tbl"><tr><th>Name</th><th>Scheduled date</th><th>Status</th><th>Is today?</th></tr>${schedRows}</table></div>`;
+    <div class="card"><h3 style="margin-top:0">Scheduled arrivals</h3><table class="tbl"><tr><th>Name</th><th>Scheduled date</th><th>Status</th><th>Is today?</th></tr>${schedRows}</table></div>
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🧾 Reconcile a window <span class="hint" style="font-weight:400">· app vs Salesforce, name by name</span></h3><p class="sub sans" style="margin:0">The exact admits the app counted, each flagged with why the two systems can disagree: readmissions (second casefile = second admit here, often one opportunity there), same-day discharges, duplicates, manual rows.</p></div></div>
+      <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <label class="hint">From <input type="date" id="rec_since" value="${today().slice(0,8)}01"/></label>
+        <label class="hint">To <input type="date" id="rec_end" value="${today()}"/></label>
+        <button class="btn btn-gold btn-sm sans" onclick="loadAdmitRecon()">Show the exact list</button></div>
+      <div id="reconBody"></div></div>`;
+}
+async function loadAdmitRecon(){
+  const host=$('reconBody'); if(!host) return;
+  host.innerHTML='<div class="skel" style="height:60px;margin-top:8px"></div>';
+  const since=($('rec_since')||{}).value||'', end=($('rec_end')||{}).value||'';
+  let d; try{ d=await api('/diag/admits?since='+encodeURIComponent(since)+'&end='+encodeURIComponent(end)); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const fpill=(f)=>`<span class="badge-${f==='readmit'?'warn':f==='same-day discharge'?'info':f.startsWith('duplicate')?'crit':'idle'}">${esc(f)}</span>`;
+  const rows=(d.admits||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong>${a.referral?`<div class="hint">${esc(a.referral)}</div>`:''}</td><td>${esc(a.admit)}${a.time?' <span class="hint">'+esc(a.time)+'</span>':''}</td><td>${a.discharged?esc(a.discharged)+(a.status?' <span class="hint">'+esc(a.status)+'</span>':''):'<span class="badge-ok">still here</span>'}</td><td class="hint">${esc(a.source)}</td><td>${a.flags.map(fpill).join(' ')||''}</td></tr>`).join('');
+  host.innerHTML=`<div class="ret-cards" style="margin-top:8px">
+      ${box(d.total,'Admit rows (this list)')}${box(d.commandCenterCount,'Command Center counts')}${box(d.distinctPeople,'Distinct people',(d.distinctPeople<d.total?'rc-elev':''))}${box(d.readmits,'Readmissions',(d.readmits?'rc-warn':''))}${box(d.sameDay,'Same-day discharges')}${box(d.manual,'Manual rows')}</div>
+    <div class="hint" style="margin:6px 0">Compare <strong>Distinct people</strong> to Salesforce — readmissions and duplicates are the usual gap. ${d.total-d.distinctPeople?`<strong>${d.total-d.distinctPeople}</strong> of the difference is people appearing more than once in this window.`:''}</div>
+    <table class="tbl"><tr><th>Patient</th><th>Admit</th><th>Discharged</th><th>Source</th><th>Why counts differ</th></tr>${rows}</table>`;
 }
 /* ───────── AKRON OUTPATIENT (owner-only, separate Kipu location) ───────── */
 let OP_DATA=null, OP_PERIOD=null;

@@ -3045,6 +3045,47 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+// ── Admit reconciliation — the EXACT admits the app counted for a window, one row
+// per person with the reasons the app-vs-Salesforce number can differ flagged on
+// each: readmission (same person, second casefile), duplicate rows in the window,
+// same-day discharge (chart opened but SF may mark not-admitted), manual rows.
+// Read-only; built to settle "the app says 90, Salesforce says 85" by name.
+app.get('/api/diag/admits', requireAuth, requireAdmin, (req, res) => {
+  const today = appToday();
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : today.slice(0, 8) + '01';
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;
+  const rows = db.prepare(`SELECT id, name, pref, kipu_id, admit, admit_time, discharge_date, discharge_status, source, active, referral_source FROM clients WHERE merged_into IS NULL AND admit IS NOT NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ? ORDER BY admit, name`).all(since, end);
+  // What the Corporate Command Center counts for this window (DISTINCT kipu_id+name):
+  const ccCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT DISTINCT kipu_id, name FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?)`).get(since, end).n;
+  const nameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z ]/g, '').trim();
+  const nameCount = {};
+  rows.forEach((r) => { const k = nameKey(r.name); nameCount[k] = (nameCount[k] || 0) + 1; });
+  const prior = db.prepare(`SELECT COUNT(*) n FROM clients WHERE merged_into IS NULL AND lower(name) = lower(?) AND admit IS NOT NULL AND substr(admit,1,10) < ?`);
+  const admits = rows.map((r) => {
+    const k = nameKey(r.name);
+    const adm = String(r.admit).slice(0, 10);
+    const readmit = prior.get(r.name, adm).n > 0;
+    const sameDay = r.discharge_date && String(r.discharge_date).slice(0, 10) === adm;
+    const flags = [
+      readmit ? 'readmit' : null,
+      nameCount[k] > 1 ? 'duplicate in window' : null,
+      sameDay ? 'same-day discharge' : null,
+      !r.kipu_id ? 'manual row (not from Kipu)' : null,
+    ].filter(Boolean);
+    return { name: r.name, admit: adm, time: r.admit_time || '', source: r.source || 'manual', discharged: r.discharge_date ? String(r.discharge_date).slice(0, 10) : '', status: r.discharge_status || '', referral: r.referral_source || '', flags };
+  });
+  res.json({
+    since, end,
+    total: admits.length,
+    commandCenterCount: ccCount,
+    distinctPeople: Object.keys(nameCount).length,
+    readmits: admits.filter((a) => a.flags.includes('readmit')).length,
+    sameDay: admits.filter((a) => a.flags.includes('same-day discharge')).length,
+    manual: admits.filter((a) => a.flags.some((f) => f.startsWith('manual'))).length,
+    admits,
+  });
+});
+
 // ── Admit / Discharge diagnostic — read-only. Shows today's facility counts and the
 // last few days of admits/discharges/scheduled with each one's STORED date + source,
 // so a leader can see the off-by-a-day (or any miscount) directly. Changes nothing.

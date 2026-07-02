@@ -180,7 +180,7 @@ const GROUPS=[
 ];
 const GROUP_OF={
   // My Shift — each person's role-tailored home
-  dashboard:'today',today:'today',
+  dashboard:'today',today:'today',opscenter:'today',
   // Arrival — the warm welcome (front door + intake)
   arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
   // Stay — anticipate every need (the daily care)
@@ -274,7 +274,7 @@ const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // everything else clinical/detox stays hidden from them.
 const UNIVERSAL_VIEWS = ['myrole','mystats','mygrowth','mytasks','messages','team','training','library','standard'];
 // Corporate Operations (Chava): walled to her lane — the hub, ordering, maintenance.
-const CORPORATE_VIEWS = ['corphub','inventory','maintenance'];
+const CORPORATE_VIEWS = ['corphub','opscenter','inventory','maintenance'];
 let PREVIEW_ROLE=null;   // admin "preview as" — see the app exactly as a role does
 function isCorporateRole(){ return !!(ME && (ME.job_role==='Executive Assistant' || PREVIEW_ROLE==='Executive Assistant')); }
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
@@ -288,7 +288,7 @@ const ROLE_MENU = {
   'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
   'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
-  'Executive Assistant': ['corphub','inventory','maintenance','myrole','mygrowth','messages'],
+  'Executive Assistant': ['corphub','opscenter','inventory','maintenance','myrole','mygrowth','messages'],
   'Housing Director': ['housing','myrole','mygrowth','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','mygrowth','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','myrole','mygrowth','housing','voice','activities','residents','houses','mytasks','messages'],
@@ -341,6 +341,8 @@ function canSeeView(v){
   // Akron Outpatient is owner-only: the admin, plus anyone the owner explicitly grants.
   // Even Exec/Ops directors don't see it unless granted — so this check comes first.
   if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
+  // Operations Center: leadership's live board (admin/ED/DoO/Clinical Director/HR/EA).
+  if(v==='opscenter') return !!(ME.role==='admin' || ME.opsAccess);
   // Corporate hub: Chava, plus owner/leadership. Even non-corporate leadership gets it.
   if(v==='corphub') return !!(ME.role==='admin' || ME.corpAccess);
   if(v==='hcos') return !!(ME.role==='admin' || ME.hrAccess);
@@ -459,6 +461,7 @@ function show(v){
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
+  if(v==='opscenter') loadOpsCenter();
   if(v==='command') loadCommand();
   if(v==='finance') loadFinance();
   if(v==='expenses') loadExpenses();
@@ -5902,6 +5905,29 @@ async function askHcos(){
   catch(e){ if(el)el.innerHTML='<div class="hint" style="margin-top:8px;color:var(--danger)">'+esc(e.message)+'</div>'; }
 }
 
+// ── OPERATIONS CENTER — "what's happening right now"; every tile drills into work ──
+async function loadOpsCenter(){
+  const host=$('opscenter'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="hint">Loading the board…</div></div>';
+  let d; try{ d=await api('/opscenter'); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const tiles=d.tiles||[];
+  const groups=[
+    ['now','🟢 Right now','the facility pulse this minute'],
+    ['queues','📋 Work queues','what’s waiting on someone'],
+    ['people','👥 People & compliance','the team and its deadlines'],
+  ];
+  const tile=(t)=>`<div class="ret-card ${t.alert?'rc-elev':''}" style="cursor:pointer" onclick="opsDrill('${t.view}','${t.tab||''}')" title="Open ${esc(t.label)}"><div class="n">${t.n}</div><div class="l">${esc(t.label)}${t.sub?`<div class="hint">${esc(t.sub)}</div>`:''}</div></div>`;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🎛️ Operations Center</h3><p class="sub sans" style="margin:0">What’s happening right now, across the operation. Tap any tile to jump straight into that work queue — no hunting through menus.</p></div><div class="hint" style="white-space:nowrap">${esc(d.today||'')} · <a href="#" onclick="loadOpsCenter();return false">↻ refresh</a></div></div></div>
+    ${groups.map(([g,label,sub])=>{
+      const ts=tiles.filter(t=>t.group===g); if(!ts.length) return '';
+      return `<div class="card"><h3 style="margin-top:0">${label} <span class="hint" style="font-weight:400">· ${sub}</span></h3><div class="ret-cards">${ts.map(tile).join('')}</div></div>`;
+    }).join('')}`;
+}
+// Drill-through: land on the exact tab that holds the work, not just the page.
+function opsDrill(view,tab){
+  if(tab){ if(view==='corphub') CORP_TAB=tab; if(view==='hcos'){ HCOS_TAB=tab; HCOS_PERSON=null; } }
+  show(view);
+}
 let CORP_TAB='dashboard', CORP_FAC='', CORP_LOCS=[];
 async function loadCorpHub(){
   const host=$('corphub'); if(!host) return;

@@ -352,6 +352,40 @@ function facilityForEntity(name) {
   }
   return null;
 }
+// ── OPERATIONS CENTER: "what's happening right now" — one drillable board ──────
+// Layer-5 architecture: Executive answers "right now"; Analytics answers "why".
+// Every tile is a count + a drill target; tiles that can't compute are skipped.
+function canSeeOps(user) { return !!user && (user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR', 'Executive Assistant'].includes(user.job_role)); }
+app.get('/api/opscenter', requireAuth, (req, res) => {
+  if (!canSeeOps(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const today = appToday();
+  const t = [];
+  const add = (fn) => { try { const x = fn(); if (x) t.push(x); } catch { /* tile skipped */ } };
+  const one = (sql, ...a) => db.prepare(sql).get(...a).n;
+  // RIGHT NOW — facility pulse (detox today; per-facility once scoping flips)
+  add(() => ({ group: 'now', key: 'census', label: 'Census now', n: one(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND merged_into IS NULL`), view: 'command' }));
+  add(() => { const beds = one(`SELECT COUNT(*) n FROM beds`); if (!beds) return null; const occ = one(`SELECT COUNT(*) n FROM beds WHERE status='Occupied'`); return { group: 'now', key: 'beds', label: 'Beds available', n: beds - occ, sub: `${occ}/${beds} occupied`, view: 'bedboard' }; });
+  add(() => ({ group: 'now', key: 'admits', label: 'Admissions today', n: one(`SELECT COUNT(DISTINCT COALESCE(kipu_id,name)) n FROM clients WHERE merged_into IS NULL AND substr(admit,1,10)=?`, today), view: 'admitcheck' }));
+  add(() => ({ group: 'now', key: 'arrivals', label: 'Expected arrivals', n: one(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date=? AND status='expected'`, today), view: 'arrivals' }));
+  add(() => ({ group: 'now', key: 'penddc', label: 'Pending discharges', n: one(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= ?`, addDays(today, 1)), view: 'dischargepage' }));
+  add(() => { const n = one(`SELECT COUNT(*) n FROM incidents WHERE status='Open'`); return { group: 'now', key: 'incidents', label: 'Open incidents', n, alert: n > 0, view: 'incidents' }; });
+  // WORK QUEUES
+  add(() => ({ group: 'queues', key: 'orders', label: 'Orders to place', n: one(`SELECT COUNT(*) n FROM order_requests WHERE status='requested'`), view: 'corphub', tab: 'orders' }));
+  add(() => ({ group: 'queues', key: 'maint', label: 'Maintenance open', n: one(`SELECT COUNT(*) n FROM maintenance_requests WHERE status IN ('open','in_progress')`), view: 'maintenance' }));
+  add(() => ({ group: 'queues', key: 'concierge', label: 'Concierge open', n: one(`SELECT COUNT(*) n FROM requests WHERE status NOT IN ('done','closed','cancelled')`), view: 'concierge' }));
+  add(() => ({ group: 'queues', key: 'obtasks', label: 'HR tasks due', n: one(`SELECT COUNT(*) n FROM hr_onboard_tasks WHERE done=0 AND due_date <= ?`, today), view: 'hcos', tab: 'people' }));
+  add(() => ({ group: 'queues', key: 'corptasks', label: 'Projects in motion', n: one(`SELECT COUNT(*) n FROM corp_tasks WHERE status IN ('todo','doing','blocked')`), view: 'corphub', tab: 'projects' }));
+  add(() => ({ group: 'queues', key: 'docgap', label: 'Doc-gap discharges (7d)', n: one(`SELECT COUNT(*) n FROM clients WHERE discharge_doc_gap=1 AND substr(discharge_date,1,10) >= date(?, '-6 day')`, today), view: 'retention', sub: 'billing-readiness' }));
+  // PEOPLE & COMPLIANCE
+  add(() => { const n = one(`SELECT COUNT(*) n FROM hr_reviews WHERE status='open' AND due_date < ?`, today); return { group: 'people', key: 'reviews', label: 'Reviews overdue', n, alert: n > 0, view: 'hcos', tab: 'reviews' }; });
+  add(() => { const n = one(`SELECT COUNT(*) n FROM hr_certifications c JOIN hr_employees e ON e.id=c.employee_id AND e.status='active' WHERE c.expires IS NOT NULL AND c.expires <= ?`, addDays(today, 30)); return { group: 'people', key: 'certs', label: 'Certs expiring ≤30d', n, alert: n > 0, view: 'hcos', tab: 'certs' }; });
+  add(() => ({ group: 'people', key: 'leave', label: 'Leave requests', n: one(`SELECT COUNT(*) n FROM hr_leave WHERE status='requested'`), view: 'hcos', tab: 'leave' }));
+  add(() => { const n = one(`SELECT COUNT(*) n FROM hr_cases WHERE status='open'`); return { group: 'people', key: 'cases', label: 'Open HR cases', n, view: 'hcos', tab: 'relations' }; });
+  add(() => ({ group: 'people', key: 'pipeline', label: 'Hiring pipeline', n: one(`SELECT COUNT(*) n FROM candidates WHERE stage NOT IN ('Hired','Passed')`), view: 'hiring' }));
+  add(() => { const n = one(`SELECT COUNT(*) n FROM insurance_policies WHERE status IN ('active','pending') AND expiration_date IS NOT NULL AND expiration_date <= ?`, addDays(today, 60)); return { group: 'people', key: 'ins', label: 'Insurance renewing ≤60d', n, alert: n > 0, view: 'corphub', tab: 'insurance' }; });
+  res.json({ today, tiles: t });
+});
+
 app.get('/api/org/facilities', requireAuth, (req, res) => {
   res.json({ facilities: orgFacilities(), departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
 });
@@ -390,7 +424,7 @@ function policyStatus(p, today) {
 function daysToExpiry(exp, today) { if (!exp) return null; return Math.round((Date.parse(String(exp).slice(0, 10) + 'T00:00:00') - Date.parse(today + 'T00:00:00')) / 864e5); }
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
-  if (user) { user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); }
+  if (user) { user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); user.opsAccess = canSeeOps(user); }
   res.json({ user: user || null });
 });
 

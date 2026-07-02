@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { db, audit, getState, setState, publishEvent, nameInitials } from './src/db.js';
+import { db, audit, getState, setState, publishEvent, nameInitials, defaultFacilityId } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured, smsStatus, DEFAULT_CC } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
@@ -696,12 +696,12 @@ app.get('/api/me', (req, res) => {
     // Facility scope for the shell chip: explicit user_facility_access rows win;
     // org-wide roles fall back to every operating facility; everyone else to detox.
     try {
-      let facs = db.prepare(`SELECT f.id, f.name FROM user_facility_access ua JOIN org_facilities f ON f.id = ua.facility_id WHERE ua.user_id = ? AND f.active = 1 ORDER BY f.sort, f.id`).all(user.id);
+      let facs = db.prepare(`SELECT f.id, f.fkey, f.name FROM user_facility_access ua JOIN org_facilities f ON f.id = ua.facility_id WHERE ua.user_id = ? AND f.active = 1 ORDER BY f.sort, f.id`).all(user.id);
       if (!facs.length) {
         const orgWide = user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(user.job_role || '');
         facs = orgWide
-          ? db.prepare(`SELECT id, name FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id`).all()
-          : db.prepare(`SELECT id, name FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id LIMIT 1`).all();
+          ? db.prepare(`SELECT id, fkey, name FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id`).all()
+          : db.prepare(`SELECT id, fkey, name FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id LIMIT 1`).all();
       }
       user.facilities = facs;
     } catch { user.facilities = []; }
@@ -2240,8 +2240,8 @@ app.post('/api/clients', requireAuth, (req, res) => {
   if (!b.name?.trim() && !b.pref?.trim()) return res.status(400).json({ error: 'Name required' });
   const vals = CLIENT_FIELDS.map(f => b[f] ?? null);
   const info = db.prepare(
-    `INSERT INTO clients (${CLIENT_FIELDS.join(',')}) VALUES (${CLIENT_FIELDS.map(() => '?').join(',')})`
-  ).run(...vals);
+    `INSERT INTO clients (${CLIENT_FIELDS.join(',')}, facility_id) VALUES (${CLIENT_FIELDS.map(() => '?').join(',')}, ?)`
+  ).run(...vals, b.facility_id ? +b.facility_id : defaultFacilityId());
   saveTasks(info.lastInsertRowid, b.tasks);
   audit({ user: req.user, action: 'CREATE', entity: 'client', entity_id: info.lastInsertRowid, detail: b.name, ip: req.ip });
   publishEvent({ event: 'admission.created', entity: 'client', entity_id: info.lastInsertRowid, actor: req.user.username, summary: `${nameInitials(b.name || b.pref)} admitted` });
@@ -3054,9 +3054,11 @@ app.get('/api/diag/admits', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : today.slice(0, 8) + '01';
   const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;
-  const rows = db.prepare(`SELECT id, name, pref, kipu_id, admit, admit_time, discharge_date, discharge_status, source, active, referral_source FROM clients WHERE merged_into IS NULL AND admit IS NOT NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ? ORDER BY admit, name`).all(since, end);
+  const dfid = req.query.facility ? +req.query.facility : null;
+  const DF = dfid ? ` AND facility_id=${dfid}` : '';
+  const rows = db.prepare(`SELECT id, name, pref, kipu_id, admit, admit_time, discharge_date, discharge_status, source, active, referral_source FROM clients WHERE merged_into IS NULL AND admit IS NOT NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?${DF} ORDER BY admit, name`).all(since, end);
   // What the Corporate Command Center counts for this window (DISTINCT kipu_id+name):
-  const ccCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT DISTINCT kipu_id, name FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?)`).get(since, end).n;
+  const ccCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT DISTINCT kipu_id, name FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`+DF+`)`).get(since, end).n;
   const nameKey = (n) => String(n || '').toLowerCase().replace(/[^a-z ]/g, '').trim();
   const nameCount = {};
   rows.forEach((r) => { const k = nameKey(r.name); nameCount[k] = (nameCount[k] || 0) + 1; });
@@ -7953,8 +7955,8 @@ app.get('/api/incidents', requireAuth, (req, res) => {
 app.post('/api/incidents', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.type || !b.description?.trim()) return res.status(400).json({ error: 'Missing' });
   const needsContract = b.needs_contract ? 1 : 0;
-  db.prepare(`INSERT INTO incidents (client_id, type, severity, description, action_taken, needs_contract, reported_by, reported_by_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, needsContract, req.user.id, req.user.name);
+  db.prepare(`INSERT INTO incidents (client_id, type, severity, description, action_taken, needs_contract, reported_by, reported_by_name, facility_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, needsContract, req.user.id, req.user.name, b.facility_id ? +b.facility_id : defaultFacilityId());
   if (b.severity === 'High' || b.severity === 'Critical') createAlert(b.client_id || null, 'incident', b.severity, `${b.severity} incident (${b.type}): ${b.description.trim().slice(0, 80)}`);
   if (needsContract) createAlert(b.client_id || null, 'behavior_contract', 'Elevated', `Incident flagged as needing a behavioral contract by ${req.user.name}: ${b.description.trim().slice(0, 70)}`);
   audit({ user: req.user, action: 'INCIDENT', entity: 'client', entity_id: b.client_id ? +b.client_id : null, detail: `${b.type}/${b.severity}${needsContract ? '/needs-contract' : ''}`, ip: req.ip });

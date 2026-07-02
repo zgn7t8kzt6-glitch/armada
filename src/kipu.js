@@ -6,7 +6,7 @@
 // version; this implements the documented v3 pattern and is verified on first
 // connect via /api/kipu/test before any sync.
 import crypto from 'node:crypto';
-import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ, setState, localDateOf, publishEvent, nameInitials } from './db.js';
+import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ, setState, localDateOf, publishEvent, nameInitials, defaultFacilityId } from './db.js';
 
 // Kipu timestamps are UTC; admit time-of-day only makes sense in local time.
 // Convert an ISO/timestamp to local HH:MM (24h). Module-level so both the sync
@@ -355,7 +355,10 @@ export async function kipuSyncRoster() {
   const claimedRows = new Set(); // app rows already taken this sync — never merge two people onto one
   const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ?`);
   const byName = db.prepare(`SELECT id, loc, active, kipu_id FROM clients WHERE name = ? OR pref = ?`);
-  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, payment_method, next_loc, anticipated_dc, kipu_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
+  // New rows are stamped with the detox facility — this sync IS the detox roster,
+  // and per-facility scoping needs every row owned (Constitution, Principle 3).
+  const facId = defaultFacilityId();
+  const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, payment_method, next_loc, anticipated_dc, kipu_id, facility_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
   const admRef = db.prepare(`SELECT referral_source FROM admissions WHERE referral_source IS NOT NULL AND referral_source != '' AND (name = ? OR name = ?) ORDER BY id DESC LIMIT 1`);
   // Flow-event recorder: one row per real transition, so re-running the sync
   // never double-counts. parseLoc → a known ASAM code, or null if unspecified.
@@ -572,7 +575,7 @@ export async function kipuSyncRoster() {
     } else if (!discharged) {
       // Only create rows for currently-active patients.
       const info = ins.run(name, p.first_name || name, room, program, newLoc, admit, admitTime, therapist, caseMgr, refSource,
-        dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, paymentMethod, nextLoc, anticipatedDc, kid || null);
+        dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, paymentMethod, nextLoc, anticipatedDc, kid || null, facId);
       claimedRows.add(info.lastInsertRowid);   // brand-new active row — seen this sync, never sweep it
       // Record an admission event only for genuinely new intakes (admitted today
       // or yesterday) — never for the initial baseline import of the standing

@@ -2632,6 +2632,16 @@ export function publishEvent({ event, entity = null, entity_id = null, facility_
 export function nameInitials(n) {
   return String(n || '').trim().split(/\s+/).map((w) => (w[0] || '').toUpperCase()).join('') || '?';
 }
+// The default facility for operational writes (Armada Detox of Akron) — every new
+// row that doesn't say otherwise belongs to detox, so per-facility scoping stays
+// truthful as other facilities come online. Cached after first lookup.
+let _defFacId;
+export function defaultFacilityId() {
+  if (_defFacId !== undefined) return _defFacId;
+  try { _defFacId = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id ?? null; }
+  catch { _defFacId = null; }
+  return _defFacId;
+}
 
 export default db;
 
@@ -2655,3 +2665,12 @@ addColumn('hr_employees', 'term_date', 'TEXT');          // offboarding: last da
 addColumn('hr_employees', 'term_reason', 'TEXT');        // Resignation | Retirement | Layoff | Termination
 addColumn('hr_onboard_tasks', 'phase', 'TEXT');          // null/'onboard' | 'offboard'
 addColumn('authorizations', 'reminded', 'TEXT');         // JSON of reminder thresholds already sent
+// Standing ownership repair: any operational row that arrived without a facility
+// belongs to detox (all writes now stamp explicitly; this catches rows created
+// between the foundation seed and the stamping code, and is a no-op after that).
+try {
+  const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id;
+  if (dfid) for (const t of ['clients', 'expected_arrivals', 'incidents', 'admissions']) {
+    try { db.prepare(`UPDATE ${t} SET facility_id=? WHERE facility_id IS NULL`).run(dfid); } catch { /* table optional */ }
+  }
+} catch { /* registry not seeded yet (fresh boot order) — seed backfills anyway */ }

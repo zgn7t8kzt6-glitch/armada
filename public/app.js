@@ -5645,7 +5645,7 @@ async function loadAdmitRecon(){
   const host=$('reconBody'); if(!host) return;
   host.innerHTML='<div class="skel" style="height:60px;margin-top:8px"></div>';
   const since=($('rec_since')||{}).value||'', end=($('rec_end')||{}).value||'';
-  let d; try{ d=await api('/diag/admits?since='+encodeURIComponent(since)+'&end='+encodeURIComponent(end)); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  let d; try{ d=await api('/diag/admits?since='+encodeURIComponent(since)+'&end='+encodeURIComponent(end)+facQ('&')); }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
   const box=(n,l,sev)=>`<div class="ret-card ${sev||''}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
   const fpill=(f)=>`<span class="badge-${f==='readmit'?'warn':f==='same-day discharge'?'info':f.startsWith('duplicate')?'crit':'idle'}">${esc(f)}</span>`;
   const rows=(d.admits||[]).map(a=>`<tr><td><strong>${esc(a.name)}</strong>${a.referral?`<div class="hint">${esc(a.referral)}</div>`:''}</td><td>${esc(a.admit)}${a.time?' <span class="hint">'+esc(a.time)+'</span>':''}</td><td>${a.discharged?esc(a.discharged)+(a.status?' <span class="hint">'+esc(a.status)+'</span>':''):'<span class="badge-ok">still here</span>'}</td><td class="hint">${esc(a.source)}</td><td>${a.flags.map(fpill).join(' ')||''}</td></tr>`).join('');
@@ -6069,27 +6069,43 @@ function renderShellContext(){
     });
   }
 }
-// Facility chip: real scope from user_facility_access (via /api/me). One facility →
-// a plain label; several → a picker that scopes the Operations Center live.
-let OPS_FAC='';
+// Facility scope — THE global selector. Every scoped screen reads FAC_SCOPE; it
+// persists across sessions and DEFAULTS TO DETOX (per the owner: everything
+// defaults to detox; "All facilities" is the roll-up view, chosen deliberately).
+// Screens wire in as their per-facility data comes online — the scope is already
+// live on the Operations Center and the admit reconciliation.
+let FAC_SCOPE=null;   // facility id as string, '' = all facilities
+function facScopeInit(){
+  if(FAC_SCOPE!==null) return;
+  const saved=localStorage.getItem('facScope');
+  if(saved!==null){ FAC_SCOPE=saved; return; }
+  const detox=(ME.facilities||[]).find(f=>f.fkey==='detox-akron');
+  FAC_SCOPE = detox ? String(detox.id) : '';
+}
 function renderFacChip(){
   const chip=$('facChip'); if(!chip) return;
+  facScopeInit();
   const facs=ME.facilities||[];
   if(facs.length<=1){
     $('facChipName').textContent = facs.length ? facs[0].name : 'Armada';
+    if(facs.length) FAC_SCOPE=String(facs[0].id);
     chip.style.display='';
     return;
   }
-  chip.innerHTML=`🏥 <select id="facChipSel" onchange="facScopeChange(this.value)" style="border:none;background:transparent;font:inherit;color:inherit;max-width:170px;cursor:pointer">
-    <option value="">All facilities (${facs.length})</option>
-    ${facs.map(f=>`<option value="${f.id}" ${String(OPS_FAC)===String(f.id)?'selected':''}>${esc(f.name)}</option>`).join('')}</select>`;
+  chip.innerHTML=`🏥 <select id="facChipSel" onchange="facScopeChange(this.value)" style="border:none;background:transparent;font:inherit;color:inherit;max-width:170px;cursor:pointer" title="Facility scope — screens filter to this facility as each comes online">
+    <option value="" ${FAC_SCOPE===''?'selected':''}>All facilities (${facs.length})</option>
+    ${facs.map(f=>`<option value="${f.id}" ${String(FAC_SCOPE)===String(f.id)?'selected':''}>${esc(f.name)}</option>`).join('')}</select>`;
   chip.style.display='';
 }
 function facScopeChange(v){
-  OPS_FAC=v||'';
+  FAC_SCOPE=v||'';
+  localStorage.setItem('facScope', FAC_SCOPE);
   const active=document.querySelector('.view.active');
-  if(active&&active.id==='opscenter') loadOpsCenter();
+  if(!active) return;
+  if(active.id==='opscenter') loadOpsCenter();
+  if(active.id==='admitcheck' && $('reconBody') && $('reconBody').innerHTML) loadAdmitRecon();
 }
+function facQ(prefix){ return FAC_SCOPE ? prefix+'facility='+encodeURIComponent(FAC_SCOPE) : ''; }
 let TODAY_ITEMS=[];
 async function refreshTodayBadge(){
   try{ const d=await api('/today'); TODAY_ITEMS=d.items||[]; const b=$('todayBadge'); if(b){ const n=TODAY_ITEMS.length; b.textContent=n; b.style.display=n?'':'none'; } }catch(_e){}
@@ -6148,7 +6164,7 @@ function ksearchGo(i){
 async function loadOpsCenter(){
   const host=$('opscenter'); if(!host) return;
   host.innerHTML='<div class="card"><div class="skel" style="width:220px;height:22px;margin-bottom:14px"></div><div class="skel-tiles">'+'<div class="skel"></div>'.repeat(5)+'</div></div><div class="card"><div class="skel-tiles">'+'<div class="skel"></div>'.repeat(5)+'</div></div>';
-  let d; try{ d=await api('/opscenter'+(OPS_FAC?'?facility='+encodeURIComponent(OPS_FAC):'')); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="loadOpsCenter()">Retry</button></div></div></div>'; return; }
+  let d; try{ d=await api('/opscenter'+facQ('?')); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="loadOpsCenter()">Retry</button></div></div></div>'; return; }
   const tiles=d.tiles||[];
   const groups=[
     ['now','🟢 Right now','the facility pulse this minute'],

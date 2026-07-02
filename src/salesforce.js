@@ -16,7 +16,7 @@
 // Until credentials exist this stays inert; the app's own referral tracking
 // works fully without it.
 
-import { getState, setState } from './db.js';
+import { getState, setState, defaultFacilityId } from './db.js';
 
 let _token = null, _tokenExp = 0;
 
@@ -312,9 +312,10 @@ export async function sfSyncArrivals(db) {
   catch (e) { try { wonRecords = await sfQueryAll(buildWon(wonSafe)); } catch (e2) { /* admitted pull optional */ } }
 
   const find = db.prepare(`SELECT id, status FROM expected_arrivals WHERE sf_lead_id = ?`);
+  const facId = defaultFacilityId();   // SF pipeline is the detox front door — stamp ownership
   const ins = db.prepare(`INSERT INTO expected_arrivals
-    (sf_lead_id, first_name, last_name, preferred_name, dob, phone, scheduled_date, program, referral_source, insurance)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`);
+    (sf_lead_id, first_name, last_name, preferred_name, dob, phone, scheduled_date, program, referral_source, insurance, facility_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
   // Only refresh descriptive fields on rows still 'expected' — never clobber a
   // front-desk arrived/no-show decision.
   const upd = db.prepare(`UPDATE expected_arrivals SET first_name=?, last_name=?, preferred_name=?, dob=?, phone=?,
@@ -335,8 +336,8 @@ export async function sfSyncArrivals(db) {
     arrived_at=COALESCE(arrived_at, datetime('now')), auto=1, scheduled_date=COALESCE(?, scheduled_date), updated_at=datetime('now')
     WHERE sf_lead_id=? AND status != 'arrived'`);
   const insArrived = db.prepare(`INSERT INTO expected_arrivals
-    (sf_lead_id, first_name, last_name, preferred_name, scheduled_date, program, status, arrived_at, auto)
-    VALUES (?,?,?,?,?,?, 'arrived', datetime('now'), 1)`);
+    (sf_lead_id, first_name, last_name, preferred_name, scheduled_date, program, status, arrived_at, auto, facility_id)
+    VALUES (?,?,?,?,?,?, 'arrived', datetime('now'), 1, ?)`);
 
   let pulled = records.length, created = 0, updated = 0, admitted = 0;
   db.exec('BEGIN');
@@ -348,7 +349,7 @@ export async function sfSyncArrivals(db) {
       const vals = [first || null, last || null, first || null, null, null, sched, r.StageName || null, null, null];
       const existing = find.get(r.Id);
       if (existing) { upd.run(...vals, r.Id); updated++; }
-      else { ins.run(r.Id, ...vals); created++; }
+      else { ins.run(r.Id, ...vals, facId); created++; }
     }
     // Re-own the SF-confirmed arrivals so a facility filter actually drops the
     // ones that no longer qualify: clear recent SF-auto arrivals (auto=1, no Kipu
@@ -360,7 +361,7 @@ export async function sfSyncArrivals(db) {
       const { first, last } = parseName(r.Name);
       const existing = find.get(r.Id);
       if (existing) { markArrived.run(sched, r.Id); admitted++; }
-      else { insArrived.run(r.Id, first || null, last || null, first || null, sched, r.StageName || null); admitted++; }
+      else { insArrived.run(r.Id, first || null, last || null, first || null, sched, r.StageName || null, facId); admitted++; }
     }
     // Drop stale 'expected' rows that no longer qualify — i.e. their SF opp wasn't
     // in this (facility-scoped) scheduled/won pull anymore: moved facility (e.g.

@@ -5967,7 +5967,7 @@ async function renderCorpEntities(body){
       </div></details>`;
   };
   body.innerHTML=`<div class="pc-note" style="color:#a60;margin-bottom:8px">🔒 <strong>Sensitive vault</strong> — EINs, bank accounts, full card numbers/CVV, and logins. Owner + Executive Assistant only. Values are hidden until you tap “Show”. Treat this like a password manager.</div>
-    <div class="toolbar" style="justify-content:flex-start;gap:8px;margin-bottom:6px"><button class="btn btn-gold btn-sm sans" onclick="ENT_SHOW=!ENT_SHOW;renderCorpEntities($('corpBody'))">${ENT_SHOW?'🙈 Hide values':'👁 Show values'}</button>${ME.role==='admin'?'<button class="btn btn-ghost btn-sm sans" onclick="importEntities()">⤓ Import from file</button>':''}<span id="entMsg" class="hint" style="align-self:center"></span></div>
+    <div class="toolbar" style="justify-content:flex-start;gap:8px;margin-bottom:6px"><button class="btn btn-gold btn-sm sans" onclick="ENT_SHOW=!ENT_SHOW;renderCorpEntities($('corpBody'))">${ENT_SHOW?'🙈 Hide values':'👁 Show values'}</button>${ME.role==='admin'?'<button class="btn btn-ghost btn-sm sans" onclick="importEntities()">⤓ Import the Excel sheet</button>':''}<span id="entMsg" class="hint" style="align-self:center"></span></div>
     <div class="card"><h3 style="margin-top:0">🏛️ Entities <span class="hint" style="font-weight:400">· ${active.length} active</span></h3>${active.length?active.map(entCard).join(''):'<div class="hint">No entities yet — admin can Import from file.</div>'}</div>
     ${closed.length?`<div class="card" style="opacity:.85"><details><summary style="cursor:pointer"><strong>🗄️ Archived — closed / sold entities</strong> <span class="hint">· ${closed.length}</span></summary><div style="margin-top:6px">${closed.map(entCard).join('')}</div></details></div>`:''}
     ${(orphanCards.length||orphanBanks.length)?`<div class="card"><details><summary style="cursor:pointer"><strong>💳 Cards / accounts not tied to an entity</strong> <span class="hint">· ${orphanCards.length+orphanBanks.length}</span></summary><div style="margin-top:6px">${bankBlock(orphanBanks)}${cardBlock(orphanCards)}</div></details></div>`:''}
@@ -5975,14 +5975,25 @@ async function renderCorpEntities(body){
       ${portals.length?`<table class="tbl"><tr><th>Portal</th><th>Username</th><th>Password</th><th>Info</th><th>Entity</th></tr>${portals.map(p=>`<tr><td><strong>${esc(p.name)}</strong></td><td class="hint">${esc(p.username||'')}</td><td>${mask(p.password)}</td><td class="hint">${esc(p.info||'')}</td><td class="hint">${esc(p.entity||'')}</td></tr>`).join('')}</table>`:'<div class="hint">No logins yet.</div>'}</div>`;
 }
 async function importEntities(){
-  const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
-  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(!f)return; const r=new FileReader();
-    r.onload=async()=>{ let payload; try{ payload=JSON.parse(r.result); }catch(e){ if($('entMsg'))$('entMsg').textContent='That file isn’t valid JSON.'; return; }
-      if(!confirm('Import the entity vault? This replaces the current entity data.'))return;
-      if($('entMsg'))$('entMsg').textContent='Importing…';
-      try{ const resp=await api('/corp/entities/import',{method:'POST',body:JSON.stringify(payload)}); if($('entMsg'))$('entMsg').textContent=`✓ Imported ${resp.imported.records} entities, ${resp.imported.banks} bank accts, ${resp.imported.cards} cards, ${resp.imported.portals} logins.`; renderCorpEntities($('corpBody')); }
-      catch(e){ if($('entMsg'))$('entMsg').textContent=e.message; } };
-    r.readAsText(f); };
+  const inp=document.createElement('input'); inp.type='file';
+  inp.accept='.xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(!f)return;
+    const isXlsx=/\.xlsx$/i.test(f.name);
+    if(!confirm('Import the entity vault from "'+f.name+'"? This replaces the current entity data.'))return;
+    if($('entMsg'))$('entMsg').textContent=isXlsx?'Reading the Excel sheet…':'Importing…';
+    const done=(resp)=>{ if($('entMsg'))$('entMsg').textContent=`✓ Imported ${resp.imported.records} entities, ${resp.imported.banks} bank accts, ${resp.imported.cards} cards, ${resp.imported.portals} logins.`; renderCorpEntities($('corpBody')); };
+    const fail=(e)=>{ if($('entMsg'))$('entMsg').textContent=e.message; };
+    const r=new FileReader();
+    if(isXlsx){
+      r.onload=async()=>{ const data=String(r.result).replace(/^data:[^;]+;base64,/,'');
+        try{ done(await api('/corp/entities/import-xlsx',{method:'POST',body:JSON.stringify({data})})); }catch(e){ fail(e); } };
+      r.readAsDataURL(f);
+    } else {
+      r.onload=async()=>{ let payload; try{ payload=JSON.parse(r.result); }catch(e){ fail(new Error('That file isn’t valid JSON — upload the Excel sheet (.xlsx) instead.')); return; }
+        try{ done(await api('/corp/entities/import',{method:'POST',body:JSON.stringify(payload)})); }catch(e){ fail(e); } };
+      r.readAsText(f);
+    }
+  };
   inp.click();
 }
 let LEASE_DATA=null, LEASE_OPEN=null, LEASE_FILE=null;

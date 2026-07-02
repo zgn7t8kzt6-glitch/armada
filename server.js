@@ -21,6 +21,7 @@ import {
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
+import { parseEntityWorkbook } from './src/xlsx.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -3724,8 +3725,8 @@ app.post('/api/corp/entities/portal', requireAuth, requireCorp, (req, res) => {
 app.delete('/api/corp/entities/portal/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`UPDATE portals SET active=0 WHERE id=?`).run(req.params.id); res.json({ ok: true }); });
 // One-time bulk import from the entity information sheet (owner uploads the JSON I
 // prepared). Replaces existing rows so re-import is idempotent.
-app.post('/api/corp/entities/import', requireAuth, requireAdmin, (req, res) => {
-  const b = req.body || {};
+// Shared import (JSON payload or a parsed workbook) — replaces existing vault data.
+function importEntityVault(b) {
   const s = (v, n) => String(v == null ? '' : v).slice(0, n);
   let n = { records: 0, banks: 0, cards: 0, portals: 0 };
   db.exec('BEGIN');
@@ -3751,8 +3752,24 @@ app.post('/api/corp/entities/import', requireAuth, requireAdmin, (req, res) => {
       for (const r of b.portals) { ins.run(s(r.name, 120), s(r.username, 120), s(r.password, 120), s(r.info, 1000), s(r.entity, 120)); n.portals++; }
     }
     db.exec('COMMIT');
-  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* ignore */ } return res.status(500).json({ error: e.message }); }
-  res.json({ ok: true, imported: n });
+  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* ignore */ } throw e; }
+  return n;
+}
+app.post('/api/corp/entities/import', requireAuth, requireAdmin, (req, res) => {
+  try { res.json({ ok: true, imported: importEntityVault(req.body || {}) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Upload the ORIGINAL Entity Information .xlsx — the app parses it directly
+// (entities, banks, cards, portals) so there's no JSON middle step.
+app.post('/api/corp/entities/import-xlsx', requireAuth, requireAdmin, (req, res) => {
+  const data = String(req.body?.data || '').replace(/^data:[^;]+;base64,/, '');
+  if (!data) return res.status(400).json({ error: 'No file received.' });
+  let parsed;
+  try { parsed = parseEntityWorkbook(Buffer.from(data, 'base64')); }
+  catch (e) { return res.status(400).json({ error: 'Could not read that Excel file: ' + e.message }); }
+  if (!parsed.records.length) return res.status(400).json({ error: 'No entities found — is this the Entity Information sheet?' });
+  try { res.json({ ok: true, imported: importEntityVault(parsed) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── HR / Ownership employee roster (admin-only — salary is sensitive) ──────────
 // Everyone across every entity, broken down by location, with job title + salary.

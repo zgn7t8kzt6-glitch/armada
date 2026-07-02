@@ -127,8 +127,9 @@ async function boot(){
   $('r_date').value = today(); $('a_date').value = today();
   applyCompanyBranding();
   renderGroups();
-  // Role-based landing: everyone opens already where they work.
-  const landing = isHousingRole() ? 'housing' : (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
+  // Role-based landing: everyone opens already where they work. Leadership lands
+  // on the Operations Center — the "what's happening right now" board.
+  const landing = isHousingRole() ? 'housing' : isCorporateRole() ? 'corphub' : (ME.role==='admin' || ME.opsAccess) ? 'opscenter' : 'dashboard';
   show(landing);
   renderShellContext();   // facility chip · role pill · Today inbox · ops alerts (D2 shell)
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
@@ -170,34 +171,44 @@ function kipuWebLink(kipuId){
 /* ---- grouped nav, by the Ritz guest journey: Arrival → Stay → Handoff,
    then Team (culture) and Facility (operations); My Shift on top, Command for leadership ---- */
 const GROUPS=[
-  {g:'today',label:'My Shift',first:'dashboard'},
+  // The flow of a day: land Home, work the journey left→right, manage below the divider.
+  {g:'today',label:'Home',first:'dashboard'},
   {g:'arrival',label:'Arrival',first:'arrivals'},
-  {g:'stay',label:'Stay',first:'clients'},
-  {g:'handoff',label:'Handoff',first:'dischargepage'},
-  {g:'housing',label:'Hilltop',first:'housing'},
-  {g:'team',label:'Team',first:'mytasks'},
+  {g:'stay',label:'Care',first:'clients'},
+  {g:'handoff',label:'Discharge',first:'dischargepage'},
+  {g:'revenue',label:'Revenue',first:'authreg'},
   {g:'facility',label:'Facility',first:'inventory'},
-  {g:'command',label:'Command',first:'command',admin:true},
+  {g:'team',label:'Team',first:'mytasks'},
+  {g:'housing',label:'Hilltop',first:'housing'},
+  {g:'enterprise',label:'Enterprise',first:'ownership'},
+  {g:'insight',label:'Insight',first:'outcomes',admin:true},
+  {g:'command',label:'Admin',first:'settings',admin:true},
 ];
 const GROUP_OF={
-  // My Shift — each person's role-tailored home
-  dashboard:'today',today:'today',opscenter:'today',
+  // Home — where every day starts: my shift, the live board, the facility command
+  dashboard:'today',today:'today',opscenter:'today',command:'today',
   // Arrival — the warm welcome (front door + intake)
   arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
-  // Stay — anticipate every need (the daily care)
+  // Care — anticipate every need (the daily care)
   clients:'stay',editor:'stay',journey:'stay',records:'stay',family:'stay',report:'stay',
   concierge:'stay',dignity:'stay',rounds:'stay',roundscan:'stay',bedboard:'stay',bedmap:'stay',laundry:'stay',engagement:'stay',program:'stay',meals:'stay',property:'stay',
   casemgmt:'stay',retention:'stay',surveys:'stay',clientvoice:'stay',incidents:'stay',compliance:'stay',
-  // Handoff — the fond farewell + continuum
+  // Discharge — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
-  // Housing — the recovery-residence suite (PHP/IOP/ORH L2·L3)
+  // Revenue — Revenue OS: authorizations, money in, outpatient economics
+  authreg:'revenue',outpatient:'revenue',finance:'revenue',expenses:'revenue',
+  // Hilltop — the recovery-residence suite (separate world)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
   myrole:'team',mystats:'team',mygrowth:'team',employees:'team',leadmirror:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
-  inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',
-  // Command — leadership insight + config (admin)
-  command:'command',guide:'command',finance:'command',expenses:'command',plan:'command',excellence:'command',onboarding:'command',playbook:'command',leadership:'command',staffsignins:'command',admitcheck:'command',dupes:'command',ownership:'command',corphub:'command',hcos:'command',authreg:'command',outpatient:'command',outcomes:'command',analytics:'command',scorecard:'command','report-view':'command',settings:'command',users:'command',audit:'command',askai:'command',
+  inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',staffsignins:'facility',
+  // Enterprise — the parent company: corporate, people, leadership programs
+  ownership:'enterprise',corphub:'enterprise',hcos:'enterprise',plan:'enterprise',excellence:'enterprise',onboarding:'enterprise',playbook:'enterprise',leadership:'enterprise',
+  // Insight — why it happened (Analytics answers "why"; Home answers "now")
+  outcomes:'insight',analytics:'insight',scorecard:'insight','report-view':'insight',admitcheck:'insight',askai:'insight',
+  // Admin — configuration & governance
+  settings:'command',users:'command',audit:'command',guide:'command',dupes:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -364,17 +375,27 @@ function canSeeView(v){
   if(!allowed) return true;   // ungated → visible to everyone (generous default)
   return allowed.includes(ME.job_role);
 }
+// One visibility rule for the sidebar: a button is showable when the role may see
+// the view AND it isn't an admin-only tool (unless VIEW_ROLES explicitly grants it)
+// AND it isn't a subview reached through in-page tabs. Group tabs, nav filtering,
+// and group landing all consult THIS — so an empty group never shows its tab.
+function buttonShowable(b){
+  const v=b.dataset.view;
+  let adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
+  if(adminHidden && VIEW_ROLES[v] && canSeeView(v)) adminHidden=false;
+  return !adminHidden && !b.hasAttribute('data-subview') && canSeeView(v);
+}
 function groupVisible(g){
-  if(g==='today' || g==='team') return true;   // My Shift + culture: always
-  return Object.keys(GROUP_OF).some(v=>GROUP_OF[v]===g && canSeeView(v));
+  if(g==='today' || g==='team') return true;   // Home + culture: always
+  return [...document.querySelectorAll('#nav button')].some(b=>(GROUP_OF[b.dataset.view]||'stay')===g && buttonShowable(b));
 }
 function firstAllowedView(grp){
   // Staffing is the Director of Operations' core job — land the Facility section
   // on the Staffing schedule for her, not the supplies list.
   if(grp.g==='facility' && ME && ME.job_role==='Director of Operations' && canSeeView('schedule')) return 'schedule';
   if(canSeeView(grp.first)) return grp.first;
-  const v=[...document.querySelectorAll('#nav button')].map(b=>b.dataset.view).find(v=>GROUP_OF[v]===grp.g && canSeeView(v));
-  return v || grp.first;
+  const b=[...document.querySelectorAll('#nav button')].find(b=>(GROUP_OF[b.dataset.view]||'stay')===grp.g && buttonShowable(b));
+  return b ? b.dataset.view : grp.first;
 }
 // Frontline roles get their whole toolset as a persistent bar across the top of
 // every page — no sidebar to hunt through; their tools are always one tap away.
@@ -422,15 +443,7 @@ function selectGroup(g){
   document.querySelectorAll('#nav [data-cap]').forEach(c=>{ c.style.display = (c.dataset.group===g) ? '' : 'none'; });
   document.querySelectorAll('#groupbar button').forEach(b=>b.classList.toggle('active', b.dataset.g===g));
   const navBtns=[...document.querySelectorAll('#nav button')];
-  navBtns.forEach(b=>{
-    let adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
-    // Views explicitly granted to a job role (VIEW_ROLES) are never admin-hidden
-    // for that role — e.g. the Director of Operations owns Staffing / Coverage /
-    // Assign Staff / Staffing Model / Operations even on a non-admin login.
-    if(adminHidden && VIEW_ROLES[b.dataset.view] && canSeeView(b.dataset.view)) adminHidden=false;
-    const sub = b.hasAttribute('data-subview');   // reached via in-page tabs, not the sidebar
-    b.style.display = (b.dataset.group===g && !adminHidden && !sub && canSeeView(b.dataset.view)) ? '' : 'none';
-  });
+  navBtns.forEach(b=>{ b.style.display = (b.dataset.group===g && buttonShowable(b)) ? '' : 'none'; });
   // Hide the sub-nav when a section has only one screen (no redundant repeat).
   const visible=navBtns.filter(b=>b.dataset.group===g && b.style.display!=='none').length;
   const navEl=document.getElementById('nav'); if(navEl) navEl.style.display = visible<=1 ? 'none' : '';

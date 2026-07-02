@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624CJ" />
+<link rel="stylesheet" href="/styles.css?v=20260624CK" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -52,88 +52,98 @@
     </div>
     <div class="side-groups sans" id="groupbar"></div>
     <nav class="side-nav sans" id="nav">
+    <!-- HOME — where the day starts -->
     <button data-view="dashboard">My Shift</button>
     <button data-view="today">Today</button>
-    <button data-view="opscenter">🎛️ Operations Center</button>
+    <button data-view="opscenter">Operations Center</button>
     <button data-view="command" data-admin>Command Center</button>
-    <button data-view="guide" data-admin>Owner's Guide</button>
-    <button data-view="finance" data-admin>Revenue</button>
-    <button data-view="expenses" data-admin>Budget</button>
-    <button data-view="playbook" data-admin>Playbook Scorecard</button>
-    <button data-view="plan" data-admin>90-Day Plan</button>
-    <button data-view="excellence" data-admin>Excellence Standards</button>
-    <button data-view="onboarding" data-admin>Onboarding</button>
-    <button data-view="leadership" data-admin>Leadership</button>
-    <button data-view="staffsignins" data-admin>Staff Sign-ins</button>
-    <button data-view="admitcheck" data-admin>Admit/Discharge Check</button>
-    <button data-view="ownership">🏢 Corporate Command Center</button>
-    <button data-view="corphub">🗂️ Corporate Hub</button>
-    <button data-view="hcos">👥 HR — People OS</button>
-    <button data-view="authreg">🛡 Authorizations</button>
-    <button data-view="outpatient">Akron Outpatient</button>
-    <button data-view="dupes" data-admin>Merge Duplicates</button>
-    <button data-view="compliance" data-admin>Documentation</button>
-    <button data-view="report" class="active">Shift Playbook</button>
-    <button data-view="retention">Retention</button>
-    <button data-view="outcomes">Insights</button>
-    <button data-view="analytics" data-admin data-subview>Risk Analytics</button>
-    <button data-view="scorecard" data-subview>Scorecard</button>
-    <button data-view="lineup" data-subview>Lineup</button>
-    <button data-view="surveys" data-subview>Surveys</button>
-    <button data-view="clientvoice">Client Voice <span id="cvBadge" class="badge-danger" style="display:none"></span></button>
-    <button data-view="concierge">Concierge</button>
-    <button data-view="dignity" data-subview>Dignity Kits</button>
-    <button data-view="roundscan">Rounds</button>
-    <button data-view="rounds">Rounds Status</button>
-    <button data-view="bedboard">Bed Turnover</button>
-    <button data-view="laundry">Laundry</button>
-    <button data-view="bedmap">Bed Board</button>
-    <button data-view="property">Belongings</button>
-    <button data-view="engagement">Engagement</button>
-    <button data-view="program">Program</button>
-    <button data-view="meals">Meals</button>
-    <button data-view="dischargepage">Discharge</button>
-    <button data-view="incidents" data-subview>Incidents</button>
-    <button data-view="casemgmt">Case Mgmt</button>
-    <button data-view="continuum">Continuum</button>
-    <button data-view="referrals">Referrals</button>
-    <button data-view="partners" data-subview>Partners</button>
-    <button data-view="askai" data-subview>Ask AI</button>
-    <button data-view="mytasks">My Tasks</button>
-    <button data-view="messages">Messages <span id="msgBadge" class="badge-danger" style="display:none"></span></button>
-    <button data-view="family" data-subview>Family</button>
+    <!-- ARRIVAL — the front door -->
     <button data-view="arrivals">Front Desk</button>
     <button data-view="arrivalcheck">Intake</button>
     <button data-view="admissions">Admissions</button>
+    <button data-view="referrals">Referrals</button>
+    <button data-view="partners" data-subview>Partners</button>
+    <!-- CARE — the daily work, in the order a shift meets it -->
+    <button data-view="clients">Clients</button>
+    <button data-view="records">Client Record</button>
+    <button data-view="editor" data-subview>Care Card</button>
+    <button data-view="rounds">Rounds Status</button>
+    <button data-view="roundscan">Rounds</button>
+    <button data-view="bedmap">Bed Board</button>
+    <button data-view="bedboard">Bed Turnover</button>
+    <button data-view="laundry">Laundry</button>
+    <button data-view="property">Belongings</button>
+    <button data-view="meals">Meals</button>
+    <button data-view="engagement">Engagement</button>
+    <button data-view="program">Program</button>
+    <button data-view="casemgmt">Case Mgmt</button>
+    <button data-view="family" data-subview>Family</button>
+    <button data-view="concierge">Concierge</button>
+    <button data-view="clientvoice">Client Voice <span id="cvBadge" class="badge-danger" style="display:none"></span></button>
+    <button data-view="report" class="active">Shift Playbook</button>
+    <button data-view="retention">Retention</button>
+    <button data-view="compliance" data-admin>Documentation</button>
+    <button data-view="surveys" data-subview>Surveys</button>
+    <button data-view="dignity" data-subview>Dignity Kits</button>
+    <button data-view="incidents" data-subview>Incidents</button>
+    <!-- DISCHARGE — the fond farewell -->
+    <button data-view="dischargepage">Discharge</button>
+    <button data-view="continuum">Continuum</button>
     <button data-view="alumni">Alumni</button>
-    <button data-view="accountability" data-admin data-subview>Accountability</button>
-    <button data-view="team">Team</button>
-    <button data-view="employees">Employees</button>
-    <button data-view="leadmirror">Leadership Mirror</button>
-    <button data-view="hiring">Hiring</button>
-    <button data-view="workplace" data-admin data-subview>Best Place to Work <span id="wpBadge" class="badge-danger" style="display:none"></span></button>
+    <!-- REVENUE — Revenue OS -->
+    <button data-view="authreg">Authorizations</button>
+    <button data-view="outpatient">Akron Outpatient</button>
+    <button data-view="finance" data-admin>Revenue</button>
+    <button data-view="expenses" data-admin>Budget</button>
+    <!-- FACILITY — the building runs -->
     <button data-view="inventory">Supplies</button>
     <button data-view="maintenance">Maintenance</button>
     <button data-view="operations" data-admin>Operations</button>
-    <button data-view="coverage" data-subview>Coverage</button>
     <button data-view="schedule" data-admin>Staffing</button>
     <button data-view="roster" data-admin>Roster</button>
+    <button data-view="staffsignins" data-admin>Staff Sign-ins</button>
+    <button data-view="coverage" data-subview>Coverage</button>
     <button data-view="weekgrid" data-admin data-subview>Weekly grid</button>
+    <button data-view="assign" data-admin data-subview>Assign Staff</button>
     <button data-view="staffmodel" data-admin data-subview>Staffing Model</button>
+    <!-- TEAM — culture, growth, communication -->
+    <button data-view="mytasks">My Tasks</button>
+    <button data-view="messages">Messages <span id="msgBadge" class="badge-danger" style="display:none"></span></button>
+    <button data-view="team">Team</button>
     <button data-view="mystats">How I'm doing</button>
     <button data-view="mygrowth">My Growth</button>
     <button data-view="myrole">My Role</button>
     <button data-view="training">Training</button>
     <button data-view="library">Library / SOPs</button>
+    <button data-view="employees">Employees</button>
+    <button data-view="leadmirror">Leadership Mirror</button>
+    <button data-view="hiring">Hiring</button>
     <button data-view="standard" data-subview>Standard</button>
-    <button data-view="clients">Clients</button>
-    <button data-view="records">Client Record</button>
-    <button data-view="editor" data-subview>Care Card</button>
-    <button data-view="assign" data-admin data-subview>Assign Staff</button>
-    <button data-view="settings" data-admin>Settings</button>
+    <button data-view="lineup" data-subview>Lineup</button>
+    <button data-view="workplace" data-admin data-subview>Best Place to Work <span id="wpBadge" class="badge-danger" style="display:none"></span></button>
+    <button data-view="accountability" data-admin data-subview>Accountability</button>
+    <!-- ENTERPRISE — the parent company -->
+    <button data-view="ownership">Corporate Command Center</button>
+    <button data-view="corphub">Corporate Hub</button>
+    <button data-view="hcos">HR — People OS</button>
+    <button data-view="plan" data-admin>90-Day Plan</button>
+    <button data-view="excellence" data-admin>Excellence Standards</button>
+    <button data-view="onboarding" data-admin>Onboarding</button>
+    <button data-view="playbook" data-admin>Playbook Scorecard</button>
+    <button data-view="leadership" data-admin>Leadership</button>
+    <!-- INSIGHT — why it happened -->
+    <button data-view="outcomes">Insights</button>
+    <button data-view="admitcheck" data-admin>Admit/Discharge Check</button>
+    <button data-view="scorecard" data-subview>Scorecard</button>
+    <button data-view="analytics" data-admin data-subview>Risk Analytics</button>
     <button data-view="report-view" data-admin data-subview>Reports</button>
+    <button data-view="askai" data-subview>Ask AI</button>
+    <!-- ADMIN — configuration & governance -->
+    <button data-view="settings" data-admin>Settings</button>
     <button data-view="users" data-admin>Staff</button>
     <button data-view="audit" data-admin>Audit Log</button>
+    <button data-view="guide" data-admin>Owner's Guide</button>
+    <button data-view="dupes" data-admin>Merge Duplicates</button>
     <!-- Hilltop Recovery Home (sober-living suite) -->
     <div class="side-cap" data-group="housing" data-cap>Daily</div>
     <button data-view="housing">Hilltop HQ</button>
@@ -2645,7 +2655,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624CJ"></script>
-<script src="/housing.js?v=20260624CJ"></script>
+<script src="/app.js?v=20260624CK"></script>
+<script src="/housing.js?v=20260624CK"></script>
 </body>
 </html>

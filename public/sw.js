@@ -1,8 +1,8 @@
 // Network-first service worker — stays fresh online, works offline from cache.
 // Hardened: a bad/empty network response never poisons the cache or blanks the app,
 // and a single missing asset never blocks the install.
-const C = 'armada-v320';
-const SHELL = ['/', '/index.html', '/kiosk.html', '/sl-kiosk.html', '/display.html', '/training.html', '/signup.html', '/styles.css?v=20260624CJ', '/app.js?v=20260624CJ', '/logo.png', '/logo.svg', '/manifest.webmanifest'];
+const C = 'armada-v321';
+const SHELL = ['/', '/index.html', '/kiosk.html', '/sl-kiosk.html', '/display.html', '/training.html', '/signup.html', '/styles.css?v=20260624CK', '/app.js?v=20260624CK', '/logo.png', '/logo.svg', '/manifest.webmanifest'];
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(C)

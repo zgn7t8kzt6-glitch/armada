@@ -211,6 +211,7 @@ Grouped, not flat; groups mirror the platform layers. `▸` = exists today, `○
 | **Error state** | in-card: cause + Retry; never a blank card | ★ new (api() already surfaces messages — wrap in recipe) |
 | **Audit trail** | table: when · who · what · detail; filterable; read-only | ✓ audit view — restyle to recipe |
 | **AI assistant panel** | right-side drawer, context-scoped ("Ask about this lease/person/business"), streaming answer, sources line | ✓ three exist (lease/HR/askai) — ONE component, three scopes |
+| **Operational Intelligence panel** | the signature (Constitution Art. V): three strata on substantive screens — `.oi-info` (facts), `.oi-intel` (AI insight: labeled, cited, sage-tinted left rail), `.oi-action` (verb buttons, one primary gold). Intelligence stratum collapses when the AI has nothing grounded to say — never filler | ★ formalize — embryos exist (discharge debrief, lease Q&A, coverage matrix) |
 | **Chip row / filter bar** | horizontal scroll chips for scopes (exists: chip-row) | ✓ |
 | **Kanban** | swipe columns (exists: corp-kanban) | ✓ |
 | **Drawer/sheet** | desktop right drawer 420px; mobile bottom sheet; for detail-without-navigation | ★ new — the biggest UX upgrade for 3-click flows |

@@ -7,7 +7,7 @@ order; when they conflict, the Constitution wins.
 
 | # | Document | What it settles |
 |---|---|---|
-| 1 | [ARMADA-CONSTITUTION.md](ARMADA-CONSTITUTION.md) | **The law.** Twelve principles, five gates, the Armada OS product map, and the amendment rule. Every PR answers to it. |
+| 1 | [ARMADA-CONSTITUTION.md](ARMADA-CONSTITUTION.md) | **The law** (v1.1). Sixteen principles across four articles, the Platform Contract, the Operational Intelligence signature, five gates, the Armada OS product map, the ten-question Review, and the amendment rule. Every PR answers to it. |
 | 2 | [ARMADA-AUDIT.md](ARMADA-AUDIT.md) | What exists — the honest inventory of every module, table, route, and workflow as found. |
 | 3 | [ARMADA-MASTER-APP-MAP.md](ARMADA-MASTER-APP-MAP.md) | Audit × target: keep/adapt/rebuild dispositions, owner decisions, phases, and the high-risk register. |
 | 4 | [ARMADA-DOMAIN-ARCHITECTURE.md](ARMADA-DOMAIN-ARCHITECTURE.md) | The business domains (31 + MDM), independent of how the code is organized. |

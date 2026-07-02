@@ -2577,6 +2577,38 @@ export function audit({ user, action, entity = null, entity_id = null, detail = 
   ).run(user?.id ?? null, user?.username ?? null, action, entity, entity_id, detail, ip);
 }
 
+// ── org_events: the platform event spine (Constitution, Article II) ───────────
+// One row per business moment (admission.created, order.requested, ...). It is
+// three things at once: the activity feed, the audit trail of what-happened-when,
+// and usage telemetry (Principle 15). Modules publish; anything may read.
+// `summary` is the human line shown in feeds — for patient events use initials,
+// never full names, so corporate-scope screens stay PHI-light (Principle 13).
+db.exec(`CREATE TABLE IF NOT EXISTS org_events (
+  id INTEGER PRIMARY KEY,
+  event TEXT NOT NULL,              -- dot-namespaced: admission.created, order.placed, ...
+  entity TEXT,                      -- entity type: client|order|incident|employee|leave|maintenance|...
+  entity_id TEXT,
+  facility_id INTEGER REFERENCES org_facilities(id),
+  actor TEXT,                       -- username, or 'system'/'kipu' for automation
+  summary TEXT,                     -- one human-readable line for the activity feed
+  payload TEXT,                     -- JSON detail (optional)
+  at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_org_events_at ON org_events(at);
+CREATE INDEX IF NOT EXISTS idx_org_events_event ON org_events(event);`);
+
+// Publishing must never break the workflow that publishes — swallow everything.
+export function publishEvent({ event, entity = null, entity_id = null, facility_id = null, actor = null, summary = null, payload = null }) {
+  try {
+    db.prepare(`INSERT INTO org_events (event, entity, entity_id, facility_id, actor, summary, payload) VALUES (?,?,?,?,?,?,?)`)
+      .run(event, entity, entity_id != null ? String(entity_id) : null, facility_id, actor, summary, payload ? JSON.stringify(payload) : null);
+  } catch { /* the event spine never takes a workflow down with it */ }
+}
+// Patient names shrink to initials before they touch a feed (Principle 13).
+export function nameInitials(n) {
+  return String(n || '').trim().split(/\s+/).map((w) => (w[0] || '').toUpperCase()).join('') || '?';
+}
+
 export default db;
 
 // ── Late-table column additions ────────────────────────────────────────────────

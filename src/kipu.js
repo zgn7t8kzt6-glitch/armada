@@ -6,7 +6,7 @@
 // version; this implements the documented v3 pattern and is verified on first
 // connect via /api/kipu/test before any sync.
 import crypto from 'node:crypto';
-import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ, setState, localDateOf } from './db.js';
+import { db, parseLoc, rollupDailyMetrics, appToday, addDays, APP_TZ, setState, localDateOf, publishEvent, nameInitials } from './db.js';
 
 // Kipu timestamps are UTC; admit time-of-day only makes sense in local time.
 // Convert an ISO/timestamp to local HH:MM (24h). Module-level so both the sync
@@ -520,11 +520,13 @@ export async function kipuSyncRoster() {
       // Level-of-care change: record it once, then advance the stored level.
       if (newLoc && existing.loc && newLoc !== existing.loc) {
         evt.run(existing.id, kid || null, 'loc_change', existing.loc, newLoc, today, null);
+        publishEvent({ event: 'level.changed', entity: 'client', entity_id: existing.id, actor: 'kipu', summary: `${nameInitials(name)} moved ${existing.loc} → ${newLoc}` });
       }
       if (newLoc) db.prepare(`UPDATE clients SET loc = ? WHERE id = ?`).run(newLoc, existing.id);
       // Discharge (or AMA) transition: only when they were active until now.
       if (discharged && existing.active === 1) {
         evt.run(existing.id, kid || null, isAma(dischStatus) ? 'ama' : 'discharge', existing.loc || newLoc || null, null, (localDateOf(dischDate) || today), dischStatus ? String(dischStatus) : null);
+        publishEvent({ event: 'discharge.recorded', entity: 'client', entity_id: existing.id, actor: 'kipu', summary: `${nameInitials(name)} discharged${isAma(dischStatus) ? ' (AMA)' : ''}` });
         // Flag the vacated bed for turnover (RT bed board), unless already flagged.
         try {
           const cl = db.prepare(`SELECT room, pref, name FROM clients WHERE id = ?`).get(existing.id);
@@ -575,7 +577,10 @@ export async function kipuSyncRoster() {
       // Record an admission event only for genuinely new intakes (admitted today
       // or yesterday) — never for the initial baseline import of the standing
       // census, which would inflate past days with a one-time spike.
-      if (admit && admit >= yest) evt.run(info.lastInsertRowid, kid || null, 'admit', null, newLoc, admit, null);
+      if (admit && admit >= yest) {
+        evt.run(info.lastInsertRowid, kid || null, 'admit', null, newLoc, admit, null);
+        publishEvent({ event: 'admission.created', entity: 'client', entity_id: info.lastInsertRowid, actor: 'kipu', summary: `${nameInitials(name)} admitted${newLoc ? ' · ' + newLoc : ''}` });
+      }
       created++;
     }
   }
@@ -647,7 +652,7 @@ export async function kipuSyncRoster() {
   // discharges + re-admits and skews the weekly counts.
   let deactivated = 0;
   if (activeKids.length) {
-    const activeRows = db.prepare(`SELECT id, kipu_id, loc, discharge_date FROM clients WHERE source='kipu' AND active = 1`).all();
+    const activeRows = db.prepare(`SELECT id, kipu_id, name, loc, discharge_date FROM clients WHERE source='kipu' AND active = 1`).all();
     const gone = activeRows.filter((g) => !claimedRows.has(g.id));
     // SAFEGUARD: a partial / failed census pull (pagination, location filter, network)
     // would make almost everyone look "gone". Never mass-discharge — if we'd drop more
@@ -673,6 +678,7 @@ export async function kipuSyncRoster() {
       for (const g of gone) {
         const dd = realDate(g);
         evt.run(g.id, g.kipu_id || null, 'discharge', g.loc || null, null, dd, 'left census');
+        publishEvent({ event: 'discharge.recorded', entity: 'client', entity_id: g.id, actor: 'kipu', summary: `${nameInitials(g.name)} discharged (left census)` });
         setGone.run(dd, g.id);
         deactivated++;
       }

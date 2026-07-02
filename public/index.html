@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624CG" />
+<link rel="stylesheet" href="/styles.css?v=20260624CH" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -179,7 +179,12 @@
     <header class="topbar sans">
       <button class="hamb" onclick="toggleNav()" aria-label="Menu">☰</button>
       <div class="topbar-title" id="topbarTitle">Today</div>
-      <button class="iconbtn" id="reqBell" onclick="show('concierge')" title="Concierge requests — tap to view" style="margin-left:auto;display:none">🔔<span id="reqBadge" class="badge-danger" style="display:none"></span></button>
+      <span class="ctx-chip" id="facChip" style="display:none;margin-left:10px" title="Your facility scope">🏥 <span id="facChipName"></span></span>
+      <span class="role-pill" id="rolePill" style="display:none;margin-left:8px"></span>
+      <button class="iconbtn" id="searchBtn" onclick="openSearch()" title="Search everything (Ctrl/⌘ K)" style="margin-left:auto">🔍</button>
+      <button class="iconbtn" id="todayBtn" onclick="toggleToday()" title="Today — your task inbox" style="margin-left:8px;display:none">📥<span id="todayBadge" class="nbadge" style="display:none"></span></button>
+      <button class="iconbtn" id="opsBell" onclick="show('opscenter')" title="Operations Center alerts" style="margin-left:8px;display:none">🚨<span id="opsBadge" class="nbadge" style="display:none"></span></button>
+      <button class="iconbtn" id="reqBell" onclick="show('concierge')" title="Concierge requests — tap to view" style="margin-left:8px;display:none">🔔<span id="reqBadge" class="badge-danger" style="display:none"></span></button>
       <button class="iconbtn" onclick="show('askai')" title="Ask AI" style="margin-left:8px">✦ Ask AI</button>
       <div id="topAccount" class="topacct" style="display:none">
         <span id="whoamiTop" class="hint" style="margin-right:2px"></span>
@@ -2638,7 +2643,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624CG"></script>
-<script src="/housing.js?v=20260624CG"></script>
+<script src="/app.js?v=20260624CH"></script>
+<script src="/housing.js?v=20260624CH"></script>
 </body>
 </html>

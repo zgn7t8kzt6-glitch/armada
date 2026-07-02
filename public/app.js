@@ -130,6 +130,7 @@ async function boot(){
   // Role-based landing: everyone opens already where they work.
   const landing = isHousingRole() ? 'housing' : (ME.job_role==='Director of Operations') ? 'operations' : (ME.role==='admin' ? 'command' : 'dashboard');
   show(landing);
+  renderShellContext();   // facility chip · role pill · Today inbox · ops alerts (D2 shell)
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
   if(isLeadershipUser()){ pollWpBadge(); setInterval(pollWpBadge, 60000); }   // Best Place to Work attention badge
   if(canSeeView('concierge')){ if($('reqBell'))$('reqBell').style.display=''; pollReqBadge(); setInterval(pollReqBadge, 45000); }   // concierge request bell
@@ -5905,11 +5906,91 @@ async function askHcos(){
   catch(e){ if(el)el.innerHTML='<div class="hint" style="margin-top:8px;color:var(--danger)">'+esc(e.message)+'</div>'; }
 }
 
+/* ═══ D2 SHELL — always know where you are, what's yours, what's burning ═══ */
+function renderShellContext(){
+  const pill=$('rolePill');
+  if(pill){
+    const prev=!!PREVIEW_ROLE;
+    pill.textContent = prev ? ('Previewing: '+PREVIEW_ROLE) : (ME.role==='admin' ? 'Owner · Admin' : (ME.job_role||'Team'));
+    pill.classList.toggle('previewing', prev);
+    pill.style.display='';
+  }
+  const chip=$('facChip');
+  if(chip){
+    // Scope display (Phase-2 per-user scoping deepens this via user_facility_access).
+    const label = (ME.role==='admin'||['Executive Director','Executive Assistant'].includes(ME.job_role)) ? 'All facilities'
+      : isHousingRole() ? 'Hilltop — Akron House' : 'Armada Detox of Akron';
+    $('facChipName').textContent=label; chip.style.display='';
+  }
+  if($('todayBtn')){ $('todayBtn').style.display=''; refreshTodayBadge(); setInterval(refreshTodayBadge, 120000); }
+  if((ME.opsAccess||ME.role==='admin') && $('opsBell')){ $('opsBell').style.display=''; refreshOpsBadge(); setInterval(refreshOpsBadge, 90000); }
+  if(!renderShellContext._keys){
+    renderShellContext._keys=true;
+    document.addEventListener('keydown',(e)=>{
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){ e.preventDefault(); openSearch(); }
+      if(e.key==='Escape'){ closeSearch(); closeToday(); }
+    });
+  }
+}
+let TODAY_ITEMS=[];
+async function refreshTodayBadge(){
+  try{ const d=await api('/today'); TODAY_ITEMS=d.items||[]; const b=$('todayBadge'); if(b){ const n=TODAY_ITEMS.length; b.textContent=n; b.style.display=n?'':'none'; } }catch(_e){}
+}
+async function refreshOpsBadge(){
+  try{ const d=await api('/opscenter'); const n=(d.tiles||[]).filter(t=>t.alert).length; const b=$('opsBadge'); if(b){ b.textContent=n; b.style.display=n?'':'none'; } }catch(_e){}
+}
+// Today drawer — the personal inbox: everything waiting on ME, overdue first.
+function closeToday(){ const d=document.getElementById('todayDrawer'); if(d) d.remove(); }
+function toggleToday(){
+  if(document.getElementById('todayDrawer')) return closeToday();
+  const d=document.createElement('div'); d.id='todayDrawer'; d.className='today-drawer sans';
+  const row=(t,i)=>`<div class="q-row ${t.overdue?'q-overdue':''}" onclick="todayGo(${i})"><div class="q-main"><div class="q-title">${esc(t.label)}</div><div class="q-sub">${esc(t.sub||'')}</div></div><div>›</div></div>`;
+  d.innerHTML=`<div class="td-head"><strong>📥 Today${TODAY_ITEMS.length?` · ${TODAY_ITEMS.length}`:''}</strong><button class="iconbtn" onclick="closeToday()">✕</button></div>
+    <div class="td-body">${TODAY_ITEMS.length?TODAY_ITEMS.map(row).join(''):'<div class="empty"><div class="e-ico">🌤</div>Nothing waiting on you right now.<br>Enjoy the calm — it’s earned.</div>'}</div>`;
+  document.body.appendChild(d);
+  refreshTodayBadge();
+}
+function todayGo(i){ const t=TODAY_ITEMS[i]; if(!t) return; closeToday(); opsDrill(t.view, t.tab||''); }
+// Global search (Ctrl/⌘K) — people, work, vendors, pages; walls respected server-side.
+function closeSearch(){ const o=document.getElementById('ksearch'); if(o) o.remove(); }
+function openSearch(){
+  if(document.getElementById('ksearch')) return;
+  const o=document.createElement('div'); o.id='ksearch'; o.className='ksearch';
+  o.onclick=(e)=>{ if(e.target===o) closeSearch(); };
+  o.innerHTML=`<div class="ksearch-box"><input id="ksearchInput" placeholder="Search clients, employees, orders, vendors, pages…" autocomplete="off"/><div class="ksearch-list" id="ksearchList"></div></div>`;
+  document.body.appendChild(o);
+  const inp=document.getElementById('ksearchInput'); inp.focus();
+  let t=null;
+  inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>runSearch(inp.value),180); };
+}
+let KSEARCH_HITS=[];
+async function runSearch(q){
+  const list=document.getElementById('ksearchList'); if(!list) return;
+  q=String(q||'').trim();
+  // Pages match locally — the nav already knows what this user may see.
+  const pages=[...document.querySelectorAll('#nav button')].map(b=>({view:b.dataset.view,label:b.textContent.trim()}))
+    .filter(p=>q.length>=2 && p.label.toLowerCase().includes(q.toLowerCase()) && canSeeView(p.view)).slice(0,4);
+  let data={results:[]};
+  if(q.length>=2){ try{ data=await api('/search?q='+encodeURIComponent(q)); }catch(_e){} }
+  KSEARCH_HITS=[...data.results.map(r=>({...r})), ...pages.map(p=>({type:'page',icon:'▸',label:p.label,view:p.view,sub:'Go to page'}))];
+  if(!KSEARCH_HITS.length){ list.innerHTML=q.length>=2?'<div class="empty" style="padding:18px">No matches. Try a name, an item, or a page.</div>':''; return; }
+  list.innerHTML=KSEARCH_HITS.map((r,i)=>`<div class="q-row" onclick="ksearchGo(${i})"><div>${r.icon||'•'}</div><div class="q-main"><div class="q-title">${esc(r.label)}</div><div class="q-sub">${esc(r.sub||'')}</div></div><div>›</div></div>`).join('');
+}
+function ksearchGo(i){
+  const r=KSEARCH_HITS[i]; if(!r) return;
+  closeSearch();
+  if(r.type==='client') return openJourney(r.id);
+  if(r.type==='employee'){ show('hcos'); return setTimeout(()=>openHcosPerson(r.id),250); }
+  if(r.type==='order') return opsDrill('corphub','orders');
+  if(r.type==='vendor') return opsDrill('corphub','vendors');
+  if(r.type==='page') return show(r.view);
+}
+
 // ── OPERATIONS CENTER — "what's happening right now"; every tile drills into work ──
 async function loadOpsCenter(){
   const host=$('opscenter'); if(!host) return;
-  host.innerHTML='<div class="card"><div class="hint">Loading the board…</div></div>';
-  let d; try{ d=await api('/opscenter'); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  host.innerHTML='<div class="card"><div class="skel" style="width:220px;height:22px;margin-bottom:14px"></div><div class="skel-tiles">'+'<div class="skel"></div>'.repeat(5)+'</div></div><div class="card"><div class="skel-tiles">'+'<div class="skel"></div>'.repeat(5)+'</div></div>';
+  let d; try{ d=await api('/opscenter'); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'<div class="e-act"><button class="btn btn-gold btn-sm sans" onclick="loadOpsCenter()">Retry</button></div></div></div>'; return; }
   const tiles=d.tiles||[];
   const groups=[
     ['now','🟢 Right now','the facility pulse this minute'],
@@ -5921,7 +6002,9 @@ async function loadOpsCenter(){
     ${groups.map(([g,label,sub])=>{
       const ts=tiles.filter(t=>t.group===g); if(!ts.length) return '';
       return `<div class="card"><h3 style="margin-top:0">${label} <span class="hint" style="font-weight:400">· ${sub}</span></h3><div class="ret-cards">${ts.map(tile).join('')}</div></div>`;
-    }).join('')}`;
+    }).join('')}
+    ${(d.events&&d.events.length)?`<div class="card"><details><summary style="cursor:pointer"><h3 style="margin:0;display:inline">🕐 Activity <span class="hint" style="font-weight:400">· the last ${d.events.length} business moments, newest first</span></h3></summary>
+      <div class="ops-feed">${d.events.map(ev=>`<div class="q-row"><div class="q-main"><div class="q-title">${esc(ev.summary||ev.event)}</div><div class="q-sub">${esc(ev.event)} · ${esc((ev.at||'').slice(0,16).replace('T',' '))}${ev.actor?' · '+esc(ev.actor):''}</div></div></div>`).join('')}</div></details></div>`:''}`;
 }
 // Drill-through: land on the exact tab that holds the work, not just the page.
 function opsDrill(view,tab){

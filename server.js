@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { db, audit, getState, setState } from './src/db.js';
+import { db, audit, getState, setState, publishEvent, nameInitials } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured, smsStatus, DEFAULT_CC } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
@@ -124,12 +124,26 @@ setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
 const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant', 'HR'];
-// HCOS (HR command center): owner, HR, and executives.
-function canSeeHR(user) { return !!user && (user.role === 'admin' || ['HR', 'Executive Director'].includes(user.job_role)); }
+// ── Phase 2 access control: the role_permissions matrix is LIVE for the corporate
+// and HR modules (first per the rebuild order; clinical switches LAST). Grant paths
+// are additive per the Constitution (Evolve Without Breaking): a matrix row can
+// widen access beyond the legacy walls, never silently revoke what works today —
+// full deny-by-matrix flips on module-by-module once every role is mapped.
+function hasPerm(user, module, action = 'view') {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  try {
+    const row = db.prepare(`SELECT allowed FROM role_permissions WHERE role = ? AND module = ? AND action = ?`).get(user.job_role || '', module, action);
+    return row ? !!row.allowed : false;
+  } catch { return false; }
+}
+// HCOS (HR command center): owner, HR, and executives — plus any role granted
+// the 'hr' module in the permission matrix.
+function canSeeHR(user) { return !!user && (user.role === 'admin' || ['HR', 'Executive Director'].includes(user.job_role) || hasPerm(user, 'hr')); }
 function requireHR(req, res, next) { if (!canSeeHR(req.user)) return res.status(403).json({ error: 'HR access only.' }); next(); }
 // Corporate Operations (Chava): sees ordering, maintenance, and her hub — plus owner/
-// leadership can see it too. A shared board, so anyone can drop a task for her.
-function canSeeCorp(user) { return !!user && (user.role === 'admin' || ['Executive Assistant', 'Executive Director', 'Director of Operations'].includes(user.job_role)); }
+// leadership can see it too, plus any role granted the 'corporate' module.
+function canSeeCorp(user) { return !!user && (user.role === 'admin' || ['Executive Assistant', 'Executive Director', 'Director of Operations'].includes(user.job_role) || hasPerm(user, 'corporate')); }
 function requireCorp(req, res, next) { if (!canSeeCorp(req.user)) return res.status(403).json({ error: 'Corporate access only.' }); next(); }
 
 /* ───────── Selection over hiring (Horst Schulze): role profiles + structured interview ───────── */
@@ -383,7 +397,91 @@ app.get('/api/opscenter', requireAuth, (req, res) => {
   add(() => { const n = one(`SELECT COUNT(*) n FROM hr_cases WHERE status='open'`); return { group: 'people', key: 'cases', label: 'Open HR cases', n, view: 'hcos', tab: 'relations' }; });
   add(() => ({ group: 'people', key: 'pipeline', label: 'Hiring pipeline', n: one(`SELECT COUNT(*) n FROM candidates WHERE stage NOT IN ('Hired','Passed')`), view: 'hiring' }));
   add(() => { const n = one(`SELECT COUNT(*) n FROM insurance_policies WHERE status IN ('active','pending') AND expiration_date IS NOT NULL AND expiration_date <= ?`, addDays(today, 60)); return { group: 'people', key: 'ins', label: 'Insurance renewing ≤60d', n, alert: n > 0, view: 'corphub', tab: 'insurance' }; });
-  res.json({ today, tiles: t });
+  // Activity feed: the last business moments off the org_events spine.
+  let events = [];
+  try { events = db.prepare(`SELECT event, summary, actor, at FROM org_events ORDER BY id DESC LIMIT 20`).all(); } catch { /* feed optional */ }
+  res.json({ today, tiles: t, events });
+});
+
+// ── TODAY: the personal task inbox — everything waiting on ME, due-ordered ─────
+app.get('/api/today', requireAuth, (req, res) => {
+  const today = appToday();
+  const items = [];
+  const add = (fn) => { try { fn(); } catch { /* source skipped */ } };
+  const me = req.user;
+  // My project/errand tasks on the corporate board (matched by assignee name).
+  add(() => {
+    if (!canSeeCorp(me)) return;
+    for (const t of db.prepare(`SELECT id, title, category, priority, due_date, status FROM corp_tasks WHERE status IN ('todo','doing','blocked') AND (assignee IS NULL OR assignee='' OR assignee LIKE ?) ORDER BY (due_date IS NULL), due_date LIMIT 12`).all('%' + (me.name || '') + '%')) {
+      items.push({ label: t.title, sub: `${t.category}${t.due_date ? ' · due ' + t.due_date : ''}`, overdue: !!(t.due_date && t.due_date < today), view: 'corphub', tab: 'projects' });
+    }
+  });
+  // Tasks assigned to me by a teammate (followups).
+  add(() => {
+    for (const f of db.prepare(`SELECT id, text, due_date FROM followups WHERE done=0 AND assignee_id=? ORDER BY (due_date IS NULL), due_date LIMIT 10`).all(me.id)) {
+      items.push({ label: f.text, sub: f.due_date ? 'due ' + f.due_date : 'assigned to you', overdue: !!(f.due_date && f.due_date < today), view: 'mytasks' });
+    }
+  });
+  // Leadership: anything burning on the Ops Center lands in Today too.
+  add(() => {
+    if (!canSeeOps(me)) return;
+    const one = (sql, ...a) => db.prepare(sql).get(...a).n;
+    const inc = one(`SELECT COUNT(*) n FROM incidents WHERE status='Open'`);
+    if (inc) items.push({ label: `${inc} open incident${inc === 1 ? '' : 's'} to review`, sub: 'Ops Center', overdue: true, view: 'incidents' });
+    if (canSeeHR(me)) { const rev = one(`SELECT COUNT(*) n FROM hr_reviews WHERE status='open' AND due_date < ?`, today); if (rev) items.push({ label: `${rev} review${rev === 1 ? '' : 's'} overdue`, sub: 'People OS', overdue: true, view: 'hcos', tab: 'reviews' }); }
+    if (canSeeCorp(me)) { const ord = one(`SELECT COUNT(*) n FROM order_requests WHERE status='requested' AND priority IN ('High','Urgent')`); if (ord) items.push({ label: `${ord} high-priority order${ord === 1 ? '' : 's'} to place`, sub: 'Corporate Hub', overdue: false, view: 'corphub', tab: 'orders' }); }
+  });
+  items.sort((a, b) => (b.overdue ? 1 : 0) - (a.overdue ? 1 : 0));
+  res.json({ today, items: items.slice(0, 15) });
+});
+
+// ── GLOBAL SEARCH: people, work, vendors — walls respected per source ──────────
+app.get('/api/search', requireAuth, (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ results: [] });
+  const like = '%' + q + '%';
+  const me = req.user;
+  const out = [];
+  const add = (fn) => { try { fn(); } catch { /* source skipped */ } };
+  const eaWalled = me.job_role === 'Executive Assistant' && me.role !== 'admin';   // corporate lane: no clinical
+  add(() => {
+    if (eaWalled) return;
+    for (const c of db.prepare(`SELECT id, name, pref, room, active FROM clients WHERE merged_into IS NULL AND (name LIKE ? OR pref LIKE ?) ORDER BY active DESC, id DESC LIMIT 6`).all(like, like)) {
+      out.push({ type: 'client', icon: '🛏', id: c.id, label: c.name || c.pref, sub: (c.active ? 'In care' : 'Discharged') + (c.room ? ' · Room ' + c.room : '') });
+    }
+  });
+  add(() => {
+    if (!canSeeHR(me)) return;
+    for (const e of db.prepare(`SELECT id, first_name, last_name, job_title, entity, status FROM hr_employees WHERE (first_name || ' ' || last_name) LIKE ? ORDER BY (status!='active'), last_name LIMIT 6`).all(like)) {
+      out.push({ type: 'employee', icon: '👤', id: e.id, label: `${e.first_name} ${e.last_name}`, sub: [e.job_title, e.entity].filter(Boolean).join(' · ') || (e.status === 'active' ? 'Active' : 'Inactive') });
+    }
+  });
+  add(() => {
+    if (!canSeeCorp(me)) return;
+    for (const o of db.prepare(`SELECT id, item_name, facility, status FROM order_requests WHERE item_name LIKE ? AND status IN ('requested','ordered') ORDER BY id DESC LIMIT 5`).all(like)) {
+      out.push({ type: 'order', icon: '🛒', id: o.id, label: o.item_name, sub: `${o.status} · ${o.facility}` });
+    }
+    for (const v of db.prepare(`SELECT id, name, category FROM vendors WHERE name LIKE ? LIMIT 4`).all(like)) {
+      out.push({ type: 'vendor', icon: '📇', id: v.id, label: v.name, sub: v.category || 'Vendor' });
+    }
+  });
+  res.json({ results: out.slice(0, 18) });
+});
+
+// ── PERMISSION MATRIX (Phase 2 lever): rows here GRANT module access live ──────
+const PERM_MODULES = ['corporate', 'facility_ops', 'admissions', 'census', 'clinical', 'casemgmt', 'peer', 'ur', 'billing', 'hr', 'finance', 'bd', 'compliance', 'scheduling', 'documents', 'tasks', 'reports', 'admin'];
+app.get('/api/org/permissions', requireAuth, requireAdmin, (req, res) => {
+  res.json({ roles: JOB_ROLES, modules: PERM_MODULES, permissions: db.prepare(`SELECT role, module, action, scope, allowed FROM role_permissions ORDER BY role, module`).all() });
+});
+app.post('/api/org/permissions', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (!b.role || !PERM_MODULES.includes(b.module)) return res.status(400).json({ error: 'role and a known module are required.' });
+  const action = String(b.action || 'view').slice(0, 20);
+  if (b.allowed === false || b.allowed === 0) db.prepare(`DELETE FROM role_permissions WHERE role=? AND module=? AND action=?`).run(b.role, b.module, action);
+  else db.prepare(`INSERT OR IGNORE INTO role_permissions (role, module, action, scope) VALUES (?,?,?,?)`).run(b.role, b.module, action, String(b.scope || 'facility').slice(0, 20));
+  audit({ user: req.user, action: 'PERMISSION_SET', detail: `${b.role}/${b.module}/${action}=${b.allowed === false || b.allowed === 0 ? 0 : 1}`, ip: req.ip });
+  publishEvent({ event: 'role.changed', entity: 'permission', actor: req.user.username, summary: `${b.role} ${b.allowed === false || b.allowed === 0 ? 'revoked' : 'granted'} ${b.module}` });
+  res.json({ ok: true });
 });
 
 app.get('/api/org/facilities', requireAuth, (req, res) => {
@@ -607,8 +705,11 @@ function raiseReorder(item, qty, level, user) {
   try {
     if (item.department !== 'Kitchen') {
       const open = db.prepare(`SELECT id FROM order_requests WHERE source='detox-auto' AND facility=? AND item_name=? AND status='requested'`).get(DETOX_LOCATION, item.name);
-      if (!open) db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, priority, status, requested_by_id, requested_by, source) VALUES (?,?,?,?,?, 'requested', ?, ?, 'detox-auto')`)
-        .run(DETOX_LOCATION, item.name, `to par (${Math.max((item.par_level || 0) - qty, 1)} ${item.unit || ''})`.trim(), item.department || null, level === 'out' ? 'High' : 'Normal', user?.id || null, user?.name || 'Auto');
+      if (!open) {
+        const ord = db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, priority, status, requested_by_id, requested_by, source) VALUES (?,?,?,?,?, 'requested', ?, ?, 'detox-auto')`)
+          .run(DETOX_LOCATION, item.name, `to par (${Math.max((item.par_level || 0) - qty, 1)} ${item.unit || ''})`.trim(), item.department || null, level === 'out' ? 'High' : 'Normal', user?.id || null, user?.name || 'Auto');
+        publishEvent({ event: 'inventory.par_breached', entity: 'order', entity_id: ord.lastInsertRowid, facility_id: facilityForEntity(DETOX_LOCATION)?.id ?? null, actor: user?.username || 'system', summary: `${item.name} ${level === 'out' ? 'out of stock' : 'below par'} — auto-queued` });
+      }
     }
   } catch { /* order stream is best-effort */ }
   return true;
@@ -1024,6 +1125,7 @@ app.post('/api/maintenance', requireAuth, async (req, res) => {
   for (const p of photos) insPhoto.run(id, p, req.user.id, req.user.name);
   const r = db.prepare(`SELECT * FROM maintenance_requests WHERE id = ?`).get(id);
   audit({ user: req.user, action: 'MAINT_NEW', entity_id: id, detail: `${title} (${priority}/${category})`, ip: req.ip });
+  publishEvent({ event: 'maintenance.opened', entity: 'maintenance', entity_id: id, actor: req.user.username, summary: `${title} (${priority})${b.location ? ' · ' + String(b.location).slice(0, 40) : ''}` });
   // Urgent or any Safety/Security item escalates to the on-call leader immediately.
   if (priority === 'Urgent' || category === 'Safety/Security') {
     createAlert(null, 'maint_' + id, priority === 'Urgent' ? 'High' : 'Elevated', `Maintenance ${priority}: ${title}${r.location ? ' @ ' + r.location : ''} (${category}). Reported by ${req.user.name}.`);
@@ -1959,6 +2061,7 @@ app.post('/api/clients', requireAuth, (req, res) => {
   ).run(...vals);
   saveTasks(info.lastInsertRowid, b.tasks);
   audit({ user: req.user, action: 'CREATE', entity: 'client', entity_id: info.lastInsertRowid, detail: b.name, ip: req.ip });
+  publishEvent({ event: 'admission.created', entity: 'client', entity_id: info.lastInsertRowid, actor: req.user.username, summary: `${nameInitials(b.name || b.pref)} admitted` });
   res.json({ id: info.lastInsertRowid });
 });
 
@@ -3343,6 +3446,7 @@ app.post('/api/corp/orders', requireAuth, requireCorp, async (req, res) => {
   const pris = ['Low', 'Normal', 'High', 'Urgent'];
   const info = db.prepare(`INSERT INTO order_requests (facility, item_name, qty, category, vendor, link, priority, est_cost, notes, requested_by_id, requested_by, source) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'manual')`)
     .run(facility.slice(0, 120), String(b.item_name).slice(0, 200), String(b.qty || '').slice(0, 40), String(b.category || '').slice(0, 60), String(b.vendor || '').slice(0, 80), String(b.link || '').slice(0, 500), pris.includes(b.priority) ? b.priority : 'Normal', String(b.est_cost || '').slice(0, 40), String(b.notes || '').slice(0, 1000), req.user.id, req.user.name);
+  publishEvent({ event: 'order.requested', entity: 'order', entity_id: info.lastInsertRowid, facility_id: facilityForEntity(facility)?.id ?? null, actor: req.user.username, summary: `${String(b.item_name).slice(0, 80)} requested · ${facility}` });
   // If this falls under the landlord's responsibility for the facility, email them.
   let landlord = null;
   try { const o = db.prepare(`SELECT * FROM order_requests WHERE id = ?`).get(info.lastInsertRowid); landlord = await maybeEmailLandlord(o, req.user, false); } catch { /* best-effort */ }
@@ -3398,6 +3502,10 @@ app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
     ordered_at=?, ordered_by=CASE WHEN ?='ordered' AND ordered_by IS NULL THEN ? ELSE ordered_by END, received_at=?, received_by=CASE WHEN ?='received' AND received_by IS NULL THEN ? ELSE received_by END, updated_at=datetime('now') WHERE id=?`)
     .run(status, ['Low', 'Normal', 'High', 'Urgent'].includes(b.priority) ? b.priority : null, b.vendor != null ? String(b.vendor).slice(0, 80) : null, b.link != null ? String(b.link).slice(0, 500) : null, b.qty != null ? String(b.qty).slice(0, 40) : null, b.est_cost != null ? String(b.est_cost).slice(0, 40) : null, b.notes != null ? String(b.notes).slice(0, 1000) : null,
       orderedAt, status, req.user.name, receivedAt, status, req.user.name, o.id);
+  if (status !== o.status && status !== 'requested') {
+    const evName = { ordered: 'order.placed', received: 'order.received', cancelled: 'order.cancelled' }[status];
+    publishEvent({ event: evName, entity: 'order', entity_id: o.id, facility_id: facilityForEntity(o.facility)?.id ?? null, actor: req.user.username, summary: `${o.item_name} ${status} · ${o.facility}` });
+  }
   res.json({ ok: true });
 });
 app.delete('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM order_requests WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
@@ -3449,6 +3557,7 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
     created = 1;
   }
   console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}`);
+  publishEvent({ event: 'email.order_received', entity: 'order', facility_id: facilityForEntity(entity)?.id ?? null, actor: msg.from, summary: `${created} item${created === 1 ? '' : 's'} emailed in · ${entity}` });
   // Confirmation reply to the sender ("✓ Got it") — best-effort, never blocks intake.
   if (emailConfigured() && getState('order_intake_confirm') !== 'off' && /@/.test(msg.from)) {
     const esc = htmlEsc;
@@ -3949,6 +4058,7 @@ app.post('/api/hcos/person/:id/start-onboarding', requireAuth, requireHR, (req, 
     db.exec('COMMIT');
   } catch (err) { try { db.exec('ROLLBACK'); } catch { /* ignore */ } return res.status(500).json({ error: err.message }); }
   hrEvent(e.id, 'onboarding', `Onboarding started — hire date ${hire}`, req.user.name);
+  publishEvent({ event: 'employee.hired', entity: 'employee', entity_id: e.id, actor: req.user.username, summary: `${e.first_name} ${e.last_name} — onboarding started (${e.entity || 'no entity'})` });
   res.json({ ok: true, hire });
 });
 app.post('/api/hcos/onboard/task/:id/toggle', requireAuth, requireHR, (req, res) => {
@@ -4017,6 +4127,7 @@ app.post('/api/hcos/leave', requireAuth, requireHR, (req, res) => {
   const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : appToday();
   const info = db.prepare(`INSERT INTO hr_leave (employee_id, kind, start_date, end_date, notes) VALUES (?,?,?,?,?)`)
     .run(+b.employee_id, kinds.includes(b.kind) ? b.kind : 'PTO', dt(b.start_date), dt(b.end_date || b.start_date), String(b.notes || '').slice(0, 500));
+  publishEvent({ event: 'leave.requested', entity: 'leave', entity_id: info.lastInsertRowid, actor: req.user.username, summary: `${b.kind || 'PTO'} leave requested (${dt(b.start_date)})` });
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 app.post('/api/hcos/leave/:id/decide', requireAuth, requireHR, (req, res) => {
@@ -4125,6 +4236,7 @@ app.post('/api/hcos/person/:id/complete-offboarding', requireAuth, requireHR, (r
   db.prepare(`UPDATE hr_employees SET status='inactive', updated_at=datetime('now') WHERE id=?`).run(e.id);
   db.prepare(`UPDATE hr_reviews SET status='done', summary=COALESCE(summary,'(closed at offboarding)'), completed_at=datetime('now') WHERE employee_id=? AND status='open'`).run(e.id);
   hrEvent(e.id, 'offboarding', `Offboarding complete — employee archived`, req.user.name);
+  publishEvent({ event: 'employee.terminated', entity: 'employee', entity_id: e.id, actor: req.user.username, summary: `${e.first_name} ${e.last_name} — offboarding complete` });
   res.json({ ok: true });
 });
 // Policy documents + acknowledgements.
@@ -4198,6 +4310,7 @@ app.post('/api/myhr/leave', requireAuth, (req, res) => {
   const dt = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : appToday();
   db.prepare(`INSERT INTO hr_leave (employee_id, kind, start_date, end_date, notes) VALUES (?,?,?,?,?)`)
     .run(e.id, kinds.includes(b.kind) ? b.kind : 'PTO', dt(b.start_date), dt(b.end_date || b.start_date), String(b.notes || '').slice(0, 500));
+  publishEvent({ event: 'leave.requested', entity: 'leave', entity_id: e.id, actor: req.user.username, summary: `${b.kind || 'PTO'} leave requested (${dt(b.start_date)}) — self-service` });
   res.json({ ok: true });
 });
 app.post('/api/myhr/pulse', requireAuth, (req, res) => {
@@ -5690,6 +5803,7 @@ app.post('/api/clients/:id/discharge', requireAuth, (req, res) => {
   // linger in any count that filters on active alone (keeps census consistent).
   db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, departure_steps = ?, discharge_reason = ?, discharge_followthrough = ?, discharge_improve = ? WHERE id = ?`)
     .run(status, d, b.destination || null, steps, b.reason || null, b.followthrough || null, b.improve || null, req.params.id);
+  try { const cln = db.prepare(`SELECT name FROM clients WHERE id = ?`).get(req.params.id); publishEvent({ event: 'discharge.recorded', entity: 'client', entity_id: +req.params.id, actor: req.user.username, summary: `${nameInitials(cln?.name)} discharged · ${status}` }); } catch { /* feed only */ }
   // Safety net: discharged with belongings/cash still on the books → flag leadership.
   try {
     const cid = +req.params.id;
@@ -7620,6 +7734,7 @@ app.post('/api/incidents', requireAuth, (req, res) => {
   if (b.severity === 'High' || b.severity === 'Critical') createAlert(b.client_id || null, 'incident', b.severity, `${b.severity} incident (${b.type}): ${b.description.trim().slice(0, 80)}`);
   if (needsContract) createAlert(b.client_id || null, 'behavior_contract', 'Elevated', `Incident flagged as needing a behavioral contract by ${req.user.name}: ${b.description.trim().slice(0, 70)}`);
   audit({ user: req.user, action: 'INCIDENT', entity: 'client', entity_id: b.client_id ? +b.client_id : null, detail: `${b.type}/${b.severity}${needsContract ? '/needs-contract' : ''}`, ip: req.ip });
+  publishEvent({ event: 'incident.reported', entity: 'incident', actor: req.user.username, summary: `${b.severity || 'Low'} incident · ${b.type}` });
   res.json({ ok: true });
 });
 app.post('/api/incidents/:id/status', requireAuth, (req, res) => {

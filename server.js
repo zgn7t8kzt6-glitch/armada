@@ -21,7 +21,7 @@ import {
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
-import { parseEntityWorkbook } from './src/xlsx.js';
+import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -4252,10 +4252,37 @@ function normalizeInbound(b) {
   if (!text) { const html = pick('html', 'HtmlBody', 'body-html'); text = String(html).replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim(); }
   return { from, to, subject, text };
 }
+// Spreadsheet orders: office managers often attach an .xlsx instead of typing the
+// list. Pull attachments out of the webhook payload (Power Automate ContentBytes,
+// Mailgun/SendGrid variants), read them with the in-house xlsx reader, and hand
+// the rows to the same AI parser as body text. CSV/TXT attachments decode direct.
+function inboundAttachmentsText(body) {
+  const arrs = [body?.attachments, body?.Attachments, body?.attachment ? [body.attachment] : null].filter(Array.isArray);
+  const list = (arrs[0] || []).slice(0, 4);
+  const parts = [], names = [];
+  for (const a of list) {
+    try {
+      const name = String(a.name || a.Name || a.filename || a.fileName || 'attachment').slice(0, 120);
+      const b64 = a.contentBytes || a.ContentBytes || a.content || a.data || a.content_b64 || '';
+      if (!b64 || typeof b64 !== 'string' || b64.length > 8_000_000) continue;   // ~6MB decoded cap
+      const buf = Buffer.from(b64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      if (/\.(xlsx|xlsm)$/i.test(name)) {
+        const text = workbookText(buf);
+        if (text.trim()) { parts.push(`[Attached spreadsheet: ${name}]\n${text}`); names.push(name); }
+      } else if (/\.(csv|txt)$/i.test(name)) {
+        const text = buf.toString('utf8').slice(0, 20000);
+        if (text.trim()) { parts.push(`[Attached file: ${name}]\n${text}`); names.push(name); }
+      }
+    } catch (e) { parts.push(`[Attachment could not be read: ${e.message}]`); }
+  }
+  return { text: parts.join('\n\n'), names };
+}
 app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb' }), async (req, res) => {
   if ((req.query.t || req.headers['x-intake-token']) !== orderIntakeToken()) return res.status(401).json({ error: 'bad token' });
   const msg = normalizeInbound(req.body || {});
   if (!msg.from) return res.status(400).json({ error: 'no sender' });
+  const attach = inboundAttachmentsText(req.body || {});
+  if (attach.text) msg.text = (msg.text ? msg.text + '\n\n' : '') + attach.text;
   // Resolve the entity: an address/+tag route wins, else a sender route, else default.
   const routes = db.prepare(`SELECT * FROM order_intake_routes WHERE active = 1`).all();
   let entity = null, requester = msg.from;
@@ -4280,11 +4307,12 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
     }
   }
   if (!created) {   // couldn't parse (or AI off) — capture the whole email as one order to review
-    insert.run(entity, (msg.subject || 'Emailed order').slice(0, 200), '', 'Other', '', '', 'Normal', `via email from ${requester}. Original:\n${msg.text}`.slice(0, 1000), requester);
-    itemNames.push(msg.subject || 'Emailed order');
+    const label = (msg.subject || 'Emailed order') + (attach.names.length ? ` (+${attach.names.join(', ')})` : '');
+    insert.run(entity, label.slice(0, 200), '', 'Other', '', '', 'Normal', `via email from ${requester}. Original:\n${msg.text}`.slice(0, 1000), requester);
+    itemNames.push(label);
     created = 1;
   }
-  console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}`);
+  console.log(`[intake] ${created} order(s) from ${msg.from} → ${entity}${attach.names.length ? ' (spreadsheet: ' + attach.names.join(', ') + ')' : ''}`);
   publishEvent({ event: 'email.order_received', entity: 'order', facility_id: facilityForEntity(entity)?.id ?? null, actor: msg.from, summary: `${created} item${created === 1 ? '' : 's'} emailed in · ${entity}` });
   // Confirmation reply to the sender ("✓ Got it") — best-effort, never blocks intake.
   if (emailConfigured() && getState('order_intake_confirm') !== 'off' && /@/.test(msg.from)) {
@@ -4352,9 +4380,11 @@ app.post('/api/corp/intake/send-instructions', requireAuth, requireAdmin, async 
       &nbsp;&nbsp;"from": [From dynamic field],<br>
       &nbsp;&nbsp;"to": [To dynamic field],<br>
       &nbsp;&nbsp;"subject": [Subject dynamic field],<br>
-      &nbsp;&nbsp;"text": [Body dynamic field]<br>
+      &nbsp;&nbsp;"text": [Body dynamic field],<br>
+      &nbsp;&nbsp;"attachments": [Attachments dynamic field]<br>
       }
     </div>
+    <p style="margin:8px 0 4px"><strong>3b. Attachments (important):</strong> in the trigger's settings set <em>Include Attachments = Yes</em>, then map the whole <em>Attachments</em> array into the body as shown. Office managers often send their order as an attached Excel sheet — our side reads .xlsx/.csv attachments automatically (each attachment arrives as Name + ContentBytes; no transformation needed).</p>
     <p style="margin:8px 0 4px"><strong>4. Licensing:</strong> the HTTP action is a premium connector, so the flow owner (the service account) needs a <strong>Power Automate Premium</strong> license. Let me know if we don't already have one available.</p>
     <p style="margin:8px 0 4px"><strong>5. Testing:</strong> once live, send a test email to orders@armadarecovery.com with a body like <em>“Please order 2 cases of nitrile gloves and 1 box of pens”</em> and confirm the flow run shows a <strong>200 response</strong> from the HTTP step. We'll verify it arrived on our side.</p>
     <p style="margin:8px 0 4px"><strong>Security notes:</strong> the webhook URL above contains an access token — please don't post it anywhere public. The flow only needs read access to this one shared mailbox; no broader mailbox permissions are required.</p>

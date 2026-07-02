@@ -161,3 +161,35 @@ export function parseEntityWorkbook(buf) {
   }
   return { records, banks, cards, portals };
 }
+
+// Flatten a workbook into plain rows of text — the shape the order-email AI
+// parser eats. Tab-separated cells, one line per row, sheet headers included.
+// Caps keep a runaway sheet from flooding the model (it reads ~12k chars).
+export function workbookText(buf, { maxSheets = 3, maxRows = 300 } = {}) {
+  const wb = readWorkbook(buf);
+  const colNum = (letters) => { let n = 0; for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
+  const out = [];
+  for (const name of wb.sheetNames.slice(0, maxSheets)) {
+    const g = wb.grid(name);
+    if (!g) continue;
+    const rows = new Map();   // rowNum → Map(colNum → val)
+    for (const ref of Object.keys(g)) {
+      const m = ref.match(/^([A-Z]+)(\d+)$/);
+      if (!m || !g[ref]) continue;
+      const r = +m[2], c = colNum(m[1]);
+      if (!rows.has(r)) rows.set(r, new Map());
+      rows.get(r).set(c, g[ref]);
+    }
+    if (!rows.size) continue;
+    const lines = [];
+    for (const r of [...rows.keys()].sort((a, b) => a - b).slice(0, maxRows)) {
+      const cols = rows.get(r);
+      const maxC = Math.max(...cols.keys());
+      const cells = [];
+      for (let c = 1; c <= maxC; c++) cells.push(cols.get(c) ?? '');
+      lines.push(cells.join('\t').replace(/\t+$/, ''));
+    }
+    out.push((wb.sheetNames.length > 1 ? `--- Sheet: ${name} ---\n` : '') + lines.join('\n'));
+  }
+  return out.join('\n\n');
+}

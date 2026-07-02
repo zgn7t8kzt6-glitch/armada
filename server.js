@@ -4232,6 +4232,20 @@ app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
     ordered_at=?, ordered_by=CASE WHEN ?='ordered' AND ordered_by IS NULL THEN ? ELSE ordered_by END, received_at=?, received_by=CASE WHEN ?='received' AND received_by IS NULL THEN ? ELSE received_by END, updated_at=datetime('now') WHERE id=?`)
     .run(status, ['Low', 'Normal', 'High', 'Urgent'].includes(b.priority) ? b.priority : null, b.vendor != null ? String(b.vendor).slice(0, 80) : null, b.link != null ? String(b.link).slice(0, 500) : null, b.qty != null ? String(b.qty).slice(0, 40) : null, b.est_cost != null ? String(b.est_cost).slice(0, 40) : null, b.notes != null ? String(b.notes).slice(0, 1000) : null,
       orderedAt, status, req.user.name, receivedAt, status, req.user.name, o.id);
+  if (b.tracking != null) db.prepare(`UPDATE order_requests SET tracking=? WHERE id=?`).run(String(b.tracking).slice(0, 300), o.id);
+  // Close the loop with the person who emailed the order: tell them when it's
+  // placed (with tracking if Chava added one) and when it arrives.
+  if (status !== o.status && ['ordered', 'received'].includes(status) && o.source === 'email' && /@/.test(o.requested_by || '') && emailConfigured()) {
+    const e2 = htmlEsc;
+    const trk = b.tracking != null ? String(b.tracking).slice(0, 300) : o.tracking;
+    sendEmail({ to: o.requested_by, suppressCc: true,
+      subject: status === 'ordered' ? `📦 Ordered: ${o.item_name} (${o.facility})` : `✓ Received: ${o.item_name} (${o.facility})`,
+      html: `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:520px">
+        <p><strong>${e2(o.item_name)}</strong>${o.qty ? ' (' + e2(o.qty) + ')' : ''} for <strong>${e2(o.facility)}</strong> ${status === 'ordered' ? 'has been ordered' : 'has been received'}.</p>
+        ${status === 'ordered' && trk ? `<p>📦 Tracking: ${/^https?:\/\//i.test(trk) ? `<a href="${e2(trk)}">${e2(trk)}</a>` : `<strong>${e2(trk)}</strong>`}</p>` : ''}
+        <p>🔎 <a href="${orderStatusLink(req, o.requested_by)}">All your orders, live</a>.</p>
+        <p style="color:#888;font-size:12px">Armada Care Standards — automated order intake.</p></div>` }).catch((err) => console.error('[orders] status email:', err.message));
+  }
   if (status !== o.status && status !== 'requested') {
     const evName = { ordered: 'order.placed', received: 'order.received', cancelled: 'order.cancelled' }[status];
     publishEvent({ event: evName, entity: 'order', entity_id: o.id, facility_id: facilityForEntity(o.facility)?.id ?? null, actor: req.user.username, summary: `${o.item_name} ${status} · ${o.facility}` });
@@ -4254,6 +4268,35 @@ function normalizeInbound(b) {
   if (!text) { const html = pick('html', 'HtmlBody', 'body-html'); text = String(html).replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim(); }
   return { from, to, subject, text };
 }
+// ── Order tracking for senders: a signed, no-login status link per requester.
+// The link is scoped to ONE email address via HMAC — office managers see their
+// own orders only. Chava adds a carrier tracking number when she places it.
+function statusSecret() { let s = getState('order_status_secret'); if (!s) { s = crypto.randomBytes(24).toString('hex'); setState('order_status_secret', s); } return s; }
+const statusSig = (email) => crypto.createHmac('sha256', statusSecret()).update(String(email).toLowerCase().trim()).digest('hex').slice(0, 24);
+function orderStatusLink(req, email) {
+  const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || appBaseUrl(req)).replace(/\/$/, '');
+  return `${base}/order-status?e=${encodeURIComponent(String(email).toLowerCase().trim())}&s=${statusSig(email)}`;
+}
+app.get('/order-status', (req, res) => {
+  const email = String(req.query.e || '').toLowerCase().trim();
+  if (!email || req.query.s !== statusSig(email)) return res.status(403).send('<p style="font-family:sans-serif;padding:30px">This tracking link isn\'t valid — use the link from your confirmation email.</p>');
+  const rows = db.prepare(`SELECT item_name, qty, facility, status, priority, tracking, created_at, ordered_at, received_at FROM order_requests WHERE lower(requested_by)=? AND created_at >= date('now','-90 day') ORDER BY id DESC LIMIT 50`).all(email);
+  const e = htmlEsc;
+  const pill = (st) => ({ requested: '<span style="background:#fdf6ec;color:#9a6a1f;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600">waiting to be placed</span>', ordered: '<span style="background:#eef3f7;color:#3d6f8e;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600">ordered ✓</span>', received: '<span style="background:#e7f0ea;color:#2f7a4f;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600">received ✓✓</span>', cancelled: '<span style="background:#f0f1f4;color:#6f7a75;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600">cancelled</span>' }[st] || e(st));
+  const day = (v) => v ? String(v).slice(0, 10) : '';
+  const trackHtml = (t) => { if (!t) return ''; const isUrl = /^https?:\/\//i.test(t); return `<div style="margin-top:4px;font-size:13px">📦 Tracking: ${isUrl ? `<a href="${e(t)}">${e(t.length > 50 ? t.slice(0, 50) + '…' : t)}</a>` : `<strong>${e(t)}</strong>`}</div>`; };
+  const card = (r) => `<div style="background:#fff;border:1px solid #eae5da;border-radius:14px;padding:14px 16px;margin:10px 0">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap"><strong>${e(r.item_name)}</strong>${pill(r.status)}</div>
+    <div style="color:#6f7a75;font-size:13px;margin-top:3px">${r.qty ? e(r.qty) + ' · ' : ''}${e(r.facility)} · sent ${day(r.created_at)}${r.ordered_at ? ' · placed ' + day(r.ordered_at) : ''}${r.received_at ? ' · received ' + day(r.received_at) : ''}</div>
+    ${trackHtml(r.tracking)}</div>`;
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your orders — Armada</title></head>
+  <body style="margin:0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#f5f3ed;color:#1b2825"><div style="max-width:560px;margin:0 auto;padding:22px 16px">
+    <h2 style="font-family:Georgia,serif;margin:6px 0 2px">Your orders</h2>
+    <p style="color:#6f7a75;font-size:14px;margin:0 0 8px">${e(email)} · last 90 days · this page is always current — bookmark it.</p>
+    ${rows.length ? rows.map(card).join('') : '<div style="background:#fff;border:1px solid #eae5da;border-radius:14px;padding:24px;text-align:center;color:#6f7a75">No orders on file yet — email one to orders@armadarecovery.com.</div>'}
+    <p style="color:#a9a294;font-size:12px;margin-top:14px">Armada Care Standards — automated order intake.</p></div></body></html>`);
+});
+
 // Spreadsheet orders: office managers often attach an .xlsx instead of typing the
 // list. Pull attachments out of the webhook payload (Power Automate ContentBytes,
 // Mailgun/SendGrid variants), read them with the in-house xlsx reader, and hand
@@ -4383,12 +4426,14 @@ app.post('/api/inbound/order', express.urlencoded({ extended: true, limit: '20mb
       <div>• type the items in the email body ("2 cases nitrile gloves, 6 bags coffee"), or</div>
       <div>• attach the Excel/CSV <strong>as a copy</strong> (paperclip → Browse this computer), or</div>
       <div>• attach a clear photo of the list (.jpg/.png) or a PDF.</div>
+      <p style="margin-top:10px">🔎 <a href="${orderStatusLink(req, msg.from)}">Check the status of your orders any time</a>.</p>
       <p style="color:#888;font-size:12px;margin-top:12px">Armada Care Standards — automated order intake.</p></div>`
       : `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:520px">
       <p>✓ Got it — <strong>${created} item${created === 1 ? '' : 's'}</strong> queued for <strong>${esc(entity)}</strong>:</p>
       ${itemNames.map((n) => `<div>• ${esc(n)}</div>`).join('')}
       ${cloud.failed ? `<p style="color:#a60;margin-top:10px"><strong>P.S.</strong> — the OneDrive/SharePoint link in your email couldn't be opened (it requires sign-in). Next time, attach the file as a <strong>copy</strong> (paperclip → Browse this computer), or set the link to "Anyone with the link" — then we read the spreadsheet automatically.</p>` : ''}
       <p style="color:#555;margin-top:12px">Corporate will place the order and you'll hear if anything needs clarifying. No need to reply.</p>
+      <p style="margin-top:10px">🔎 <a href="${orderStatusLink(req, msg.from)}">Check the status of your orders any time</a> — updates live as each item is placed and received.</p>
       <p style="color:#888;font-size:12px">Armada Care Standards — automated order intake.</p></div>`;
     sendEmail({ to: msg.from, subject: fellBack ? `⚠️ Order email received — we couldn't read the items (${entity})` : `✓ Order received — ${created} item${created === 1 ? '' : 's'} for ${entity}`, html, suppressCc: true })
       .catch((e) => console.error('[intake] confirm email:', e.message));

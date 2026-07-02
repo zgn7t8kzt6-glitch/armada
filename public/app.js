@@ -6569,14 +6569,15 @@ async function renderCorpOrders(body){
   const actions=(o)=>{
     let b='';
     if(o.status==='requested') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'ordered')">Mark ordered</button>`;
-    if(o.status==='ordered') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'received')">Mark received</button>`;
+    if(o.status==='ordered') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'received')">Mark received</button><button class="btn btn-ghost btn-sm sans" onclick="orderTracking(${o.id})" title="Add carrier tracking — the requester sees it on their status page">📦</button>`;
     if(o.status!=='received'&&o.status!=='cancelled') b+=`<button class="btn btn-ghost btn-sm sans" onclick="setOrder(${o.id},'cancelled')">Cancel</button>`;
     b+=`<button class="btn btn-ghost btn-sm sans" onclick="emailLandlord(${o.id},this)" title="Email the landlord (if this is their responsibility)">🏠</button>`;
     b+=`<button class="btn btn-ghost btn-sm sans" onclick="delOrder(${o.id})">🗑</button>`;
     return b;
   };
+  const trackBit=(o)=>o.tracking?`<div class="hint">📦 ${/^https?:\/\//i.test(o.tracking)?`<a href="${esc(o.tracking)}" target="_blank" rel="noopener">tracking ↗</a>`:esc(o.tracking)}</div>`:'';
   const rowH=(o)=>`<tr>
-    <td><strong>${esc(o.item_name)}</strong>${o.qty?` <span class="hint">· ${esc(o.qty)}</span>`:''}${o.link?` <a href="${esc(o.link)}" target="_blank" rel="noopener">🔗</a>`:''}${o.notes?`<div class="hint">${esc(o.notes)}</div>`:''}</td>
+    <td><strong>${esc(o.item_name)}</strong>${o.qty?` <span class="hint">· ${esc(o.qty)}</span>`:''}${o.link?` <a href="${esc(o.link)}" target="_blank" rel="noopener">🔗</a>`:''}${o.notes?`<div class="hint">${esc(o.notes)}</div>`:''}${trackBit(o)}</td>
     <td class="hint">${esc(o.facility)}</td>
     <td>${o.priority!=='Normal'?`<span style="color:${priColor(o.priority)}">${esc(o.priority)}</span>`:'<span class="hint">Normal</span>'}</td>
     <td class="hint">${esc(o.vendor||'')}${o.est_cost?`<div>${esc(o.est_cost)}</div>`:''}</td>
@@ -6637,6 +6638,11 @@ async function addOrder(){
 }
 async function setOrder(id,status){ try{ await api('/corp/orders/'+id,{method:'PATCH',body:JSON.stringify({status})}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
 async function emailLandlord(id,btn){ if(btn)btn.disabled=true; try{ const r=await api('/corp/orders/'+id+'/email-landlord',{method:'POST'}); alert(r.sent?('✓ Emailed the landlord ('+r.to+').'):('Could not email landlord: '+(r.reason||'no landlord on file for this facility — add it on the lease.'))); }catch(e){ alert(e.message); } if(btn)btn.disabled=false; }
+async function orderTracking(id){
+  const t=prompt('Tracking number or carrier link (the office manager sees this on their status page):');
+  if(t==null) return;
+  try{ await api('/corp/orders/'+id,{method:'PATCH',body:JSON.stringify({tracking:t})}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); }
+}
 async function delOrder(id){ if(!confirm('Delete this order request?'))return; try{ await api('/corp/orders/'+id,{method:'DELETE'}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
 let PAY_SHOW=false;
 async function renderCorpPayments(body){

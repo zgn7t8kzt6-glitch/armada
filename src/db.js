@@ -2777,3 +2777,4 @@ try {
     try { db.prepare(`UPDATE ${t} SET facility_id=? WHERE facility_id IS NULL`).run(dfid); } catch { /* table optional */ }
   }
 } catch { /* registry not seeded yet (fresh boot order) — seed backfills anyway */ }
+addColumn('order_requests', 'tracking', 'TEXT');         // carrier tracking # or URL (shown on the status page)

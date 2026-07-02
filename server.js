@@ -407,9 +407,10 @@ app.get('/api/opscenter', requireAuth, (req, res) => {
   });
   add(() => {
     const nowMin = new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })).toISOString().slice(0, 16).replace('T', ' ');
+    const CARE_SQL = `(department LIKE '%case%' OR department LIKE '%therap%' OR department LIKE '%clinic%' OR department LIKE '%counsel%' OR department LIKE '%peer%')`;
     const broken = one(`SELECT COUNT(*) n FROM requests WHERE status != 'Done' AND promise_at IS NOT NULL AND promise_at < ?`, nowMin);
-    const waiting = one(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`);
-    return { group: 'now', key: 'promises', label: 'Service promises at risk', n: broken, alert: broken > 0, sub: waiting ? waiting + ' in queue' : undefined, view: 'appts' };
+    const waiting = one(`SELECT COUNT(*) n FROM requests WHERE status != 'Done' AND ${CARE_SQL}`);
+    return { group: 'now', key: 'promises', label: 'Service promises at risk', n: broken, alert: broken > 0, sub: waiting ? waiting + ' meeting request' + (waiting === 1 ? '' : 's') + ' waiting' : undefined, view: 'appts' };
   });
   add(() => {
     const ran = db.prepare(`SELECT COUNT(*) n FROM billing_ready_status WHERE date=?${F}`).get(today).n;
@@ -919,14 +920,19 @@ app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
     FROM appointments a JOIN clients c ON c.id=a.client_id WHERE a.date=? ORDER BY a.time`).all(day)
     .map((a) => ({ ...a, client: a.pref || a.client_name,
       overdue: a.date === today && ['scheduled', 'checked_in'].includes(a.status) && a.time < nowHM() }));
-  const queue = db.prepare(`SELECT r.*, c.pref, c.name AS client_name, c.room FROM requests r LEFT JOIN clients c ON c.id=r.client_id
+  // The scheduling queue is MEETING REQUESTS ONLY — clients asking for their case
+  // manager / therapist / clinical time. Blankets, snacks, and everything else
+  // stay in Concierge (its own view, its own bell). Two different services.
+  const queue = db.prepare(`SELECT r.*, c.pref, c.name AS client_name, c.room, c.therapist, c.case_manager FROM requests r LEFT JOIN clients c ON c.id=r.client_id
     WHERE r.status != 'Done' ORDER BY (r.priority='Urgent') DESC, r.id`).all()
-    .map((r) => ({ id: r.id, client: r.pref || r.client_name || 'Unknown', room: r.room || '', department: r.department, text: r.text, priority: r.priority,
+    .filter((r) => CARE_DEPTS.test(r.department || ''))
+    .map((r) => ({ id: r.id, client_id: r.client_id, client: r.pref || r.client_name || 'Unknown', room: r.room || '', department: r.department, text: r.text, priority: r.priority,
       status: r.status, created_at: r.created_at, claimed_by: r.claimed_by || '', ready: !!r.ready_at,
+      therapist: r.therapist || '', case_manager: r.case_manager || '',
       waitMin: Math.max(0, Math.round((Date.now() - Date.parse(r.created_at + 'Z')) / 60000)),
       promise_at: r.promise_at || '', promised_by: r.promised_by || '',
       promiseBreached: !!(r.promise_at && new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })).toISOString().slice(0, 16).replace('T', ' ') > r.promise_at),
-      needsNote: CARE_DEPTS.test(r.department || '') }));
+      needsNote: true }));
   // Pending documentation: quick notes flagged for expansion + my missed-without-reschedule.
   const mine = (v) => String(v || '').toLowerCase() === String(req.user.name || '').toLowerCase();
   let pending = db.prepare(`SELECT q.id, q.client_id, q.by_name, q.kind, q.created_at, c.pref, c.name AS client_name FROM quick_notes q JOIN clients c ON c.id=q.client_id WHERE q.needs_expansion=1 AND q.expanded_at IS NULL ORDER BY q.id DESC LIMIT 40`).all()

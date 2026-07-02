@@ -5883,16 +5883,22 @@ function renderAppts(){
 }
 function apQueue(b){
   const q=AP_DATA.queue||[];
+  const assigned=(r)=>/therap/i.test(r.department)?(r.therapist||''):(r.case_manager||'');
   const row=(r)=>`<div class="q-row ${r.promiseBreached?'q-overdue':''}" style="cursor:default">
     <div class="q-main"><div class="q-title">${esc(r.client)}${r.room?' · '+esc(r.room):''} — ${esc(r.text)}</div>
-      <div class="q-sub">${esc(r.department)} · waiting ${r.waitMin} min${r.claimed_by?' · '+esc(r.claimed_by)+' on it':''}${r.promise_at?' · <strong>promised by '+esc(r.promise_at.slice(11,16))+'</strong>'+(r.promiseBreached?' <span class="badge-crit">promise at risk — reschedule or go now</span>':''):''}${r.ready?' · <span class="badge-ok">client notified — ready</span>':''}</div></div>
+      <div class="q-sub">${esc(r.department)}${assigned(r)?' · assigned: <strong>'+esc(assigned(r))+'</strong>':''} · waiting ${r.waitMin} min${r.claimed_by?' · '+esc(r.claimed_by)+' on it':''}${r.promise_at?' · <strong>promised by '+esc(r.promise_at.slice(11,16))+'</strong>'+(r.promiseBreached?' <span class="badge-crit">promise at risk — see them now or re-promise</span>':''):''}${r.ready?' · <span class="badge-ok">client notified — ready</span>':''}</div></div>
     <div style="display:flex;gap:4px;flex-wrap:wrap">
       ${!r.promise_at?`<button class="btn btn-ghost btn-sm sans" onclick="apPromise(${r.id})" title="Commit a response time — the kiosk shows it to the client">⏱ Promise…</button>`:`<button class="btn btn-ghost btn-sm sans" onclick="apPromise(${r.id})">⏱ Re-promise</button>`}
       ${!r.claimed_by?`<button class="btn btn-ghost btn-sm sans" onclick="apQAct(${r.id},'claim')">✋ I've got it</button>`:''}
+      ${r.client_id?`<button class="btn btn-ghost btn-sm sans" onclick="apBookFromReq(${r.client_id})" title="Turn this request into a scheduled appointment">📅 Book</button>`:''}
       ${!r.ready?`<button class="btn btn-ghost btn-sm sans" onclick="apQAct(${r.id},'ready')" title="Flashes 'we're ready for you' on the kiosk">📣 Ready</button>`:''}
-      <button class="btn btn-gold btn-sm sans" onclick="${r.needsNote?`apNoteModal('queue',${r.id})`:`apQAct(${r.id},'done')`}">✓ Done</button></div></div>`;
+      <button class="btn btn-gold btn-sm sans" onclick="apNoteModal('queue',${r.id})">✓ Met — note</button></div></div>`;
   b.innerHTML=q.length?`<div style="margin-top:8px">${q.map(row).join('')}</div>`
-    :'<div class="empty"><div class="e-ico">🛎</div>The queue is clear — every request handled.<br>That IS the standard.</div>';
+    :'<div class="empty"><div class="e-ico">🤝</div>No meeting requests waiting — every ask for the care team is handled.<br>(Blankets &amp; comforts live in <a href="#" onclick="show(\'concierge\');return false">Concierge</a>.)</div>';
+}
+function apBookFromReq(clientId){
+  AP_TAB='cal'; renderAppts(); apBookForm();
+  const sel=$('apC'); if(sel) sel.value=String(clientId);
 }
 async function apPromise(id){
   const mins=prompt('Promise a response within how many minutes? (the kiosk will show the client the committed time)','20');

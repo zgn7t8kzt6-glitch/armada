@@ -2805,3 +2805,21 @@ addColumn('order_requests', 'tracking', 'TEXT');         // carrier tracking # o
 addColumn('desk_items', 'bucket', 'TEXT');               // AI-filed: Clinical/Maintenance/Expansion/…
 addColumn('desk_items', 'facility_id', 'INTEGER');       // AI-matched location (owner chain, Principle 3)
 addColumn('desk_items', 'suggested_role', 'TEXT');       // AI: which role should help close this
+
+// ── Excellence OS: the handbook lives in the daily work, not on a shelf ────────
+// Recognition names the standard it reflects; coaching points at the written line;
+// Fridays close with a four-question reflection. (Improvement ideas already live
+// in staff_voice / Best Place to Work — one system, not two.)
+addColumn('extra_mile', 'principle', 'TEXT');            // which Armada Principle the recognition reflects
+addColumn('hr_coaching', 'standard', 'TEXT');            // the written standard the coaching is from ("no random criticism")
+addColumn('hr_coaching', 'follow_up', 'TEXT');           // date the coach committed to circle back
+addColumn('hr_coaching', 'followed_up_at', 'TEXT');      // when the follow-up actually happened
+db.exec(`
+CREATE TABLE IF NOT EXISTS weekly_reflections (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id), user_name TEXT,
+  week TEXT NOT NULL,                       -- the Monday of the week (one per person per week)
+  proud TEXT, barrier TEXT, lived TEXT, improve TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, week)
+);`);

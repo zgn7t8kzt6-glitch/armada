@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624DA" />
+<link rel="stylesheet" href="/styles.css?v=20260624DB" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -117,6 +117,7 @@
     <button data-view="mygrowth">My Growth</button>
     <button data-view="myrole">My Role</button>
     <button data-view="training">Training</button>
+    <button data-view="handbook">Excellence Handbook</button>
     <button data-view="library">Library / SOPs</button>
     <button data-view="employees">Employees</button>
     <button data-view="leadmirror">Leadership Mirror</button>
@@ -1693,9 +1694,20 @@
       <div class="card" style="border-left:4px solid #c8a44d">
         <h3>✨ Extra Mile — living our value</h3>
         <p class="sub sans" style="margin:0 0 8px">How teammates went above and beyond. Saw someone make a resident's day? Add it — the whole team sees it.</p>
-        <div class="handoff-add"><input id="em_person" class="sans" style="max-width:140px" placeholder="Who"/><input id="em_story" class="sans" style="flex:1" placeholder="What they did (no resident names)"/><button class="btn btn-gold sans" onclick="addExtraMile()">Add</button></div>
+        <div class="handoff-add"><input id="em_person" class="sans" style="max-width:140px" placeholder="Who"/><input id="em_story" class="sans" style="flex:1" placeholder="What they did (no resident names)"/><select id="em_principle" class="sans" style="max-width:230px"><option value="">Which principle? (optional)</option></select><button class="btn btn-gold sans" onclick="addExtraMile()">Add</button></div>
         <span class="hint" id="em_msg"></span>
         <div id="extraMileFeed" style="margin-top:10px"></div>
+      </div>
+      <div class="card" style="border-left:4px solid var(--gold)">
+        <h3>🪞 Weekly reflection <span class="hint" style="font-weight:400">· Fridays · two minutes</span></h3>
+        <p class="sub sans" style="margin:0 0 8px">Four questions to close the week. Leadership reads every one — it's how barriers get removed and the standards stay honest.</p>
+        <div class="grid2">
+          <div class="field"><label>What made you proud this week?</label><textarea id="rf_proud" rows="2"></textarea></div>
+          <div class="field"><label>What barrier slowed you down?</label><textarea id="rf_barrier" rows="2"></textarea></div>
+          <div class="field"><label>Who lived the standards this week?</label><textarea id="rf_lived" rows="2"></textarea></div>
+          <div class="field"><label>How can we improve?</label><textarea id="rf_improve" rows="2"></textarea></div>
+        </div>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold sans" onclick="submitReflection()">Submit reflection</button><span class="hint" id="rf_msg"></span></div>
       </div>
       <div class="card" id="belongCard" style="border-left:4px solid #7a5cc0">
         <h3>💜 Belonging check-in <span class="hint" style="font-weight:400">· anonymous</span></h3>
@@ -2149,6 +2161,8 @@
     </section>
 
     <!-- LINEUP -->
+    <!-- THE ARMADA EXCELLENCE STANDARDS — the handbook, browsable by everyone -->
+    <section id="handbook" class="view"><div id="handbookBody"></div></section>
     <section id="lineup" class="view">
       <div id="purposeBanner" class="card" style="display:none;background:linear-gradient(135deg,var(--navy),var(--navy-2));color:#fff;text-align:center">
         <div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--gold)">Why we're here</div>
@@ -2185,6 +2199,11 @@
         <div id="lx_preview" style="margin-top:10px"></div>
         <div class="cmd-sub">🌟 In tomorrow's "Caught being great" — remove any you don't want</div>
         <div id="lineupRecogList"></div>
+      </div>
+      <div class="card no-print" id="reflectionsCard" style="display:none;border-left:4px solid var(--gold)">
+        <h3>🪞 This week's reflections</h3>
+        <p class="sub sans">Four questions, every Friday, every voice — barriers to remove and people to recognize, in their own words.</p>
+        <div id="reflectionsList" style="margin-top:8px"></div>
       </div>
       <div class="card no-print" id="raffleCard" style="display:none;border-left:4px solid #7a5cc0">
         <h3>🎁 Recognition raffle</h3>
@@ -2665,7 +2684,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624DA"></script>
-<script src="/housing.js?v=20260624DA"></script>
+<script src="/app.js?v=20260624DB"></script>
+<script src="/housing.js?v=20260624DB"></script>
 </body>
 </html>

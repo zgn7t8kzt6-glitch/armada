@@ -200,7 +200,7 @@ const GROUP_OF={
   // Hilltop — the recovery-residence suite (separate world)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
-  myrole:'team',mystats:'team',mygrowth:'team',employees:'team',leadmirror:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',
+  myrole:'team',mystats:'team',mygrowth:'team',employees:'team',leadmirror:'team',mytasks:'team',messages:'team',team:'team',workplace:'team',lineup:'team',accountability:'team',training:'team',library:'team',standard:'team',hiring:'team',handbook:'team',
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',staffsignins:'facility',
   // Enterprise — the parent company: corporate, people, leadership programs
@@ -284,7 +284,7 @@ Object.entries(HUBS).forEach(([k,h])=>h.items.forEach(([v])=>{ HUB_OF[v]=k; }));
 const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // The handful of shared pages housing staff still get (their own tasks/comms/learning) —
 // everything else clinical/detox stays hidden from them.
-const UNIVERSAL_VIEWS = ['myrole','mystats','mygrowth','mytasks','messages','team','training','library','standard'];
+const UNIVERSAL_VIEWS = ['myrole','mystats','mygrowth','mytasks','messages','team','training','library','standard','handbook'];
 // Corporate Operations (Chava): walled to her lane — the hub, ordering, maintenance.
 const CORPORATE_VIEWS = ['corphub','opscenter','inventory','maintenance'];
 let PREVIEW_ROLE=null;   // admin "preview as" — see the app exactly as a role does
@@ -296,26 +296,17 @@ const ROLE_MENU = {
   // tab), Intake (the full arrival checklist — dignity bag lives there, no standalone
   // Dignity tab), then the day's work. My Tasks lives ON My Shift, not as a tab.
   // My Role is folded into My Shift (its own collapsible at the bottom) — no tab.
-  'BHT / Tech': ['dashboard','mystats','mygrowth','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','library'],
-  'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
-  'Case Manager': [
-    { t:'Start of day — read My Shift', d:'Your tiles show who needs you: new admits without a case plan, discharges coming, meetings requested.', v:'dashboard' },
-    { t:'Work the meeting queue', d:'Clients asked for you by name — promise a time, meet, and close each with the one-minute note.', v:'appts' },
-    { t:'Discharges in the next 72 hours', d:'Aftercare confirmed, ride arranged, meds plan, continuum referral — the fond farewell starts days early.', v:'dischargepage' },
-    { t:'Authorization check', d:'Nothing expires unseen — renew or escalate anything inside the window.', v:'authreg' },
-    { t:'Billing readiness — your caseload', d:'Every client of yours needs today\'s qualifying encounter documented before 4 PM.', v:'billingready' },
-    { t:'Family touchpoints', d:'One update to a family member changes their whole week. Log the contact.', v:'family' },
-    { t:'End of day — clear your follow-ups', d:'Expand any quick notes flagged for a full note; reschedule anything missed. Leave nothing hanging.', v:'appts' },
-  ],
-  'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
+  'BHT / Tech': ['dashboard','mystats','mygrowth','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','handbook','library'],
+  'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','handbook','library'],
+  'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','handbook','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
-  'Executive Assistant': ['corphub','opscenter','inventory','maintenance','myrole','mygrowth','messages'],
+  'Executive Assistant': ['corphub','opscenter','inventory','maintenance','myrole','mygrowth','handbook','messages'],
   // The Case Manager's day, in order: home → meeting queue → caseload → the exits
   // (discharge/continuum) → the money guardrails (auths, billing readiness) → circle.
-  'Case Manager': ['dashboard','appts','casemgmt','clients','records','dischargepage','continuum','authreg','billingready','family','referrals','alumni','incidents','messages','team','training','library'],
-  'Housing Director': ['housing','myrole','mygrowth','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
-  'House Manager':    ['housing','myrole','mygrowth','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
-  'Recovery Coach':   ['staffhub','myrole','mygrowth','housing','voice','activities','residents','houses','mytasks','messages'],
+  'Case Manager': ['dashboard','appts','casemgmt','clients','records','dischargepage','continuum','authreg','billingready','family','referrals','alumni','incidents','messages','team','training','handbook','library'],
+  'Housing Director': ['housing','myrole','mygrowth','handbook','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
+  'House Manager':    ['housing','myrole','mygrowth','handbook','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
+  'Recovery Coach':   ['staffhub','myrole','mygrowth','handbook','housing','voice','activities','residents','houses','mytasks','messages'],
 };
 // Plain-language "how my shift flows" — the rhythm of the job in order, each step
 // linking to the tool. This is the train-a-new-hire-in-five-minutes layer.
@@ -524,6 +515,7 @@ function show(v){
   if(v==='alumni') loadAlumni();
   if(v==='accountability') loadAccountability();
   if(v==='standard') loadStandard();
+  if(v==='handbook') loadHandbook();
   if(v==='library') loadLibrary();
   if(v==='training') loadTraining();
   if(v==='scorecard') loadScorecard();
@@ -1493,7 +1485,7 @@ async function testAlert(){ const r=await api('/settings/test-alert',{method:'PO
 /* ---- huddle mode: the start-of-shift lineup as a paced, stepped ritual ---- */
 let HUDDLE_STEPS=[], HUDDLE_I=0;
 async function startHuddle(){
-  const [t, line, conc] = await Promise.all([api('/today'), api('/lineup'), api('/concerns').catch(()=>({concerns:[]}))]);
+  const [t, line, conc, hb] = await Promise.all([api('/today'), api('/lineup'), api('/concerns').catch(()=>({concerns:[]})), handbook().catch(()=>null)]);
   const atRisk = (t.attention||[]).filter(a=>a.kind==='risk');
   const welcome = (t.attention||[]).filter(a=>a.kind==='welcome');
   const leaving = (t.dischargesToday||[]);
@@ -1504,7 +1496,10 @@ async function startHuddle(){
   const credo = 'We are here to restore dignity and save lives — Ladies and Gentlemen serving Ladies and Gentlemen.';
   HUDDLE_STEPS = [
     {k:'Why we’re here', html:`<h1>Daily Lineup</h1><div class="hint" style="color:#cfe">${dt} · ${esc(shift)} shift</div><div class="hv" style="margin-top:18px">${esc(credo)}</div>`},
+    // The handbook's line-up spine: one principle · one story/standard · one safety reminder · one focus.
+    ...(hb?[{k:'Today’s Principle', html:`<h2>Today’s Principle — ${hb.todays.principle.n} of 10</h2><div class="hv">${esc(hb.todays.principle.title)}</div><div class="hitem" style="margin-top:12px">${esc(hb.todays.principle.line)}</div><div class="hitem" style="margin-top:12px">Who saw this lived yesterday? Name the moment.</div>`}]:[]),
     {k:'Today’s Standard', html:`<h2>Today’s Standard — say it aloud</h2><div class="hv">${esc(line.value||'')}</div>${t.focus?.t?`<div class="hitem" style="margin-top:16px">⭐ <strong>${esc(t.focus.t)}</strong>${t.focus.g?' — '+esc(t.focus.g):''}</div>`:''}`},
+    ...(hb?[{k:'Safety', html:`<h2>Today’s Safety Reminder</h2><div class="hitem">🛡 ${esc(hb.todays.safety)}</div>`}]:[]),
     {k:'The house right now', html:`<h2>The house right now</h2><div class="hitem">${t.metrics.active} active · ${t.metrics.highRisk} at risk · ${t.metrics.callsDue} aftercare calls due</div>`+
       (welcome.length?`<h3 style="margin-top:16px">Welcome today ☀</h3>`+welcome.map(w=>`<div class="hitem">${esc(w.text)}</div>`).join(''):'')+
       `<h3 style="margin-top:16px">Needs extra care ⚠</h3>`+(atRisk.length?atRisk.map(a=>`<div class="hitem">${esc(a.text)}</div>`).join(''):'<div class="hitem">All steady — touch every client, deliver every personal touch.</div>')+
@@ -4011,6 +4006,14 @@ async function removeLineupRecog(type,id){
 }
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
+  // Leaders read the week's reflections — four questions, every voice.
+  if($('reflectionsCard')){ $('reflectionsCard').style.display = canSendLineup() ? '' : 'none';
+    if(canSendLineup()) api('/reflections').then(d=>{
+      $('reflectionsList').innerHTML = d.rows.length ? d.rows.map(r=>`<div class="pc-note"><strong>${esc(r.user_name)}</strong> <span class="hint">· week of ${esc(r.week)}</span>
+        ${r.proud?`<div class="hint" style="margin-top:2px">😊 Proud: ${esc(r.proud)}</div>`:''}${r.barrier?`<div class="hint">🚧 Barrier: ${esc(r.barrier)}</div>`:''}${r.lived?`<div class="hint">🌟 Lived the standards: ${esc(r.lived)}</div>`:''}${r.improve?`<div class="hint">💡 Improve: ${esc(r.improve)}</div>`:''}</div>`).join('')
+        : '<div class="hint">No reflections yet this week — they land here as the team submits (Team page, Fridays).</div>';
+    }).catch(()=>{});
+  }
   if($('lineupCaptureCard')){ $('lineupCaptureCard').style.display = canSendLineup() ? '' : 'none'; if(canSendLineup()) loadLineupRecog(); }
   if(canSendLineup() && $('lineupSpotlight')){ try{ const sp=await api('/lineup/spotlight'); $('lineupSpotlight').value=sp.text||''; }catch(e){} }
   if($('raffleCard')){ $('raffleCard').style.display = canSendLineup() ? '' : 'none'; if(canSendLineup()) loadRaffle(); }
@@ -4214,6 +4217,12 @@ async function loadMyRole(){
       <div class="cmd-hero-row"><div><h3 style="margin:0">${esc(role)}</h3><p class="sub sans" style="margin:2px 0 0">${esc(p.purpose||'')}</p></div></div>
       ${p.reportsTo?`<div class="hint" style="margin-top:8px">Reports to: <b>${esc(p.reportsTo)}</b></div>`:''}
     </div>
+    ${p.chapter?`<div class="card" style="border-left:4px solid var(--gold)">
+      <div class="cmd-hero-row"><div><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">The Armada Excellence Standards · Chapter ${p.chapter.chapter}</div>
+      <h3 style="margin:2px 0 0">${esc(p.chapter.title)}</h3></div><button class="btn btn-ghost btn-sm sans" onclick="show('handbook')">Whole handbook ›</button></div>
+      <div style="margin-top:10px">${hbChapterHtml(p.chapter)}</div>
+      <div style="text-align:center;background:#faf6ee;border-radius:8px;padding:10px 14px;margin-top:10px"><p style="font-size:13px;line-height:1.6;margin:0">${esc(p.armadaStandard||'')}</p><div class="sans" style="margin-top:6px;font-weight:700;color:#8a6d1f">${esc(p.allBehindYou||'')}</div></div>
+    </div>`:''}
     ${flow?`<div class="card"><h3>How my shift flows</h3><p class="sub sans">The rhythm of the job, in order. When in doubt, start at step 1.</p><div class="flow" style="margin-top:10px">${flow}</div></div>`:''}
     <div class="cmd-grid">
       <div class="card"><h3>What I do</h3><p class="sub sans">My responsibilities every shift.</p><ul style="margin:8px 0;padding-left:18px;font-size:14px;line-height:1.65">${resp||'<li>—</li>'}</ul></div>
@@ -5197,13 +5206,17 @@ async function loadDashboard(){
     const onclick = t.view?`onclick="show('${t.view}')"`:`onclick="dashScrollTo('${t.key}')"`;
     return `<div class="ret-card ${cls}" style="cursor:pointer" ${onclick}><div class="n">${t.n}</div><div class="l">${esc(t.label)} ›</div></div>`;
   }).join('');
-  // Today's Standard — the lineup ritual, on every dashboard
-  const fc=d.focus;
-  $('dashStandard').innerHTML = (fc&&fc.topic) ? `<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)">
+  // Today at Armada — the handbook opens every day: principle, focus, safety.
+  const fc=d.focus, pr=d.principle;
+  $('dashStandard').innerHTML = (pr || (fc&&fc.topic)) ? `<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <div style="flex:1;min-width:220px"><div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Today's Standard — the whole house stresses this</div>
-          <h3 style="margin:2px 0 0">${esc(fc.topic)}</h3>${fc.goal?`<p class="sub sans" style="margin:4px 0 0">${esc(fc.goal)}</p>`:''}</div>
-        <div class="toolbar" style="gap:8px"><button class="btn btn-ghost btn-sm sans" onclick="startHuddle()">▶ Run the lineup</button><button class="btn btn-gold btn-sm sans" onclick="dashJoinFocus(this)">I'm on it ✋</button></div>
+        <div style="flex:1;min-width:220px">
+          ${pr?`<div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Today's Principle · ${pr.n} of 10</div>
+          <h3 style="margin:2px 0 0">${esc(pr.title)}</h3><p class="sub sans" style="margin:2px 0 0">${esc(pr.line)}</p>`:''}
+          ${fc&&fc.topic?`<div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold);margin-top:8px">Today's Focus — the whole house stresses this</div>
+          <div style="font-weight:600">${esc(fc.topic)}</div>${fc.goal?`<p class="sub sans" style="margin:2px 0 0">${esc(fc.goal)}</p>`:''}`:''}
+          ${d.safety?`<div class="hint" style="margin-top:8px">🛡 ${esc(d.safety)}</div>`:''}</div>
+        <div class="toolbar" style="gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm sans" onclick="startHuddle()">▶ Run the lineup</button><button class="btn btn-gold btn-sm sans" onclick="dashJoinFocus(this)">I'm on it ✋</button><button class="btn btn-ghost btn-sm sans" onclick="recognizeExcellence()">🌟 Recognize</button></div>
       </div></div>` : '';
   // Proactive alerts — the automations reach the floor
   const al=(d.alerts||[]);
@@ -6489,8 +6502,9 @@ async function openHcosPerson(id){
   <div class="card"><h3 style="margin-top:0">📝 Reviews</h3>
     ${d.reviews.length?`<table class="tbl"><tr><th>Review</th><th>Due</th><th>Status</th><th></th></tr>${d.reviews.map(r=>`<tr><td><strong>${esc(r.type)}</strong>${r.summary?`<div class="hint">${esc(r.summary.slice(0,140))}</div>`:''}</td><td>${esc(r.due_date||'')}</td><td>${r.status==='done'?`<span style="color:var(--good)">✓ done${r.rating?' · '+r.rating+'/10':''}</span>`:'<span class="hint">open</span>'}</td><td>${r.status==='open'?`<button class="btn btn-gold btn-sm sans" onclick="completeReview(${r.id},${e.id})">Complete</button>`:''}</td></tr>`).join('')}</table>`:'<div class="hint">No reviews scheduled — Start onboarding schedules the 30/60/90/6-month/annual cadence.</div>'}</div>
   <div class="card"><h3 style="margin-top:0">💬 Coaching log</h3>
-    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><select id="hcKind"><option>positive</option><option>corrective</option><option>observation</option></select><input id="hcNote" placeholder="What happened / what was coached" style="min-width:220px"/><button class="btn btn-gold btn-sm sans" onclick="addCoaching(${e.id})">Log</button></div>
-    ${d.coaching.map(c=>`<div class="pc-note">${c.kind==='positive'?'🌟':c.kind==='corrective'?'🔧':'👁'} ${esc(c.note)} <span class="hint">· ${esc(c.by_name||'')} · ${esc((c.created_at||'').slice(0,10))}</span></div>`).join('')||'<div class="hint">No coaching notes yet — great managers log the positive ones too.</div>'}</div>
+    <p class="sub sans" style="margin:0 0 6px">Coach from the written standard, never by mood — pick the principle or the “What Excellence Is Not” line the conversation points at.</p>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><select id="hcKind"><option>positive</option><option>corrective</option><option>observation</option></select><select id="hcStd" style="max-width:320px"><option value="">Standard (optional)</option></select><input id="hcNote" placeholder="What happened / what was coached" style="min-width:220px"/><label class="hint">Follow up <input id="hcFollow" type="date"/></label><button class="btn btn-gold btn-sm sans" onclick="addCoaching(${e.id})">Log</button></div>
+    ${d.coaching.map(c=>`<div class="pc-note">${c.kind==='positive'?'🌟':c.kind==='corrective'?'🔧':'👁'} ${esc(c.note)}${c.standard?` <span class="badge" style="background:#faf6ee;border:1px solid #e7d9b6;color:#8a6d1f">${esc(c.standard.slice(0,70))}</span>`:''} <span class="hint">· ${esc(c.by_name||'')} · ${esc((c.created_at||'').slice(0,10))}</span>${c.follow_up&&!c.followed_up_at?` <span class="risk risk-elev">follow up ${esc(c.follow_up)}</span> <button class="btn btn-ghost btn-sm sans" onclick="coachingFollowedUp(${c.id},${e.id})">✓ Circled back</button>`:c.follow_up?` <span class="hint">✓ followed up</span>`:''}</div>`).join('')||'<div class="hint">No coaching notes yet — great managers log the positive ones too.</div>'}</div>
   <div class="card"><h3 style="margin-top:0">🎓 Certifications</h3>
     <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><input id="hcCertName" placeholder="e.g. CPR, HIPAA, RN license" style="min-width:160px"/><label class="hint">Expires <input id="hcCertExp" type="date"/></label><input id="hcCertUrl" placeholder="Link to copy (optional)" style="min-width:140px"/><button class="btn btn-gold btn-sm sans" onclick="addHcosCert(${e.id})">Add</button></div>
     ${d.certs.length?`<table class="tbl"><tr><th>Certification</th><th>Expires</th><th>Copy</th><th></th></tr>${d.certs.map(certRow).join('')}</table>`:'<div class="hint">None on file.</div>'}</div>
@@ -6498,12 +6512,14 @@ async function openHcosPerson(id){
     ${d.cases.map(c=>`<div class="pc-note"><strong>${esc(c.kind)}</strong>: ${esc(c.title)} ${c.status==='open'?'<span class="risk risk-elev">open</span>':'<span style="color:var(--good)">resolved</span>'}${c.detail?`<div class="hint">${esc(c.detail.slice(0,200))}</div>`:''}${c.status==='open'?`<div style="margin-top:4px"><button class="btn btn-ghost btn-sm sans" onclick="resolveCase(${c.id},${e.id})">Resolve</button></div>`:''}</div>`).join('')||'<div class="hint">No cases — as it should be.</div>'}
     <div class="hint" style="margin-top:4px">New write-up / PIP: use the ⚖️ Relations tab.</div></div>
   <div class="card"><h3 style="margin-top:0">🕐 Timeline</h3>${d.events.map(v=>`<div class="hint" style="padding:3px 0">${evIcon[v.kind]||'•'} ${esc(v.detail||v.kind)} <span style="color:var(--muted)">· ${esc(v.by_name||'')} · ${esc((v.created_at||'').slice(0,16))}</span></div>`).join('')||'<div class="hint">Nothing logged yet.</div>'}</div>`;
+  fillStdSelect('hcStd', e.job_title);   // coach from the written standard — their chapter's lines first
 }
 async function saveHcosPerson(id){ const g=x=>($(x)||{}).value; try{ await api('/hcos/person/'+id,{method:'POST',body:JSON.stringify({hire_date:g('hpHire'),job_title:g('hpTitle'),department:g('hpDept'),manager:g('hpMgr'),email:g('hpEmail'),phone:g('hpPhone')})}); if($('hpMsg'))$('hpMsg').textContent='✓ Saved'; }catch(e){ if($('hpMsg'))$('hpMsg').textContent=e.message; } }
 async function startOnboarding(id){ const hd=($('hpHire')||{}).value||''; try{ await api('/hcos/person/'+id+'/start-onboarding',{method:'POST',body:JSON.stringify({hire_date:hd})}); openHcosPerson(id); }catch(e){ alert(e.message); } }
 async function toggleObTask(tid,eid){ try{ await api('/hcos/onboard/task/'+tid+'/toggle',{method:'POST'}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
 async function completeReview(rid,eid){ const rating=prompt('Rating 1–10 (optional):')||''; const summary=prompt('Summary (what was discussed / plan):')||''; try{ await api('/hcos/review/'+rid+'/complete',{method:'POST',body:JSON.stringify({rating,summary})}); if(eid)openHcosPerson(eid); }catch(e){ alert(e.message); } }
-async function addCoaching(eid){ const note=($('hcNote')||{}).value||''; if(!note.trim())return; try{ await api('/hcos/coaching',{method:'POST',body:JSON.stringify({employee_id:eid,kind:($('hcKind')||{}).value,note})}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
+async function addCoaching(eid){ const note=($('hcNote')||{}).value||''; if(!note.trim())return; try{ await api('/hcos/coaching',{method:'POST',body:JSON.stringify({employee_id:eid,kind:($('hcKind')||{}).value,note,standard:($('hcStd')||{}).value||'',follow_up:($('hcFollow')||{}).value||''})}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
+async function coachingFollowedUp(cid,eid){ try{ await api('/hcos/coaching/'+cid+'/followup',{method:'POST'}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
 async function addHcosCert(eid){ const name=($('hcCertName')||{}).value||''; if(!name.trim())return; try{ await api('/hcos/cert',{method:'POST',body:JSON.stringify({employee_id:eid,name,expires:($('hcCertExp')||{}).value||'',doc_url:($('hcCertUrl')||{}).value||''})}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
 async function delHcosCert(cid,eid){ if(!confirm('Remove this certification?'))return; try{ await api('/hcos/cert/'+cid,{method:'DELETE'}); openHcosPerson(eid); }catch(e){ alert(e.message); } }
 async function resolveCase(cid,eid){ const resolution=prompt('Resolution / outcome:')||''; try{ await api('/hcos/case/'+cid+'/resolve',{method:'POST',body:JSON.stringify({resolution})}); if(eid)openHcosPerson(eid);else renderHcosTab(); }catch(e){ alert(e.message); } }
@@ -8089,17 +8105,124 @@ async function saveExtractedKudos(P='kx'){
 
 async function loadExtraMile(){
   const box=$('extraMileFeed'); if(!box) return;
+  // Recognition names the standard it reflects — fill the principle picker once.
+  try{ const hb=await handbook(); const sel=$('em_principle');
+    if(sel&&sel.options.length<=1) sel.innerHTML='<option value="">Which principle did they live? (optional)</option>'+hb.principles.map(p=>`<option>${esc(p.title)}</option>`).join('');
+  }catch(e){}
   let d; try{ d=await api('/extra-mile'); }catch(e){ return; }
   box.innerHTML = (d.rows&&d.rows.length) ? d.rows.map(m=>`<div class="pc-note" style="border-left:3px solid #c8a44d">
-    <div>✨ <strong>${esc(m.person)}</strong> — ${esc(m.story)}</div>
-    <div class="hint" style="margin-top:2px">${m.by_name&&m.by_name!==m.person?'noted by '+esc(m.by_name)+' · ':''}${esc(m.at||'')}${m.value_text?' · '+esc(m.value_text):''}</div>
+    <div>✨ <strong>${esc(m.person)}</strong> — ${esc(m.story)}${m.principle?` <span class="badge" style="background:#faf6ee;border:1px solid #e7d9b6;color:#8a6d1f">${esc(m.principle)}</span>`:''}</div>
+    <div class="hint" style="margin-top:2px">${m.by_name&&m.by_name!==m.person?'noted by '+esc(m.by_name)+' · ':''}${esc(m.at||'')}${!m.principle&&m.value_text?' · '+esc(m.value_text):''}</div>
   </div>`).join('') : '<div class="hint">No moments yet today — be the first to celebrate a teammate.</div>';
 }
 async function addExtraMile(){
   const person=$('em_person')?$('em_person').value.trim():''; const story=$('em_story')?$('em_story').value.trim():'';
   if(!person||!story){ if($('em_msg'))$('em_msg').textContent='Add who and what they did.'; return; }
-  try{ await api('/extra-mile',{method:'POST',body:JSON.stringify({person,story})}); $('em_person').value='';$('em_story').value=''; if($('em_msg'))$('em_msg').textContent='✓ Added'; setTimeout(()=>{if($('em_msg'))$('em_msg').textContent='';},2000); loadExtraMile(); }
+  try{ await api('/extra-mile',{method:'POST',body:JSON.stringify({person,story,principle:($('em_principle')||{}).value||''})}); $('em_person').value='';$('em_story').value=''; if($('em_principle'))$('em_principle').value=''; if($('em_msg'))$('em_msg').textContent='✓ Added'; setTimeout(()=>{if($('em_msg'))$('em_msg').textContent='';},2000); loadExtraMile(); }
   catch(e){ if($('em_msg'))$('em_msg').textContent=e.message; }
+}
+
+/* ---- THE ARMADA EXCELLENCE STANDARDS — the handbook, live in the app ----
+   Recognition ties to a named principle; My Role carries the chapter; the
+   Friday reflection closes the week. "A standard used every day becomes who
+   we are." */
+let HB=null;
+async function handbook(){ if(!HB) HB=await api('/handbook'); return HB; }
+// 🌟 Recognize — anyone recognizes anyone, tied to a principle. The recognized
+// person sees it in their Today drawer; it flows onto tomorrow's 8am lineup.
+async function recognizeExcellence(){
+  let hb; try{ hb=await handbook(); }catch(e){ alert(e.message); return; }
+  let names=[]; try{ const {staff}=await api('/staff'); names=(staff||[]).map(s=>s.name); }catch(e){}
+  const save=hmodal(`<h3>🌟 Recognize excellence</h3>
+    <p class="sub sans" style="margin:0 0 8px">Good recognition names three things: the behavior, why it mattered, and which standard it reflected. “Nice job” builds nothing.</p>
+    <label>Who</label><input id="rx_who" list="rx_names" placeholder="Teammate's name"/><datalist id="rx_names">${names.map(n=>`<option>${esc(n)}</option>`).join('')}</datalist>
+    <label>Which Armada Principle did they live?</label><select id="rx_principle"><option value="">—</option>${hb.principles.map(p=>`<option value="${esc(p.title)}">${p.n}. ${esc(p.title)} — ${esc(p.line)}</option>`).join('')}</select>
+    <label>What exactly did they do?</label><textarea id="rx_what" rows="2" placeholder="The specific behavior (no client names)"></textarea>
+    <label>Why did it matter — for a client or a teammate?</label><textarea id="rx_why" rows="2" placeholder="The difference it made"></textarea>`);
+  save.textContent='Recognize';
+  save.onclick=async()=>{
+    const who=$('rx_who').value.trim(), what=$('rx_what').value.trim(), why=$('rx_why').value.trim();
+    if(!who||!what){ alert('Who, and what they did?'); return; }
+    try{ await api('/extra-mile',{method:'POST',body:JSON.stringify({person:who,story:why?what+' — '+why:what,principle:$('rx_principle').value||''})}); closeHModal(); alert('🌟 Recognized — they\'ll see it, and it goes on tomorrow\'s lineup.'); }
+    catch(e){ alert(e.message); }
+  };
+}
+// 🪞 Friday reflection — four questions, two minutes.
+async function submitReflection(){
+  const g=id=>($(id)||{}).value||'';
+  try{ await api('/reflection',{method:'POST',body:JSON.stringify({proud:g('rf_proud'),barrier:g('rf_barrier'),lived:g('rf_lived'),improve:g('rf_improve')})});
+    ['rf_proud','rf_barrier','rf_lived','rf_improve'].forEach(id=>{ if($(id))$(id).value=''; });
+    if($('rf_msg'))$('rf_msg').textContent='✓ Thank you — leadership reads every one.'; setTimeout(()=>{if($('rf_msg'))$('rf_msg').textContent='';},4000);
+  }catch(e){ if($('rf_msg'))$('rf_msg').textContent=e.message; }
+}
+// The full handbook browser — every chapter, browsable by anyone.
+async function loadHandbook(){
+  const host=$('handbookBody'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="empty">Loading…</div></div>';
+  let hb; try{ hb=await handbook(); }catch(e){ host.innerHTML='<div class="card"><div class="empty">'+esc(e.message)+'</div></div>'; return; }
+  const chapterCard=(c,open)=>`<details class="card" style="margin-bottom:12px" ${open?'open':''}>
+    <summary style="cursor:pointer;font-weight:700;font-size:16px">Chapter ${c.chapter} · ${esc(c.title)}${hb.myChapter===c.title?' <span class="badge" style="background:#faf6ee;border:1px solid #e7d9b6;color:#8a6d1f">my chapter</span>':''}</summary>
+    <div style="margin-top:10px">${hbChapterHtml(c)}</div></details>`;
+  host.innerHTML=`
+    <div class="card" style="background:linear-gradient(135deg,var(--navy),var(--navy-2));color:#fff;text-align:center">
+      <div class="sans" style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--gold)">The Armada Excellence Standards</div>
+      <div style="font-family:Georgia,serif;font-size:20px;line-height:1.5;margin-top:8px">What excellence looks like in every role</div>
+      <div class="sans" style="margin-top:6px;color:var(--gold)">${esc(hb.allBehindYou)}</div>
+    </div>
+    <div class="card" style="border-left:4px solid var(--gold)">
+      <div class="hint" style="text-transform:uppercase;letter-spacing:.6px;color:var(--gold)">Today's Principle · ${hb.todays.principle.n} of 10</div>
+      <h3 style="margin:2px 0 0">${esc(hb.todays.principle.title)}</h3><p class="sub sans" style="margin:2px 0 0">${esc(hb.todays.principle.line)}</p>
+      <div class="hint" style="margin-top:8px">🛡 ${esc(hb.todays.safety)}</div>
+    </div>
+    <details class="card" style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:700;font-size:16px">A note before you begin — ${esc(hb.intro.note.title)}</summary>
+      <div style="margin-top:10px;font-size:14px;line-height:1.65">${hb.intro.note.body.map(p=>`<p>${esc(p)}</p>`).join('')}<p class="hint">${esc(hb.intro.note.sign)}</p></div></details>
+    <div class="card">
+      <h3>The Armada Principles</h3><p class="sub sans">The same for every role, in every building. Learn them, coach from them, live them.</p>
+      <div style="margin-top:8px">${hb.principles.map(p=>`<div class="kv"><span class="k" style="min-width:250px">${p.n}. ${esc(p.title)}</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted)">${esc(p.line)}</span></div>`).join('')}</div>
+    </div>
+    <div class="card">
+      <h3>How to use this handbook — three layers</h3>
+      <div style="margin-top:8px">${hb.intro.layers.map(l=>`<div class="kv"><span class="k" style="min-width:200px">${esc(l.k)}</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted)">${esc(l.v)}</span></div>`).join('')}</div>
+      <p class="sub sans" style="margin-top:8px">The “What Excellence Is Not” section in each chapter is your fastest coaching tool — contrast teaches faster than aspiration.</p>
+    </div>
+    ${hb.chapters.map(c=>chapterCard(c, hb.myChapter===c.title)).join('')}
+    <div class="card">
+      <h3>How the standard stays alive</h3>
+      <p class="sub sans">${esc(hb.intro.lineup.body)}</p>
+      <ul style="margin:8px 0;padding-left:18px;font-size:14px;line-height:1.65">${hb.intro.lineup.items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>
+      <div style="margin-top:8px">${hb.intro.rhythm.map(r=>`<div class="kv"><span class="k" style="min-width:170px">${esc(r.k)}</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted)">${esc(r.v)}</span></div>`).join('')}</div>
+    </div>
+    <div class="card" style="text-align:center;background:#faf6ee;border-left:4px solid var(--gold)">
+      <p style="font-size:14px;line-height:1.65;margin:0">${esc(hb.standard)}</p>
+      <div class="sans" style="margin-top:8px;font-weight:700;color:#8a6d1f">${esc(hb.allBehindYou)}</div>
+    </div>`;
+}
+// One chapter, in the handbook's three layers — shared by the browser and My Role.
+function hbChapterHtml(c){
+  return `
+    <p style="font-size:14px;line-height:1.65">${c.purpose.map(esc).join('</p><p style="font-size:14px;line-height:1.65">')}</p>
+    <div class="kv"><span class="k" style="min-width:170px">Those outside our walls</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted)">${esc(c.serve.outside)}</span></div>
+    <div class="kv"><span class="k" style="min-width:170px">Your teammates inside</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted)">${esc(c.serve.inside)}</span></div>
+    <div class="cmd-grid" style="margin-top:10px">
+      <div><h4 style="margin:0 0 4px">Excellence looks like</h4><ul style="margin:4px 0;padding-left:18px;font-size:13px;line-height:1.6">${c.looks.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+      <div><h4 style="margin:0 0 4px">Daily standards</h4><ul style="margin:4px 0;padding-left:18px;font-size:13px;line-height:1.6">${c.daily.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+    </div>
+    <div style="border:1px solid #e3b3ac;background:#fff8f7;border-radius:8px;padding:10px 14px;margin-top:10px">
+      <h4 style="margin:0 0 4px;color:#b3382f">What excellence is not</h4><ul style="margin:4px 0;padding-left:18px;font-size:13px;line-height:1.6">${c.not.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
+    <div style="margin-top:10px"><h4 style="margin:0 0 4px">Behaviors that define excellence</h4><div style="display:flex;flex-wrap:wrap;gap:6px">${c.behaviors.map(b=>`<span class="badge" style="background:#eef5f0;border:1px solid #bcd8c6">✓ ${esc(b)}</span>`).join('')}</div></div>
+    <div style="margin-top:10px"><h4 style="margin:0 0 4px">How excellence is measured</h4>${c.measures.map(m=>`<div class="kv"><span class="k" style="min-width:140px">${esc(m.k)}</span><span class="v" style="text-align:left;font-weight:400;color:var(--muted)">${esc(m.v)}</span></div>`).join('')}</div>
+    <div style="margin-top:10px"><h4 style="margin:0 0 4px">Ask yourself every day</h4><ul style="margin:4px 0;padding-left:18px;font-size:13px;line-height:1.6">${c.questions.map(q=>`<li>${esc(q)}</li>`).join('')}</ul></div>
+    <p class="sub sans" style="margin-top:10px;font-style:italic">${esc(c.closing)}</p>`;
+}
+// Coaching-from-the-standard picker: the ten principles + every chapter's
+// "What Excellence Is Not" lines — point at the written line, never coach by mood.
+async function fillStdSelect(id, preferTitle){
+  const sel=$(id); if(!sel) return;
+  let hb; try{ hb=await handbook(); }catch(e){ return; }
+  const chapters=[...hb.chapters].sort((a,b)=>(a.title===preferTitle?-1:0)-(b.title===preferTitle?-1:0));
+  sel.innerHTML='<option value="">Standard (optional — coach from the written line)</option>'
+    +'<optgroup label="Armada Principles">'+hb.principles.map(p=>`<option value="${esc(p.title)}">${p.n}. ${esc(p.title)}</option>`).join('')+'</optgroup>'
+    +chapters.map(c=>`<optgroup label="${esc(c.title)} — What Excellence Is Not">${c.not.map(n=>`<option value="${esc(c.title)}: ${esc(n)}">${esc(n.slice(0,80))}</option>`).join('')}</optgroup>`).join('');
 }
 
 /* ---- belonging pulse (anonymous, the plan's leading indicator) ---- */

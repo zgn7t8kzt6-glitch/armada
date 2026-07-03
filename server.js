@@ -23,6 +23,7 @@ import { classifyDeskItem } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
+import { ARMADA_PRINCIPLES, ARMADA_STANDARD, ALL_BEHIND_YOU, HANDBOOK, HANDBOOK_INTRO, todaysPrinciple, todaysSafety, chapterForRole } from './src/handbook.js';
 
 // On boot, make sure there's an admin to log in with (reads ADMIN_USER / ADMIN_PASS).
 // Optionally load demo data when SEED_SAMPLE=true (handy for a pilot).
@@ -473,6 +474,27 @@ app.get('/api/today', requireAuth, (req, res) => {
     if (inc) items.push({ label: `${inc} open incident${inc === 1 ? '' : 's'} to review`, sub: 'Ops Center', overdue: true, view: 'incidents' });
     if (canSeeHR(me)) { const rev = one(`SELECT COUNT(*) n FROM hr_reviews WHERE status='open' AND due_date < ?`, today); if (rev) items.push({ label: `${rev} review${rev === 1 ? '' : 's'} overdue`, sub: 'People OS', overdue: true, view: 'hcos', tab: 'reviews' }); }
     if (canSeeCorp(me)) { const ord = one(`SELECT COUNT(*) n FROM order_requests WHERE status='requested' AND priority IN ('High','Urgent')`); if (ord) items.push({ label: `${ord} high-priority order${ord === 1 ? '' : 's'} to place`, sub: 'Corporate Hub', overdue: false, view: 'corphub', tab: 'orders' }); }
+  });
+  // Excellence OS: culture becomes visible — recognition finds the person it names.
+  add(() => {
+    const first = (me.name || '').split(/\s+/)[0] || '';
+    if (!first) return;
+    for (const r of db.prepare(`SELECT principle, story, by_name FROM extra_mile WHERE created_at >= datetime('now','-7 day') AND (lower(trim(person)) = lower(?) OR lower(trim(person)) = lower(?)) ORDER BY id DESC LIMIT 3`).all(me.name || '', first)) {
+      items.push({ label: `🌟 You were recognized${r.principle ? ' — ' + r.principle : ''}`, sub: `${r.story.slice(0, 90)}${r.by_name ? ' — ' + r.by_name : ''}`, overdue: false, view: 'team' });
+    }
+  });
+  // Coaching follow-ups I promised — a coaching note isn't done until the circle-back.
+  add(() => {
+    for (const c of db.prepare(`SELECT h.id, h.follow_up, h.standard, e.first_name, e.last_name FROM hr_coaching h JOIN hr_employees e ON e.id=h.employee_id WHERE h.by_name=? AND h.follow_up IS NOT NULL AND h.follow_up <= ? AND h.followed_up_at IS NULL ORDER BY h.follow_up LIMIT 5`).all(me.name || '', today)) {
+      items.push({ label: `Coaching follow-up: ${c.first_name} ${c.last_name}`, sub: c.standard ? c.standard.slice(0, 80) : 'circle back on the coaching note', overdue: c.follow_up < today, view: 'hcos' });
+    }
+  });
+  // Friday: four questions, two minutes — the week closes with a reflection.
+  add(() => {
+    const dow = new Date(today + 'T12:00:00').getDay();
+    if (dow !== 5 && dow !== 6 && dow !== 0) return;
+    if (db.prepare(`SELECT 1 FROM weekly_reflections WHERE user_id=? AND week=?`).get(me.id, excWeek(today))) return;
+    items.push({ label: '🪞 Weekly reflection — four questions, two minutes', sub: 'What made you proud? Who lived the standards?', overdue: false, view: 'team' });
   });
   items.sort((a, b) => (b.overdue ? 1 : 0) - (a.overdue ? 1 : 0));
   res.json({ today, items: items.slice(0, 15) });
@@ -5226,9 +5248,15 @@ app.post('/api/hcos/review/:id/complete', requireAuth, requireHR, (req, res) => 
 app.post('/api/hcos/coaching', requireAuth, requireHR, (req, res) => {
   const b = req.body || {};
   if (!b.employee_id || !String(b.note || '').trim()) return res.status(400).json({ error: 'Employee and note required.' });
-  db.prepare(`INSERT INTO hr_coaching (employee_id, kind, note, by_name) VALUES (?,?,?,?)`)
-    .run(+b.employee_id, ['positive', 'corrective', 'observation'].includes(b.kind) ? b.kind : 'positive', String(b.note).slice(0, 2000), req.user.name);
-  hrEvent(+b.employee_id, 'coaching', `${b.kind || 'positive'} coaching logged`, req.user.name);
+  // Every coaching session ties back to a written standard — no random criticism.
+  const follow = /^\d{4}-\d{2}-\d{2}$/.test(String(b.follow_up || '')) ? b.follow_up : null;
+  db.prepare(`INSERT INTO hr_coaching (employee_id, kind, note, standard, follow_up, by_name) VALUES (?,?,?,?,?,?)`)
+    .run(+b.employee_id, ['positive', 'corrective', 'observation'].includes(b.kind) ? b.kind : 'positive', String(b.note).slice(0, 2000), String(b.standard || '').slice(0, 300) || null, follow, req.user.name);
+  hrEvent(+b.employee_id, 'coaching', `${b.kind || 'positive'} coaching logged${b.standard ? ' — ' + String(b.standard).slice(0, 80) : ''}`, req.user.name);
+  res.json({ ok: true });
+});
+app.post('/api/hcos/coaching/:id/followup', requireAuth, requireHR, (req, res) => {
+  db.prepare(`UPDATE hr_coaching SET followed_up_at=datetime('now') WHERE id=?`).run(req.params.id);
   res.json({ ok: true });
 });
 app.post('/api/hcos/case', requireAuth, requireHR, (req, res) => {
@@ -6739,7 +6767,8 @@ app.get('/api/my-role', requireAuth, (req, res) => {
   // Admins can preview another role's card (the "preview as" feature).
   const role = (req.user.role === 'admin' && JOB_ROLES.includes(req.query.as)) ? req.query.as : (req.user.job_role || '');
   if (!role) return res.json({ role: '', purpose: '', responsibilities: [], limitations: [], qualities: [] });
-  res.json(getRoleProfile(role));
+  // My chapter of the Excellence Standards — the handbook rides on the role page.
+  res.json({ ...getRoleProfile(role), chapter: chapterForRole(role), armadaStandard: ARMADA_STANDARD, allBehindYou: ALL_BEHIND_YOU });
 });
 app.get('/api/hiring/candidates', requireAuth, (req, res) => {
   let rows;
@@ -8757,6 +8786,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' ORDER BY id DESC LIMIT 10`).all()
     : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' AND (roles IS NULL OR roles LIKE ?) ORDER BY id DESC LIMIT 10`).all('%|' + jr + '|%');
   res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins, lean, priority, facility,
+    principle: todaysPrinciple(today), safety: todaysSafety(today),   // Today at Armada — the handbook opens the day
     canPreview: req.user.role === 'admin', roles: req.user.role === 'admin' ? JOB_ROLES : undefined, previewing: jr !== (req.user.job_role || '') ? jr : null });
 });
 
@@ -11015,14 +11045,49 @@ app.post('/api/kudos/bulk', requireAuth, requireAdmin, (req, res) => {
 });
 // Extra Mile wall — the whole team sees how teammates lived the value (morale).
 app.get('/api/extra-mile', requireAuth, (req, res) => {
-  res.json({ rows: db.prepare(`SELECT id, person, story, value_text, by_name, substr(created_at,1,16) at FROM extra_mile ORDER BY id DESC LIMIT 40`).all() });
+  res.json({ rows: db.prepare(`SELECT id, person, story, value_text, principle, by_name, substr(created_at,1,16) at FROM extra_mile ORDER BY id DESC LIMIT 40`).all() });
 });
 app.post('/api/extra-mile', requireAuth, (req, res) => {
   const person = (req.body?.person || '').trim(); const story = (req.body?.story || '').trim();
   if (!person || !story) return res.status(400).json({ error: 'Who, and what they did?' });
-  db.prepare(`INSERT INTO extra_mile (person, story, value_text, by_name, source) VALUES (?,?,?,?, 'manual')`)
-    .run(person.slice(0, 80), story.slice(0, 500), effectiveValue() || null, req.user.name);
+  // Recognition names the standard it reflects — "nice job" builds nothing.
+  const principle = ARMADA_PRINCIPLES.find((p) => p.title === req.body?.principle)?.title || null;
+  db.prepare(`INSERT INTO extra_mile (person, story, value_text, principle, by_name, source) VALUES (?,?,?,?,?, 'manual')`)
+    .run(person.slice(0, 80), story.slice(0, 500), effectiveValue() || null, principle, req.user.name);
+  try { publishEvent({ event: 'recognition.given', entity: 'extra_mile', actor: req.user.username, summary: `${req.user.name} recognized ${person.slice(0, 80)}${principle ? ' — ' + principle : ''}` }); } catch { /* feed only */ }
   res.json({ ok: true });
+});
+
+// ── EXCELLENCE OS — the handbook + the Friday reflection ──────────────────────
+// "A standard used every day becomes who we are." /api/handbook serves the whole
+// book (principles, chapters, today's rotation); reflections close the week with
+// four questions, read by leaders. Improvement ideas stay in staff_voice — one system.
+app.get('/api/handbook', requireAuth, (req, res) => {
+  const today = appToday();
+  res.json({
+    intro: HANDBOOK_INTRO, principles: ARMADA_PRINCIPLES, chapters: HANDBOOK,
+    standard: ARMADA_STANDARD, allBehindYou: ALL_BEHIND_YOU,
+    todays: { principle: todaysPrinciple(today), safety: todaysSafety(today) },
+    myChapter: chapterForRole(req.user.job_role)?.title || null,
+  });
+});
+const excWeek = (dstr) => { // Monday of the given app-day — one reflection per person per week
+  const d = new Date(dstr + 'T12:00:00');
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+};
+app.post('/api/reflection', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (![b.proud, b.barrier, b.lived, b.improve].some((x) => String(x || '').trim())) return res.status(400).json({ error: 'At least one answer — even one line counts.' });
+  db.prepare(`INSERT INTO weekly_reflections (user_id, user_name, week, proud, barrier, lived, improve) VALUES (?,?,?,?,?,?,?)
+              ON CONFLICT(user_id, week) DO UPDATE SET proud=excluded.proud, barrier=excluded.barrier, lived=excluded.lived, improve=excluded.improve`)
+    .run(req.user.id, req.user.name, excWeek(appToday()), String(b.proud || '').slice(0, 1000), String(b.barrier || '').slice(0, 1000), String(b.lived || '').slice(0, 1000), String(b.improve || '').slice(0, 1000));
+  res.json({ ok: true });
+});
+app.get('/api/reflections', requireAuth, (req, res) => {
+  if (!isLeader(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const wk = excWeek(appToday());
+  res.json({ week: wk, rows: db.prepare(`SELECT user_name, week, proud, barrier, lived, improve, substr(created_at,1,10) at FROM weekly_reflections WHERE week >= date(?, '-7 day') ORDER BY week DESC, user_name`).all(wk) });
 });
 app.post('/api/training-ack', requireAuth, (req, res) => {
   const today = appToday();

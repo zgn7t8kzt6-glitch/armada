@@ -1288,6 +1288,7 @@ app.post('/api/desk/settings', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
   if (b.digestHour != null && +b.digestHour >= 0 && +b.digestHour <= 23) setState('desk_digest_hour', String(+b.digestHour));
   if (b.email != null) setState('desk_email', String(b.email).slice(0, 200));
+  if (Array.isArray(b.buckets)) setState('desk_buckets', JSON.stringify(b.buckets.map((x) => String(x).trim().slice(0, 30)).filter(Boolean).slice(0, 20)));
   res.json({ ok: true });
 });
 // Text-in capture: Twilio SMS (form-encoded Body/From) or an iPhone Shortcut

@@ -5880,62 +5880,153 @@ async function authDel(id){
   if(!confirm('Delete this authorization row entirely? (Closing is usually right.)')) return;
   try{ await api('/auth-register/'+id,{method:'DELETE'}); loadAuthReg(); }catch(e){ alert(e.message); }
 }
-/* ── MY DESK — the owner's one capture inbox. Type it like a text; dates parse;
-   waiting-on items nudge people; the morning digest does the remembering. ── */
-let DESK_DATA=null, DESK_FILTER='';
+/* ── MY DESK v2 — a workflow, not a list. Capture pinned on top; five lenses:
+   Focus (work this NOW) · Board (inbox→scheduled→waiting→done) · Buckets ·
+   Locations · People (the follow-up machine). ADHD rules: urgency always wins,
+   one primary action per card, the system does the remembering. ── */
+let DESK_DATA=null, DESK_TAB='focus';
+function deskLane(x){ return x.status==='done'?'done':x.status==='waiting'?'waiting':x.due_date?'sched':'inbox'; }
 async function loadMyDesk(){
   const host=$('mydesk'); if(!host) return;
-  host.innerHTML='<div class="card"><div class="skel" style="width:240px;height:22px;margin-bottom:14px"></div><div class="skel" style="height:60px"></div></div>';
+  if(!DESK_DATA) host.innerHTML='<div class="card"><div class="skel" style="width:240px;height:22px;margin-bottom:14px"></div><div class="skel-tiles">'+'<div class="skel"></div>'.repeat(4)+'</div></div>';
   let d; try{ d=await api('/desk'); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'</div></div>'; return; }
   DESK_DATA=d;
-  let items=(d.items||[]).filter(x=>!x.snoozed||x.status==='done');
-  // Bucket / location filter chips — AI files everything; you slice it any way.
-  const bucketsPresent=[...new Set(items.map(x=>x.bucket).filter(Boolean))];
-  const facsPresent=[...new Set(items.map(x=>x.facility_name).filter(Boolean))];
-  if(DESK_FILTER) items=items.filter(x=>x.bucket===DESK_FILTER||x.facility_name===DESK_FILTER);
-  const chip=(v,ico)=>`<button class="btn ${DESK_FILTER===v?'btn-gold':'btn-ghost'} btn-sm sans" onclick="DESK_FILTER=DESK_FILTER==='${v.replace(/'/g,"\\'")}'?'':'${v.replace(/'/g,"\\'")}';loadMyDesk()">${ico}${esc(v)}</button>`;
-  const filterRow=(bucketsPresent.length||facsPresent.length)?`<div class="chip-row" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${DESK_FILTER?chip(DESK_FILTER,'✕ '):''}${bucketsPresent.filter(b=>b!==DESK_FILTER).map(b=>chip(b,'🏷 ')).join('')}${facsPresent.filter(f=>f!==DESK_FILTER).map(f=>chip(f,'📍')).join('')}</div>`:'';
+  const items=(d.items||[]);
   const today=d.today;
-  const overdue=items.filter(x=>x.overdue&&x.status!=='done');
-  const todays=items.filter(x=>x.due_date===today&&x.status!=='done');
-  const waiting=items.filter(x=>x.status==='waiting'&&!x.overdue&&x.due_date!==today);
-  const upcoming=items.filter(x=>x.status==='open'&&x.due_date&&x.due_date>today);
-  const someday=items.filter(x=>x.status==='open'&&!x.due_date);
-  const done=items.filter(x=>x.status==='done');
-  const daysAgo=(ts)=>{ if(!ts) return null; const n=Math.round((Date.now()-Date.parse(ts+'Z'))/864e5); return n<=0?'today':n+'d ago'; };
-  const row=(x)=>`<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default">
-    <div class="q-main"><div class="q-title">${esc(x.title)}</div>
-      <div class="q-sub">${x.bucket?'<span class="badge-info">🏷 '+esc(x.bucket)+'</span> ':''}${x.facility_name?'<span class="badge-idle">📍'+esc(x.facility_name)+'</span> ':''}${x.due_date?esc(x.due_date)+(x.due_time?' '+esc(x.due_time):''):''}${x.with_who?' · w/ <strong>'+esc(x.with_who)+'</strong>'+(x.matched_name?'':' <span class="badge-idle">no app match</span>'):''}${x.nudged_at?' · nudged '+daysAgo(x.nudged_at):''}${x.source!=='app'?' · 📱':''}</div></div>
-    <div style="display:flex;gap:4px;flex-wrap:wrap">
-      ${x.status!=='done'?`<button class="btn btn-gold btn-sm sans" onclick="deskDo(${x.id},{status:'done'})">✓</button>
-      <button class="btn btn-ghost btn-sm sans" title="Snooze to tomorrow" onclick="deskDo(${x.id},{snooze_days:1})">😴</button>
-      <button class="btn btn-ghost btn-sm sans" title="Pick a date" onclick="deskDate(${x.id})">🗓</button>
-      <button class="btn btn-ghost btn-sm sans" title="Who has to help close this?" onclick="deskWho(${x.id})">👤</button>
-      <button class="btn btn-ghost btn-sm sans" title="File it: bucket + location" onclick="deskBucket(${x.id})">🏷</button>
-      ${x.with_who?`<button class="btn btn-ghost btn-sm sans" title="Nudge them — lands in their Today inbox" onclick="deskNudge(${x.id})">📣</button>`:''}`
-      :`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${x.id},{status:'open'})">↩︎</button>`}
-      <button class="btn btn-ghost btn-sm sans" onclick="deskDel(${x.id})">🗑</button></div></div>`;
-  const sec=(label,list,sev)=>list.length?`<h3 style="margin:14px 0 4px;${sev?'color:var(--crit)':''}">${label} (${list.length})</h3>${list.map(row).join('')}`:'';
-  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">My Desk</h3><p class="sub sans" style="margin:0">One inbox for everything on your plate. Type it like a text — dates and people parse themselves ("call landlord friday 3pm with Josh").</p></div>
-      <button class="btn btn-ghost btn-sm sans" onclick="deskDigestNow(this)">☀️ Send digest now</button></div>
+  const live=items.filter(x=>x.status!=='done'&&(!x.snooze_until||x.snooze_until<=today));
+  const n={ overdue:live.filter(x=>x.overdue).length, today:live.filter(x=>x.due_date===today).length,
+    waiting:live.filter(x=>x.status==='waiting').length, inbox:live.filter(x=>deskLane(x)==='inbox').length,
+    done7:items.filter(x=>x.status==='done').length };
+  const stat=(nn,l,tab,sev)=>`<div class="ret-card ${sev||''}" style="cursor:pointer" onclick="DESK_TAB='${tab}';renderDeskTab()"><div class="n">${nn}</div><div class="l">${l}</div></div>`;
+  const tabs=[['focus','🎯 Focus'],['board','📋 Board'],['buckets','🗂 Buckets'],['places','📍 Locations'],['people','👥 People'],['setup','⚙️']];
+  host.innerHTML=`<div class="card">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">My Desk</h3><p class="sub sans" style="margin:0">Say it like a text — dates, people &amp; buckets file themselves.</p></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="deskDigestNow(this)">☀️ Digest now</button></div>
     <div class="toolbar" style="gap:8px;margin-top:10px"><input id="deskCap" placeholder="What do you need to remember?" style="flex:1;min-width:200px;font-size:16px;padding:12px" onkeydown="if(event.key==='Enter')deskAdd()"/><button class="btn btn-gold sans" onclick="deskAdd()">Save</button></div>
-    ${filterRow}
-    ${sec('🔥 Overdue',overdue,true)}${sec('📅 Today',todays)}${sec('⏳ Waiting on people',waiting)}${sec('🗓 Coming up',upcoming)}${sec('💡 No date yet',someday)}
-    ${(!items.length)?'<div class="empty"><div class="e-ico">🌤</div>Desk is clear. Text yourself the next thing that pops into your head.</div>':''}
-    ${done.length?`<details style="margin-top:12px"><summary class="hint" style="cursor:pointer">✅ Done recently (${done.length})</summary>${done.map(row).join('')}</details>`:''}</div>
-    <div class="card"><details><summary style="cursor:pointer"><strong>📱 Capture by text / Siri</strong> <span class="hint">· set up once, then just send</span></summary>
-      <div class="hint" style="margin:8px 0 4px"><strong>Fastest (works today, feels like texting):</strong> iPhone Shortcuts → ＋ → add action <em>“Get Contents of URL”</em> → URL below → Method POST → Request Body JSON with field <code>text</code> = <em>Ask Each Time</em> (or <em>Shortcut Input</em>) → name it <strong>“Remember”</strong>. Then: “Hey Siri, Remember” → speak → it lands here, dates parsed. Add it to your home screen too.</div>
-      <div class="hint" style="margin:6px 0 4px"><strong>True texting number:</strong> a Twilio number (~$2/mo) pointed at the same URL (Messaging webhook, HTTP POST). You text it; it replies "✓ Saved · friday 15:00". I'll walk your IT through it when you want it.</div>
-      <div class="pc-note" style="word-break:break-all;font-family:monospace;font-size:12px">${esc((DESK_DATA.settings||{}).noteUrl||'')}</div>
-      <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">
-        <label class="hint">Morning digest at <input type="number" id="deskHour" min="0" max="23" value="${(d.settings||{}).digestHour??7}" style="width:60px"/>:00</label>
-        <label class="hint">to <input id="deskEmail" value="${esc((d.settings||{}).email||'')}" placeholder="you@armadarecovery.com" style="min-width:210px"/></label>
-        <button class="btn btn-ghost btn-sm sans" onclick="deskSaveSettings()">Save</button></div></details></div>`;
-  const cap=$('deskCap'); if(cap) cap.focus();
+    <div class="ret-cards" style="margin-top:10px">${stat(n.overdue,'Overdue','focus',n.overdue?'rc-high':'')}${stat(n.today,'Today','focus')}${stat(n.waiting,'Waiting on people','people',n.waiting?'rc-warn':'')}${stat(n.inbox,'Inbox — unsorted','board',n.inbox>5?'rc-elev':'')}${stat(n.done7,'Done (14d)','board')}</div>
+    <div class="corp-tabs" style="margin-top:10px" id="deskTabs">${tabs.map(([k,l])=>`<button class="${DESK_TAB===k?'active':''}" onclick="DESK_TAB='${k}';renderDeskTab()">${l}</button>`).join('')}</div>
+    <div id="deskBody"></div></div>`;
+  renderDeskTab();
+  const cap=$('deskCap'); if(cap&&DESK_TAB==='focus') cap.focus();
+}
+function renderDeskTab(){
+  const b=$('deskBody'); if(!b||!DESK_DATA) return;
+  document.querySelectorAll('#deskTabs button').forEach(x=>x.classList.toggle('active',x.getAttribute('onclick').includes("'"+DESK_TAB+"'")));
+  if(DESK_TAB==='focus') return deskFocus(b);
+  if(DESK_TAB==='board') return deskBoard(b);
+  if(DESK_TAB==='buckets') return deskGrouped(b,'bucket','🏷','Unfiled — tap 🏷 to file');
+  if(DESK_TAB==='places') return deskGrouped(b,'facility_name','📍','No location');
+  if(DESK_TAB==='people') return deskPeople(b);
+  if(DESK_TAB==='setup') return deskSetup(b);
+}
+function deskDaysAgo(ts){ if(!ts) return null; const nn=Math.round((Date.now()-Date.parse(String(ts).replace(' ','T')+'Z'))/864e5); return nn<=0?'today':nn+'d'; }
+// One card recipe everywhere: title big, tags small, ONE gold action for its lane.
+function deskCard(x,primary){
+  const tag=(t)=>t?`<span class="badge-idle" style="margin-right:4px">${t}</span>`:'';
+  const lane=deskLane(x);
+  const gold = primary!==undefined?primary
+    : lane==='waiting'?`<button class="btn btn-gold btn-sm sans" onclick="deskNudge(${x.id})">📣 Nudge</button>`
+    : `<button class="btn btn-gold btn-sm sans" onclick="deskDo(${x.id},{status:'done'})">✓ Done</button>`;
+  return `<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default;align-items:flex-start">
+    <div class="q-main"><div class="q-title" style="font-size:14.5px">${esc(x.title)}</div>
+      <div class="q-sub" style="margin-top:2px">${x.due_date?tag('🗓 '+esc(x.due_date)+(x.due_time?' '+esc(x.due_time):'')):''}${x.with_who?tag('👤 '+esc(x.with_who)+(x.nudged_at?' · nudged '+deskDaysAgo(x.nudged_at):'')):''}${x.bucket?tag('🏷 '+esc(x.bucket)):''}${x.facility_name?tag('📍'+esc(x.facility_name)):''}${x.source!=='app'?tag('📱'):''}</div></div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${x.status!=='done'?`${gold}
+      <button class="btn btn-ghost btn-sm sans" title="More" onclick="deskMore(${x.id},this)">⋯</button>`
+      :`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${x.id},{status:'open'})">↩︎</button>`}</div></div>`;
+}
+function deskMore(id,btn){
+  const host=btn.closest('.q-row');
+  const bar=document.createElement('div');
+  bar.className='toolbar'; bar.style.cssText='justify-content:flex-end;gap:4px;flex-wrap:wrap;width:100%;margin-top:6px';
+  bar.innerHTML=`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${id},{status:'done'})">✓ Done</button>
+    <button class="btn btn-ghost btn-sm sans" onclick="deskDo(${id},{snooze_days:1})">😴 Tomorrow</button>
+    <button class="btn btn-ghost btn-sm sans" onclick="deskDo(${id},{snooze_days:7})">😴 Next week</button>
+    <button class="btn btn-ghost btn-sm sans" onclick="deskDate(${id})">🗓 Date</button>
+    <button class="btn btn-ghost btn-sm sans" onclick="deskWho(${id})">👤 Person</button>
+    <button class="btn btn-ghost btn-sm sans" onclick="deskBucket(${id})">🏷 File</button>
+    <button class="btn btn-ghost btn-sm sans" onclick="deskDo(${id},{reclassify:true})">✨ Re-file (AI)</button>
+    <button class="btn btn-ghost btn-sm sans" onclick="deskDel(${id})">🗑</button>`;
+  btn.disabled=true; host.appendChild(bar);
+}
+function deskFocus(b){
+  const d=DESK_DATA, today=d.today;
+  const live=(d.items||[]).filter(x=>x.status!=='done'&&(!x.snooze_until||x.snooze_until<=today));
+  const overdue=live.filter(x=>x.overdue);
+  const todays=live.filter(x=>x.due_date===today);
+  const soon=live.filter(x=>x.due_date&&x.due_date>today&&x.due_date<=addDaysStr(today,2));
+  const renudge=live.filter(x=>x.status==='waiting'&&(!x.nudged_at||(Date.now()-Date.parse(String(x.nudged_at).replace(' ','T')+'Z'))/864e5>=3));
+  const sec=(ico,label,list,hint)=>list.length?`<h3 style="margin:14px 0 4px">${ico} ${label} <span class="hint" style="font-weight:400">· ${hint}</span></h3>${list.map(x=>deskCard(x)).join('')}`:'';
+  b.innerHTML=`${sec('🔥','Overdue',overdue,'these first — or snooze them honestly')}
+    ${sec('📅','Today',todays,'the day\'s promises')}
+    ${sec('⏰','Next 48 hours',soon,'coming at you')}
+    ${sec('📣','Time to re-nudge',renudge,'waiting 3+ days — push or let go')}
+    ${(!overdue.length&&!todays.length&&!soon.length&&!renudge.length)?'<div class="empty"><div class="e-ico">🌤</div>Nothing urgent. The Board holds the rest —<br>or capture the next thing on your mind.</div>':''}`;
+}
+function addDaysStr(dateStr,nn){ const dt=new Date(dateStr+'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate()+nn); return dt.toISOString().slice(0,10); }
+function deskBoard(b){
+  const d=DESK_DATA;
+  const items=(d.items||[]);
+  const cols=[
+    ['inbox','📥 Inbox','no date, no owner — sort it: give it a date, a person, or done', items.filter(x=>deskLane(x)==='inbox')],
+    ['sched','🗓 Scheduled','has its date — shows up in Focus when due', items.filter(x=>deskLane(x)==='sched')],
+    ['waiting','⏳ Waiting on','someone owes you — nudge lands in their Today', items.filter(x=>deskLane(x)==='waiting')],
+    ['done','✅ Done','last 14 days', items.filter(x=>x.status==='done')],
+  ];
+  const colCard=([k,label,hint,list])=>`<div class="card" style="margin:0"><h3 style="margin:0 0 2px">${label} <span class="hint" style="font-weight:400">${list.length}</span></h3><div class="hint" style="margin-bottom:6px">${hint}</div>
+    ${list.length?list.map(x=>deskCard(x, k==='inbox'?`<button class="btn btn-gold btn-sm sans" onclick="deskDate(${x.id})">🗓 Schedule</button>`:undefined)).join(''):'<div class="hint" style="padding:10px 4px">empty</div>'}</div>`;
+  b.innerHTML=`<div class="corp-kanban" style="margin-top:10px">${cols.map(colCard).join('')}</div>`;
+}
+function deskGrouped(b,key,ico,unfiledLabel){
+  const d=DESK_DATA, today=d.today;
+  const live=(d.items||[]).filter(x=>x.status!=='done');
+  const groups={};
+  for(const x of live){ const g=x[key]||''; (groups[g]=groups[g]||[]).push(x); }
+  const names=Object.keys(groups).filter(Boolean).sort();
+  if(groups['']) names.push('');
+  if(!names.length){ b.innerHTML='<div class="empty"><div class="e-ico">'+ico+'</div>Nothing filed here yet — capture things and the AI sorts them.</div>'; return; }
+  b.innerHTML=names.map(g=>{
+    const list=groups[g].sort((a,bb)=>String(a.due_date||'9999').localeCompare(String(bb.due_date||'9999')));
+    const od=list.filter(x=>x.overdue).length;
+    return `<details ${od?'open':''} style="margin-top:10px"><summary style="cursor:pointer;padding:8px 4px"><strong>${ico} ${esc(g||unfiledLabel)}</strong> <span class="hint">· ${list.length}</span>${od?` <span class="badge-crit">${od} overdue</span>`:''}</summary>${list.map(x=>deskCard(x)).join('')}</details>`;
+  }).join('');
+}
+function deskPeople(b){
+  const d=DESK_DATA;
+  const waiting=(d.items||[]).filter(x=>x.status==='waiting');
+  if(!waiting.length){ b.innerHTML='<div class="empty"><div class="e-ico">🤝</div>You\'re not waiting on anyone.<br>Add "with Josh" to any capture and it lands here.</div>'; return; }
+  const by={};
+  for(const x of waiting){ const w=x.with_who||'(unassigned)'; (by[w]=by[w]||[]).push(x); }
+  b.innerHTML=Object.keys(by).sort().map(w=>{
+    const list=by[w];
+    const oldest=Math.max(...list.map(x=>Math.round((Date.now()-Date.parse(String(x.created_at).replace(' ','T')+'Z'))/864e5)));
+    const matched=list.some(x=>x.matched_name);
+    return `<div class="card" style="margin-top:10px"><div class="cmd-hero-row"><div><h3 style="margin:0">👤 ${esc(w)} <span class="hint" style="font-weight:400">· ${list.length} open · oldest ${oldest}d${matched?'':' · <span class="badge-idle">not matched to an app user</span>'}</span></h3></div>
+      ${matched?`<button class="btn btn-gold btn-sm sans" onclick="deskNudgeAll(${JSON.stringify(list.map(x=>x.id)).replace(/"/g,'')})">📣 Nudge all</button>`:''}</div>
+      ${list.map(x=>deskCard(x)).join('')}</div>`;
+  }).join('');
+}
+async function deskNudgeAll(ids){
+  for(const id of ids){ try{ await api('/desk/'+id+'/nudge',{method:'POST'}); }catch(_e){} }
+  loadMyDesk();
+}
+function deskSetup(b){
+  const d=DESK_DATA;
+  b.innerHTML=`<div style="margin-top:10px">
+    <h3 style="margin:0 0 4px">📱 Capture by voice / text</h3>
+    <div class="hint" style="margin:4px 0"><strong>Siri (works now):</strong> Shortcuts app → your "Desk It" shortcut: Dictate Text → Get Contents of URL (POST, JSON field <code>text</code> = Dictated Text) → URL below. Say "Hey Siri, Desk It".</div>
+    <div class="hint" style="margin:4px 0"><strong>Real texting number:</strong> Twilio number (~$2/mo) → Messaging webhook POST → same URL. It texts back "✓ Saved".</div>
+    <div class="pc-note" style="word-break:break-all;font-family:monospace;font-size:12px">${esc((d.settings||{}).noteUrl||'')}</div>
+    <h3 style="margin:14px 0 4px">☀️ Morning digest</h3>
+    <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">
+      <label class="hint">At <input type="number" id="deskHour" min="0" max="23" value="${(d.settings||{}).digestHour??7}" style="width:60px"/>:00</label>
+      <label class="hint">to <input id="deskEmail" value="${esc((d.settings||{}).email||'')}" placeholder="you@armadarecovery.com" style="min-width:210px"/></label></div>
+    <h3 style="margin:14px 0 4px">🏷 Buckets <span class="hint" style="font-weight:400">· one per line — the AI files into exactly these</span></h3>
+    <textarea id="deskBuckets" rows="6" style="width:100%;max-width:340px">${esc((d.buckets||[]).join('\n'))}</textarea>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="deskSaveSettings()">Save settings</button></div></div>`;
 }
 async function deskAdd(){
   const cap=$('deskCap'); const text=(cap&&cap.value||'').trim(); if(!text) return;
-  try{ const r=await api('/desk',{method:'POST',body:JSON.stringify({text})}); cap.value=''; loadMyDesk(); }catch(e){ alert(e.message); }
+  try{ await api('/desk',{method:'POST',body:JSON.stringify({text})}); cap.value=''; loadMyDesk(); }catch(e){ alert(e.message); }
 }
 async function deskDo(id,body){ try{ await api('/desk/'+id,{method:'PATCH',body:JSON.stringify(body)}); }catch(e){ alert(e.message);} loadMyDesk(); }
 async function deskDate(id){ const dt=prompt('Due date (YYYY-MM-DD), blank to clear:'); if(dt==null) return; const tm=dt?prompt('Time (HH:MM, optional):','')||'':''; deskDo(id,{due_date:dt,due_time:tm}); }
@@ -5949,9 +6040,9 @@ async function deskBucket(id){
   deskDo(id,{bucket:match,facility_id:fac?fac.id:(f===''?null:undefined)});
 }
 async function deskWho(id){ const w=prompt('Who has to help close this? (name — matches app users automatically)'); if(w==null) return; deskDo(id,{with_who:w}); }
-async function deskNudge(id){ try{ const r=await api('/desk/'+id+'/nudge',{method:'POST'}); const m=r.how||'nudged'; alert('📣 '+m); }catch(e){ alert(e.message);} loadMyDesk(); }
+async function deskNudge(id){ try{ const r=await api('/desk/'+id+'/nudge',{method:'POST'}); alert('📣 '+(r.how||'nudged')); }catch(e){ alert(e.message);} loadMyDesk(); }
 async function deskDel(id){ if(!confirm('Delete this item?')) return; try{ await api('/desk/'+id,{method:'DELETE'}); }catch(e){ alert(e.message);} loadMyDesk(); }
-async function deskSaveSettings(){ try{ await api('/desk/settings',{method:'POST',body:JSON.stringify({digestHour:+(($('deskHour')||{}).value||7),email:($('deskEmail')||{}).value||''})}); loadMyDesk(); }catch(e){ alert(e.message); } }
+async function deskSaveSettings(){ try{ await api('/desk/settings',{method:'POST',body:JSON.stringify({digestHour:+(($('deskHour')||{}).value||7),email:($('deskEmail')||{}).value||'',buckets:(($('deskBuckets')||{}).value||'').split('\n').map(x=>x.trim()).filter(Boolean)})}); loadMyDesk(); }catch(e){ alert(e.message); } }
 async function deskDigestNow(btn){ btn.disabled=true; try{ const r=await api('/desk/digest-now',{method:'POST'}); alert(r.sent?'☀️ Digest sent.':'Not sent: '+(r.reason||'')); }catch(e){ alert(e.message);} btn.disabled=false; }
 
 /* ── SCHEDULING & THE SERVICE PROMISE — queue + calendar + one-minute notes.

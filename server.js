@@ -1726,7 +1726,7 @@ app.post('/api/org/facilities/:id/kipu-test', requireAuth, requireAdmin, async (
 // silently corrupt census. Stamps every synced row with THIS facility.
 let _facSyncRunning = false;
 app.post('/api/org/facilities/:id/kipu-sync', requireAuth, requireAdmin, async (req, res) => {
-  const fac = db.prepare(`SELECT id, name, kipu_location_name FROM org_facilities WHERE id=?`).get(+req.params.id);
+  const fac = db.prepare(`SELECT id, name, type, kipu_location_name FROM org_facilities WHERE id=?`).get(+req.params.id);
   if (!fac) return res.status(404).json({ error: 'Not found.' });
   const conn = resolveKipuConn(fac.id);
   if (!conn) return res.status(400).json({ error: 'Save this facility\'s own Kipu connection first — the shared credentials belong to the primary facility and must not be re-stamped here.' });
@@ -1734,7 +1734,12 @@ app.post('/api/org/facilities/:id/kipu-sync', requireAuth, requireAdmin, async (
   let locId = ''; try { locId = JSON.parse(db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu'`).get(fac.id)?.config || '{}').locationId || ''; } catch { /* none */ }
   _facSyncRunning = true;
   try {
-    const r = await kipuSyncRoster({ conn, facilityId: fac.id, locationId: locId, locationName: fac.kipu_location_name || '' });
+    // An OUTPATIENT facility's people live in the outpatient roster (PHP/IOP/OP
+    // world), not the detox census — sync the right world for its type.
+    const r = fac.type === 'outpatient'
+      ? await syncOutpatient({ facilityId: fac.id, locationName: fac.kipu_location_name || '', conn })
+      : await kipuSyncRoster({ conn, facilityId: fac.id, locationId: locId, locationName: fac.kipu_location_name || '' });
+    if (r && r.error) return res.status(502).json({ error: r.error });
     audit({ user: req.user, action: 'KIPU_FACILITY_SYNC', entity: 'org_facility', entity_id: fac.id, detail: `${fac.name}: ${JSON.stringify(r).slice(0, 120)}`, ip: req.ip });
     res.json({ ok: true, result: r });
   } catch (e) { res.status(502).json({ error: e.message }); }
@@ -4499,7 +4504,7 @@ app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
     const ftype = db.prepare(`SELECT type FROM org_facilities WHERE id=?`).get(fid)?.type;
     if (ftype === 'outpatient') opPick = fid;
   }
-  const opFrag = opPick ? ` AND facility_id = ${opPick}` : '';
+  const opFrag = opPick ? ` AND (facility_id = ${opPick}${opPick === outpatientFacilityId() ? ' OR facility_id IS NULL' : ''})` : '';
   const rows = db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist, payer FROM outpatient_clients WHERE active = 1${opFrag} ORDER BY loc_class, name`).all();
   const counts = { total: rows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
   for (const r of rows) counts[r.loc_class] = (counts[r.loc_class] || 0) + 1;
@@ -4550,19 +4555,30 @@ try {
     }
   }
 } catch (e) { console.error('[phase3 outpatient backfill]', e.message); }
-async function syncOutpatient() {
-  if (!kipuConfigured()) return { error: 'Kipu isn’t connected.' };
-  let r; try { r = await kipuOutpatientCensus(outpatientLocationName()); } catch (e) { return { error: e.message }; }
+async function syncOutpatient(opts = {}) {
+  // Per-facility mode (Spark etc.): its OWN connection + location, rows stamped
+  // to that facility, matching and the discharge sweep FENCED to that facility —
+  // a Spark sync can never touch Armada Clinical's roster (same guarantee
+  // kipuSyncRoster gives the detox census).
+  const fid = opts.facilityId ? +opts.facilityId : null;
+  const conn = opts.conn || null;
+  if (fid && !conn) return { error: 'This facility has no Kipu connection of its own.' };
+  if (!fid && !kipuConfigured()) return { error: 'Kipu isn’t connected.' };
+  const locName = fid ? (opts.locationName || '') : outpatientLocationName();
+  let r; try { r = await kipuOutpatientCensus(locName, conn); } catch (e) { return { error: e.message }; }
   if (r.error) return { error: r.error };
   const today = appToday();
-  const opFac = outpatientFacilityId();
-  const get = db.prepare(`SELECT kipu_id, iop_start, admit FROM outpatient_clients WHERE kipu_id = ?`);
+  const opFac = fid || outpatientFacilityId();
+  // Match within THIS facility only (a second Kipu instance can reuse casefile
+  // ids); the default program also owns its legacy NULL-stamped rows.
+  const facMatch = fid ? `facility_id = ${fid}` : (opFac ? `(facility_id = ${opFac} OR facility_id IS NULL)` : `facility_id IS NULL`);
+  const get = db.prepare(`SELECT kipu_id, iop_start, admit FROM outpatient_clients WHERE kipu_id = ? AND ${facMatch}`);
   const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id,name,pref,level,loc_class,admit,mrn,therapist,payer,php_start,iop_start,first_seen,last_seen,active,facility_id,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,${opFac || 'NULL'},datetime('now'))`);
   // Prefer the LATEST admission date Kipu has (the most recent stay), per the rule
   // "last admission date → first IOP date".
   const upd = db.prepare(`UPDATE outpatient_clients SET name=?,pref=?,level=?,loc_class=?,admit=COALESCE(NULLIF(?,''),admit),mrn=?,therapist=?,
-    payer=COALESCE(NULLIF(payer,''),?),php_start=COALESCE(NULLIF(?,''),php_start),iop_start=?,last_seen=?,active=1,discharged_at=NULL,discharge_loc=NULL,updated_at=datetime('now') WHERE kipu_id=?`);
+    payer=COALESCE(NULLIF(payer,''),?),php_start=COALESCE(NULLIF(?,''),php_start),iop_start=?,last_seen=?,active=1,discharged_at=NULL,discharge_loc=NULL,facility_id=COALESCE(facility_id,${opFac || 'NULL'}),updated_at=datetime('now') WHERE kipu_id=? AND ${facMatch}`);
   const seen = new Set();
   db.exec('BEGIN');
   try {
@@ -4582,16 +4598,23 @@ async function syncOutpatient() {
         upd.run(p.name, p.pref, p.level, p.loc_class, p.admit || null, p.mrn, p.therapist, p.payer, p.phpStart || '', iopStart, today, kid);
       }
     }
-    const goneRows = db.prepare(`SELECT kipu_id, loc_class FROM outpatient_clients WHERE active = 1`).all();
-    const setGone = db.prepare(`UPDATE outpatient_clients SET active=0, discharged_at=?, discharge_loc=? WHERE kipu_id=?`);
+    // Discharge sweep stays inside this facility's fence.
+    const goneRows = db.prepare(`SELECT kipu_id, loc_class FROM outpatient_clients WHERE active = 1 AND ${facMatch}`).all();
+    const setGone = db.prepare(`UPDATE outpatient_clients SET active=0, discharged_at=?, discharge_loc=? WHERE kipu_id=? AND ${facMatch}`);
     for (const g of goneRows) { if (!seen.has(g.kipu_id)) setGone.run(today, g.loc_class, g.kipu_id); }
     db.exec('COMMIT');
-  } catch (e) { try { db.exec('ROLLBACK'); } catch {} return { error: e.message }; }
-  setState('outpatient_synced_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
-  return { location: r.locationName, counts: r.counts };
+  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* nothing to roll back */ } return { error: e.message }; }
+  setState(fid ? 'outpatient_synced_at_' + fid : 'outpatient_synced_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
+  return { location: r.locationName, counts: r.counts, facilityId: opFac || null };
 }
 app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, res) => {
-  const r = await syncOutpatient();
+  // Scoped to a non-default outpatient facility → refresh THAT program from its
+  // own connection; otherwise the default program from the env credentials.
+  const sc = outpatientScope(req, res); if (!sc) return;
+  if (sc.fid && !sc.isDefault && !sc.conn) return res.status(503).json({ error: `${sc.fac.name} doesn’t have its own Kipu connection yet — finish the 🔌 setup on the Facilities page.` });
+  const r = sc.fid && !sc.isDefault
+    ? await syncOutpatient({ facilityId: sc.fid, locationName: sc.fac.kipu_location_name || '', conn: sc.conn })
+    : await syncOutpatient();
   if (r.error) return res.status(/not found/i.test(r.error) ? 404 : 502).json({ error: r.error });
   audit({ user: req.user, action: 'OUTPATIENT_SYNC', detail: `${r.counts.total} at ${r.location} (PHP ${r.counts.PHP}, IOP ${r.counts.IOP})`, ip: req.ip });
   res.json({ ok: true, location: r.location, counts: r.counts });
@@ -4601,32 +4624,57 @@ app.post('/api/outpatient/refresh', requireAuth, requireOutpatient, async (req, 
 // 7d/30d/90d never triggers a fetch and can't flip the number. Cached 5 min, but the
 // last good result is retained and served if a later fetch fails, so a transient Kipu
 // hiccup never silently downgrades the count back to the census snapshot.
-let _opAdmAll = null;   // { day, at, data: [admissions] }
-async function outpatientAllAdmissions() {
+// Which outpatient facility is this request about? An explicit chip pick of a
+// NON-default outpatient facility means: that program's data, through ITS OWN
+// Kipu connection — never Akron's. Everything else keeps the legacy full view.
+//   → { fid: null }            no/irrelevant pick — default program, env connection
+//   → { fid, fac, conn }       scoped; conn null = its 🔌 isn't finished yet
+//   → null                     forbidden/invalid (403 already sent)
+function outpatientScope(req, res) {
+  const q = req.query.facility;
+  if (q === undefined || q === '') return { fid: null };
+  const fid = +q;
+  if (!Number.isInteger(fid) || fid <= 0 || !facilityAllowed(req.user, fid)) { res.status(403).json({ error: 'No access to that facility.' }); return null; }
+  const fac = db.prepare(`SELECT id, name, type, kipu_location_name FROM org_facilities WHERE id=?`).get(fid);
+  if (!fac || fac.type !== 'outpatient') return { fid: null };
+  // The default program (Armada Clinical) scopes its DATA like everyone else but
+  // keeps the shared env connection; it also owns legacy NULL-stamped rows.
+  const isDefault = fid === outpatientFacilityId();
+  return { fid, fac, isDefault, conn: resolveKipuConn(fid), frag: (col = 'facility_id') => ` AND (${col} = ${fid}${isDefault ? ` OR ${col} IS NULL` : ''})` };
+}
+let _opAdmAll = new Map();   // facility id (0 = default) → { day, at, data: [admissions] }
+async function outpatientAllAdmissions(fid = 0, fac = null, conn = null) {
   const today = appToday();
-  if (_opAdmAll && _opAdmAll.day === today && (Date.now() - _opAdmAll.at) < 5 * 60 * 1000) return _opAdmAll.data;
-  if (!kipuConfigured()) return _opAdmAll ? _opAdmAll.data : null;
-  let r; try { r = await kipuOutpatientAdmissions(outpatientLocationName(), addDays(today, -400), today); } catch { return _opAdmAll ? _opAdmAll.data : null; }
-  if (!r || r.error || !Array.isArray(r.admissions)) return _opAdmAll ? _opAdmAll.data : null;
-  _opAdmAll = { day: today, at: Date.now(), data: r.admissions };
+  const hit = _opAdmAll.get(fid || 0);
+  if (hit && hit.day === today && (Date.now() - hit.at) < 5 * 60 * 1000) return hit.data;
+  if (fid ? !conn : !kipuConfigured()) return hit ? hit.data : null;
+  const locName = fid ? (fac?.kipu_location_name || '') : outpatientLocationName();
+  let r; try { r = await kipuOutpatientAdmissions(locName, addDays(today, -400), today, conn); } catch { return hit ? hit.data : null; }
+  if (!r || r.error || !Array.isArray(r.admissions)) return hit ? hit.data : null;
+  _opAdmAll.set(fid || 0, { day: today, at: Date.now(), data: r.admissions });
   return r.admissions;
 }
 // The diagnostic dashboard: admits/discharges over an adjustable period, census by
 // level, LOS per level (+ trend), per-payer breakdown, and the "quick movers".
 app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req, res) => {
+  // Facility truth: a Spark pick reads SPARK's snapshot rows and SPARK's Kipu
+  // admissions — never Akron's numbers wearing Spark's name.
+  const sc = outpatientScope(req, res); if (!sc) return;
   const today = appToday();
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : addDays(today, -7);
   const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;
   const spanDays = Math.max(1, (opDays(since, end) || 0) + 1);
   const prevSince = addDays(since, -spanDays), prevEnd = addDays(since, -1);
   const inR = (d, s, e) => { const x = d ? String(d).slice(0, 10) : ''; return x && x >= s && x <= e; };
-  const all = db.prepare(`SELECT * FROM outpatient_clients`).all();
+  const all = db.prepare(`SELECT * FROM outpatient_clients${sc.fid ? ` WHERE 1=1${sc.frag()}` : ''}`).all();
   const activeRows = all.filter((c) => c.active);
   const counts = { total: activeRows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
   for (const c of activeRows) counts[c.loc_class] = (counts[c.loc_class] || 0) + 1;
   // Admits/discharges come from Kipu's admissions record (catches in-and-out people the
   // census snapshot never saw); fall back to the snapshot table if Kipu is unreachable.
-  const liveAdm = await outpatientAllAdmissions();
+  const liveAdm = sc.fid && !sc.isDefault
+    ? await outpatientAllAdmissions(sc.fid, sc.fac, sc.conn)
+    : await outpatientAllAdmissions(0, null, null);
   const levelByKid = new Map(all.map((c) => [String(c.kipu_id), c.loc_class]));
   let admits, discharges, admitRows, dischargeRows, source;
   if (liveAdm) {
@@ -4660,7 +4708,7 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req,
   // quick movers — moved PHP→IOP unusually fast (short PHP authorization)
   const quickThresh = +(getState('outpatient_quick_days') || 7);
   const quick = all.map((c) => { const pd = (c.iop_start && c.admit) ? opDays(c.admit, c.iop_start) : null; return pd != null && pd <= quickThresh ? { name: c.pref || c.name, payer: c.payer || '', phpDays: pd, admit: (c.admit || '').slice(0, 10), iopStart: (c.iop_start || '').slice(0, 10), active: !!c.active } : null; }).filter(Boolean).sort((a, b) => a.phpDays - b.phpDays);
-  const tracking = !!getState('outpatient_synced_at');
+  const tracking = !!getState(sc.fid && !sc.isDefault ? 'outpatient_synced_at_' + sc.fid : 'outpatient_synced_at');
   // The exact admits we counted — so a real-vs-app gap can be diagnosed by name.
   // active = still enrolled (no discharge date on the admissions record).
   const admitList = admitRows.map((a) => ({ name: a.pref || a.name, admit: (a.admit || '').slice(0, 10), discharged: (a.discharge || '').slice(0, 10), level: levelByKid.get(String(a.kipuId)) || '', active: !(a.discharge && String(a.discharge).slice(0, 10)), sameDay: a.admit && a.discharge && String(a.admit).slice(0, 10) === String(a.discharge).slice(0, 10) }))
@@ -4691,16 +4739,21 @@ app.get('/api/outpatient/analytics', requireAuth, requireOutpatient, async (req,
 // per admit). Retains last good result so a Kipu hiccup doesn't blank it.
 let _phpOutCache = new Map();   // key `${since}|${end}` → { at, data }
 app.get('/api/outpatient/php-outcomes', requireAuth, requireOutpatient, async (req, res) => {
-  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
+  // Facility truth: this panel reads live program history, so a scoped facility
+  // needs ITS OWN Kipu connection — an honest "not connected yet" beats Akron's
+  // numbers under Spark's name.
+  const sc = outpatientScope(req, res); if (!sc) return;
+  if (sc.fid && !sc.isDefault && !sc.conn) return res.status(503).json({ error: `${sc.fac.name} doesn’t have its own Kipu connection yet — finish the 🔌 setup on the Facilities page and this panel comes alive.` });
+  if ((!sc.fid || sc.isDefault) && !kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
   const today = appToday();
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : today.slice(0, 8) + '01';
   const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;
-  const key = `${since}|${end}`;
+  const key = `${sc.fid && !sc.isDefault ? sc.fid : 0}|${since}|${end}`;
   const hit = _phpOutCache.get(key);
   let r;
   if (hit && (Date.now() - hit.at) < 5 * 60 * 1000) r = hit.data;
   else {
-    try { r = await kipuOutpatientPhpOutcomes(outpatientLocationName(), since, end); } catch (e) { r = hit ? hit.data : { error: e.message }; }
+    try { r = await kipuOutpatientPhpOutcomes(sc.fid && !sc.isDefault ? (sc.fac.kipu_location_name || '') : outpatientLocationName(), since, end, sc.fid && !sc.isDefault ? sc.conn : null); } catch (e) { r = hit ? hit.data : { error: e.message }; }
     if (r && !r.error) _phpOutCache.set(key, { at: Date.now(), data: r });
     else if (hit) r = hit.data;
   }
@@ -6043,13 +6096,17 @@ app.get('/api/outpatient/field-inspect', requireAuth, requireOutpatient, async (
 // (by casefile id) to our active roster, so the denominator is who's actually
 // enrolled — not just who happened to have a session on the calendar.
 app.get('/api/outpatient/group-attendance', requireAuth, requireOutpatient, async (req, res) => {
-  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
+  // Facility truth: attendance reads live group sessions — a scoped facility
+  // uses its own connection and its own roster, or says so honestly.
+  const sc = outpatientScope(req, res); if (!sc) return;
+  if (sc.fid && !sc.isDefault && !sc.conn) return res.status(503).json({ error: `${sc.fac.name} doesn’t have its own Kipu connection yet — finish the 🔌 setup on the Facilities page.` });
+  if ((!sc.fid || sc.isDefault) && !kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
-  let g; try { g = await kipuGroupAttendance(outpatientLocationName(), date, date); } catch (e) { return res.status(502).json({ error: e.message }); }
+  let g; try { g = await kipuGroupAttendance(sc.fid && !sc.isDefault ? (sc.fac.kipu_location_name || '') : outpatientLocationName(), date, date, sc.fid && !sc.isDefault ? sc.conn : null); } catch (e) { return res.status(502).json({ error: e.message }); }
   if (g.error) return res.status(502).json(g);
   const attendedKey = (kid) => g.patients[String(kid)] && g.patients[String(kid)].attended > 0;
   const listedKey = (kid) => !!g.patients[String(kid)];
-  const roster = db.prepare(`SELECT kipu_id, loc_class FROM outpatient_clients WHERE active = 1`).all();
+  const roster = db.prepare(`SELECT kipu_id, loc_class FROM outpatient_clients WHERE active = 1${sc.fid ? sc.frag() : ''}`).all();
   // Did Kipu give us usable present/absent flags, or only enrollment? (affects wording)
   const anyAttendedFlag = Object.values(g.patients).some((p) => p.attended > 0);
   const levels = ['PHP', 'IOP', 'OP'];
@@ -12625,14 +12682,21 @@ if (kipuConfigured()) {
   if (hrs > 0) {
     const facAutoSync = async () => {
       let rows = [];
-      try { rows = db.prepare(`SELECT fi.facility_id, fi.config, f.name, f.kipu_location_name FROM facility_integrations fi JOIN org_facilities f ON f.id = fi.facility_id AND f.active = 1 WHERE fi.kind = 'kipu' AND fi.active = 1`).all(); } catch { return; }
+      try { rows = db.prepare(`SELECT fi.facility_id, fi.config, f.name, f.type, f.kipu_location_name FROM facility_integrations fi JOIN org_facilities f ON f.id = fi.facility_id AND f.active = 1 WHERE fi.kind = 'kipu' AND fi.active = 1`).all(); } catch { return; }
       for (const row of rows) {
         try {
           let c = {}; try { c = JSON.parse(row.config || '{}'); } catch { continue; }
           if (!c.autoSync) continue;
           if (!(c.accessId && c.secretKey && c.appId)) continue;
-          const r = await kipuSyncRoster({ conn: c, facilityId: row.facility_id, locationId: c.locationId || '', locationName: row.kipu_location_name || '' });
-          console.log(`[kipu] facility auto-sync ${row.name}: ${r.activeNow} active (${r.created} new, ${r.deactivated} discharged)`);
+          // Outpatient facilities sync the PHP/IOP/OP roster; bedded ones the census.
+          if (row.type === 'outpatient') {
+            const r = await syncOutpatient({ facilityId: row.facility_id, locationName: row.kipu_location_name || '', conn: c });
+            if (r.error) console.error('[kipu] facility auto-sync (' + row.name + '):', r.error);
+            else console.log(`[kipu] facility auto-sync ${row.name}: ${r.counts?.total ?? '?'} enrolled (outpatient)`);
+          } else {
+            const r = await kipuSyncRoster({ conn: c, facilityId: row.facility_id, locationId: c.locationId || '', locationName: row.kipu_location_name || '' });
+            console.log(`[kipu] facility auto-sync ${row.name}: ${r.activeNow} active (${r.created} new, ${r.deactivated} discharged)`);
+          }
         } catch (e) { console.error('[kipu] facility auto-sync (' + row.name + '):', e.message); }
       }
     };

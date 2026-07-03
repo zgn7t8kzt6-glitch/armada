@@ -448,13 +448,13 @@ async function kipuPatientDetail(casefileId, conn) {
 // { program, start_date }. This is how we reconstruct the actual PHP→IOP step-down
 // date — and therefore retroactive PHP length of stay — for stays that pre-date the
 // app. Best-effort: returns [] if the program_history route isn't available.
-async function kipuProgramHistory(casefileId) {
+async function kipuProgramHistory(casefileId, conn = null) {
   const phi = process.env.KIPU_PHI_LEVEL || 'high';
   const s = String(casefileId);
   const master = s.split(':')[0];
   const uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
   try {
-    const d = await kipuGet(`/api/patients/${master}/program_history?phi_level=${phi}&patient_master_id=${encodeURIComponent(uuid)}`);
+    const d = await kipuGet(`/api/patients/${master}/program_history?phi_level=${phi}&patient_master_id=${encodeURIComponent(uuid)}`, conn);
     const arr = d?.patient?.program_history || d?.program_history || (Array.isArray(d) ? d : []);
     return Array.isArray(arr) ? arr : [];
   } catch { return []; }
@@ -1605,13 +1605,13 @@ export async function kipuListLocations() {
 // a window we pull with a generous lookback and let the caller filter by discharge.
 // This is the authoritative admit/discharge source: the live census only shows who's
 // enrolled right now, so fast in-and-out people never appear in it.
-export async function kipuOutpatientAdmissions(locationName, startDate, endDate) {
+export async function kipuOutpatientAdmissions(locationName, startDate, endDate, conn = null) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();
   if (!want) return { error: 'No outpatient location name configured.' };
   let locId = null, locName = null;
   try {
-    const loc = await kipuGet('/api/locations');
+    const loc = await kipuGet('/api/locations', conn);
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
     const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
@@ -1623,7 +1623,7 @@ export async function kipuOutpatientAdmissions(locationName, startDate, endDate)
   const rows = [];
   for (let page = 1; page <= 50; page++) {
     let path = `/api/patients/admissions?start_date=${start}&end_date=${end}&page=${page}&per=100&location_id=${encodeURIComponent(locId)}`;
-    let d; try { d = await kipuGet(path); } catch (e) { if (page === 1) return { error: 'admissions: ' + e.message }; break; }
+    let d; try { d = await kipuGet(path, conn); } catch (e) { if (page === 1) return { error: 'admissions: ' + e.message }; break; }
     const arr = d?.patients || d?.admissions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []);
     if (!Array.isArray(arr) || arr.length === 0) break;
     rows.push(...arr);
@@ -1649,8 +1649,8 @@ export async function kipuOutpatientAdmissions(locationName, startDate, endDate)
 // person who was discharged but never reached IOP "didn't complete PHP" — either they
 // left right away (same/next day, often a referral-out) or after some PHP days but
 // before the IOP step-down. Returns one row per admit so the caller can bucket them.
-export async function kipuOutpatientPhpOutcomes(locationName, since, end) {
-  const adm = await kipuOutpatientAdmissions(locationName, since, end);
+export async function kipuOutpatientPhpOutcomes(locationName, since, end, conn = null) {
+  const adm = await kipuOutpatientAdmissions(locationName, since, end, conn);
   if (adm.error) return adm;
   const classify = (lvl) => {
     const s = String(lvl || '').toLowerCase();
@@ -1660,7 +1660,7 @@ export async function kipuOutpatientPhpOutcomes(locationName, since, end) {
     return 'Other';
   };
   const people = await mapLimit(adm.admissions, +(process.env.KIPU_CONCURRENCY || 6), async (a) => {
-    let hist = []; try { hist = a.kipuId ? await kipuProgramHistory(a.kipuId) : []; } catch { /* best-effort */ }
+    let hist = []; try { hist = a.kipuId ? await kipuProgramHistory(a.kipuId, conn) : []; } catch { /* best-effort */ }
     let hasPhp = false, hasIop = false;
     for (const h of hist) { const c = classify(h.program || h.program_name || h.name || ''); if (c === 'PHP') hasPhp = true; if (c === 'IOP') hasIop = true; }
     return { name: a.pref || a.name, payer: a.payer, admit: a.admit, discharge: a.discharge, discharged: !!a.discharge, hasPhp, hasIop };
@@ -1668,13 +1668,13 @@ export async function kipuOutpatientPhpOutcomes(locationName, since, end) {
   return { locationId: adm.locationId, locationName: adm.locationName, since: adm.start, end: adm.end, people };
 }
 
-export async function kipuOutpatientCensus(locationName) {
+export async function kipuOutpatientCensus(locationName, conn = null) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();
   if (!want) return { error: 'No outpatient location name configured.' };
   let locId = null, locName = null, locations = [];
   try {
-    const loc = await kipuGet('/api/locations');
+    const loc = await kipuGet('/api/locations', conn);
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     locations = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
     const hit = locations.find((l) => l.name.toLowerCase() === want) || locations.find((l) => l.name.toLowerCase().includes(want));
@@ -1683,7 +1683,7 @@ export async function kipuOutpatientCensus(locationName) {
   if (locId == null) return { error: `Location "${locationName}" not found in Kipu.`, locations };
   let path = (process.env.KIPU_ROSTER_PATH || '/api/patients/census');
   path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
-  const data = await kipuGet(path);
+  const data = await kipuGet(path, conn);
   const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
   const classify = (lvl) => {
     const s = String(lvl || '').toLowerCase();
@@ -1711,7 +1711,7 @@ export async function kipuOutpatientCensus(locationName) {
   // census doesn't include them). Bounded concurrency, best-effort per patient.
   const enriched = await mapLimit(basics, +(process.env.KIPU_CONCURRENCY || 6), async (x) => {
     let det = null, history = []; try { det = x.ks ? await kipuPatientDetail(x.ks) : null; } catch { /* best-effort */ }
-    try { history = x.ks ? await kipuProgramHistory(x.ks) : []; } catch { /* best-effort */ }
+    try { history = x.ks ? await kipuProgramHistory(x.ks, conn) : []; } catch { /* best-effort */ }
     return { ...x, det, history };
   });
   const patients = [];
@@ -1901,13 +1901,13 @@ export async function kipuUrProbe(locationName) {
 // Returns, for the given date window, who attended at least one group each day and
 // the per-patient session count, keyed by casefile id so the app can match it to
 // the enrolled roster. `sample` exposes the raw attendee shape for verification.
-export async function kipuGroupAttendance(locationName, startDate, endDate) {
+export async function kipuGroupAttendance(locationName, startDate, endDate, conn = null) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();
   if (!want) return { error: 'No outpatient location name configured.' };
   let locId = null, locName = null;
   try {
-    const loc = await kipuGet('/api/locations');
+    const loc = await kipuGet('/api/locations', conn);
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
     const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
@@ -1922,7 +1922,7 @@ export async function kipuGroupAttendance(locationName, startDate, endDate) {
     let path = '/api/group_sessions?page=' + page + '&per=100';
     if (sd) path += '&start_date=' + encodeURIComponent(sd);
     if (ed) path += '&end_date=' + encodeURIComponent(ed);
-    let d; try { d = await kipuGet(path); } catch (e) { if (page === 1) return { error: 'group_sessions: ' + e.message }; break; }
+    let d; try { d = await kipuGet(path, conn); } catch (e) { if (page === 1) return { error: 'group_sessions: ' + e.message }; break; }
     const arr = d?.group_sessions || d?.sessions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []);
     if (!Array.isArray(arr) || arr.length === 0) break;
     sessions.push(...arr);

@@ -1173,9 +1173,13 @@ export function buildDailyMovement(date, fid = null) {
   date = date || appToday();
   // fid = facility scope (view only; the org-wide email passes null). A facility
   // with no houses/residents produces a truthfully empty report, not Akron's.
+  // House-less rows are legacy Akron data (same ruling as hFrag in mountHousing),
+  // so Akron's scoped report must include them or it undercounts vs its own HQ.
+  let akron = null; try { akron = db.prepare(`SELECT id FROM org_facilities WHERE fkey='hilltop-akron'`).get()?.id ?? null; } catch { /* registry optional */ }
+  const nullOk = (col) => (fid != null && +fid === akron) ? ` OR ${col} IS NULL` : '';
   const fw = fid != null ? ` AND facility_id = ${+fid}` : '';
-  const rw = fid != null ? ` AND r.facility_id = ${+fid}` : '';
-  const hw = (col) => fid != null ? ` AND ${col} IN (SELECT id FROM housing_houses WHERE facility_id = ${+fid})` : '';
+  const rw = fid != null ? ` AND (r.facility_id = ${+fid}${nullOk('r.facility_id')})` : '';
+  const hw = (col) => fid != null ? ` AND (${col} IN (SELECT id FROM housing_houses WHERE facility_id = ${+fid})${nullOk(col)})` : '';
   const intakes = db.prepare(`SELECT r.name, r.loc, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.move_in=?${rw} ORDER BY h.name, r.name`).all(date);
   const discharges = db.prepare(`SELECT r.name, r.discharge_type, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.discharge_date=?${rw} ORDER BY r.name`).all(date);
   const occ = occMap();
@@ -1330,6 +1334,20 @@ export function mountHousing(app) {
     const nullOk = fid === hilltopAkronId() ? ` OR ${col} IS NULL` : '';
     return ` AND (${col} IN (SELECT id FROM housing_residents WHERE facility_id = ${fid})${nullOk})`;
   };
+  // A WRITE may only stamp a facility the writer can actually see (mirrors
+  // facilityAllowed): admins/org-wide anywhere, row-less legacy users anywhere,
+  // everyone else only facilities they hold an access row for.
+  const facPickForWrite = (req) => {
+    const fid = facPick(req);
+    if (!fid || fid < 0) return null;
+    try {
+      if (!db.prepare(`SELECT 1 FROM org_facilities WHERE id=?`).get(fid)) return null;
+      const u = req.user || {};
+      if (u.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(u.job_role || '')) return fid;
+      if (!db.prepare(`SELECT 1 FROM user_facility_access WHERE user_id=? LIMIT 1`).get(u.id)) return fid;
+      return db.prepare(`SELECT 1 FROM user_facility_access WHERE user_id=? AND facility_id=?`).get(u.id, fid) ? fid : null;
+    } catch { return null; }
+  };
   // One-time: convert pre-existing activity effectiveness from the old 1–5 scale to
   // the app-wide 1–10 scale (×2). New seeds/inserts already store 1–10.
   try { if (getState('eff_scale10') !== 'done') { db.prepare(`UPDATE housing_activity_catalog SET effectiveness = effectiveness * 2 WHERE effectiveness IS NOT NULL AND effectiveness <= 5`).run(); setState('eff_scale10', 'done'); } } catch (e) { console.error('[housing] eff migrate:', e.message); }
@@ -1418,11 +1436,11 @@ export function mountHousing(app) {
     const requests = db.prepare(`SELECT * FROM housing_requests WHERE 1=1${rFrag(req)} ORDER BY (status='open') DESC, (priority='Urgent') DESC, id DESC LIMIT 80`).all().map(r => ({ ...r, name: nm(r.resident_id) }));
     const suggestions = db.prepare(`SELECT * FROM housing_suggestions WHERE 1=1${rFrag(req)} ORDER BY id DESC LIMIT 60`).all().map(s => ({ ...s, name: nm(s.resident_id) }));
     const surveys = db.prepare(`SELECT id, key, title FROM housing_surveys WHERE active=1 ORDER BY sort, id`).all().map(s => {
-      const responses = db.prepare(`SELECT COUNT(*) c FROM housing_survey_responses WHERE survey_id=?`).get(s.id).c;
-      const avg = db.prepare(`SELECT AVG(value_num) a FROM housing_survey_answers an JOIN housing_survey_responses r ON r.id=an.response_id WHERE r.survey_id=? AND an.value_num IS NOT NULL`).get(s.id).a;
+      const responses = db.prepare(`SELECT COUNT(*) c FROM housing_survey_responses WHERE survey_id=?${rFrag(req)}`).get(s.id).c;
+      const avg = db.prepare(`SELECT AVG(value_num) a FROM housing_survey_answers an JOIN housing_survey_responses r ON r.id=an.response_id WHERE r.survey_id=? AND an.value_num IS NOT NULL${rFrag(req, 'r.resident_id')}`).get(s.id).a;
       return { ...s, responses, avg: avg != null ? +avg.toFixed(1) : null };
     });
-    const recentText = db.prepare(`SELECT an.value_text text, r.created FROM housing_survey_answers an JOIN housing_survey_responses r ON r.id=an.response_id WHERE an.value_text IS NOT NULL ORDER BY r.id DESC LIMIT 25`).all();
+    const recentText = db.prepare(`SELECT an.value_text text, r.created FROM housing_survey_answers an JOIN housing_survey_responses r ON r.id=an.response_id WHERE an.value_text IS NOT NULL${rFrag(req, 'r.resident_id')} ORDER BY r.id DESC LIMIT 25`).all();
     res.json({
       checkins, requests, suggestions, surveys, recentText,
       kpis: {
@@ -1534,7 +1552,7 @@ export function mountHousing(app) {
   app.post('/api/housing/houses', requireAuth, requireAdmin, (req, res) => {
     const b = req.body || {};
     // New houses belong to the facility selected in the chip (or Hilltop Akron).
-    const fid = (facPick(req) > 0 ? facPick(req) : null) || hilltopAkronId();
+    const fid = facPickForWrite(req) || hilltopAkronId();
     const r = db.prepare(`INSERT INTO housing_houses (name,level,orh_cert,address,city,gender,program,mat_friendly,capacity,manager,phone,opened,color,notes,facility_id)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       (b.name || 'New House').trim(), b.level || 'L2', b.orh_cert || null, b.address || null, b.city || null,
@@ -1639,7 +1657,7 @@ export function mountHousing(app) {
     // A resident belongs to their house's facility; house-less (waitlist) rows
     // take the chip's facility, else Hilltop Akron (the only live house today).
     const houseFac = b.house_id ? db.prepare(`SELECT facility_id FROM housing_houses WHERE id=?`).get(num(b.house_id))?.facility_id : null;
-    const fid = houseFac || (facPick(req) > 0 ? facPick(req) : null) || hilltopAkronId();
+    const fid = houseFac || facPickForWrite(req) || hilltopAkronId();
     const r = db.prepare(`INSERT INTO housing_residents
       (name,dob,phone,email,house_id,loc,phase,status,move_in,sober_date,recovery_coach,payer,insurance,employment,education,mat,sponsor,home_group,emergency_name,emergency_phone,goals,notes,client_id,facility_id)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
@@ -2394,7 +2412,7 @@ export function mountHousing(app) {
       const done = db.prepare(`SELECT COUNT(*) c FROM housing_onboarding WHERE resident_id=? AND done=1`).get(r.id).c;
       return { ...r, done, total: FIRST_DAY.length };
     });
-    const offRestriction = db.prepare(`SELECT resident_id FROM housing_restrictions WHERE status='active'`).all()
+    const offRestriction = db.prepare(`SELECT resident_id FROM housing_restrictions WHERE status='active'${rFrag(req)}`).all()
       .map(x => { const c = currentRestriction(x.resident_id); if (!c || !c.eligible) return null; const rr = db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(x.resident_id); return { resident_id: x.resident_id, name: rr?.name || '', type: c.type }; })
       .filter(Boolean);
     const active = db.prepare(`SELECT id,name FROM housing_residents WHERE status='active'${fFrag(req)}`).all();
@@ -2428,7 +2446,7 @@ export function mountHousing(app) {
     const date = req.query.date || todayStr();
     const shift = HOUSING_SHIFTS.includes(req.query.shift) ? req.query.shift : 'Day';
     const houseId = req.query.house_id ? num(req.query.house_id) : 0;
-    const houses = db.prepare(`SELECT id,name,program FROM housing_houses WHERE active=1 ORDER BY level DESC, name`).all();
+    const houses = db.prepare(`SELECT id,name,program FROM housing_houses WHERE active=1${fFrag(req)} ORDER BY level DESC, name`).all();
     const rows = db.prepare(`SELECT task_key, done, done_by, done_at FROM housing_shift_tasks WHERE date=? AND shift=? AND IFNULL(house_id,0)=?`).all(date, shift, houseId);
     const map = {}; rows.forEach(r => { map[r.task_key] = r; });
     const tasks = (SHIFT_TASKS[shift] || []).map(([key, label]) => ({ key, label, done: map[key]?.done ? 1 : 0, done_by: map[key]?.done_by || null, done_at: map[key]?.done_at || null }));
@@ -2613,9 +2631,9 @@ export function mountHousing(app) {
       const fwDone = db.prepare(`SELECT COUNT(*) c FROM housing_farewell WHERE resident_id=? AND done=1`).get(a.id).c;
       return { ...a, last, fwDone, fwTotal: FAREWELL.length };
     });
-    const recs = db.prepare(`SELECT would_recommend v FROM housing_alumni_checkins WHERE would_recommend IS NOT NULL`).all().map(r => r.v);
+    const recs = db.prepare(`SELECT would_recommend v FROM housing_alumni_checkins WHERE would_recommend IS NOT NULL${rFrag(req)}`).all().map(r => r.v);
     const nps = recs.length ? Math.round((recs.filter(v => v >= 9).length - recs.filter(v => v <= 6).length) / recs.length * 100) : null;
-    const soberRows = db.prepare(`SELECT resident_id, MAX(sober) s FROM housing_alumni_checkins GROUP BY resident_id`).all();
+    const soberRows = db.prepare(`SELECT resident_id, MAX(sober) s FROM housing_alumni_checkins WHERE 1=1${rFrag(req)} GROUP BY resident_id`).all();
     const soberRate = soberRows.length ? Math.round(soberRows.filter(r => r.s).length / soberRows.length * 100) : null;
     res.json({ departing, alumni, nps, soberRate, alumniCount: alumni.length, surveyed: recs.length });
   });
@@ -2745,7 +2763,7 @@ export function mountHousing(app) {
 
   // Intake roster — who still has an incomplete packet
   app.get('/api/housing/intake', requireAuth, (req, res) => {
-    const residents = db.prepare(`SELECT id,name,house_id,loc,move_in,status FROM housing_residents WHERE status IN ('active','waitlist') ORDER BY move_in DESC`).all();
+    const residents = db.prepare(`SELECT id,name,house_id,loc,move_in,status FROM housing_residents WHERE status IN ('active','waitlist')${fFrag(req)} ORDER BY move_in DESC`).all();
     const rows = residents.map(r => ({
       ...r, house: db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(r.house_id)?.name || '',
       packet: packetStatus(r.id),
@@ -2894,7 +2912,7 @@ export function mountHousing(app) {
     // returns to use (all-time)
     const returns = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE type='Return to use'${hFrag(req)}`).get().c;
     // loyalty (alumni would-recommend → NPS) for the best-in-class target panel
-    const recs = db.prepare(`SELECT would_recommend v FROM housing_alumni_checkins WHERE would_recommend IS NOT NULL`).all().map(r => r.v);
+    const recs = db.prepare(`SELECT would_recommend v FROM housing_alumni_checkins WHERE would_recommend IS NOT NULL${rFrag(req)}`).all().map(r => r.v);
     const nps = recs.length ? Math.round((recs.filter(v => v >= 9).length - recs.filter(v => v <= 6).length) / recs.length * 100) : null;
     // activities programmed in the trailing week (the engagement floor we measure on)
     const wkStart = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); })();

@@ -222,7 +222,7 @@ const GROUP_OF={
   // Insight — why it happened (Analytics answers "why"; Home answers "now")
   outcomes:'insight',analytics:'insight',scorecard:'insight','report-view':'insight',admitcheck:'insight',askai:'insight',
   // Admin — configuration & governance
-  settings:'command',users:'command',audit:'command',guide:'command',dupes:'command',
+  settings:'command',facreg:'command',users:'command',audit:'command',guide:'command',dupes:'command',
 };
 // Role → pages. Only views listed here are restricted; anything NOT listed stays
 // visible to everyone (generous "when in doubt, show" default). Admin and the
@@ -719,6 +719,7 @@ function show(v){
   if(v==='admitcheck') loadAdmitCheck();
   if(v==='dupes') loadDupes();
   if(v==='outpatient') loadOutpatient();
+  if(v==='facreg') loadOrgFacs('orgFacs2');
   if(v==='ownership') loadOwnership();
   if(v==='corphub') loadCorpHub();
   if(v==='hcos') loadHcos();
@@ -5985,7 +5986,7 @@ async function loadOwnership(){
     ${ME.role==='admin'?`<div class="card"><h3 style="margin-top:0">🏢 Facilities registry <span class="hint" style="font-weight:400">— canonical (BHOS spine)</span></h3><p class="sub sans" style="margin:0 0 6px">The official facility list every module keys on going forward. Holdings (CGSS/SZS/Propco) are corporate entities, not facilities.</p><div id="orgFacs"><div class="hint">Loading…</div></div></div>`:''}
     ${ME.role==='admin'?`<div class="card"><h3 style="margin-top:0">🔐 Permission matrix <span class="hint" style="font-weight:400">— live: a check here opens that module for the role, instantly</span></h3><p class="sub sans" style="margin:0 0 6px">Roles × modules. Corporate &amp; HR enforce from this matrix today; other modules light up as Phase 2 rolls on (clinical last). Every change is audited.</p><div id="orgPerms"><div class="hint">Loading…</div></div></div>`:''}
     ${ME.role==='admin'?`<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">⚙️ Kipu facility mapping <span class="hint" style="font-weight:400">— owner only (legacy; converges into the registry)</span></h3><p class="sub sans">If a facility shows no data, its Kipu location name here may not match Kipu. Use “List locations” in Akron Outpatient settings to see exact names, then fix them here.</p><div id="ownFacilities" class="hint">Loading…</div></div>`:''}`;
-  if(ME.role==='admin'){ loadFacilityEditor(); loadHrRoster(); loadOrgFacs(); loadOrgPerms(); }
+  if(ME.role==='admin'){ loadFacilityEditor(); loadHrRoster(); loadOrgFacs('orgFacs'); loadOrgPerms(); }
 }
 let HR_SHOW_SAL=false;
 async function loadHrRoster(){
@@ -6043,8 +6044,13 @@ async function saveHr(id){
 }
 function ownPreset(p){ const e=today(); if(p==='mtd'){ OWN_PERIOD={since:e.slice(0,8)+'01',end:e}; } else { const d=new Date(e+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-(p-1)); OWN_PERIOD={since:d.toISOString().slice(0,10),end:e}; } loadOwnership(); }
 function ownPeriodChange(){ OWN_PERIOD={since:($('own_since')||{}).value||OWN_PERIOD.since, end:($('own_end')||{}).value||OWN_PERIOD.end}; loadOwnership(); }
-async function loadOrgFacs(){
-  const host=$('orgFacs'); if(!host) return;
+async function loadOrgFacs(hostId){
+  // The registry renders on the Facilities page (orgFacs2) AND inside Ownership
+  // (orgFacs) — one at a time, so the onboarding-form ids never duplicate.
+  // Refreshes with no argument re-render wherever it was last opened.
+  loadOrgFacs._host = hostId || loadOrgFacs._host || 'orgFacs';
+  const host=$(loadOrgFacs._host); if(!host) return;
+  const other=$(loadOrgFacs._host==='orgFacs2'?'orgFacs':'orgFacs2'); if(other) other.innerHTML='<div class="hint">Open…</div>';
   let d; try{ d=await api('/org/facilities'); }catch(e){ host.textContent=e.message; return; }
   const fs=d.facilities||[];
   host.innerHTML=`<table class="tbl"><tr><th>Facility</th><th>Brand</th><th>Region</th><th>Type</th><th>Beds</th><th>Kipu name</th><th></th></tr>${fs.map(f=>`<tr>
@@ -7058,25 +7064,49 @@ function renderFacChip(){
   const chip=$('facChip'); if(!chip) return;
   facScopeInit();
   const facs=ME.facilities||[];
-  if(facs.length<=1){
-    $('facChipName').textContent = facs.length ? facs[0].name : 'Armada';
-    if(facs.length) FAC_SCOPE=String(facs[0].id);
+  if(facs.length>1){
+    // A REAL button, not a buried dropdown: the building you're in is the app's
+    // most important setting, so it reads like one — tap it, pick a building,
+    // and the whole app becomes that facility's dashboard.
+    const cur=facs.find(f=>String(f.id)===String(FAC_SCOPE));
+    const label=FAC_SCOPE===''?`All facilities (${facs.length})`:(cur?cur.name:'Pick a facility');
+    chip.classList.add('fac-btn');
+    chip.innerHTML=`🏥 <strong>${esc(label)}</strong><span class="fac-caret">▾</span>`;
+    chip.title='Switch building — the whole app becomes that facility';
+    chip.onclick=openFacPicker;
     chip.style.display='';
     return;
   }
-  // Grouped by service line — the switcher reads like the company actually is.
-  const TYPE_LABEL={ 'detox':'Detox & Residential', 'residential':'Detox & Residential', 'outpatient':'Outpatient (PHP/IOP/OP)', 'sober-living':'Sober Living', 'corporate':'Corporate' };
+  // Exactly one building — a plain label; there's nothing to switch.
+  if($('facChipName')) $('facChipName').textContent = facs.length ? facs[0].name : 'Armada';
+  else chip.innerHTML='🏥 '+esc(facs.length?facs[0].name:'Armada');
+  if(facs.length) FAC_SCOPE=String(facs[0].id);
+  chip.classList.remove('fac-btn'); chip.onclick=null;
+  chip.style.display='';
+}
+// The building picker — big tappable cards grouped by service line, so switching
+// facilities is a first-class action on any screen size (not a buried dropdown).
+function openFacPicker(){
+  const facs=ME.facilities||[];
+  const TYPE_LABEL={ 'detox':'Detox & Residential', 'residential':'Detox & Residential', 'outpatient':'Outpatient — PHP · IOP · OP', 'sober-living':'Sober Living', 'corporate':'Corporate' };
+  const TYPE_ICON={ 'detox':'🛏️','residential':'🛏️','outpatient':'🩺','sober-living':'⛰️','corporate':'🏢' };
   const TYPE_ORDER=['detox','residential','outpatient','sober-living','corporate'];
   const byType={};
   for(const f of facs){ const k=TYPE_LABEL[f.type]||'Other'; (byType[k]=byType[k]||[]).push(f); }
   const groups=[...new Set(TYPE_ORDER.map(t=>TYPE_LABEL[t]))].filter(k=>byType[k]);
   if(byType['Other']) groups.push('Other');
-  const opt=f=>`<option value="${f.id}" ${String(FAC_SCOPE)===String(f.id)?'selected':''}>${esc(f.name)}</option>`;
-  chip.innerHTML=`🏥 <select id="facChipSel" onchange="facScopeChange(this.value)" style="border:none;background:transparent;font:inherit;color:inherit;max-width:190px;cursor:pointer" title="Pick a facility — the whole app becomes that facility's dashboard">
-    <option value="" ${FAC_SCOPE===''?'selected':''}>All facilities (${facs.length})</option>
-    ${groups.map(g=>`<optgroup label="${esc(g)}">${byType[g].map(opt).join('')}</optgroup>`).join('')}</select>`;
-  chip.style.display='';
+  const card=f=>`<button type="button" class="facpick-card ${String(FAC_SCOPE)===String(f.id)?'on':''}" onclick="pickFac('${f.id}')">
+      <span class="facpick-ico">${TYPE_ICON[f.type]||'🏥'}</span><span class="facpick-name">${esc(f.name)}</span>
+      ${String(FAC_SCOPE)===String(f.id)?'<span class="facpick-now sans">you’re here</span>':''}</button>`;
+  hmodalPlain(`<h3 style="margin-top:0">🏥 Pick a building</h3>
+    <p class="sub sans" style="margin:.2em 0 12px">The whole app becomes that facility — its census, its tools, its numbers. Nothing else mixes in.</p>
+    <button type="button" class="facpick-card facpick-all ${FAC_SCOPE===''?'on':''}" onclick="pickFac('')">
+      <span class="facpick-ico">🌐</span><span class="facpick-name">All facilities — the company roll-up</span>
+      ${FAC_SCOPE===''?'<span class="facpick-now sans">you’re here</span>':''}</button>
+    ${groups.map(g=>`<div class="facpick-group sans">${esc(g)}</div>${byType[g].map(card).join('')}`).join('')}
+    <div class="toolbar" style="margin-top:14px"><button class="btn btn-ghost sans" onclick="closeHModal()">Close</button></div>`);
 }
+function pickFac(v){ try{ closeHModal(); }catch(_e){ /* modal already gone */ } facScopeChange(v); }
 function facScopeChange(v){
   FAC_SCOPE=v||'';
   localStorage.setItem('facScope', FAC_SCOPE);

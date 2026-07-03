@@ -332,13 +332,39 @@ function requireOutpatient(req, res, next) { if (!canSeeOutpatient(req.user)) re
 // One-time: everyone on the outpatient allowlist works the outpatient program,
 // but the foundation access seed only gave them detox — so their facility chip
 // couldn't reach Armada Clinical once the roster became facility-scoped.
+// ONLY for users who already have access rows: a row-less user is "legacy
+// unscoped" (sees everything) and granting their FIRST row would shrink them
+// to one building — a regression, not a grant.
+function grantOutpatientFacility(uid) {
+  try {
+    const opf = db.prepare(`SELECT id FROM org_facilities WHERE fkey='akron-house'`).get()?.id;
+    if (!opf) return;
+    const hasRows = db.prepare(`SELECT 1 FROM user_facility_access WHERE user_id=? LIMIT 1`).get(uid);
+    if (!hasRows) return;
+    db.prepare(`INSERT OR IGNORE INTO user_facility_access (user_id, facility_id, role) VALUES (?,?,(SELECT job_role FROM users WHERE id=?))`).run(uid, opf, uid);
+  } catch { /* user may be gone */ }
+}
 try {
   if (getState('outpatient_access_backfill') !== 'done') {
+    if (db.prepare(`SELECT id FROM org_facilities WHERE fkey='akron-house'`).get()?.id) {
+      for (const uid of outpatientAllowlist()) grantOutpatientFacility(uid);
+      setState('outpatient_access_backfill', 'done');
+    }
+  }
+  // Repair for the first version of this backfill (already ran in production):
+  // it granted row-less allowlisted users their FIRST row, silently shrinking
+  // them from see-everything to one building. Undo exactly that shape: an
+  // allowlisted user whose ONLY row is akron-house goes back to row-less.
+  if (getState('outpatient_access_backfill') === 'done' && getState('outpatient_access_repair') !== 'done') {
     const opf = db.prepare(`SELECT id FROM org_facilities WHERE fkey='akron-house'`).get()?.id;
     if (opf) {
-      const ins = db.prepare(`INSERT OR IGNORE INTO user_facility_access (user_id, facility_id, role) VALUES (?,?,(SELECT job_role FROM users WHERE id=?))`);
-      for (const uid of outpatientAllowlist()) { try { ins.run(uid, opf, uid); } catch { /* user may be gone */ } }
-      setState('outpatient_access_backfill', 'done');
+      for (const uid of outpatientAllowlist()) {
+        const rows = db.prepare(`SELECT facility_id FROM user_facility_access WHERE user_id=?`).all(uid);
+        if (rows.length === 1 && +rows[0].facility_id === +opf) {
+          db.prepare(`DELETE FROM user_facility_access WHERE user_id=? AND facility_id=?`).run(uid, opf);
+        }
+      }
+      setState('outpatient_access_repair', 'done');
     }
   }
 } catch (e) { console.error('[outpatient access]', e.message); }
@@ -1758,7 +1784,7 @@ function facCtx(req) {
     if (!Number.isInteger(fid) || fid <= 0 || !facilityAllowed(req.user, fid)) return { one: null, deny: true, frag: () => ' AND 1=0' };
     return { one: fid, deny: false, frag: (col) => ` AND ${col} = ${fid}` };   // explicit pick: strict
   }
-  if (req.user.role === 'admin' || req.user.job_role === 'Executive Director') return { one: null, deny: false, frag: () => '' };
+  if (req.user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(req.user.job_role)) return { one: null, deny: false, frag: () => '' };
   const ids = db.prepare(`SELECT facility_id FROM user_facility_access WHERE user_id=?`).all(req.user.id).map((r) => +r.facility_id).filter(Boolean);
   if (!ids.length) return { one: null, deny: false, frag: () => '' };   // legacy user with no access rows — unscoped, as today
   // "All my facilities" (no explicit pick): NULL-tolerant so an unstamped row is
@@ -1768,7 +1794,8 @@ function facCtx(req) {
 const denyFac = (fc, res) => { if (fc.deny) { res.status(403).json({ error: 'No access to that facility.' }); return true; } return false; };
 function facilityAllowed(user, fid) {
   if (!fid) return true;   // "all my facilities" — resolved per-user elsewhere
-  if (user.role === 'admin' || ['Executive Director'].includes(user.job_role)) return true;
+  // Must match /api/me's org-wide set — the chip and enforcement must agree.
+  if (user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(user.job_role)) return true;
   // A user with NO access rows is legacy/unscoped (sees everything, as pre-Phase-2) —
   // never lock them out. Once they HAVE rows, only those facilities are allowed.
   const rows = db.prepare(`SELECT 1 FROM user_facility_access WHERE user_id=? LIMIT 1`).get(user.id);
@@ -4466,7 +4493,11 @@ app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
   if (req.query.facility !== undefined && req.query.facility !== '') {
     const fid = +req.query.facility;
     if (!Number.isInteger(fid) || fid <= 0 || !facilityAllowed(req.user, fid)) return res.status(403).json({ error: 'No access to that facility.' });
-    opPick = fid;
+    // Only an OUTPATIENT facility means anything here. A detox/housing pick (e.g.
+    // a biller whose chip defaults to detox) falls back to the full roster rather
+    // than a meaningless empty page claiming Kipu is down.
+    const ftype = db.prepare(`SELECT type FROM org_facilities WHERE id=?`).get(fid)?.type;
+    if (ftype === 'outpatient') opPick = fid;
   }
   const opFrag = opPick ? ` AND facility_id = ${opPick}` : '';
   const rows = db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist, payer FROM outpatient_clients WHERE active = 1${opFrag} ORDER BY loc_class, name`).all();
@@ -4704,7 +4735,13 @@ app.get('/api/kipu/locations', requireAuth, requireAdmin, async (req, res) => {
 app.post('/api/outpatient/settings', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};
   if (b.location != null) setState('outpatient_location', String(b.location).trim().slice(0, 120));
-  if (Array.isArray(b.access)) setState('outpatient_access', JSON.stringify(b.access.map(Number).filter(Boolean)));
+  if (Array.isArray(b.access)) {
+    const ids = b.access.map(Number).filter(Boolean);
+    setState('outpatient_access', JSON.stringify(ids));
+    // Anyone granted the outpatient roster also gets Armada Clinical in their
+    // facility chip (only if they already have facility rows — see backfill note).
+    for (const uid of ids) grantOutpatientFacility(uid);
+  }
   res.json({ ok: true });
 });
 

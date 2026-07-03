@@ -136,7 +136,10 @@ main{max-width:1680px;margin:0 auto;padding:38px 56px 110px;width:100%}
   .shell.nav-open .scrim{display:block;position:fixed;inset:0;background:rgba(20,40,42,.4);z-index:35}
   .hamb{display:block}
   main{padding:20px 18px 80px}
-  .topbar{padding:12px 18px;background:var(--cream);backdrop-filter:none;-webkit-backdrop-filter:none}
+  .topbar{padding:12px 18px;background:var(--cream);backdrop-filter:none;-webkit-backdrop-filter:none;flex-wrap:wrap}
+  /* In hamburger mode the facility button gets its own full-width row — it must
+     never be crushed out of sight by the icon cluster (it's how you switch buildings). */
+  .ctx-chip.fac-btn{order:10;flex-basis:100%;max-width:none;justify-content:center;margin:6px 0 0}
   .card{padding:22px 20px}
 }
 /* ── Phones: denser, tap-friendly, no sideways blow-out ─────────────────── */
@@ -894,6 +897,21 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 
 /* ═══ D2 — shell context: facility chip, role badge, Today, search ═══ */
 .ctx-chip{font-family:var(--sans);display:inline-flex;align-items:center;gap:6px;background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:600;color:var(--navy);cursor:default;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The facility switcher is a first-class BUTTON — gold ring, caret, tappable */
+.ctx-chip.fac-btn{cursor:pointer;border:1.5px solid var(--gold,#c9a35c);box-shadow:0 1px 4px rgba(160,120,40,.14);max-width:280px;flex-shrink:0}
+.ctx-chip.fac-btn:hover{background:var(--cream)}
+.ctx-chip .fac-caret{font-size:10px;opacity:.65;margin-left:2px}
+/* Building picker cards (inside the shared modal) */
+.facpick-card{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin:5px 0;cursor:pointer;font-family:var(--sans);font-size:14.5px;font-weight:600;color:var(--ink)}
+.facpick-card:hover{background:var(--cream);border-color:var(--gold,#c9a35c)}
+.facpick-card.on{border:1.5px solid var(--gold,#c9a35c);background:var(--cream)}
+.facpick-card .facpick-ico{font-size:19px;flex-shrink:0}
+.facpick-card .facpick-name{flex:1;min-width:0}
+.facpick-card .facpick-now{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--gold,#a07828);font-weight:700;flex-shrink:0}
+.facpick-all{margin-bottom:2px}
+.facpick-group{font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700;margin:13px 0 2px}
+[data-theme="dark"] .facpick-card{background:#16202a;border-color:#28323c;color:#cfe3df}
+[data-theme="dark"] .facpick-card:hover,[data-theme="dark"] .facpick-card.on{background:#1b2733}
 .role-pill{font-family:var(--sans);font-size:10.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;background:var(--idle-bg);color:var(--muted);border-radius:999px;padding:3px 9px;white-space:nowrap}
 .role-pill.previewing{background:var(--warn-bg);color:var(--warn)}
 .iconbtn{position:relative}
@@ -911,7 +929,7 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 .today-drawer .td-body{flex:1;overflow-y:auto;padding:6px 6px 16px}
 @media(max-width:760px){
   .today-drawer{top:auto;left:0;width:auto;max-height:78vh;border-radius:18px 18px 0 0;border-left:none;border-top:1px solid var(--line)}
-  .ctx-chip{max-width:130px}
+  .ctx-chip:not(.fac-btn){max-width:130px}
 }
 /* Ops Center activity feed */
 .ops-feed{border-top:1px solid var(--line-2);margin-top:6px}

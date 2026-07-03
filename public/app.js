@@ -450,39 +450,148 @@ function renderToolsbar(){
     if(acct) acct.style.display='none';
   }
 }
+/* ── SIDEBAR v3 — the whole map, one glance ────────────────────────────────────
+   Every group is a collapsible section you can SEE at all times — no more
+   hunting through tabs for where a page lives. Type in the filter to find any
+   page by name. Star (★) anything to pin it to the top. The active section
+   opens itself; your open/closed choices persist per device. Frontline roles
+   keep their flat task menus (unchanged). */
+const navPins=()=>{ try{ const p=JSON.parse(localStorage.getItem('navPins')||'[]'); return Array.isArray(p)?p:[]; }catch(_e){ return []; } };
+const navOpenState=()=>{ try{ return JSON.parse(localStorage.getItem('navOpen')||'{}')||{}; }catch(_e){ return {}; } };
+let NAV_ORDER=null;   // original DOM order of buttons+captions, captured once
+function togglePin(v,ev){ if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  const p=navPins(); const i=p.indexOf(v); if(i>=0) p.splice(i,1); else p.push(v);
+  localStorage.setItem('navPins',JSON.stringify(p)); renderGroups(); }
+function navRecents(){ try{ const r=JSON.parse(localStorage.getItem('navRecent')||'[]'); return Array.isArray(r)?r:[]; }catch(_e){ return []; } }
+function navRecordRecent(v){
+  if(['dashboard','today'].includes(v)||navPins().includes(v)) return;
+  const r=navRecents().filter(x=>x!==v); r.unshift(v);
+  localStorage.setItem('navRecent',JSON.stringify(r.slice(0,4)));
+  const host=$('navRecent'); if(host) renderNavShortcuts();
+}
+function navLabelOf(v){ const b=document.querySelector(`#navSecs button[data-view="${v}"]`); return b?b.childNodes[0].textContent.trim():v; }
+function renderNavShortcuts(){
+  const pinHost=$('navPinned'), recHost=$('navRecent'); if(!pinHost||!recHost) return;
+  const mk=(v,star)=>{ const b=document.createElement('button'); b.dataset.view=v; b.className='nav-shortcut';
+    b.innerHTML=`<span class="pinbtn on" title="${star?'Unpin':''}">${star?'★':'·'}</span>${esc(navLabelOf(v))}`;
+    b.onclick=()=>show(v);
+    if(star) b.querySelector('.pinbtn').onclick=(ev)=>togglePin(v,ev);
+    return b; };
+  const pins=navPins().filter(v=>{ const ob=document.querySelector(`#navSecs button[data-view="${v}"]`); return ob&&buttonShowable(ob); });
+  pinHost.innerHTML=pins.length?'<div class="side-cap">★ Pinned</div>':''; pins.forEach(v=>pinHost.appendChild(mk(v,true)));
+  const recents=navRecents().filter(v=>{ const ob=document.querySelector(`#navSecs button[data-view="${v}"]`); return ob&&buttonShowable(ob)&&!navPins().includes(v); }).slice(0,4);
+  recHost.innerHTML=recents.length?'<div class="side-cap">Recent</div>':''; recents.forEach(v=>recHost.appendChild(mk(v,false)));
+}
+function applyNavVisibility(){
+  document.querySelectorAll('#navSecs .side-sec').forEach(sec=>{
+    let visible=0;
+    sec.querySelectorAll('.side-secbody > button[data-view]').forEach(b=>{ const ok=buttonShowable(b); b.style.display=ok?'':'none'; if(ok)visible++; });
+    sec.querySelectorAll('.side-secbody > [data-cap]').forEach(c=>{ c.style.display=''; });
+    sec.style.display=visible?'':'none';
+    const n=sec.querySelector('.side-count'); if(n) n.textContent=visible;
+  });
+  renderNavShortcuts();
+}
+function navToggleSec(g){
+  const sec=document.querySelector(`#navSecs .side-sec[data-g="${g}"]`); if(!sec) return;
+  sec.classList.toggle('open');
+  const st=navOpenState(); st[g]=sec.classList.contains('open'); localStorage.setItem('navOpen',JSON.stringify(st));
+}
+function navApplyFilter(){
+  const q=(($('navFilter')||{}).value||'').trim().toLowerCase();
+  const nav=$('nav'); if(!nav) return;
+  nav.classList.toggle('nav-filtering',!!q);
+  if(!q){ applyNavVisibility(); return; }
+  document.querySelectorAll('#navSecs .side-sec').forEach(sec=>{
+    let hits=0;
+    sec.querySelectorAll('.side-secbody > button[data-view]').forEach(b=>{
+      const ok=buttonShowable(b)&&b.childNodes[0].textContent.toLowerCase().includes(q);
+      b.style.display=ok?'':'none'; if(ok)hits++;
+    });
+    sec.querySelectorAll('.side-secbody > [data-cap]').forEach(c=>{ c.style.display='none'; });
+    sec.style.display=hits?'':'none';
+  });
+}
+function navFilterKey(ev){
+  if(ev.key==='Escape'){ ev.target.value=''; navApplyFilter(); ev.target.blur(); return; }
+  if(ev.key==='Enter'){ const b=[...document.querySelectorAll('#navSecs .side-secbody > button[data-view]')].find(x=>x.style.display!=='none'); if(b){ show(b.dataset.view); ev.target.value=''; navApplyFilter(); } }
+}
 function renderGroups(){
-  document.querySelectorAll('#nav button').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'stay'; });
+  document.querySelectorAll('#nav > button, #navSecs button[data-view]').forEach(b=>{ b.dataset.group = GROUP_OF[b.dataset.view]||'stay'; });
   renderToolsbar();
   const flat = flatMenu();
+  const nav=$('nav');
   if(flat){
-    // Flat task menu: the top tools bar is the nav; hide the sidebar group tabs.
+    // Flat task menu: the top tools bar is the nav; no sections needed.
     if($('groupbar')) $('groupbar').style.display='none';
-    const nav=$('nav'); if(nav) flat.forEach(v=>{ const b=nav.querySelector(`button[data-view="${v}"]`); if(b) nav.appendChild(b); });
+    if(nav){
+      // restore any sectioned buttons to the flat nav, in role order
+      document.querySelectorAll('#navSecs button[data-view]').forEach(b=>nav.appendChild(b));
+      const secs=$('navSecs'); if(secs) secs.style.display='none';
+      ['navPinned','navRecent','navFilterWrap'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+      flat.forEach(v=>{ const b=nav.querySelector(`button[data-view="${v}"]`); if(b) nav.appendChild(b); });
+    }
     return;
   }
-  if($('groupbar')) $('groupbar').style.display='';
+  if($('groupbar')) $('groupbar').style.display='none';   // v3: sections replace the group tabs
+  if(!nav) return;
+  ['navFilterWrap','navPinned','navRecent'].forEach(id=>{ const el=$(id); if(el) el.style.display=''; });
+  // Capture the original order of buttons + captions once (rebuilds stay stable).
+  if(!NAV_ORDER) NAV_ORDER=[...nav.querySelectorAll('button[data-view], [data-cap]')];
+  // Scaffold: filter · pinned · recent · sections · build stamp
+  if(!$('navSecs')){
+    nav.insertAdjacentHTML('afterbegin',
+      `<div class="side-filter" id="navFilterWrap"><input id="navFilter" placeholder="Find a page…" oninput="navApplyFilter()" onkeydown="navFilterKey(event)" autocomplete="off"/></div>
+       <div id="navPinned"></div><div id="navRecent"></div><div id="navSecs"></div>`);
+    nav.insertAdjacentHTML('beforeend', `<div class="side-build" id="navBuild"></div>`);
+  }
+  const secsHost=$('navSecs');
   const isAdmin = ME && ME.role==='admin';
-  const mk = x=>`<button data-g="${x.g}"${x.admin?' class="side-admingroup"':''}>${x.label}</button>`;
-  const everyday = GROUPS.filter(x=>!x.admin && groupVisible(x.g)).map(mk).join('');
-  const leadership = isAdmin ? GROUPS.filter(x=>x.admin).map(mk).join('') : '';
-  $('groupbar').innerHTML = everyday + (leadership ? '<div class="side-divider"></div>'+leadership : '');
-  document.querySelectorAll('#groupbar button').forEach(b=>b.onclick=()=>{ const grp=GROUPS.find(x=>x.g===b.dataset.g); show(firstAllowedView(grp)); });
+  const open=navOpenState();
+  secsHost.innerHTML='';
+  for(const grp of GROUPS){
+    if(grp.admin && !isAdmin) continue;
+    const sec=document.createElement('div');
+    sec.className='side-sec'+(open[grp.g]?' open':'');
+    sec.dataset.g=grp.g;
+    sec.innerHTML=`<button type="button" class="side-sechead${grp.admin?' side-admingroup':''}" onclick="navToggleSec('${grp.g}')"><span class="side-caret">▸</span>${esc(grp.label)}<span class="side-count"></span></button><div class="side-secbody"></div>`;
+    secsHost.appendChild(sec);
+  }
+  // Move each button/caption into its group's body, preserving original order.
+  for(const el of NAV_ORDER){
+    const g=el.dataset.view?(GROUP_OF[el.dataset.view]||'stay'):(el.dataset.group||'stay');
+    const body=secsHost.querySelector(`.side-sec[data-g="${g}"] .side-secbody`);
+    if(body) body.appendChild(el);
+  }
+  // Pin affordance on every page row (hover on desktop, always on touch).
+  secsHost.querySelectorAll('.side-secbody > button[data-view]').forEach(b=>{
+    if(!b.querySelector('.pinbtn')){
+      const star=document.createElement('span'); star.className='pinbtn';
+      star.onclick=(ev)=>togglePin(b.dataset.view,ev);
+      b.appendChild(star);
+    }
+    const on=navPins().includes(b.dataset.view);
+    const st=b.querySelector('.pinbtn'); st.textContent=on?'★':'☆'; st.classList.toggle('on',on); st.title=on?'Unpin':'Pin to top';
+  });
+  applyNavVisibility();
+  // Build stamp — so "did it deploy?" is answered by looking at the sidebar.
+  const bs=$('navBuild');
+  if(bs&&!bs.textContent){ fetch('/sw.js').then(r=>r.text()).then(t=>{ const m=t.match(/armada-v(\d+)/); if(m) bs.textContent='build '+m[1]; }).catch(()=>{}); }
 }
 function selectGroup(g){
   const flat = flatMenu();
   if(flat){
-    [...document.querySelectorAll('#nav button')].forEach(b=>{ b.style.display = (flat.includes(b.dataset.view) && canSeeView(b.dataset.view)) ? '' : 'none'; });
+    [...document.querySelectorAll('#nav button[data-view]')].forEach(b=>{ b.style.display = (flat.includes(b.dataset.view) && canSeeView(b.dataset.view)) ? '' : 'none'; });
     document.querySelectorAll('#nav [data-cap]').forEach(c=>{ c.style.display='none'; });
     const navEl=$('nav'); if(navEl) navEl.style.display='';
     return;
   }
-  document.querySelectorAll('#nav [data-cap]').forEach(c=>{ c.style.display = (c.dataset.group===g) ? '' : 'none'; });
-  document.querySelectorAll('#groupbar button').forEach(b=>b.classList.toggle('active', b.dataset.g===g));
-  const navBtns=[...document.querySelectorAll('#nav button')];
-  navBtns.forEach(b=>{ b.style.display = (b.dataset.group===g && buttonShowable(b)) ? '' : 'none'; });
-  // Hide the sub-nav when a section has only one screen (no redundant repeat).
-  const visible=navBtns.filter(b=>b.dataset.group===g && b.style.display!=='none').length;
-  const navEl=document.getElementById('nav'); if(navEl) navEl.style.display = visible<=1 ? 'none' : '';
+  // v3: highlight + auto-open the active section (without persisting the auto-open).
+  document.querySelectorAll('#navSecs .side-sec').forEach(sec=>{
+    const active=sec.dataset.g===g;
+    sec.classList.toggle('current',active);
+    if(active) sec.classList.add('open');
+  });
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.view));
 // In-page hub tab strip: render the tabs for whichever hub the current view belongs to.
@@ -507,6 +616,7 @@ function show(v){
   document.querySelectorAll('#toolsbar button').forEach(b=>b.classList.toggle('active', b.dataset.tv===v));
   renderHubTabs(v);
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
+  try{ navRecordRecent(v); }catch(_e){ /* shortcuts optional */ }
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
   const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',billingready:'Billing Readiness',mydesk:'My Desk',appts:'Scheduling & Queue',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);

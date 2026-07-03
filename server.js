@@ -1273,13 +1273,20 @@ app.post('/api/desk/settings', requireAuth, requireAdmin, (req, res) => {
 // the sender receives an instant "✓ saved" text.
 app.post('/api/inbound/note', express.urlencoded({ extended: true, limit: '1mb' }), (req, res) => {
   if ((req.query.t || '') !== noteToken()) return res.status(401).json({ error: 'bad token' });
-  const text = String(req.body?.Body || req.body?.body || req.body?.text || '').trim();
-  if (!text) return res.status(400).json({ error: 'no text' });
+  // Liberal in what we accept: Twilio sends Body; Shortcuts users type text/Text/
+  // note/whatever. Take the first known field, else the first plain string value.
+  const b = req.body || {};
+  let text = '';
+  for (const k of ['Body', 'body', 'text', 'Text', 'TEXT', 'note', 'Note', 'message', 'Message', 'task', 'Task']) {
+    if (typeof b[k] === 'string' && b[k].trim()) { text = b[k].trim(); break; }
+  }
+  if (!text) { const v = Object.values(b).find((x) => typeof x === 'string' && x.trim() && x.length < 2000); text = v ? v.trim() : ''; }
+  if (!text) return res.status(400).json({ error: 'no text — send JSON like {"text":"call the roofer tomorrow"}' });
   const owner = db.prepare(`SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1`).get();
   if (!owner) return res.status(500).json({ error: 'no admin' });
-  const r = deskCapture(owner.id, text, req.body?.Body ? 'sms' : 'shortcut');
+  const r = deskCapture(owner.id, text, b.Body ? 'sms' : 'shortcut');
   const line = `✓ Saved${r.date ? ' · ' + r.date + (r.time ? ' ' + r.time : '') : ''}${r.matched ? ' · waiting on ' + r.matched : ''}`;
-  if (req.body?.Body) { res.type('text/xml').send(`<Response><Message>${htmlEsc(line)} — "${htmlEsc(r.title.slice(0, 80))}"</Message></Response>`); }
+  if (b.Body) { res.type('text/xml').send(`<Response><Message>${htmlEsc(line)} — "${htmlEsc(r.title.slice(0, 80))}"</Message></Response>`); }
   else res.json({ ok: true, saved: r.title, when: r.date, time: r.time, waitingOn: r.matched, line });
 });
 // Morning digest — the ADHD contract: you capture, the system remembers.

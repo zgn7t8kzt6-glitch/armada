@@ -5951,7 +5951,7 @@ function deskCard(x,primary){
     : `<button class="btn btn-gold btn-sm sans" onclick="deskDo(${x.id},{status:'done'})">✓ Done</button>`;
   // STACKED layout — title gets the full width, actions live UNDERNEATH. Never
   // let buttons share a row with text inside a narrow kanban column.
-  return `<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default;display:block">
+  return `<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default;display:block" draggable="true" ondragstart="deskDragStart(event,${x.id})" ondragend="this.classList.remove('dragging')">
     <div class="q-title" style="font-size:14.5px;line-height:1.35">${esc(x.title)}</div>
     <div class="q-sub" style="margin-top:3px;line-height:2">${x.due_date?tag('🗓 '+esc(x.due_date)+(x.due_time?' '+esc(x.due_time):'')):''}${x.with_who?tag('👤 '+esc(x.with_who)+(x.nudged_at?' · nudged '+deskDaysAgo(x.nudged_at):'')):''}${x.bucket?tag('🏷 '+esc(x.bucket)):''}${x.facility_name?tag('📍'+esc(x.facility_name)):''}${(!x.with_who&&x.suggested_role)?`<span class="badge-info" style="margin-right:4px;cursor:pointer" title="AI suggests this role — tap to pick the person" onclick="deskAssignRole(${x.id},'${esc(x.suggested_role).replace(/'/g,"\\'")}')">🎯 ${esc(x.suggested_role)} →</span>`:''}${x.source!=='app'?tag('📱'):''}</div>
     <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${x.status!=='done'?`${gold}
@@ -5988,47 +5988,70 @@ function deskFocus(b){
     ${(!overdue.length&&!todays.length&&!soon.length&&!renudge.length)?'<div class="empty"><div class="e-ico">🌤</div>Nothing urgent. The Board holds the rest —<br>or capture the next thing on your mind.</div>':''}`;
 }
 function addDaysStr(dateStr,nn){ const dt=new Date(dateStr+'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate()+nn); return dt.toISOString().slice(0,10); }
+/* ---- Trello-style strip: columns side by side, swipe/snap column to column,
+   each column scrolls inside itself, cards drag between columns (desktop). ---- */
+function deskStrip(b,kind,cols){
+  const nav=cols.map((c,i)=>`<button class="btn btn-ghost btn-sm sans" onclick="deskGoCol(${i})">${c.nav||c.label}${c.list.length?` <span class="hint">${c.list.length}</span>`:''}</button>`).join('');
+  b.innerHTML=`<div class="trello-nav no-print">${nav}</div>
+    <div class="trello">${cols.map((c,i)=>`
+      <div class="trello-col" id="tcol-${i}" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="deskDrop(event,'${kind}','${encodeURIComponent(c.key)}')">
+        <div class="trello-head"><h3 style="margin:0;font-size:15px">${c.label} <span class="hint" style="font-weight:400">${c.list.length}</span>${c.od?` <span class="badge-crit">${c.od} overdue</span>`:''}</h3>${c.hint?`<div class="hint">${c.hint}</div>`:''}${c.head||''}</div>
+        <div class="trello-body">${c.list.length?c.list.map(x=>deskCard(x,c.primary?c.primary(x):undefined)).join(''):'<div class="hint" style="padding:12px 2px">empty — drag a card here</div>'}</div>
+      </div>`).join('')}</div>`;
+}
+function deskGoCol(i){ const el=$('tcol-'+i); if(el) el.scrollIntoView({behavior:'smooth',inline:'start',block:'nearest'}); }
+function deskDragStart(e,id){ e.dataTransfer.setData('text/plain',String(id)); e.dataTransfer.effectAllowed='move'; e.target.classList.add('dragging'); }
+async function deskDrop(e,kind,rawKey){
+  e.preventDefault(); e.currentTarget.classList.remove('dragover');
+  const id=+e.dataTransfer.getData('text/plain'); if(!id) return;
+  const key=decodeURIComponent(rawKey);
+  const item=((DESK_DATA||{}).items||[]).find(x=>x.id===id)||{};
+  if(kind==='lane'){
+    if(key==='done') return deskDo(id,{status:'done'});
+    if(key==='inbox') return deskDo(id,{status:'open',due_date:'',with_who:''});
+    if(key==='sched') return (item.due_date&&item.status!=='open')?deskDo(id,{status:'open'}):deskDate(id);
+    if(key==='waiting') return item.with_who?deskDo(id,{status:'waiting'}):deskWho(id);
+  }
+  if(kind==='bucket') return deskDo(id,{bucket:key});
+  if(kind==='place'){ const f=((DESK_DATA||{}).facilities||[]).find(x=>x.name===key); return deskDo(id,{facility_id:f?f.id:''}); }
+  if(kind==='person'&&key&&key!=='(unassigned)') return deskDo(id,{with_who:key});
+}
 function deskBoard(b){
-  const d=DESK_DATA;
-  const items=(d.items||[]);
-  const cols=[
-    ['inbox','📥 Inbox','no date, no owner — sort it: give it a date, a person, or done', items.filter(x=>deskLane(x)==='inbox')],
-    ['sched','🗓 Scheduled','has its date — shows up in Focus when due', items.filter(x=>deskLane(x)==='sched')],
-    ['waiting','⏳ Waiting on','someone owes you — nudge lands in their Today', items.filter(x=>deskLane(x)==='waiting')],
-    ['done','✅ Done','last 14 days', items.filter(x=>x.status==='done')],
-  ];
-  const colCard=([k,label,hint,list])=>`<div class="card" style="margin:0"><h3 style="margin:0 0 2px">${label} <span class="hint" style="font-weight:400">${list.length}</span></h3><div class="hint" style="margin-bottom:6px">${hint}</div>
-    ${list.length?list.map(x=>deskCard(x, k==='inbox'?`<button class="btn btn-gold btn-sm sans" onclick="deskDate(${x.id})">🗓 Schedule</button>`:undefined)).join(''):'<div class="hint" style="padding:10px 4px">empty</div>'}</div>`;
-  b.innerHTML=`<div class="corp-kanban" style="margin-top:10px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))">${cols.map(colCard).join('')}</div>`;
+  const items=(DESK_DATA.items||[]);
+  deskStrip(b,'lane',[
+    {key:'inbox',label:'📥 Inbox',nav:'📥 Inbox',hint:'no date, no owner — give it one, or drag it',list:items.filter(x=>deskLane(x)==='inbox'),od:items.filter(x=>deskLane(x)==='inbox'&&x.overdue).length,primary:(x)=>`<button class="btn btn-gold btn-sm sans" onclick="deskDate(${x.id})">🗓 Schedule</button>`},
+    {key:'sched',label:'🗓 Scheduled',nav:'🗓 Scheduled',hint:'has its date — surfaces in Focus when due',list:items.filter(x=>deskLane(x)==='sched'),od:items.filter(x=>deskLane(x)==='sched'&&x.overdue).length},
+    {key:'waiting',label:'⏳ Waiting on',nav:'⏳ Waiting',hint:'someone owes you — 📣 nudge or ✉️ email',list:items.filter(x=>deskLane(x)==='waiting'),od:items.filter(x=>deskLane(x)==='waiting'&&x.overdue).length},
+    {key:'done',label:'✅ Done',nav:'✅ Done',hint:'last 14 days — drag one back out to reopen',list:items.filter(x=>x.status==='done')},
+  ]);
 }
 function deskGrouped(b,key,ico,unfiledLabel){
-  const d=DESK_DATA, today=d.today;
-  const live=(d.items||[]).filter(x=>x.status!=='done');
+  const live=(DESK_DATA.items||[]).filter(x=>x.status!=='done');
   const groups={};
   for(const x of live){ const g=x[key]||''; (groups[g]=groups[g]||[]).push(x); }
-  const names=Object.keys(groups).filter(Boolean).sort();
-  if(groups['']) names.push('');
-  if(!names.length){ b.innerHTML='<div class="empty"><div class="e-ico">'+ico+'</div>Nothing filed here yet — capture things and the AI sorts them.</div>'; return; }
-  b.innerHTML=names.map(g=>{
-    const list=groups[g].sort((a,bb)=>String(a.due_date||'9999').localeCompare(String(bb.due_date||'9999')));
-    const od=list.filter(x=>x.overdue).length;
-    return `<details ${od?'open':''} style="margin-top:10px"><summary style="cursor:pointer;padding:8px 4px"><strong>${ico} ${esc(g||unfiledLabel)}</strong> <span class="hint">· ${list.length}</span>${od?` <span class="badge-crit">${od} overdue</span>`:''}</summary>${list.map(x=>deskCard(x)).join('')}</details>`;
-  }).join('');
+  const byDue=(a,bb)=>String(a.due_date||'9999').localeCompare(String(bb.due_date||'9999'));
+  // Every category is a column — even empty ones — so there's always somewhere to drag a card TO.
+  const all=key==='bucket'?(DESK_DATA.buckets||[]):((DESK_DATA.facilities||[]).map(f=>f.name));
+  const withItems=Object.keys(groups).filter(Boolean).sort();
+  const names=[...withItems, ...all.filter(g=>!withItems.includes(g))];
+  const cols=names.map(g=>({key:g,label:ico+' '+esc(g),nav:esc(g),list:(groups[g]||[]).sort(byDue),od:(groups[g]||[]).filter(x=>x.overdue).length}));
+  cols.push({key:'',label:ico+' '+esc(unfiledLabel),nav:'…unfiled',list:(groups['']||[]).sort(byDue),od:(groups['']||[]).filter(x=>x.overdue).length});
+  deskStrip(b,key==='bucket'?'bucket':'place',cols);
 }
 function deskPeople(b){
-  const d=DESK_DATA;
-  const waiting=(d.items||[]).filter(x=>x.status==='waiting');
+  const waiting=(DESK_DATA.items||[]).filter(x=>x.status==='waiting');
   if(!waiting.length){ b.innerHTML='<div class="empty"><div class="e-ico">🤝</div>You\'re not waiting on anyone.<br>Add "with Josh" to any capture and it lands here.</div>'; return; }
   const by={};
   for(const x of waiting){ const w=x.with_who||'(unassigned)'; (by[w]=by[w]||[]).push(x); }
-  b.innerHTML=Object.keys(by).sort().map(w=>{
+  const cols=Object.keys(by).sort().map(w=>{
     const list=by[w];
     const oldest=Math.max(...list.map(x=>Math.round((Date.now()-Date.parse(String(x.created_at).replace(' ','T')+'Z'))/864e5)));
     const matched=list.some(x=>x.matched_name);
-    return `<div class="card" style="margin-top:10px"><div class="cmd-hero-row"><div><h3 style="margin:0">👤 ${esc(w)} <span class="hint" style="font-weight:400">· ${list.length} open · oldest ${oldest}d${matched?'':' · <span class="badge-idle">not matched to an app user</span>'}</span></h3></div>
-      ${matched?`<button class="btn btn-gold btn-sm sans" onclick="deskNudgeAll(${JSON.stringify(list.map(x=>x.id)).replace(/"/g,'')})">📣 Nudge all</button>`:''}</div>
-      ${list.map(x=>deskCard(x)).join('')}</div>`;
-  }).join('');
+    return {key:w,label:'👤 '+esc(w),nav:esc(w),list,od:list.filter(x=>x.overdue).length,
+      hint:'oldest '+oldest+'d'+(matched?'':' · not matched to an app user'),
+      head:matched?`<button class="btn btn-gold btn-sm sans" style="margin-top:4px" onclick="deskNudgeAll(${JSON.stringify(list.map(x=>x.id)).replace(/"/g,'')})">📣 Nudge all</button>`:''};
+  });
+  deskStrip(b,'person',cols);
 }
 async function deskNudgeAll(ids){
   for(const id of ids){ try{ await api('/desk/'+id+'/nudge',{method:'POST'}); }catch(_e){} }

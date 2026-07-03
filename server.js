@@ -692,10 +692,20 @@ function billingCfg() {
     nursing: ['nursing'],
     disqualify: ['vitals', 'medication', 'med admin', 'mar ', 'medical', 'physician', 'h&p', 'history and physical', 'admission', 'consent', 'orientation', 'administrative', 'lab', 'urinalysis', 'ua screen', 'intake', 'screening', 'assessment', 'treatment plan', 'biopsych'],
     review: [],
-    nursingQualifies: false,   // ASAM 3.5: medical/nursing-only does NOT bill by default
+    nursingQualifies: false,   // fallback only — per-LOC rules below override
     requireCompleted: true,    // an in-progress qualifying note = needs_review, not complete
     checkHour: 16,             // 4:00 PM facility time
     email: '',
+    // The payor rulebook, per level of care (from the biller's compliance doc):
+    // a day bills only if at least one note matches the LOC's list.
+    locRules: {
+      '3.7-WM': ['nurse note', "nurse's note", 'nursing note', 'detox nurse', 'nursing shift'],
+      '3.2-WM': ['nurse note', "nurse's note", 'nursing note', 'detox nurse', 'nursing shift', 'group note', 'detox group', 'group session', 'individual progress', 'individual session', 'case management', 'case mgmt'],
+      '3.7':    ['detox group', 'group note', 'group session', 'individual progress', 'individual session', 'psychotherapy', 'case management', 'case mgmt'],
+      '3.5':    ['detox group', 'group note', 'group session', 'individual progress', 'individual session', 'psychotherapy', 'case management', 'case mgmt'],
+    },
+    locUsual: { '3.7-WM': 2 },   // "at least 1 but usually 2 nurse notes"
+    intakeAssessment: true,      // intake day: Nurse Assessment + Doctor's Action Order
   };
   try { const c = JSON.parse(getState('billing_ready_cfg') || 'null'); return c ? { ...dflt, ...c } : dflt; } catch { return dflt; }
 }
@@ -753,18 +763,60 @@ async function runBillingSweep({ date, byName = 'scheduler' } = {}) {
         const r = await kipuDayEncounters(c.kipu_id, day);
         if (!r.ok) { status = 'sync_error'; detail = 'Kipu fetch failed: ' + (r.error || 'unknown'); }
         else {
-          const judged = (r.notes || []).map((n) => ({ ...n, ...classifyEncounter(n.name, cfg) }));
           const done = (n) => !cfg.requireCompleted || !n.status || /complete|signed|final/i.test(n.status);
-          const q = judged.filter((n) => n.cls === 'qualify' && done(n)).sort((a, b) => String(a.time || '99').localeCompare(String(b.time || '99')))[0];
-          const qOpen = judged.find((n) => n.cls === 'qualify' && !done(n));
-          const unk = judged.find((n) => n.cls === 'unmatched' || n.cls === 'review');
-          if (q) {
-            status = 'complete'; type = q.type; title = q.name; time = q.time || null;
-            staff = q.author || null;
-            if (!staff && q.id) staff = await kipuNoteAuthor(c.kipu_id, q.id);
-          } else if (qOpen) { status = 'needs_review'; type = qOpen.type; title = qOpen.name; time = qOpen.time || null; detail = 'Qualifying note exists but is still in progress — finish/sign it.'; }
-          else if (unk) { status = 'needs_review'; type = unk.type; title = unk.name; time = unk.time || null; detail = unk.cls === 'review' ? 'Note type is mapped to Needs Review.' : `Unmapped note type "${unk.name}" — map it in settings.`; }
-          else { status = 'missing'; detail = judged.length ? 'Only non-qualifying documentation today (' + [...new Set(judged.map((n) => n.name))].slice(0, 3).join(', ') + ').' : 'No documentation found for this date.'; }
+          const locCode = String(c.loc || '').trim();
+          const rule = (cfg.locRules || {})[locCode] || null;
+          const isIntakeDay = String(c.admit || '').slice(0, 10) === day;
+          if (isIntakeDay && cfg.intakeAssessment) {
+            // Intake day bills on the Nurse Assessment (+ Doctor's Action Order),
+            // not the daily face-to-face. Signature/attestation can't be read from
+            // the note list — the detail says exactly what to verify by hand.
+            const assess = (r.notes || []).find((n) => /nurs/i.test(n.name) && /assess/i.test(n.name) && done(n));
+            const order = (r.notes || []).find((n) => /action order|admit/i.test(n.name));
+            if (assess) {
+              status = 'complete'; type = 'Nursing Assessment'; title = assess.name; time = assess.time || null;
+              staff = assess.author || (assess.id ? await kipuNoteAuthor(c.kipu_id, assess.id) : null);
+              detail = 'Intake day — verify On-Call Provider listed + provider/supervisor attestation' + (order ? '' : '; no Doctor\u2019s Action Order (Admit to LOC) found yet') + '.';
+            } else {
+              status = 'missing';
+              detail = 'Intake day: Nurse Assessment required (with On-Call Provider, signed/attested)' + (order ? '' : ' + Doctor\u2019s Action Order to admit') + '.';
+            }
+          } else if (rule) {
+            // The payor's per-LOC whitelist IS the law for this client's day.
+            const hitRule = (n) => rule.some((p) => n.name.toLowerCase().includes(String(p).toLowerCase()));
+            const matches = (r.notes || []).filter(hitRule);
+            const ready = matches.filter(done).sort((a, b) => String(a.time || '99').localeCompare(String(b.time || '99')));
+            const typeOf = (nm) => /group/i.test(nm) ? 'Group' : /case/i.test(nm) ? 'Case Management' : /nurs/i.test(nm) ? 'Nursing' : /individual|progress|psychotherapy/i.test(nm) ? 'Individual' : 'Other';
+            if (ready.length) {
+              const q = ready[0];
+              status = 'complete'; type = typeOf(q.name); title = q.name; time = q.time || null;
+              staff = q.author || (q.id ? await kipuNoteAuthor(c.kipu_id, q.id) : null);
+              const usual = (cfg.locUsual || {})[locCode];
+              if (usual && ready.length < usual) detail = `${locCode}: ${ready.length} qualifying note${ready.length === 1 ? '' : 's'} — payors usually expect ${usual}.`;
+            } else if (matches.length) {
+              const q = matches[0];
+              status = 'needs_review'; type = typeOf(q.name); title = q.name; time = q.time || null;
+              detail = `${locCode}: qualifying note exists but is still in progress — finish/sign it.`;
+            } else {
+              status = 'missing';
+              const need = locCode === '3.7-WM' ? "a nurse's note" : locCode === '3.2-WM' ? "a nurse's note or group/individual/case-management note" : 'a group, individual-progress, or case-management note';
+              detail = `${locCode} day needs ${need} — none found${(r.notes || []).length ? ' (today: ' + [...new Set(r.notes.map((n) => n.name))].slice(0, 3).join(', ') + ')' : ''}.`;
+            }
+          } else {
+            // No LOC on the chart (or an unmapped level) → the global mapping rules.
+            const judged = (r.notes || []).map((n) => ({ ...n, ...classifyEncounter(n.name, cfg) }));
+            const q = judged.filter((n) => n.cls === 'qualify' && done(n)).sort((a, b) => String(a.time || '99').localeCompare(String(b.time || '99')))[0];
+            const qOpen = judged.find((n) => n.cls === 'qualify' && !done(n));
+            const unk = judged.find((n) => n.cls === 'unmatched' || n.cls === 'review');
+            if (q) {
+              status = 'complete'; type = q.type; title = q.name; time = q.time || null;
+              staff = q.author || null;
+              if (!staff && q.id) staff = await kipuNoteAuthor(c.kipu_id, q.id);
+              if (!locCode) detail = 'No level of care on the chart — judged by the global rules; set the LOC for payor-exact checking.';
+            } else if (qOpen) { status = 'needs_review'; type = qOpen.type; title = qOpen.name; time = qOpen.time || null; detail = 'Qualifying note exists but is still in progress — finish/sign it.'; }
+            else if (unk) { status = 'needs_review'; type = unk.type; title = unk.name; time = unk.time || null; detail = unk.cls === 'review' ? 'Note type is mapped to Needs Review.' : `Unmapped note type "${unk.name}" — map it in settings.`; }
+            else { status = 'missing'; detail = (r.notes || []).length ? 'Only non-qualifying documentation today (' + [...new Set(r.notes.map((n) => n.name))].slice(0, 3).join(', ') + ').' : 'No documentation found for this date.'; }
+          }
         }
       }
       const prev = prevState.get(day, c.id);
@@ -889,7 +941,9 @@ app.post('/api/billingready/settings', requireAuth, requireAdmin, (req, res) => 
     ...(b.nursingQualifies != null ? { nursingQualifies: !!b.nursingQualifies } : {}),
     ...(b.requireCompleted != null ? { requireCompleted: !!b.requireCompleted } : {}),
     ...(b.checkHour != null && +b.checkHour >= 0 && +b.checkHour <= 23 ? { checkHour: +b.checkHour } : {}),
-    ...(b.email != null ? { email: String(b.email).slice(0, 300) } : {}) };
+    ...(b.email != null ? { email: String(b.email).slice(0, 300) } : {}),
+    ...(b.locRules && typeof b.locRules === 'object' ? { locRules: Object.fromEntries(Object.entries(b.locRules).slice(0, 12).map(([k, v]) => [String(k).slice(0, 12), (Array.isArray(v) ? v : []).map((x) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 40)]).filter(([, v]) => v.length)) } : {}),
+    ...(b.intakeAssessment != null ? { intakeAssessment: !!b.intakeAssessment } : {}) };
   setState('billing_ready_cfg', JSON.stringify(next));
   audit({ user: req.user, action: 'BILLING_CFG', detail: 'mapping/settings updated', ip: req.ip });
   res.json({ ok: true, cfg: next });

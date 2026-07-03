@@ -6284,7 +6284,7 @@ async function loadBillingReady(){
   else if(BR_FILTER!=='all') rows=rows.filter(r=>r.status===BR_FILTER);
   const rowH=(r)=>`<tr style="cursor:pointer" onclick="brOpen(${r.id})">
     <td><strong>${esc(r.client)}</strong>${r.admittedToday?' <span class="badge-info">admitted today</span>':''}${r.dischargedToday?' <span class="badge-idle">discharged today</span>':''}<div class="hint">${esc(r.kipu?('#'+r.kipu):'no chart')}${r.loc?' · '+esc(r.loc):''}${r.program?' · '+esc(r.program):''}</div></td>
-    <td>${stBadge(r)} ${alBadge(r.alert)}</td>
+    <td>${r.loc?'<span class="badge-info">'+esc(r.loc)+'</span> ':''}${stBadge(r)} ${alBadge(r.alert)}</td>
     <td>${r.status==='complete'?`<strong>${esc(r.type||'')}</strong><div class="hint">${esc(r.title||'')}${r.time?' · '+esc(r.time):''}${r.staff?' · '+esc(r.staff):''}</div>`:`<span class="hint">${esc(r.detail||r.exception||'')}</span>`}</td>
     <td class="hint">${esc(r.therapist||'')}</td><td class="hint">${esc(r.case_manager||'')}</td>
     <td>${r.notes?`💬${r.notes}`:''}</td></tr>`;
@@ -6313,8 +6313,12 @@ function brSettingsCard(c){
       <label class="hint">Non-qualifying<textarea id="brD" rows="5" style="width:100%">${esc((c.disqualify||[]).join('\n'))}</textarea></label>
       <label class="hint">Needs review<textarea id="brR" rows="5" style="width:100%">${esc((c.review||[]).join('\n'))}</textarea></label>
       <label class="hint">Nursing patterns<textarea id="brN" rows="5" style="width:100%">${esc((c.nursing||[]).join('\n'))}</textarea></label></div>
+    <h4 style="margin:12px 0 2px">Per-level-of-care rules <span class="hint" style="font-weight:400">— the payor rulebook; a day bills only if a note matches the client's LOC list</span></h4>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+      ${Object.keys(c.locRules||{}).map(k=>`<label class="hint">${esc(k)}<textarea class="brLoc" data-loc="${esc(k)}" rows="4" style="width:100%">${esc((c.locRules[k]||[]).join('\n'))}</textarea></label>`).join('')}</div>
     <div class="toolbar" style="justify-content:flex-start;gap:10px;flex-wrap:wrap;margin-top:8px">
-      <label class="hint"><input type="checkbox" id="brNQ" ${c.nursingQualifies?'checked':''}/> Nursing encounters qualify (3.5 default: OFF)</label>
+      <label class="hint"><input type="checkbox" id="brIA" ${c.intakeAssessment?'checked':''}/> Intake day requires Nurse Assessment + Action Order</label>
+      <label class="hint"><input type="checkbox" id="brNQ" ${c.nursingQualifies?'checked':''}/> Nursing qualifies in the GLOBAL fallback (no-LOC charts)</label>
       <label class="hint"><input type="checkbox" id="brRC" ${c.requireCompleted?'checked':''}/> Note must be completed/signed</label>
       <label class="hint">Check hour <input type="number" id="brHour" value="${c.checkHour}" min="0" max="23" style="width:60px"/>:00</label>
       <label class="hint">Alert email <input id="brEmail" value="${esc(c.email||'')}" placeholder="defaults to ops list" style="min-width:200px"/></label>
@@ -6323,7 +6327,9 @@ function brSettingsCard(c){
 async function brSaveCfg(){
   const lines=(id)=>(($(id)||{}).value||'').split('\n').map(x=>x.trim()).filter(Boolean);
   try{
-    await api('/billingready/settings',{method:'POST',body:JSON.stringify({qualify:lines('brQ'),disqualify:lines('brD'),review:lines('brR'),nursing:lines('brN'),nursingQualifies:($('brNQ')||{}).checked,requireCompleted:($('brRC')||{}).checked,checkHour:+(($('brHour')||{}).value||16),email:($('brEmail')||{}).value||''})});
+    const locRules={};
+    document.querySelectorAll('.brLoc').forEach(t=>{ locRules[t.dataset.loc]=t.value.split('\n').map(x=>x.trim()).filter(Boolean); });
+    await api('/billingready/settings',{method:'POST',body:JSON.stringify({qualify:lines('brQ'),disqualify:lines('brD'),review:lines('brR'),nursing:lines('brN'),nursingQualifies:($('brNQ')||{}).checked,requireCompleted:($('brRC')||{}).checked,intakeAssessment:($('brIA')||{}).checked,checkHour:+(($('brHour')||{}).value||16),email:($('brEmail')||{}).value||'',locRules})});
     loadBillingReady();
   }catch(e){ alert(e.message); }
 }

@@ -191,6 +191,103 @@ async function evalListRaw(casefileId, { all = false } = {}) {
   return list;
 }
 
+// POST with HMAC signing — body MD5 goes into the canonical string.
+async function kipuPost(path, body) {
+  if (!kipuConfigured()) throw new Error('Kipu not configured. Set KIPU_ACCESS_ID, KIPU_SECRET_KEY, and KIPU_APP_ID.');
+  const base = process.env.KIPU_BASE_URL || 'https://api.kipuapi.com';
+  const app = process.env.KIPU_APP_ID;
+  const uri = path + (path.includes('?') ? '&' : '?') + 'app_id=' + encodeURIComponent(app);
+  const contentType = 'application/vnd.kipusystems+json; version=3';
+  const date = new Date().toUTCString();
+  const bodyStr = JSON.stringify(body);
+  const contentMd5 = crypto.createHash('md5').update(bodyStr).digest('base64');
+  const canonical = [contentType, contentMd5, uri, date].join(',');
+  const sig = crypto.createHmac('sha1', process.env.KIPU_SECRET_KEY).update(canonical).digest('base64');
+  const r = await fetch(base + uri, {
+    method: 'POST',
+    headers: {
+      Accept: contentType,
+      'Content-Type': contentType,
+      'Content-MD5': contentMd5,
+      Date: date,
+      Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}`,
+    },
+    body: bodyStr,
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`Kipu ${r.status}: ${text.slice(0, 300)}`);
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+// Discover evaluation templates available in this Kipu account.
+// Kipu does not have a single canonical "list templates" endpoint — try several.
+export async function kipuListTemplates() {
+  const tries = [
+    '/api/evaluation_templates',
+    '/api/evaluations/templates',
+    '/api/templates',
+    '/api/facility/evaluation_templates',
+    '/api/patient_evaluation_templates',
+  ];
+  const results = [];
+  for (const path of tries) {
+    try {
+      const d = await kipuGet(path);
+      const arr = d?.evaluation_templates || d?.templates || d?.evaluations || (Array.isArray(d) ? d : null);
+      if (Array.isArray(arr) && arr.length) {
+        const mapped = arr.map((t) => ({
+          id: t.id ?? t.evaluation_template_id ?? t.template_id,
+          name: t.name ?? t.template_name ?? t.evaluation_name ?? t.title ?? JSON.stringify(t).slice(0, 60),
+          category: t.category ?? t.type ?? t.evaluation_type ?? '',
+        }));
+        return { ok: true, path, count: mapped.length, templates: mapped };
+      }
+      results.push({ path, status: 'empty', raw: JSON.stringify(d).slice(0, 120) });
+    } catch (e) {
+      results.push({ path, status: 'error', error: String(e.message).slice(0, 120) });
+    }
+  }
+  return { ok: false, tried: results };
+}
+
+// Push a note into a patient's Kipu chart as a patient_evaluation.
+// templateId OR templateName must be provided (or both).
+export async function kipuPushNote(casefileId, { templateId, templateName, text, authorName, noteDate }) {
+  const s = String(casefileId);
+  const master = s.split(':')[0];
+  const uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+  const today = noteDate || new Date().toISOString().slice(0, 10);
+  const phi = process.env.KIPU_PHI_LEVEL || 'high';
+
+  const evalBody = {
+    patient_casefile_id: master,
+    patient_master_id: uuid !== master ? uuid : undefined,
+    note: text,
+    content: text,
+    author_name: authorName || '',
+    date: today,
+    phi_level: phi,
+  };
+  if (templateId != null) evalBody.evaluation_template_id = templateId;
+  if (templateName) evalBody.evaluation_name = templateName;
+
+  // Try casefile-scoped first, then global.
+  const paths = [
+    `/api/patients/${master}/patient_evaluations?phi_level=${phi}&patient_master_id=${encodeURIComponent(uuid)}`,
+    '/api/patient_evaluations',
+  ];
+  let lastErr = 'push failed';
+  for (const path of paths) {
+    try {
+      const result = await kipuPost(path, { patient_evaluation: evalBody });
+      return { ok: true, path, result };
+    } catch (e) {
+      lastErr = String(e.message).slice(0, 300);
+    }
+  }
+  throw new Error(lastErr);
+}
+
 // Quick connectivity check.
 export async function kipuTest() {
   const path = process.env.KIPU_TEST_PATH || '/api/patients/census';

@@ -1353,6 +1353,7 @@ async function loadSettings(){
   if($('kc_warn')) $('kc_warn').innerHTML = st.kioskCodeWeak ? '<span style="color:var(--danger);font-weight:600">⚠ This kiosk code is weak/default. Set a strong code (6+ chars) and re-enter it on the iPads — anyone on the internet can otherwise reach the kiosk.</span>' : '<span class="risk risk-low">Strong code set ✓</span>';
   try { const k = await api('/kipu/status'); $('kipuStatus').innerHTML = k.configured ? '<span class="risk risk-low">credentials set</span>' : '<span class="risk risk-warn">not configured — set Kipu env vars on your host</span>'; } catch(e){}
   try { const w = await api('/warehouse/status'); $('whStatus').innerHTML = w.configured ? '<span class="risk risk-low">credentials set</span>' : '<span class="risk risk-warn">not configured — set WH_* env vars on your host</span>'; } catch(e){}
+  loadKipuTemplateConfig();
 }
 async function runAiHealth(){
   const el=$('aiHealthResult'); el.innerHTML='Checking…';
@@ -1479,6 +1480,62 @@ async function kipuCoverage(){
 }
 async function kipuDocInspect(){ $('kipuResult').textContent='Probing Kipu documentation for one client…'; const el=$('kipuInspect'); el.style.display='none'; try{ const r=await api('/kipu/doc-inspect',{method:'POST'}); $('kipuResult').textContent='Documentation probe — copy this whole box to your assistant:'; el.style.display='block'; el.textContent=JSON.stringify(r,null,2); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function kipuNotesPreview(){ $('kipuResult').textContent='Pulling one client\'s documentation…'; const el=$('kipuInspect'); el.style.display='none'; try{ const r=await api('/kipu/notes-preview',{method:'POST'}); $('kipuResult').textContent=`Pulled ${r.noteCount||0} notes · ${r.chars} characters. Per-note breakdown + preview below:`; el.style.display='block'; const bd=(r.breakdown||[]).map(b=>`  ${b.chars} chars — ${b.head}`).join('\n'); const dbg=r.debug?`DIAGNOSTIC: ${r.debug.candidates} candidate notes · dated:${r.debug.anyDated} · fetched ${r.debug.fetched} · ${r.debug.withContent} had content\nNote types seen: ${(r.debug.sampleNames||[]).join(' | ')}\ntherapist: ${r.therapist||'(none)'} · case manager: ${r.case_manager||'(none)'}\n\n`:''; el.textContent=dbg+'BREAKDOWN:\n'+bd+'\n\n----- PREVIEW -----\n'+(r.preview||'(empty — no note content returned)'); }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
+async function kipuProbeTemplates(){
+  const msg=$('kipuTplMsg'), pre=$('kipuTplResult');
+  msg.textContent='Probing Kipu for evaluation templates…'; pre.style.display='none';
+  try{
+    const r=await api('/kipu/templates',{method:'POST'});
+    if(r.ok && r.templates && r.templates.length){
+      msg.textContent=`Found ${r.templates.length} templates via ${r.path}`;
+      pre.style.display='block';
+      pre.textContent='TEMPLATES:\n'+r.templates.map(t=>`  [${t.id}] ${t.name}${t.category?' ('+t.category+')':''}`).join('\n');
+    } else {
+      msg.textContent='No templates found — see details below';
+      pre.style.display='block';
+      pre.textContent='Tried:\n'+(r.tried||[]).map(t=>`  ${t.path}: ${t.status}${t.error?' — '+t.error:''}`).join('\n')+'\n\nThis may mean your Kipu API key needs write permissions, or the templates endpoint is different for your facility. Contact Kipu support and ask for the evaluation_template_id for your Case Management Note form.';
+    }
+  }catch(e){ msg.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+
+async function saveKipuTemplates(){
+  const msg=$('kipuTplSaveMsg');
+  msg.textContent='Saving…';
+  try{
+    await api('/kipu/template-config',{method:'POST',body:JSON.stringify({
+      cm_id:$('tplCmId').value.trim(), cm_name:$('tplCmName').value.trim(),
+      handoff_id:$('tplHandoffId').value.trim(), handoff_name:$('tplHandoffName').value.trim(),
+      pulse_id:$('tplPulseId').value.trim(), pulse_name:$('tplPulseName').value.trim(),
+      note_id:$('tplNoteId').value.trim(), note_name:$('tplNoteName').value.trim(),
+    })});
+    msg.textContent='✓ Saved';
+    setTimeout(()=>{ msg.textContent=''; },2500);
+  }catch(e){ msg.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+}
+
+async function loadKipuTemplateConfig(){
+  try{
+    const r=await api('/kipu/template-config');
+    if(r.cm){    if($('tplCmId')) $('tplCmId').value=r.cm.id||'';    if($('tplCmName')) $('tplCmName').value=r.cm.name||''; }
+    if(r.handoff){ if($('tplHandoffId')) $('tplHandoffId').value=r.handoff.id||''; if($('tplHandoffName')) $('tplHandoffName').value=r.handoff.name||''; }
+    if(r.pulse){  if($('tplPulseId')) $('tplPulseId').value=r.pulse.id||'';  if($('tplPulseName')) $('tplPulseName').value=r.pulse.name||''; }
+    if(r.note){   if($('tplNoteId')) $('tplNoteId').value=r.note.id||'';   if($('tplNoteName')) $('tplNoteName').value=r.note.name||''; }
+  }catch{ /* not critical */ }
+}
+
+// Push a single note to a client's Kipu chart. Call from any note form.
+// noteType: 'cm' | 'handoff' | 'pulse' | 'note'
+async function pushNoteToKipu(clientId, text, noteType, btnEl){
+  if(!clientId || !text) return;
+  const orig = btnEl ? btnEl.textContent : '';
+  if(btnEl){ btnEl.disabled=true; btnEl.textContent='Pushing…'; }
+  try{
+    const r = await api('/kipu/push-note',{method:'POST',body:JSON.stringify({client_id:clientId,text,note_type:noteType||'note'})});
+    if(btnEl){ btnEl.textContent='✓ In Kipu'; setTimeout(()=>{ btnEl.disabled=false; btnEl.textContent=orig; },3000); }
+  }catch(e){
+    if(btnEl){ btnEl.textContent='Failed: '+e.message.slice(0,40); setTimeout(()=>{ btnEl.disabled=false; btnEl.textContent=orig; },4000); }
+  }
+}
+
 async function kipuReset(){ if(!confirm('This clears the current client list and rebuilds it from the live Kipu active census. Continue?'))return; $('kipuResult').textContent='Rebuilding roster from Kipu…'; try{ const r=await api('/kipu/reset',{method:'POST'}); $('kipuResult').textContent=`✓ Roster rebuilt: ${r.activeNow} active clients, ${r.importedDischarges||0} recent discharges imported (of ${r.total} census records). Reading every client's notes for snapshots & AMA risk in the background — check the Command Center shortly.`; }catch(e){ $('kipuResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function whTestConn(){ $('whResult').textContent='Connecting… (first connect can take ~20s)'; try{ const r=await api('/warehouse/test',{method:'POST'}); $('whResult').innerHTML='<span style="color:var(--good)">✓ Connected'+(r.sampleCount!=null?' · census returns '+r.sampleCount+' rows':' (census query not confirmed yet)')+'</span>'; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
 async function whSync(){ $('whResult').textContent='Syncing census…'; try{ const r=await api('/warehouse/sync',{method:'POST'}); $('whResult').textContent=`Synced: ${r.created} new, ${r.matched} updated (of ${r.total} in warehouse).`; }catch(e){ $('whResult').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; } }
@@ -1886,10 +1943,13 @@ async function toggleDone(taskId, done){
   await api('/completions',{method:'POST',body:JSON.stringify({date:$('r_date').value,shift:$('r_shift').value,task_id:taskId,done:!!done})});
   loadPlaybook();
 }
-async function addHandoff(clientId){
+async function addHandoff(clientId, btnEl){
   const inp=$('ho_'+clientId); if(!inp.value.trim())return;
-  await api('/handoffs',{method:'POST',body:JSON.stringify({date:$('r_date').value,shift:$('r_shift').value,client_id:clientId,note:inp.value})});
+  const text = inp.value;
+  await api('/handoffs',{method:'POST',body:JSON.stringify({date:$('r_date').value,shift:$('r_shift').value,client_id:clientId,note:text})});
   loadPlaybook();
+  // Silently attempt to push to Kipu if templates are configured.
+  pushNoteToKipu(clientId, text, 'handoff', null).catch(()=>{});
 }
 
 /* ---- outcomes ---- */
@@ -4439,7 +4499,7 @@ async function loadJourney(){
       <h3>Documentation notes — red-flag scan</h3>
       <p class="sub sans">Drop in a note (or it arrives from the EMR). Claude flags anything that means they're unhappy or at risk, and raises it on Today.</p>
       <div class="voicewrap"><textarea id="noteText" placeholder="e.g. Client was withdrawn at group and said the food is terrible and nobody listens…"></textarea><button type="button" class="mic" onclick="dictateInto(this)" title="Dictate">🎤</button></div>
-      <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="addNote(${c.id})">Scan &amp; save</button></div>
+      <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="addNote(${c.id})">Scan &amp; save</button><button id="notePushKipu" class="btn btn-ghost btn-sm sans" style="display:none" onclick="pushNoteToKipu(this.dataset.clientId,this.dataset.text,'note',this)">Push to Kipu</button></div>
       <div id="noteResult"></div>
       <div id="notesList"></div>
     </div>`;
@@ -4480,8 +4540,10 @@ async function addNote(clientId){
   const t=$('noteText').value.trim(); if(!t) return;
   $('noteResult').innerHTML='<span class="hint">Scanning…</span>';
   try{ const r=await api('/notes',{method:'POST',body:JSON.stringify({client_id:clientId,text:t})});
+    const pushBtn = $('notePushKipu');
     $('noteResult').innerHTML = r.flagged ? `<div class="ama-banner ${r.level==='High'?'ama-high':'ama-elev'}" style="margin:8px 0"><div class="ama-head">⚑ Red flag (${esc(r.level)})</div><div class="ama-sum">${esc(r.summary||'')}</div><div class="pc-note">→ ${esc(r.suggested_action||'')}</div></div>` : '<div class="hint" style="margin:6px 0">✓ Saved — no red flags found.</div>';
     $('noteText').value=''; loadClientNotes(clientId);
+    if(pushBtn){ pushBtn.dataset.clientId=clientId; pushBtn.dataset.text=t; pushBtn.style.display='inline-flex'; }
   }catch(e){ $('noteResult').innerHTML='<span class="hint" style="color:var(--danger)">'+e.message+'</span>'; }
 }
 async function printAnchor(id){

@@ -3021,6 +3021,28 @@ export function hourInTz(tz) {
   catch { return new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })).getHours(); }
 }
 
+// ── REBUILD PHASE 5 (start) — the shift world learns facilities ──────────────
+// My Shift / workforce / rounds / duty logs were single-building tables; every
+// legacy row belongs to Akron detox (owner's standing rule for pre-facility data).
+addColumn('schedule_slots', 'facility_id', 'INTEGER');
+addColumn('manual_on_shift', 'facility_id', 'INTEGER');
+addColumn('rounds', 'facility_id', 'INTEGER');
+addColumn('duty_logs', 'facility_id', 'INTEGER');
+for (const t of ['schedule_slots', 'manual_on_shift', 'rounds', 'duty_logs']) {
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_fac ON ${t}(facility_id)`); } catch { /* optional */ }
+}
+if (getState('phase5_shift_backfill') !== 'done') {
+  try {
+    const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id;
+    if (dfid) {
+      for (const t of ['schedule_slots', 'manual_on_shift', 'rounds', 'duty_logs']) {
+        try { db.prepare(`UPDATE ${t} SET facility_id=? WHERE facility_id IS NULL`).run(dfid); } catch { /* table optional */ }
+      }
+      setState('phase5_shift_backfill', 'done');
+    }
+  } catch (e) { console.error('[phase5 shifts]', e.message); }
+}
+
 // Registry v2 added Spark/Reverie Greenwood AFTER the foundation access seed ran,
 // so users in the "all facilities" group (marked by holding a corporate row) never
 // got rows for them and the facility chip hid both buildings. One-time repair.

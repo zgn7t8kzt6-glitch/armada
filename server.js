@@ -10548,8 +10548,9 @@ app.get('/api/staffing', requireAuth, (req, res) => {
 app.post('/api/staffing/slots', requireAuth, requireStaffingManager, (req, res) => {
   const b = req.body || {};
   if (!b.date || !b.part || !b.role) return res.status(400).json({ error: 'date, part, role required' });
-  const info = db.prepare(`INSERT INTO schedule_slots (date, part, role, needed, notes, created_by) VALUES (?,?,?,?,?,?)`)
-    .run(b.date.slice(0, 10), b.part, b.role, Math.max(1, +b.needed || 1), b.notes || null, req.user.id);
+  const sfid = stampFac(req, res); if (sfid === null && res.headersSent) return;
+  const info = db.prepare(`INSERT INTO schedule_slots (date, part, role, needed, notes, created_by, facility_id) VALUES (?,?,?,?,?,?,?)`)
+    .run(b.date.slice(0, 10), b.part, b.role, Math.max(1, +b.needed || 1), b.notes || null, req.user.id, sfid || null);
   res.json({ id: info.lastInsertRowid });
 });
 app.delete('/api/staffing/slots/:id', requireAuth, requireStaffingManager, (req, res) => {
@@ -10796,6 +10797,7 @@ app.post('/api/schedule/week', requireAuth, requireStaffingManager, (req, res) =
   const cells = req.body?.cells || {};
   const tpl = {}; db.prepare(`SELECT id, role, shift_label, part FROM shift_templates`).all().forEach((t) => { tpl[t.id] = t; });
   let saved = 0;
+  const gridFid = stampFac(req, res); if (gridFid === null && res.headersSent) return;
   const findSlot = db.prepare(`SELECT id FROM schedule_slots WHERE template_id=? AND date=?`);
   for (const [key, raw] of Object.entries(cells)) {
     const [tid, date] = key.split('|'); const t = tpl[tid];
@@ -10804,8 +10806,8 @@ app.post('/api/schedule/week', requireAuth, requireStaffingManager, (req, res) =
     let slot = findSlot.get(tid, date);
     if (!names.length) { if (slot) db.prepare(`DELETE FROM schedule_slots WHERE id=?`).run(slot.id); continue; }
     if (!slot) {
-      const info = db.prepare(`INSERT INTO schedule_slots (date, part, role, needed, shift_label, template_id, created_by) VALUES (?,?,?,?,?,?,?)`)
-        .run(date, t.part, t.role, names.length, t.shift_label, +tid, req.user.id);
+      const info = db.prepare(`INSERT INTO schedule_slots (date, part, role, needed, shift_label, template_id, created_by, facility_id) VALUES (?,?,?,?,?,?,?,?)`)
+        .run(date, t.part, t.role, names.length, t.shift_label, +tid, req.user.id, gridFid || null);
       slot = { id: info.lastInsertRowid };
     } else {
       db.prepare(`UPDATE schedule_slots SET needed=?, role=?, shift_label=?, part=? WHERE id=?`).run(names.length, t.role, t.shift_label, t.part, slot.id);
@@ -10937,50 +10939,63 @@ app.post('/api/clock/out', requireAuth, (req, res) => {
 });
 
 // Safety rounds + job-duty completions.
+// Explicit facility pick = that building's rows only; the DEFAULT building also
+// owns legacy/unattributed rows (the standing rule for pre-facility data).
+function shiftFrag(fc, col) {
+  if (fc.one) return ` AND (${col} = ${fc.one}${fc.one === defaultFacilityId() ? ` OR ${col} IS NULL` : ''})`;
+  return fc.frag(col);
+}
 app.get('/api/rounds/today', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const d = dayBoundsUtc(appToday());
-  res.json({ rounds: db.prepare(`SELECT * FROM rounds WHERE ts >= ? AND ts < ? ORDER BY ts DESC`).all(d.start, d.end) });
+  res.json({ rounds: db.prepare(`SELECT * FROM rounds WHERE ts >= ? AND ts < ?${shiftFrag(fc, 'facility_id')} ORDER BY ts DESC`).all(d.start, d.end) });
 });
 app.post('/api/rounds', requireAuth, (req, res) => {
-  db.prepare(`INSERT INTO rounds (by_id, by_name, area, note) VALUES (?,?,?,?)`).run(req.user.id, req.user.name, req.body?.area || null, req.body?.note || null);
+  const fid = stampFac(req, res); if (fid === null && res.headersSent) return;
+  db.prepare(`INSERT INTO rounds (by_id, by_name, area, note, facility_id) VALUES (?,?,?,?,?)`).run(req.user.id, req.user.name, req.body?.area || null, req.body?.note || null, fid || null);
   res.json({ ok: true });
 });
 app.post('/api/duties', requireAuth, (req, res) => {
   if (!(req.body?.text || '').trim()) return res.status(400).json({ error: 'What was done?' });
-  db.prepare(`INSERT INTO duty_logs (date, part, role, text, by_id, by_name) VALUES (?,?,?,?,?,?)`)
-    .run(appToday(), req.body.part || null, req.body.role || null, req.body.text.trim(), req.user.id, req.user.name);
+  const fid = stampFac(req, res); if (fid === null && res.headersSent) return;
+  db.prepare(`INSERT INTO duty_logs (date, part, role, text, by_id, by_name, facility_id) VALUES (?,?,?,?,?,?,?)`)
+    .run(appToday(), req.body.part || null, req.body.role || null, req.body.text.trim(), req.user.id, req.user.name, fid || null);
   res.json({ ok: true });
 });
 
 // Workforce dashboard: on now, coverage today, call-off patterns, rounds/duties.
+// Everything answers for the SELECTED building (My Shift must never show the
+// detox roster while you're standing in Spark).
 app.get('/api/workforce/summary', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const sf = (col) => shiftFrag(fc, col);
   const days = ({ '30': 30, '90': 90 })[String(req.query.range)] || 30;
   const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
   const today = appToday();
-  const onNow = db.prepare(`SELECT user_name, clock_in FROM time_entries WHERE clock_out IS NULL ORDER BY clock_in`).all();
+  const onNow = db.prepare(`SELECT user_name, clock_in FROM time_entries WHERE clock_out IS NULL${sf('facility_id')} ORDER BY clock_in`).all();
   // Manually-added on-shift staff (no login) — surfaced alongside clock-ins.
-  const onNowManual = db.prepare(`SELECT id, name, role FROM manual_on_shift WHERE for_date = ? ORDER BY id DESC`).all(today);
+  const onNowManual = db.prepare(`SELECT id, name, role FROM manual_on_shift WHERE for_date = ?${sf('facility_id')} ORDER BY id DESC`).all(today);
   // Everyone scheduled today (default on-shift) who hasn't called off or been marked absent.
   const onNowScheduled = db.prepare(`SELECT a.user_name name, s.role, s.shift_label FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
-    WHERE s.date = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent') ORDER BY s.part, s.role`).all(today);
+    WHERE s.date = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent')${sf('s.facility_id')} ORDER BY s.part, s.role`).all(today);
   // Today coverage roll-up.
   const slotsToday = db.prepare(`SELECT s.id, s.needed,
     (SELECT COUNT(*) FROM schedule_assignments a WHERE a.slot_id=s.id AND a.status='scheduled') AS sched
-    FROM schedule_slots s WHERE s.date = ?`).all(today);
+    FROM schedule_slots s WHERE s.date = ?${sf('s.facility_id')}`).all(today);
   const needed = slotsToday.reduce((n, s) => n + s.needed, 0);
   const scheduled = slotsToday.reduce((n, s) => n + s.sched, 0);
   const gaps = slotsToday.filter((s) => s.sched < s.needed).length;
   // Call-off patterns.
   const byPerson = db.prepare(`SELECT user_name k, COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id
-    WHERE a.status='called_off' AND s.date >= ? GROUP BY user_name ORDER BY n DESC`).all(since);
+    WHERE a.status='called_off' AND s.date >= ?${sf('s.facility_id')} GROUP BY user_name ORDER BY n DESC`).all(since);
   const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const calloffRows = db.prepare(`SELECT s.date FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?`).all(since);
+  const calloffRows = db.prepare(`SELECT s.date FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?${sf('s.facility_id')}`).all(since);
   const byDow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => ({ k: d, n: 0 }));
   calloffRows.forEach((r) => { const d = dowNames[new Date(r.date + 'T00:00').getDay()]; const e = byDow.find((x) => x.k === d); if (e) e.n++; });
   const rday = dayBoundsUtc(today);
-  const roundsToday = db.prepare(`SELECT COUNT(*) n FROM rounds WHERE ts >= ? AND ts < ?`).get(rday.start, rday.end).n;
-  const dutiesToday = db.prepare(`SELECT COUNT(*) n FROM duty_logs WHERE date = ?`).get(today).n;
-  const calloffsWeek = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?`).get(new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10)).n;
+  const roundsToday = db.prepare(`SELECT COUNT(*) n FROM rounds WHERE ts >= ? AND ts < ?${sf('facility_id')}`).get(rday.start, rday.end).n;
+  const dutiesToday = db.prepare(`SELECT COUNT(*) n FROM duty_logs WHERE date = ?${sf('facility_id')}`).get(today).n;
+  const calloffsWeek = db.prepare(`SELECT COUNT(*) n FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.status='called_off' AND s.date >= ?${sf('s.facility_id')}`).get(new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10)).n;
   res.json({
     onNow, onNowManual, onNowScheduled, coverage: { needed, scheduled, gaps, pct: needed ? Math.round(scheduled / needed * 100) : null },
     calloffsWeek, byPerson, byDow, roundsToday, dutiesToday,
@@ -12343,7 +12358,8 @@ app.post('/api/onshift/manual', requireAuth, (req, res) => {
   const name = (req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Name required' });
   const role = (req.body?.role || '').trim() || null;
-  db.prepare(`INSERT INTO manual_on_shift (name, role, by_name, for_date) VALUES (?,?,?,?)`).run(name.slice(0, 80), role, req.user.name, appToday());
+  const mfid = stampFac(req, res); if (mfid === null && res.headersSent) return;
+  db.prepare(`INSERT INTO manual_on_shift (name, role, by_name, for_date, facility_id) VALUES (?,?,?,?,?)`).run(name.slice(0, 80), role, req.user.name, appToday(), mfid || null);
   res.json({ ok: true });
 });
 app.delete('/api/onshift/manual/:id', requireAuth, (req, res) => {

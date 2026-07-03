@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals|incidents($|\?)|billingready($|\?|\/run)|appts($|\?)|inventory($|\?)|maintenance($|\?)|requests($|\?|\/count)|command\/overview|retention|opscenter|diag\/admits|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh))|housing\/|case-management)/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals|incidents($|\?)|billingready($|\?|\/run)|appts($|\?)|inventory($|\?)|maintenance($|\?)|requests($|\?|\/count)|command\/overview|retention|opscenter|diag\/admits|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh))|housing\/|case-management|workforce\/summary|rounds($|\?|\/today)|duties($|\?)|onshift\/manual|staffing\/)/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.

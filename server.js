@@ -4062,8 +4062,8 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   for (const c of admitRows) { if (isReferredOut(c)) continue; const k = stayKey(c); if (seenA.has(k)) continue; seenA.add(k); admitted++; }
   // People who are CURRENTLY here. A "discharge" for someone who is still an active
   // patient is a phantom (the census-churn bug) — they never actually left.
-  const activeKeys = new Set(db.prepare(`SELECT kipu_id, name, pref FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map((c) => dupKeyOf(c)));
-  const dischRaw = db.prepare(`SELECT id, pref, name, kipu_id, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist, diagnosis
+  const activeKeys = new Set(db.prepare(`SELECT kipu_id, name, pref, facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map((c) => dupKeyOf(c)));
+  const dischRaw = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist, diagnosis
     FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ? ORDER BY discharge_date DESC`).all(since, end);
   const seenD = new Set(); const dischAll = [];
   for (const c of dischRaw) { const k = stayKey(c); if (seenD.has(k)) continue; seenD.add(k); dischAll.push(c); }
@@ -4205,7 +4205,10 @@ function clientChildTables() {
   return out;
 }
 const dupNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
-const dupKeyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || dupNorm(c.name);
+// Person-within-facility key (review fix): the same human at two facilities is
+// two EPISODES — never one "duplicate" group. Rows selected for dup work must
+// include facility_id or they fall into the shared 0-bucket.
+const dupKeyOf = (c) => (((c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || dupNorm(c.name)) + '|' + (c.facility_id || 0));
 // Shared merge core (used by the manual tool AND the automatic de-dupe). Reassigns
 // every client-linked table to the kept record, backfills only stable identity/
 // clinical fields when blank (never discharge/location state), and RETIRES the
@@ -4302,12 +4305,14 @@ function cleanupChurnDuplicates() {
 // every discharge metric at the source, not query-by-query. Reversible.
 function cleanupPhantomDischarges() {
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
-  const keyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || norm(c.name);
+  // Person AND facility: a discharge row at facility B is never a phantom of an
+  // active stay at facility A (review fix — cross-facility guard).
+  const keyOf = (c) => (((c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || norm(c.name)) + '|' + (c.facility_id || 0));
   const childTbls = clientChildTables();
   const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
   const activeByKey = {};
-  for (const a of db.prepare(`SELECT id, kipu_id, name FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all()) { const k = keyOf(a); if (k && !activeByKey[k]) activeByKey[k] = a; }
-  const disch = db.prepare(`SELECT id, kipu_id, name, discharge_status, discharge_reason FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL`).all();
+  for (const a of db.prepare(`SELECT id, kipu_id, name, facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all()) { const k = keyOf(a); if (k && !activeByKey[k]) activeByKey[k] = a; }
+  const disch = db.prepare(`SELECT id, kipu_id, name, facility_id, discharge_status, discharge_reason FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL`).all();
   let total = 0;
   for (const d of disch) {
     const k = keyOf(d); const act = activeByKey[k]; if (!act || act.id === d.id) continue;   // person not currently here → leave it
@@ -4322,7 +4327,7 @@ function cleanupPhantomDischarges() {
   return total;
 }
 app.get('/api/diag/duplicates', requireAuth, requireAdmin, (req, res) => {
-  const rows = db.prepare(`SELECT id, pref, name, kipu_id, room, admit, admit_time, discharge_date, discharge_status, source, active, therapist, diagnosis FROM clients WHERE merged_into IS NULL ORDER BY name, id`).all();
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, room, admit, admit_time, discharge_date, discharge_status, source, active, therapist, diagnosis FROM clients WHERE merged_into IS NULL ORDER BY name, id`).all();
   const groups = {};
   for (const c of rows) { const k = dupKeyOf(c); if (!k) continue; (groups[k] = groups[k] || []).push(c); }
   const childTbls = clientChildTables();
@@ -4343,6 +4348,11 @@ app.post('/api/diag/merge', requireAuth, requireAdmin, (req, res) => {
   const keep = +req.body?.keep;
   const dupes = Array.isArray(req.body?.dupes) ? [...new Set(req.body.dupes.map(Number))].filter((x) => x && x !== keep) : [];
   if (!keep || !dupes.length) return res.status(400).json({ error: 'Pick a record to keep and at least one duplicate to merge.' });
+  // Review fix: never merge across facilities — an episode at another facility is
+  // a different stay, not a duplicate (person-level linking is Phase 6's job).
+  const keepFac = db.prepare(`SELECT facility_id FROM clients WHERE id=?`).get(keep)?.facility_id || 0;
+  const crossFac = dupes.filter((d) => (db.prepare(`SELECT facility_id FROM clients WHERE id=?`).get(d)?.facility_id || 0) !== keepFac);
+  if (crossFac.length) return res.status(400).json({ error: `Refusing to merge across facilities (rows ${crossFac.join(', ')} belong to a different facility). Same person at two facilities = two episodes, not a duplicate.` });
   const r = mergeClients(keep, dupes, req.user.name);
   if (r.error) return res.status(r.error === 'Keep record not found.' ? 404 : 500).json({ error: r.error });
   audit({ user: req.user, action: 'CLIENT_MERGE', detail: `kept ${keep}, merged ${r.merged} (${dupes.join(',')})`, ip: req.ip });
@@ -4400,6 +4410,17 @@ function outpatientFacilityId() {
         || orgFacilities().find((x) => x.type === 'outpatient' && (x.name || '').toLowerCase().includes(loc));
   return f ? f.id : null;
 }
+// Review fix: legacy outpatient rows predate facility_id — adopt them into the
+// configured outpatient facility once (latched). They are NOT detox rows.
+try {
+  if (getState('phase3_outpatient_backfill') !== 'done') {
+    const opf = outpatientFacilityId();
+    if (opf) {
+      db.prepare(`UPDATE outpatient_clients SET facility_id=? WHERE facility_id IS NULL`).run(opf);
+      setState('phase3_outpatient_backfill', 'done');
+    }
+  }
+} catch (e) { console.error('[phase3 outpatient backfill]', e.message); }
 async function syncOutpatient() {
   if (!kipuConfigured()) return { error: 'Kipu isn’t connected.' };
   let r; try { r = await kipuOutpatientCensus(outpatientLocationName()); } catch (e) { return { error: e.message }; }
@@ -8825,7 +8846,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     subtitle = 'The house at a glance — census, who\'s at risk, how we\'re serving, and what needs leadership.';
     const today2 = today;
     // De-dupe by person and split real discharges from referral-outs (didn't complete intake).
-    const dRawLd = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?${fc.frag('facility_id')}`).all(today2);
+    const dRawLd = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?${fc.frag('facility_id')}`).all(today2);
     const seenLd = new Set(); const dToday = []; const dReferred = [];
     for (const c of dRawLd) { const k = dupKeyOf(c); if (k && seenLd.has(k)) continue; if (k) seenLd.add(k); (isReferredOut(c) ? dReferred : dToday).push(c); }
     const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
@@ -12510,7 +12531,7 @@ function buildMorningBrief() {
   const byLoc = {};
   for (const c of active) { const k = (c.loc && c.loc !== 'Unspecified') ? c.loc : (parseLoc(c.program) || 'Unspecified'); byLoc[k] = (byLoc[k] || 0) + 1; }
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
-  const dRawMb = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
+  const dRawMb = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
   const seenMb = new Set(); const dToday = [];   // real discharges only (deduped, referral-outs excluded)
   for (const c of dRawMb) { const k = dupKeyOf(c); if (k && seenMb.has(k)) continue; if (k) seenMb.add(k); if (!isReferredOut(c)) dToday.push(c); }
   const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;

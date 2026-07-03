@@ -100,16 +100,17 @@ async function kipuRawProbe(path) {
 }
 
 // Fetch a path that may return an image (or JSON with base64) → a data URL.
-async function kipuGetBinary(path) {
-  if (!kipuConfigured()) return null;
-  const base = process.env.KIPU_BASE_URL || 'https://api.kipuapi.com';
-  const uri = path + (path.includes('?') ? '&' : '?') + 'app_id=' + encodeURIComponent(process.env.KIPU_APP_ID);
+async function kipuGetBinary(path, conn) {
+  const cr = kipuCreds(conn);
+  if (!cr.accessId || !cr.secretKey || !cr.appId) return null;
+  const base = cr.base;
+  const uri = path + (path.includes('?') ? '&' : '?') + 'app_id=' + encodeURIComponent(cr.appId);
   const contentType = 'application/vnd.kipusystems+json; version=3';
   const date = new Date().toUTCString();
   const contentMd5 = crypto.createHash('md5').update('').digest('base64');
   const canonical = [contentType, contentMd5, uri, date].join(',');
-  const sig = crypto.createHmac('sha1', process.env.KIPU_SECRET_KEY).update(canonical).digest('base64');
-  const r = await fetch(base + uri, { headers: { Accept: 'image/*, application/json', 'Content-Type': contentType, 'Content-MD5': contentMd5, Date: date, Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}` } });
+  const sig = crypto.createHmac('sha1', cr.secretKey).update(canonical).digest('base64');
+  const r = await fetch(base + uri, { headers: { Accept: 'image/*, application/json', 'Content-Type': contentType, 'Content-MD5': contentMd5, Date: date, Authorization: `APIAuth ${cr.accessId}:${sig}` } });
   if (!r.ok) return null;
   const ct = (r.headers.get('content-type') || '').toLowerCase();
   const buf = Buffer.from(await r.arrayBuffer());
@@ -132,7 +133,7 @@ async function kipuGetBinary(path) {
   return null;
 }
 // A patient's photo (for face-matching), best-effort across endpoint shapes.
-export async function kipuPatientPhoto(casefileId) {
+export async function kipuPatientPhoto(casefileId, conn) {
   const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
   const phi = process.env.KIPU_PHI_LEVEL || 'high', e = encodeURIComponent;
   const q = `phi_level=${phi}&patient_master_id=${e(uuid)}`;
@@ -144,7 +145,7 @@ export async function kipuPatientPhoto(casefileId) {
     `/api/patients/${master}/patient_image?${q}`,
     `/api/patients/${master}/avatar?${q}`,
     `/api/patients/${e(uuid)}/patient_picture?phi_level=${phi}&patient_master_id=${master}`,
-  ]) { try { const d = await kipuGetBinary(path); if (d) return d; } catch { /* try next */ } }
+  ]) { try { const d = await kipuGetBinary(path, conn); if (d) return d; } catch { /* try next */ } }
   return null;
 }
 
@@ -477,7 +478,16 @@ function deriveLevelDates(history, admit, classify, localDateOf) {
 // to name). Non-destructive: only fills blank fields on existing clients so it
 // can't clobber staff edits. Maps the analytics fields (admit time, therapist,
 // discharge where/why) whenever Kipu charts them — so they're never re-entered.
-export async function kipuSyncRoster(opts = {}) {
+// Review fix (critical): ALL roster syncs — scheduler, manual, per-facility —
+// run one at a time through this chain. Two interleaved syncs used to be able
+// to see each other's half-written state; now they queue.
+let _syncChain = Promise.resolve();
+export function kipuSyncRoster(opts = {}) {
+  const run = _syncChain.then(() => _kipuSyncRosterInner(opts));
+  _syncChain = run.catch(() => { /* next sync proceeds after a failure */ });
+  return run;
+}
+async function _kipuSyncRosterInner(opts = {}) {
   // Rebuild Phase 3: opts lets a SECOND facility sync with its own connection.
   // Defaults reproduce the original env-based detox behavior exactly.
   const conn = opts.conn || null;
@@ -490,8 +500,11 @@ export async function kipuSyncRoster(opts = {}) {
   let created = 0, matched = 0;
   const seenKids = new Set();    // de-dupe: the census feed can return the same casefile twice
   const claimedRows = new Set(); // app rows already taken this sync — never merge two people onto one
-  const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ?`);
-  const byName = db.prepare(`SELECT id, loc, active, kipu_id FROM clients WHERE name = ? OR pref = ?`);
+  // Review fix: a casefile id (and a name) is only unique WITHIN one Kipu
+  // instance — match only rows owned by this facility (or not yet owned, which
+  // this sync then adopts). Never claim another facility's patient.
+  const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ? AND (facility_id = ? OR facility_id IS NULL)`);
+  const byName = db.prepare(`SELECT id, loc, active, kipu_id FROM clients WHERE (name = ? OR pref = ?) AND (facility_id = ? OR facility_id IS NULL)`);
   // New rows are stamped with the syncing facility (opts.facilityId), else detox.
   // Every row must be owned so per-facility scoping is honest (Constitution, P3).
   const facId = opts.facilityId || defaultFacilityId();
@@ -615,9 +628,9 @@ export async function kipuSyncRoster(opts = {}) {
     // people who happen to share a name collapse onto one record, under-counting
     // the census and today's admits. (A row with no kipu_id is a manually-added
     // client that's safe to link.)
-    const nameRow = byName.get(name, name);
+    const nameRow = byName.get(name, name, facId);
     const safeName = nameRow && (!nameRow.kipu_id || nameRow.kipu_id === kid) ? nameRow : null;
-    let existing = (kid && byKipu.get(kid)) || safeName;
+    let existing = (kid && byKipu.get(kid, facId)) || safeName;
     if (existing && claimedRows.has(existing.id)) existing = null;   // row already taken this sync → make a new one
 
     // The census carries none of the clinical fields — pull them from the
@@ -679,6 +692,7 @@ export async function kipuSyncRoster(opts = {}) {
       // Kipu is the source of truth: set source, backfill blank descriptive
       // fields, and authoritatively set active/discharge from the census.
       db.prepare(`UPDATE clients SET source='kipu',
+        facility_id = COALESCE(facility_id, ${facId}),
         kipu_id = COALESCE(?, kipu_id),
         admit = COALESCE(NULLIF(admit,''), ?),
         admit_time = COALESCE(NULLIF(admit_time,''), ?),
@@ -754,7 +768,7 @@ export async function kipuSyncRoster(opts = {}) {
         const dOnly = localDateOf(dRaw);
         dischargeDateByKid.set(ks, dOnly);
         dischargeDateByKid.set(ks.split(':')[0], dOnly);           // also by master id
-        if (byKipu.get(ks)) continue;                              // already have this episode
+        if (byKipu.get(ks, facId)) continue;                              // already have this episode
         if (activeMasters.has(ks.split(':')[0])) continue;         // currently admitted under another casefile
         toImport.push({ p, kid: ks, dDate: dOnly });
       }
@@ -764,7 +778,7 @@ export async function kipuSyncRoster(opts = {}) {
       });
       const seenNow = new Set();
       for (const { p, kid, dDate, det } of enriched) {
-        if (seenNow.has(kid) || byKipu.get(kid)) continue; seenNow.add(kid);
+        if (seenNow.has(kid) || byKipu.get(kid, facId)) continue; seenNow.add(kid);
         const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || p.full_name;
         if (!name) continue;
         const g = (...keys) => { if (!det) return null; for (const k of keys) { const v = det[k]; if (v != null && String(v).trim() !== '') return Array.isArray(v) ? v.join(', ') : String(v); } return null; };
@@ -796,7 +810,10 @@ export async function kipuSyncRoster(opts = {}) {
   // discharges + re-admits and skews the weekly counts.
   let deactivated = 0;
   if (activeKids.length) {
-    const activeRows = db.prepare(`SELECT id, kipu_id, name, loc, discharge_date FROM clients WHERE source='kipu' AND active = 1`).all();
+    // Review fix (critical): the sweep judges ONLY this sync's facility. A Spark
+    // sync must never conclude that detox patients "left the census" — they were
+    // simply never in Spark's census to begin with.
+    const activeRows = db.prepare(`SELECT id, kipu_id, name, loc, discharge_date FROM clients WHERE source='kipu' AND active = 1 AND facility_id = ?`).all(facId);
     const gone = activeRows.filter((g) => !claimedRows.has(g.id));
     // SAFEGUARD: a partial / failed census pull (pagination, location filter, network)
     // would make almost everyone look "gone". Never mass-discharge — if we'd drop more
@@ -832,9 +849,9 @@ export async function kipuSyncRoster(opts = {}) {
   // parallel, best-effort. Once set they're skipped on later syncs.
   let photos = 0;
   if (process.env.KIPU_PHOTO_SYNC !== 'false') {
-    const noPhoto = db.prepare(`SELECT id, kipu_id FROM clients WHERE source='kipu' AND active = 1 AND kipu_id IS NOT NULL AND (photo IS NULL OR photo = '')`).all();
+    const noPhoto = db.prepare(`SELECT id, kipu_id FROM clients WHERE source='kipu' AND active = 1 AND kipu_id IS NOT NULL AND (photo IS NULL OR photo = '') AND facility_id = ?`).all(facId);
     const setP = db.prepare(`UPDATE clients SET photo = ? WHERE id = ?`);
-    const got = await mapLimit(noPhoto, +(process.env.KIPU_CONCURRENCY || 6), async (c) => { let ph = null; try { ph = await kipuPatientPhoto(c.kipu_id); } catch { /* best-effort */ } return { id: c.id, ph }; });
+    const got = await mapLimit(noPhoto, +(process.env.KIPU_CONCURRENCY || 6), async (c) => { let ph = null; try { ph = await kipuPatientPhoto(c.kipu_id, conn); } catch { /* best-effort */ } return { id: c.id, ph }; });
     for (const x of got) if (x.ph) { setP.run(x.ph, x.id); photos++; }
   }
   rollupDailyMetrics(today);   // refresh today's intake/discharge/LOC-change/AMA snapshot

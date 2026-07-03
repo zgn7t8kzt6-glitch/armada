@@ -3006,6 +3006,21 @@ export function facilityModules(fac) {
   return defaultModulesFor(fac.type);
 }
 
+// ── REBUILD PHASE 4 — per-facility operations ─────────────────────────────────
+// Each facility carries its own operational settings (geofence, on-call, kiosk
+// code, report recipients) and lives on its own clock. Wheatfield is Central
+// time; its "today" must not flip at 11pm local because Akron is Eastern.
+addColumn('org_facilities', 'settings', 'TEXT');       // JSON: geo_lat/geo_lon/geo_radius/oncall_phone/oncall_email/kiosk_code/billing_email/report_email
+addColumn('time_entries', 'facility_id', 'INTEGER');   // which facility's fence the punch matched
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_time_entries_facility ON time_entries(facility_id)`); } catch { /* optional */ }
+export function todayInTz(tz) {
+  try { return new Date().toLocaleDateString('en-CA', { timeZone: tz || APP_TZ }); } catch { return appToday(); }
+}
+export function hourInTz(tz) {
+  try { return +new Date().toLocaleString('en-US', { timeZone: tz || APP_TZ, hour: 'numeric', hour12: false }); }
+  catch { return new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })).getHours(); }
+}
+
 // Registry v2 added Spark/Reverie Greenwood AFTER the foundation access seed ran,
 // so users in the "all facilities" group (marked by holding a corporate row) never
 // got rows for them and the facility chip hid both buildings. One-time repair.

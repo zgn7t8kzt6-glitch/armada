@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { db, audit, getState, setState, publishEvent, nameInitials, defaultFacilityId, MODULE_CATALOG, TYPE_MODULES, defaultModulesFor, facilityModules } from './src/db.js';
+import { db, audit, getState, setState, publishEvent, nameInitials, defaultFacilityId, MODULE_CATALOG, TYPE_MODULES, defaultModulesFor, facilityModules, todayInTz, hourInTz } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured, smsStatus, DEFAULT_CC } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
@@ -1554,6 +1554,27 @@ app.post('/api/org/facilities', requireAuth, requireAdmin, (req, res) => {
 // The module catalog + type defaults — drives the onboarding wizard's checkboxes.
 app.get('/api/org/module-catalog', requireAuth, requireAdmin, (req, res) => {
   res.json({ catalog: MODULE_CATALOG, byType: TYPE_MODULES, types: FACILITY_TYPES_ORG });
+});
+// ── Per-facility operational settings (Rebuild Phase 4) ───────────────────────
+// Geofence, on-call, kiosk code, report recipients — each building its own,
+// with the org-wide values as fallback so nothing breaks before configuration.
+const FAC_SETTING_KEYS = ['geo_lat', 'geo_lon', 'geo_radius', 'oncall_phone', 'oncall_email', 'kiosk_code', 'billing_email', 'report_email'];
+function facSettings(fid) {
+  try { const r = db.prepare(`SELECT settings FROM org_facilities WHERE id=?`).get(+fid); return r && r.settings ? JSON.parse(r.settings) : {}; }
+  catch { return {}; }
+}
+function facSetting(fid, key) { const v = fid ? facSettings(fid)[key] : null; return v == null || v === '' ? null : v; }
+app.get('/api/org/facilities/:id/settings', requireAuth, requireAdmin, (req, res) => {
+  res.json({ settings: facSettings(+req.params.id), keys: FAC_SETTING_KEYS });
+});
+app.post('/api/org/facilities/:id/settings', requireAuth, requireAdmin, (req, res) => {
+  const f = db.prepare(`SELECT id, name FROM org_facilities WHERE id=?`).get(+req.params.id);
+  if (!f) return res.status(404).json({ error: 'Not found.' });
+  const cur = facSettings(f.id);
+  for (const k of FAC_SETTING_KEYS) if (req.body && req.body[k] !== undefined) cur[k] = String(req.body[k]).slice(0, 200);
+  db.prepare(`UPDATE org_facilities SET settings=? WHERE id=?`).run(JSON.stringify(cur), f.id);
+  audit({ user: req.user, action: 'FACILITY_SETTINGS', entity: 'org_facility', entity_id: f.id, detail: f.name, ip: req.ip });
+  res.json({ ok: true });
 });
 // ── Per-facility Kipu connection (Rebuild Phase 3) ────────────────────────────
 // Resolve a facility's Kipu connection from facility_integrations, else null so the
@@ -3435,9 +3456,11 @@ function latestAmaRead(clientId) {
 
 // Notify the posted on-call leader by text/email (voice-first principle: the
 // alert reaches a human, it doesn't sit unread). Best-effort, non-blocking.
-function notifyOnCall(message) {
-  const email = getState('oncall_email') || process.env.ONCALL_EMAIL;
-  const phone = getState('oncall_phone') || process.env.ONCALL_PHONE;
+function notifyOnCall(message, facilityId) {
+  // Phase 4: the facility's own on-call first; the org-wide number is the fallback.
+  const fid = facilityId || defaultFacilityId();
+  const email = facSetting(fid, 'oncall_email') || getState('oncall_email') || process.env.ONCALL_EMAIL;
+  const phone = facSetting(fid, 'oncall_phone') || getState('oncall_phone') || process.env.ONCALL_PHONE;
   // On-call EMAIL is OFF by default — per-alert emails flood the inbox and burn
   // the Resend quota that the daily reports/orders need. Alerts still surface
   // in-app, and SMS (a different channel) still fires if configured. Re-enable
@@ -4384,7 +4407,10 @@ function outpatientLocationName() { return (getState('outpatient_location') || O
 const opDays = (a, b) => { if (!a || !b) return null; const n = Math.round((Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / 864e5); return Number.isFinite(n) && n >= 0 ? n : null; };
 const avg1 = (arr) => arr.length ? +(arr.reduce((x, y) => x + y, 0) / arr.length).toFixed(1) : null;
 app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
-  const rows = db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist, payer FROM outpatient_clients WHERE active = 1 ORDER BY loc_class, name`).all();
+  // Facility truth: an explicit pick shows ONLY that program's roster. Spark
+  // with no sync yet reads 0 — never a mirror of Akron's census.
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const rows = db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist, payer FROM outpatient_clients WHERE active = 1${fc.frag('facility_id')} ORDER BY loc_class, name`).all();
   const counts = { total: rows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
   for (const r of rows) counts[r.loc_class] = (counts[r.loc_class] || 0) + 1;
   const access = req.user.role === 'admin'
@@ -4393,13 +4419,18 @@ app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
   // Raw level-of-care text → count + how we classified it, so a 61-vs-40 mismatch is
   // diagnosable at a glance (e.g. everyone's level text reading the same value).
   const lb = {};
-  for (const r of db.prepare(`SELECT level, loc_class, COUNT(*) n FROM outpatient_clients WHERE active = 1 GROUP BY level, loc_class`).all()) {
+  for (const r of db.prepare(`SELECT level, loc_class, COUNT(*) n FROM outpatient_clients WHERE active = 1${fc.frag('facility_id')} GROUP BY level, loc_class`).all()) {
     lb[(r.level || '(blank)') + '  →  ' + r.loc_class] = r.n;
   }
+  // Connection + sync stamps are per facility: the default program reads the env
+  // connection; any other facility reads ITS OWN 🔌 connection (none = not ready).
+  const opFid = outpatientFacilityId();
+  const scopedElsewhere = fc.one && fc.one !== opFid;
+  const conn = scopedElsewhere ? resolveKipuConn(fc.one) : null;
   res.json({
-    location: outpatientLocationName(),
-    kipuReady: kipuConfigured(),
-    asOf: getState('outpatient_synced_at') || null,
+    location: scopedElsewhere ? (db.prepare(`SELECT kipu_location_name FROM org_facilities WHERE id=?`).get(fc.one)?.kipu_location_name || '') : outpatientLocationName(),
+    kipuReady: scopedElsewhere ? !!conn : kipuConfigured(),
+    asOf: scopedElsewhere ? (getState('outpatient_synced_at_' + fc.one) || null) : (getState('outpatient_synced_at') || null),
     counts,
     levelBreakdown: lb,
     roster: rows.map((r) => ({ name: r.pref || r.name, level: r.level, locClass: r.loc_class, admit: r.admit, therapist: r.therapist, mrn: r.mrn, payer: r.payer || '' })),
@@ -10677,16 +10708,35 @@ function metersBetween(la1, lo1, la2, lo2) {
 // Returns null if allowed, or an error string if the punch is off-site.
 // Allowed if EITHER on the facility WiFi (request from an approved public IP) OR
 // physically within the geofence by GPS.
-function geofenceCheck(body, req) {
+// Phase 4: every facility can carry its own fence (⚙️ in the registry); a punch
+// passes at ANY facility fence the org has, and records WHICH one it matched.
+function facilityFences() {
+  const out = [];
+  try {
+    for (const f of orgFacilities()) {
+      if (!f.active) continue;
+      const st = facSettings(f.id);
+      const la = parseFloat(st.geo_lat), lo = parseFloat(st.geo_lon);
+      if (isFinite(la) && isFinite(lo)) out.push({ fid: f.id, name: f.name, lat: la, lon: lo, radius: Math.max(30, parseInt(st.geo_radius, 10) || 300) });
+    }
+  } catch { /* registry optional on exotic boots */ }
+  return out;
+}
+function geofenceCheck(body, req, out) {
   const g = geofenceCfg();
   if (!g.on) return null;
   if (req && g.ips.length && g.ips.includes(clientIp(req))) return null;   // on our WiFi
   const lat = parseFloat(body?.lat), lon = parseFloat(body?.lon);
-  if (!isFinite(lat) || !isFinite(lon)) return 'Clock in/out at Armada — turn on location, or connect to the Armada WiFi. (Ask a lead to approve this network once.)';
-  const dist = metersBetween(lat, lon, g.lat, g.lon);
+  if (!isFinite(lat) || !isFinite(lon)) return 'Clock in/out at an Armada facility — turn on location, or connect to the facility WiFi. (Ask a lead to approve this network once.)';
   const acc = Math.min(parseFloat(body?.acc) || 0, 100);   // give back up to 100m of GPS slack
-  if (dist - acc > g.radius) return `You can only clock in/out at Armada (105 E Market St) or on the Armada WiFi. You appear to be about ${Math.round(dist)}m away.`;
-  return null;
+  const fences = [{ fid: defaultFacilityId(), name: 'Armada', lat: g.lat, lon: g.lon, radius: g.radius }, ...facilityFences()];
+  let nearest = Infinity;
+  for (const f of fences) {
+    const dist = metersBetween(lat, lon, f.lat, f.lon);
+    if (dist - acc <= f.radius) { if (out) out.facilityId = f.fid; return null; }
+    nearest = Math.min(nearest, dist);
+  }
+  return `You can only clock in/out at an Armada facility or on its WiFi. You appear to be about ${Math.round(nearest)}m from the nearest one.`;
 }
 app.get('/api/clock/geofence', requireAuth, (req, res) => res.json(geofenceCfg()));
 app.post('/api/clock/geofence', requireAuth, requireStaffingManager, (req, res) => {
@@ -10713,16 +10763,17 @@ app.get('/api/clock/status', requireAuth, (req, res) => {
   res.json({ clockedIn: !!mine, since: mine?.clock_in || null, onNow, geofenceOn: geofenceCfg().on });
 });
 app.post('/api/clock/in', requireAuth, (req, res) => {
-  const err = geofenceCheck(req.body, req);
+  const out = {};
+  const err = geofenceCheck(req.body, req, out);
   if (err) return res.status(403).json({ error: err });
   const open = db.prepare(`SELECT id FROM time_entries WHERE user_id = ? AND clock_out IS NULL`).get(req.user.id);
   if (open) return res.json({ ok: true, already: true });
-  db.prepare(`INSERT INTO time_entries (user_id, user_name) VALUES (?,?)`).run(req.user.id, req.user.name);
+  db.prepare(`INSERT INTO time_entries (user_id, user_name, facility_id) VALUES (?,?,?)`).run(req.user.id, req.user.name, out.facilityId || null);
   audit({ user: req.user, action: 'CLOCK_IN', ip: req.ip });
   res.json({ ok: true });
 });
 app.post('/api/clock/out', requireAuth, (req, res) => {
-  const err = geofenceCheck(req.body, req);
+  const err = geofenceCheck(req.body, req, {});
   if (err) return res.status(403).json({ error: err });
   db.prepare(`UPDATE time_entries SET clock_out = datetime('now') WHERE user_id = ? AND clock_out IS NULL`).run(req.user.id);
   audit({ user: req.user, action: 'CLOCK_OUT', ip: req.ip });

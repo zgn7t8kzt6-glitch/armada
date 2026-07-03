@@ -1169,27 +1169,32 @@ const FIRST_DAY = [
   ['First week', 'retention72', '72-hour 1:1 retention check'],
 ];
 
-export function buildDailyMovement(date) {
+export function buildDailyMovement(date, fid = null) {
   date = date || appToday();
-  const intakes = db.prepare(`SELECT r.name, r.loc, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.move_in=? ORDER BY h.name, r.name`).all(date);
-  const discharges = db.prepare(`SELECT r.name, r.discharge_type, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.discharge_date=? ORDER BY r.name`).all(date);
+  // fid = facility scope (view only; the org-wide email passes null). A facility
+  // with no houses/residents produces a truthfully empty report, not Akron's.
+  const fw = fid != null ? ` AND facility_id = ${+fid}` : '';
+  const rw = fid != null ? ` AND r.facility_id = ${+fid}` : '';
+  const hw = (col) => fid != null ? ` AND ${col} IN (SELECT id FROM housing_houses WHERE facility_id = ${+fid})` : '';
+  const intakes = db.prepare(`SELECT r.name, r.loc, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.move_in=?${rw} ORDER BY h.name, r.name`).all(date);
+  const discharges = db.prepare(`SELECT r.name, r.discharge_type, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.discharge_date=?${rw} ORDER BY r.name`).all(date);
   const occ = occMap();
-  const houses = db.prepare(`SELECT * FROM housing_houses WHERE active=1 ORDER BY program, name`).all();
+  const houses = db.prepare(`SELECT * FROM housing_houses WHERE active=1${fw} ORDER BY program, name`).all();
   const capacity = houses.reduce((a, h) => a + (h.capacity || 0), 0);
-  const occupied = Object.values(occ).reduce((a, o) => a + (o.occupied || 0), 0);
-  const open = Object.values(occ).reduce((a, o) => a + (o.open || 0), 0);
-  const census = db.prepare(`SELECT COUNT(*) c FROM housing_residents WHERE status='active'`).get().c;
+  const occupied = houses.reduce((a, h) => a + (occ[h.id]?.occupied || 0), 0);
+  const open = houses.reduce((a, h) => a + (occ[h.id]?.open || 0), 0);
+  const census = db.prepare(`SELECT COUNT(*) c FROM housing_residents WHERE status='active'${fw}`).get().c;
   const byHouse = houses.map(h => { const o = occ[h.id] || {}; return { name: h.name, program: h.program || '', occupied: o.occupied || 0, capacity: h.capacity || 0, open: o.open || 0 }; });
   const byProgram = {};
   for (const h of houses) { const o = occ[h.id] || {}; byProgram[h.program || 'Other'] = (byProgram[h.program || 'Other'] || 0) + (o.occupied || 0); }
   const occPct = capacity ? Math.round(occupied / capacity * 100) : 0;
   // Operational signals leadership/clinical want alongside the census.
-  const incidents = db.prepare(`SELECT i.type, i.severity, i.summary, h.name house FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id WHERE i.date=? ORDER BY i.id DESC`).all(date);
-  const openWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done'`).get().c;
-  const urgentWO = db.prepare(`SELECT m.title, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id WHERE m.status!='done' AND m.priority='Urgent' ORDER BY m.id DESC`).all();
-  const lowStock = db.prepare(`SELECT COUNT(*) c FROM housing_inventory WHERE qty<=par`).get().c;
+  const incidents = db.prepare(`SELECT i.type, i.severity, i.summary, h.name house FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id WHERE i.date=?${hw('i.house_id')} ORDER BY i.id DESC`).all(date);
+  const openWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done'${hw('house_id')}`).get().c;
+  const urgentWO = db.prepare(`SELECT m.title, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id WHERE m.status!='done' AND m.priority='Urgent'${hw('m.house_id')} ORDER BY m.id DESC`).all();
+  const lowStock = db.prepare(`SELECT COUNT(*) c FROM housing_inventory WHERE qty<=par${hw('house_id')}`).get().c;
   const wkEnd = (() => { const d = new Date(date); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
-  const activitiesWeek = db.prepare(`SELECT e.title, e.date, e.time, e.dimension, h.name house FROM housing_activity_events e LEFT JOIN housing_houses h ON h.id=e.house_id WHERE e.date>=? AND e.date<=? AND e.status!='cancelled' ORDER BY e.date, e.time`).all(date, wkEnd);
+  const activitiesWeek = db.prepare(`SELECT e.title, e.date, e.time, e.dimension, h.name house FROM housing_activity_events e LEFT JOIN housing_houses h ON h.id=e.house_id WHERE e.date>=? AND e.date<=? AND e.status!='cancelled'${hw('e.house_id')} ORDER BY e.date, e.time`).all(date, wkEnd);
   const kpis = { date, intakes: intakes.length, discharges: discharges.length, census, occupied, capacity, open, occPct, openWO, lowStock, incidents: incidents.length };
 
   const pretty = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -1277,6 +1282,54 @@ export function mountHousing(app) {
   try { seedHousingSurveys(); } catch (e) { console.error('[housing] survey seed:', e.message); }
   try { seedHousingSupplies(); } catch (e) { console.error('[housing] supply seed:', e.message); }
   try { seedHousingActivities(); } catch (e) { console.error('[housing] activity seed:', e.message); }
+  // ── Facility ownership (multi-facility truth) ────────────────────────────
+  // Owner's ruling (2026-07-03): every house and resident in the system today
+  // is Hilltop AKRON's — the seeded roster came from Akron. Other sober-living
+  // facilities (Hilltop Dayton, Reverie Indy/Greenwood) start EMPTY and stay
+  // empty until their own rosters are uploaded. One-time, latched; new rows
+  // are stamped at insert, so this never silently re-owns later data.
+  try {
+    const hcols = db.prepare(`PRAGMA table_info(housing_houses)`).all().map(c => c.name);
+    if (!hcols.includes('facility_id')) db.exec(`ALTER TABLE housing_houses ADD COLUMN facility_id INTEGER`);
+    const rcols = db.prepare(`PRAGMA table_info(housing_residents)`).all().map(c => c.name);
+    if (!rcols.includes('facility_id')) db.exec(`ALTER TABLE housing_residents ADD COLUMN facility_id INTEGER`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_housing_houses_fac ON housing_houses(facility_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_housing_residents_fac ON housing_residents(facility_id)`);
+    if (getState('housing_akron_backfill') !== 'done') {
+      const ha = db.prepare(`SELECT id FROM org_facilities WHERE fkey='hilltop-akron'`).get()?.id;
+      if (ha) {
+        db.prepare(`UPDATE housing_houses SET facility_id=? WHERE facility_id IS NULL`).run(ha);
+        db.prepare(`UPDATE housing_residents SET facility_id=? WHERE facility_id IS NULL`).run(ha);
+        setState('housing_akron_backfill', 'done');
+      }
+    }
+  } catch (e) { console.error('[housing] facility columns:', e.message); }
+  // Default owner for new housing rows created without an explicit facility —
+  // Hilltop Akron, the only sober-living facility live today.
+  const hilltopAkronId = () => { try { return db.prepare(`SELECT id FROM org_facilities WHERE fkey='hilltop-akron'`).get()?.id ?? null; } catch { return null; } };
+  // ── Facility scope for housing reads ─────────────────────────────────────
+  // An explicit ?facility= pick means: show ONLY that building's houses and
+  // residents. A facility with nothing uploaded is truthfully EMPTY — never a
+  // mirror of Akron. No pick (All facilities) = everything, as before.
+  const facPick = (req) => {
+    const q = req.query.facility;
+    if (q === undefined || q === '') return null;
+    const fid = +q;
+    return (Number.isInteger(fid) && fid > 0) ? fid : -1;   // -1 = invalid → matches nothing
+  };
+  // Rows tied to no house/resident (general notes, org-wide records) are legacy
+  // Akron data by the same ruling — visible under Hilltop Akron, hidden elsewhere.
+  const fFrag = (req) => { const fid = facPick(req); return fid === null ? '' : ` AND facility_id = ${fid}`; };
+  const hFrag = (req, col = 'house_id') => {
+    const fid = facPick(req); if (fid === null) return '';
+    const nullOk = fid === hilltopAkronId() ? ` OR ${col} IS NULL` : '';
+    return ` AND (${col} IN (SELECT id FROM housing_houses WHERE facility_id = ${fid})${nullOk})`;
+  };
+  const rFrag = (req, col = 'resident_id') => {
+    const fid = facPick(req); if (fid === null) return '';
+    const nullOk = fid === hilltopAkronId() ? ` OR ${col} IS NULL` : '';
+    return ` AND (${col} IN (SELECT id FROM housing_residents WHERE facility_id = ${fid})${nullOk})`;
+  };
   // One-time: convert pre-existing activity effectiveness from the old 1–5 scale to
   // the app-wide 1–10 scale (×2). New seeds/inserts already store 1–10.
   try { if (getState('eff_scale10') !== 'done') { db.prepare(`UPDATE housing_activity_catalog SET effectiveness = effectiveness * 2 WHERE effectiveness IS NOT NULL AND effectiveness <= 5`).run(); setState('eff_scale10', 'done'); } } catch (e) { console.error('[housing] eff migrate:', e.message); }
@@ -1361,9 +1414,9 @@ export function mountHousing(app) {
   // ---- Resident Voice: kiosk results, walled off under Sober Living ----
   app.get('/api/housing/voice', requireAuth, (req, res) => {
     const nm = (rid) => rid ? (db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(rid)?.name || null) : null;
-    const checkins = db.prepare(`SELECT * FROM housing_checkins ORDER BY id DESC LIMIT 60`).all().map(c => ({ ...c, name: nm(c.resident_id) }));
-    const requests = db.prepare(`SELECT * FROM housing_requests ORDER BY (status='open') DESC, (priority='Urgent') DESC, id DESC LIMIT 80`).all().map(r => ({ ...r, name: nm(r.resident_id) }));
-    const suggestions = db.prepare(`SELECT * FROM housing_suggestions ORDER BY id DESC LIMIT 60`).all().map(s => ({ ...s, name: nm(s.resident_id) }));
+    const checkins = db.prepare(`SELECT * FROM housing_checkins WHERE 1=1${rFrag(req)} ORDER BY id DESC LIMIT 60`).all().map(c => ({ ...c, name: nm(c.resident_id) }));
+    const requests = db.prepare(`SELECT * FROM housing_requests WHERE 1=1${rFrag(req)} ORDER BY (status='open') DESC, (priority='Urgent') DESC, id DESC LIMIT 80`).all().map(r => ({ ...r, name: nm(r.resident_id) }));
+    const suggestions = db.prepare(`SELECT * FROM housing_suggestions WHERE 1=1${rFrag(req)} ORDER BY id DESC LIMIT 60`).all().map(s => ({ ...s, name: nm(s.resident_id) }));
     const surveys = db.prepare(`SELECT id, key, title FROM housing_surveys WHERE active=1 ORDER BY sort, id`).all().map(s => {
       const responses = db.prepare(`SELECT COUNT(*) c FROM housing_survey_responses WHERE survey_id=?`).get(s.id).c;
       const avg = db.prepare(`SELECT AVG(value_num) a FROM housing_survey_answers an JOIN housing_survey_responses r ON r.id=an.response_id WHERE r.survey_id=? AND an.value_num IS NOT NULL`).get(s.id).a;
@@ -1412,13 +1465,14 @@ export function mountHousing(app) {
 
   // ---- Dashboard / HQ ----
   app.get('/api/housing/overview', requireAuth, (req, res) => {
-    const houses = db.prepare(`SELECT * FROM housing_houses WHERE active=1 ORDER BY level DESC, name`).all();
+    const houses = db.prepare(`SELECT * FROM housing_houses WHERE active=1${fFrag(req)} ORDER BY level DESC, name`).all();
     const occ = occMap();
-    const residents = db.prepare(`SELECT * FROM housing_residents WHERE status='active'`).all();
+    const residents = db.prepare(`SELECT * FROM housing_residents WHERE status='active'${fFrag(req)}`).all();
     const capacity = houses.reduce((a, h) => a + (h.capacity || 0), 0);
     // occupancy is bed-based (reflects the census even before every resident has
     // an individual record), with residents counted when they're entered.
-    const occupied = Object.values(occ).reduce((a, o) => a + (o.occupied || 0), 0) || residents.length;
+    // Summed over THIS scope's houses only — a facility with no houses reads 0.
+    const occupied = houses.reduce((a, h) => a + (occ[h.id]?.occupied || 0), 0) || residents.length;
     // by program (PHP / IOP / Graduate) from occupied beds per house
     const byLoc = {};
     houses.forEach(h => { const k = h.program || h.gender || 'Other'; byLoc[k] = (byLoc[k] || 0) + ((occ[h.id]?.occupied) || 0); });
@@ -1431,17 +1485,17 @@ export function mountHousing(app) {
     const screensDue = residents.filter(r => { const s = lastScreen(r.id); return !s || (Date.now() - new Date(s.date).getTime()) > 7 * 86400000; }).length;
     const underDose = residents.filter(r => { const t = LOC[r.loc]?.weeklyHours || 0; return t > 0 && clinHoursThisWeek(r.id) < t * 0.6; }).length;
     // ORH compliance %
-    const orhRows = db.prepare(`SELECT status, COUNT(*) c FROM housing_orh GROUP BY status`).all();
+    const orhRows = db.prepare(`SELECT status, COUNT(*) c FROM housing_orh WHERE 1=1${hFrag(req)} GROUP BY status`).all();
     const orhTot = orhRows.reduce((a, r) => a + r.c, 0);
     const orhMet = (orhRows.find(r => r.status === 'met')?.c || 0);
     const orhPartial = (orhRows.find(r => r.status === 'partial')?.c || 0);
     const orhPct = orhTot ? Math.round(((orhMet + orhPartial * 0.5) / orhTot) * 100) : 0;
     // returns to use this month (positive screens or relapse incidents)
     const monthStart = todayStr().slice(0, 8) + '01';
-    const returnsToUse = db.prepare(`SELECT COUNT(*) c FROM housing_screens WHERE result='positive' AND date>=?`).get(monthStart).c
-      + db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE type='Return to use' AND date>=?`).get(monthStart).c;
-    const grievOpen = db.prepare(`SELECT COUNT(*) c FROM housing_grievances WHERE status='open'`).get().c;
-    const openIncidents = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE status='open'`).get().c;
+    const returnsToUse = db.prepare(`SELECT COUNT(*) c FROM housing_screens WHERE result='positive' AND date>=?${rFrag(req)}`).get(monthStart).c
+      + db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE type='Return to use' AND date>=?${hFrag(req)}`).get(monthStart).c;
+    const grievOpen = db.prepare(`SELECT COUNT(*) c FROM housing_grievances WHERE status='open'${hFrag(req)}`).get().c;
+    const openIncidents = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE status='open'${hFrag(req)}`).get().c;
     // Open beds split by the house's gender, so you can see men's vs women's availability.
     const openByGender = { Men: 0, Women: 0, Any: 0 };
     houses.forEach(h => {
@@ -1469,7 +1523,7 @@ export function mountHousing(app) {
   // ---- Houses & Beds ----
   app.get('/api/housing/houses', requireAuth, (req, res) => {
     const occ = occMap();
-    const houses = db.prepare(`SELECT * FROM housing_houses ORDER BY active DESC, level DESC, name`).all();
+    const houses = db.prepare(`SELECT * FROM housing_houses WHERE 1=1${fFrag(req)} ORDER BY active DESC, level DESC, name`).all();
     res.json(houses.map(h => {
       const beds = db.prepare(`SELECT b.*, r.name resident_name, r.loc resident_loc, r.phase resident_phase
         FROM housing_beds b LEFT JOIN housing_residents r ON r.id=b.resident_id WHERE b.house_id=? ORDER BY b.room, b.label`).all(h.id);
@@ -1479,11 +1533,13 @@ export function mountHousing(app) {
 
   app.post('/api/housing/houses', requireAuth, requireAdmin, (req, res) => {
     const b = req.body || {};
-    const r = db.prepare(`INSERT INTO housing_houses (name,level,orh_cert,address,city,gender,program,mat_friendly,capacity,manager,phone,opened,color,notes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    // New houses belong to the facility selected in the chip (or Hilltop Akron).
+    const fid = (facPick(req) > 0 ? facPick(req) : null) || hilltopAkronId();
+    const r = db.prepare(`INSERT INTO housing_houses (name,level,orh_cert,address,city,gender,program,mat_friendly,capacity,manager,phone,opened,color,notes,facility_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       (b.name || 'New House').trim(), b.level || 'L2', b.orh_cert || null, b.address || null, b.city || null,
       b.gender || 'Any', b.program || null, b.mat_friendly ? 1 : 0, num(b.capacity), b.manager || null, b.phone || null,
-      b.opened || null, b.color || null, b.notes || null);
+      b.opened || null, b.color || null, b.notes || null, fid);
     audit({ user: req.user, action: 'HOUSING_HOUSE_ADD', detail: b.name, ip: req.ip });
     res.json({ ok: true, id: Number(r.lastInsertRowid) });
   });
@@ -1540,7 +1596,9 @@ export function mountHousing(app) {
     if (r.bed_id) db.prepare(`UPDATE housing_beds SET status='open', resident_id=NULL WHERE id=?`).run(r.bed_id);
     if (bed.resident_id && bed.resident_id !== rid) db.prepare(`UPDATE housing_residents SET bed_id=NULL WHERE id=?`).run(bed.resident_id);
     db.prepare(`UPDATE housing_beds SET status='occupied', resident_id=? WHERE id=?`).run(rid, bed.id);
-    db.prepare(`UPDATE housing_residents SET bed_id=?, house_id=?, status='active' WHERE id=?`).run(bed.id, bed.house_id, rid);
+    // Moving into a bed also moves the resident to that house's FACILITY.
+    db.prepare(`UPDATE housing_residents SET bed_id=?, house_id=?, status='active',
+      facility_id=COALESCE((SELECT facility_id FROM housing_houses WHERE id=?), facility_id) WHERE id=?`).run(bed.id, bed.house_id, bed.house_id, rid);
     audit({ user: req.user, action: 'HOUSING_BED_ASSIGN', detail: `${r.name} → bed ${bed.label}`, ip: req.ip });
     res.json({ ok: true });
   });
@@ -1548,10 +1606,9 @@ export function mountHousing(app) {
   // ---- Residents ----
   app.get('/api/housing/residents', requireAuth, (req, res) => {
     const status = req.query.status || 'active';
-    const where = status === 'all' ? '' : `WHERE status=?`;
     const rows = status === 'all'
-      ? db.prepare(`SELECT * FROM housing_residents ORDER BY name`).all()
-      : db.prepare(`SELECT * FROM housing_residents ${where} ORDER BY name`).all(status);
+      ? db.prepare(`SELECT * FROM housing_residents WHERE 1=1${fFrag(req)} ORDER BY name`).all()
+      : db.prepare(`SELECT * FROM housing_residents WHERE status=?${fFrag(req)} ORDER BY name`).all(status);
     res.json(rows.map(residentCard));
   });
 
@@ -1579,14 +1636,18 @@ export function mountHousing(app) {
 
   app.post('/api/housing/residents', requireAuth, (req, res) => {
     const b = req.body || {};
+    // A resident belongs to their house's facility; house-less (waitlist) rows
+    // take the chip's facility, else Hilltop Akron (the only live house today).
+    const houseFac = b.house_id ? db.prepare(`SELECT facility_id FROM housing_houses WHERE id=?`).get(num(b.house_id))?.facility_id : null;
+    const fid = houseFac || (facPick(req) > 0 ? facPick(req) : null) || hilltopAkronId();
     const r = db.prepare(`INSERT INTO housing_residents
-      (name,dob,phone,email,house_id,loc,phase,status,move_in,sober_date,recovery_coach,payer,insurance,employment,education,mat,sponsor,home_group,emergency_name,emergency_phone,goals,notes,client_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (name,dob,phone,email,house_id,loc,phase,status,move_in,sober_date,recovery_coach,payer,insurance,employment,education,mat,sponsor,home_group,emergency_name,emergency_phone,goals,notes,client_id,facility_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       (b.name || 'New Resident').trim(), b.dob || null, b.phone || null, b.email || null,
       b.house_id ? num(b.house_id) : null, b.loc || 'IOP', num(b.phase, 1), b.status || (b.house_id ? 'active' : 'waitlist'),
       b.move_in || todayStr(), b.sober_date || null, b.recovery_coach || null, b.payer || null, b.insurance || null,
       b.employment || null, b.education || null, b.mat || null, b.sponsor || null, b.home_group || null,
-      b.emergency_name || null, b.emergency_phone || null, b.goals || null, b.notes || null, b.client_id ? num(b.client_id) : null);
+      b.emergency_name || null, b.emergency_phone || null, b.goals || null, b.notes || null, b.client_id ? num(b.client_id) : null, fid);
     const id = Number(r.lastInsertRowid);
     // auto-place into a bed if requested
     if (b.bed_id) {
@@ -1702,13 +1763,13 @@ export function mountHousing(app) {
     const status = req.query.status || 'open';
     const where = status === 'all' ? '' : `WHERE m.status=?`;
     const rows = (status === 'all'
-      ? db.prepare(`SELECT m.*, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id ORDER BY (m.status='open') DESC, (m.priority='Urgent') DESC, m.id DESC`).all()
-      : db.prepare(`SELECT m.*, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id ${where} ORDER BY (m.priority='Urgent') DESC, m.id DESC`).all(status));
+      ? db.prepare(`SELECT m.*, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id WHERE 1=1${hFrag(req, 'm.house_id')} ORDER BY (m.status='open') DESC, (m.priority='Urgent') DESC, m.id DESC`).all()
+      : db.prepare(`SELECT m.*, h.name house FROM housing_maintenance m LEFT JOIN housing_houses h ON h.id=m.house_id ${where}${hFrag(req, 'm.house_id')} ORDER BY (m.priority='Urgent') DESC, m.id DESC`).all(status));
     res.json({
       rows,
       kpis: {
-        open: db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status='open'`).get().c,
-        urgent: db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status='open' AND priority='Urgent'`).get().c,
+        open: db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status='open'${hFrag(req)}`).get().c,
+        urgent: db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status='open' AND priority='Urgent'${hFrag(req)}`).get().c,
       },
     });
   });
@@ -1737,7 +1798,7 @@ export function mountHousing(app) {
 
   // Inventory
   app.get('/api/housing/inventory', requireAuth, (req, res) => {
-    const items = db.prepare(`SELECT i.*, h.name house FROM housing_inventory i LEFT JOIN housing_houses h ON h.id=i.house_id ORDER BY i.category, i.name`).all()
+    const items = db.prepare(`SELECT i.*, h.name house FROM housing_inventory i LEFT JOIN housing_houses h ON h.id=i.house_id WHERE 1=1${hFrag(req, 'i.house_id')} ORDER BY i.category, i.name`).all()
       .map(i => ({ ...i, low: isLow(i) }));
     const low = items.filter(i => i.low);
     res.json({
@@ -1818,7 +1879,7 @@ export function mountHousing(app) {
   // ---- Daily Movement report (preview, send now, auto-email settings) ----
   const canMovement = (u) => u && (u.role === 'admin' || u.job_role === 'Executive Director' || HOUSING_ACCESS_ROLES.includes(u.job_role));
   app.get('/api/housing/daily-movement', requireAuth, (req, res) => {
-    const report = buildDailyMovement(req.query.date);
+    const report = buildDailyMovement(req.query.date, facPick(req));
     res.json({
       ...report,
       recipients: movementRecipients(),
@@ -1898,7 +1959,7 @@ export function mountHousing(app) {
     const to = req.query.to || (() => { const d = new Date(from); d.setDate(d.getDate() + 28); return d.toISOString().slice(0, 10); })();
     const rows = db.prepare(`SELECT e.*, h.name house, c.dimension cat_dimension FROM housing_activity_events e
       LEFT JOIN housing_houses h ON h.id=e.house_id LEFT JOIN housing_activity_catalog c ON c.id=e.catalog_id
-      WHERE e.date>=? AND e.date<=? ORDER BY e.date, e.time`).all(from, to).map(e => {
+      WHERE e.date>=? AND e.date<=?${hFrag(req, 'e.house_id')} ORDER BY e.date, e.time`).all(from, to).map(e => {
         const fb = db.prepare(`SELECT COUNT(*) n, AVG(enjoyed) e, AVG(engaged) g FROM housing_activity_feedback WHERE event_id=?`).get(e.id);
         return { ...e, feedbackN: fb.n, avgEnjoyed: fb.e != null ? +fb.e.toFixed(1) : null, avgEngaged: fb.g != null ? +fb.g.toFixed(1) : null };
       });
@@ -1970,9 +2031,9 @@ export function mountHousing(app) {
   app.get('/api/housing/activities/engagement', requireAuth, (req, res) => {
     const days = Math.min(180, Math.max(7, num(req.query.days, 30)));
     const since = (() => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().slice(0, 10); })();
-    const done = db.prepare(`SELECT * FROM housing_activity_events WHERE status='completed' AND date>=?`).all(since);
-    const planned = db.prepare(`SELECT COUNT(*) c FROM housing_activity_events WHERE date>=? AND date<=?`).get(since, todayStr()).c;
-    const fb = db.prepare(`SELECT f.* FROM housing_activity_feedback f JOIN housing_activity_events e ON e.id=f.event_id WHERE e.date>=?`).all(since);
+    const done = db.prepare(`SELECT * FROM housing_activity_events WHERE status='completed' AND date>=?${hFrag(req)}`).all(since);
+    const planned = db.prepare(`SELECT COUNT(*) c FROM housing_activity_events WHERE date>=? AND date<=?${hFrag(req)}`).get(since, todayStr()).c;
+    const fb = db.prepare(`SELECT f.* FROM housing_activity_feedback f JOIN housing_activity_events e ON e.id=f.event_id WHERE e.date>=?${hFrag(req, 'e.house_id')}`).all(since);
     const avg = (arr, k) => { const v = arr.map(x => x[k]).filter(x => x != null); return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : null; };
     const totalAtt = done.reduce((a, e) => a + (e.attendance || 0), 0);
     // most effective: by feedback score (enjoyed+engaged) weighted by responses, joined to catalog
@@ -1997,7 +2058,7 @@ export function mountHousing(app) {
     // per-resident participation from attendee rosters → isolation flag (retention)
     const part = {};
     for (const e of done) { const ids = P(e.attendees, []); for (const id of (ids || [])) part[id] = (part[id] || 0) + 1; }
-    const active = db.prepare(`SELECT id, name, move_in FROM housing_residents WHERE status='active' ORDER BY name`).all();
+    const active = db.prepare(`SELECT id, name, move_in FROM housing_residents WHERE status='active'${fFrag(req)} ORDER BY name`).all();
     const residents = active.map(r => ({ id: r.id, name: r.name, count: part[r.id] || 0, los: losDays(r.move_in) }))
       .sort((a, b) => a.count - b.count);
     const lowEngaged = residents.filter(r => r.count <= 1 && r.los >= 7); // isolating despite a week+ in house
@@ -2061,11 +2122,11 @@ export function mountHousing(app) {
 
   // ---- Drug screening ----
   app.get('/api/housing/screens', requireAuth, (req, res) => {
-    const residents = db.prepare(`SELECT id,name,house_id,loc FROM housing_residents WHERE status='active'`).all();
-    const recent = db.prepare(`SELECT s.*, r.name resident_name FROM housing_screens s JOIN housing_residents r ON r.id=s.resident_id ORDER BY s.date DESC, s.id DESC LIMIT 40`).all();
-    const total = db.prepare(`SELECT COUNT(*) c FROM housing_screens`).get().c;
-    const pos = db.prepare(`SELECT COUNT(*) c FROM housing_screens WHERE result='positive'`).get().c;
-    const refused = db.prepare(`SELECT COUNT(*) c FROM housing_screens WHERE result='refused'`).get().c;
+    const residents = db.prepare(`SELECT id,name,house_id,loc FROM housing_residents WHERE status='active'${fFrag(req)}`).all();
+    const recent = db.prepare(`SELECT s.*, r.name resident_name FROM housing_screens s JOIN housing_residents r ON r.id=s.resident_id WHERE 1=1${rFrag(req, 's.resident_id')} ORDER BY s.date DESC, s.id DESC LIMIT 40`).all();
+    const total = db.prepare(`SELECT COUNT(*) c FROM housing_screens WHERE 1=1${rFrag(req)}`).get().c;
+    const pos = db.prepare(`SELECT COUNT(*) c FROM housing_screens WHERE result='positive'${rFrag(req)}`).get().c;
+    const refused = db.prepare(`SELECT COUNT(*) c FROM housing_screens WHERE result='refused'${rFrag(req)}`).get().c;
     const due = residents.filter(r => { const s = lastScreen(r.id); return !s || (Date.now() - new Date(s.date).getTime()) > 7 * 86400000; })
       .map(r => ({ ...r, last: lastScreen(r.id)?.date || null, house: db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(r.house_id)?.name || '' }));
     res.json({
@@ -2078,7 +2139,7 @@ export function mountHousing(app) {
   app.post('/api/housing/screens/random', requireAuth, (req, res) => {
     const n = Math.max(1, num(req.body?.n, 3));
     const houseId = req.body?.house_id ? num(req.body.house_id) : null;
-    let pool = db.prepare(`SELECT id,name,house_id FROM housing_residents WHERE status='active'${houseId ? ' AND house_id=?' : ''}`).all(...(houseId ? [houseId] : []));
+    let pool = db.prepare(`SELECT id,name,house_id FROM housing_residents WHERE status='active'${fFrag(req)}${houseId ? ' AND house_id=?' : ''}`).all(...(houseId ? [houseId] : []));
     pool = pool.map(r => ({ ...r, last: lastScreen(r.id)?.date || null }))
       .sort((a, b) => (a.last || '').localeCompare(b.last || '')); // least-recently screened first
     // shuffle within, then weight toward stale
@@ -2134,13 +2195,13 @@ export function mountHousing(app) {
 
   // ---- Ledger / rent ----
   app.get('/api/housing/ledger', requireAuth, (req, res) => {
-    const residents = db.prepare(`SELECT id,name,house_id,payer FROM housing_residents WHERE status='active' ORDER BY name`).all()
+    const residents = db.prepare(`SELECT id,name,house_id,payer FROM housing_residents WHERE status='active'${fFrag(req)} ORDER BY name`).all()
       .map(r => ({ ...r, balance: balanceOf(r.id), house: db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(r.house_id)?.name || '' }));
-    const totalCharged = db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM housing_ledger WHERE kind='charge'`).get().s;
-    const totalPaid = db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM housing_ledger WHERE kind='payment'`).get().s;
+    const totalCharged = db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM housing_ledger WHERE kind='charge'${rFrag(req)}`).get().s;
+    const totalPaid = db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM housing_ledger WHERE kind='payment'${rFrag(req)}`).get().s;
     const byPayer = db.prepare(`SELECT payer, COALESCE(SUM(CASE WHEN kind='charge' THEN amount ELSE 0 END),0) charged,
-        COALESCE(SUM(CASE WHEN kind='payment' THEN amount ELSE 0 END),0) paid FROM housing_ledger GROUP BY payer`).all();
-    const recent = db.prepare(`SELECT l.*, r.name resident_name FROM housing_ledger l JOIN housing_residents r ON r.id=l.resident_id ORDER BY l.date DESC, l.id DESC LIMIT 40`).all();
+        COALESCE(SUM(CASE WHEN kind='payment' THEN amount ELSE 0 END),0) paid FROM housing_ledger WHERE 1=1${rFrag(req)} GROUP BY payer`).all();
+    const recent = db.prepare(`SELECT l.*, r.name resident_name FROM housing_ledger l JOIN housing_residents r ON r.id=l.resident_id WHERE 1=1${rFrag(req, 'l.resident_id')} ORDER BY l.date DESC, l.id DESC LIMIT 40`).all();
     res.json({
       residents, recent, byPayer,
       stats: { totalCharged, totalPaid, outstanding: +(residents.reduce((a, r) => a + Math.max(0, r.balance), 0)).toFixed(2) },
@@ -2158,7 +2219,7 @@ export function mountHousing(app) {
   // ---- Clinical coordination (PHP/IOP) ----
   app.get('/api/housing/coordination', requireAuth, (req, res) => {
     const wk = weekKey(req.query.week || todayStr());
-    const residents = db.prepare(`SELECT id,name,loc,house_id,recovery_coach FROM housing_residents WHERE status='active' AND loc!='MON' ORDER BY name`).all();
+    const residents = db.prepare(`SELECT id,name,loc,house_id,recovery_coach FROM housing_residents WHERE status='active' AND loc!='MON'${fFrag(req)} ORDER BY name`).all();
     const rows = residents.map(r => {
       const target = LOC[r.loc]?.weeklyHours || 0;
       const hours = db.prepare(`SELECT COALESCE(SUM(hours),0) h FROM housing_coordination WHERE resident_id=? AND week=?`).get(r.id, wk).h;
@@ -2183,7 +2244,7 @@ export function mountHousing(app) {
 
   // ---- ORH / NARR compliance ----
   app.get('/api/housing/orh', requireAuth, (req, res) => {
-    const houses = db.prepare(`SELECT id,name,level,orh_cert FROM housing_houses WHERE active=1 ORDER BY level DESC, name`).all();
+    const houses = db.prepare(`SELECT id,name,level,orh_cert FROM housing_houses WHERE active=1${fFrag(req)} ORDER BY level DESC, name`).all();
     const statusByHouse = {};
     houses.forEach(h => {
       const rows = db.prepare(`SELECT code,status,note FROM housing_orh WHERE house_id=?`).all(h.id);
@@ -2194,8 +2255,8 @@ export function mountHousing(app) {
       const partial = req2.filter(s => m[s[1]]?.status === 'partial').length;
       statusByHouse[h.id] = { map: m, pct: req2.length ? Math.round(((met + partial * 0.5) / req2.length) * 100) : 0, met, partial, total: req2.length };
     });
-    const inspections = db.prepare(`SELECT i.*, h.name house_name FROM housing_inspections i JOIN housing_houses h ON h.id=i.house_id ORDER BY i.date DESC LIMIT 30`).all();
-    const grievances = db.prepare(`SELECT g.*, h.name house_name, r.name resident_name FROM housing_grievances g LEFT JOIN housing_houses h ON h.id=g.house_id LEFT JOIN housing_residents r ON r.id=g.resident_id ORDER BY g.status='open' DESC, g.date DESC LIMIT 30`).all();
+    const inspections = db.prepare(`SELECT i.*, h.name house_name FROM housing_inspections i JOIN housing_houses h ON h.id=i.house_id WHERE 1=1${hFrag(req, 'i.house_id')} ORDER BY i.date DESC LIMIT 30`).all();
+    const grievances = db.prepare(`SELECT g.*, h.name house_name, r.name resident_name FROM housing_grievances g LEFT JOIN housing_houses h ON h.id=g.house_id LEFT JOIN housing_residents r ON r.id=g.resident_id WHERE 1=1${hFrag(req, 'g.house_id')} ORDER BY g.status='open' DESC, g.date DESC LIMIT 30`).all();
     res.json({ houses, standards: ORH_STANDARDS, statusByHouse, inspections, grievances });
   });
 
@@ -2230,12 +2291,12 @@ export function mountHousing(app) {
     const status = req.query.status || 'all';
     const where = status === 'all' ? '' : `WHERE i.status=?`;
     const rows = (status === 'all'
-      ? db.prepare(`SELECT i.*, h.name house_name, r.name resident_name FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id LEFT JOIN housing_residents r ON r.id=i.resident_id ORDER BY i.date DESC, i.id DESC LIMIT 200`).all()
-      : db.prepare(`SELECT i.*, h.name house_name, r.name resident_name FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id LEFT JOIN housing_residents r ON r.id=i.resident_id ${where} ORDER BY i.date DESC, i.id DESC LIMIT 200`).all(status));
-    const open = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE status='open'`).get().c;
-    const high = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE severity='high'`).get().c;
+      ? db.prepare(`SELECT i.*, h.name house_name, r.name resident_name FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id LEFT JOIN housing_residents r ON r.id=i.resident_id WHERE 1=1${hFrag(req, 'i.house_id')} ORDER BY i.date DESC, i.id DESC LIMIT 200`).all()
+      : db.prepare(`SELECT i.*, h.name house_name, r.name resident_name FROM housing_incidents i LEFT JOIN housing_houses h ON h.id=i.house_id LEFT JOIN housing_residents r ON r.id=i.resident_id ${where}${hFrag(req, 'i.house_id')} ORDER BY i.date DESC, i.id DESC LIMIT 200`).all(status));
+    const open = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE status='open'${hFrag(req)}`).get().c;
+    const high = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE severity='high'${hFrag(req)}`).get().c;
     const monthStart = todayStr().slice(0, 8) + '01';
-    const month = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE date>=?`).get(monthStart).c;
+    const month = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE date>=?${hFrag(req)}`).get(monthStart).c;
     res.json({ rows, types: HOUSING_INCIDENT_TYPES, stats: { open, high, month, total: rows.length } });
   });
 
@@ -2270,8 +2331,8 @@ export function mountHousing(app) {
   // ---- Staffing / shift coverage ----
   app.get('/api/housing/staffing', requireAuth, (req, res) => {
     const date = req.query.date || todayStr();
-    const houses = db.prepare(`SELECT id,name,program,level FROM housing_houses WHERE active=1 ORDER BY level DESC, name`).all();
-    const assigns = db.prepare(`SELECT * FROM housing_staff_shifts WHERE date=?`).all(date);
+    const houses = db.prepare(`SELECT id,name,program,level FROM housing_houses WHERE active=1${fFrag(req)} ORDER BY level DESC, name`).all();
+    const assigns = db.prepare(`SELECT * FROM housing_staff_shifts WHERE date=?${hFrag(req)}`).all(date);
     const grid = {};
     houses.forEach(h => { grid[h.id] = {}; HOUSING_SHIFTS.forEach(s => grid[h.id][s] = []); });
     assigns.forEach(a => { if (grid[a.house_id] && grid[a.house_id][a.shift]) grid[a.house_id][a.shift].push(a); });
@@ -2300,9 +2361,9 @@ export function mountHousing(app) {
     const houseId = req.query.house_id ? num(req.query.house_id) : null;
     const rows = (houseId
       ? db.prepare(`SELECT s.*, h.name house_name FROM housing_shift_reports s LEFT JOIN housing_houses h ON h.id=s.house_id WHERE s.house_id=? ORDER BY s.date DESC, s.id DESC LIMIT 60`).all(houseId)
-      : db.prepare(`SELECT s.*, h.name house_name FROM housing_shift_reports s LEFT JOIN housing_houses h ON h.id=s.house_id ORDER BY s.date DESC, s.id DESC LIMIT 60`).all())
+      : db.prepare(`SELECT s.*, h.name house_name FROM housing_shift_reports s LEFT JOIN housing_houses h ON h.id=s.house_id WHERE 1=1${hFrag(req, 's.house_id')} ORDER BY s.date DESC, s.id DESC LIMIT 60`).all())
       .map(r => ({ ...r, safety: P(r.safety, {}) }));
-    const houses = db.prepare(`SELECT id,name,program FROM housing_houses WHERE active=1 ORDER BY level DESC, name`).all();
+    const houses = db.prepare(`SELECT id,name,program FROM housing_houses WHERE active=1${fFrag(req)} ORDER BY level DESC, name`).all();
     // which house/shift still needs a report today
     const today = todayStr();
     const doneToday = {}; db.prepare(`SELECT house_id,shift FROM housing_shift_reports WHERE date=?`).all(today).forEach(r => doneToday[r.house_id + '|' + r.shift] = 1);
@@ -2329,23 +2390,23 @@ export function mountHousing(app) {
   app.get('/api/housing/staffhub', requireAuth, (req, res) => {
     const date = req.query.date || todayStr();
     const ago = (n) => { const d = new Date(date); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
-    const arrivals = db.prepare(`SELECT r.id, r.name, r.move_in, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active' AND r.move_in>=? ORDER BY r.move_in DESC, r.name`).all(ago(3)).map(r => {
+    const arrivals = db.prepare(`SELECT r.id, r.name, r.move_in, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active' AND r.move_in>=?${rFrag(req, 'r.id')} ORDER BY r.move_in DESC, r.name`).all(ago(3)).map(r => {
       const done = db.prepare(`SELECT COUNT(*) c FROM housing_onboarding WHERE resident_id=? AND done=1`).get(r.id).c;
       return { ...r, done, total: FIRST_DAY.length };
     });
     const offRestriction = db.prepare(`SELECT resident_id FROM housing_restrictions WHERE status='active'`).all()
       .map(x => { const c = currentRestriction(x.resident_id); if (!c || !c.eligible) return null; const rr = db.prepare(`SELECT name FROM housing_residents WHERE id=?`).get(x.resident_id); return { resident_id: x.resident_id, name: rr?.name || '', type: c.type }; })
       .filter(Boolean);
-    const active = db.prepare(`SELECT id,name FROM housing_residents WHERE status='active'`).all();
+    const active = db.prepare(`SELECT id,name FROM housing_residents WHERE status='active'${fFrag(req)}`).all();
     const checkedIn = {}; db.prepare(`SELECT DISTINCT resident_id FROM housing_checkins WHERE date=?`).all(date).forEach(c => { checkedIn[c.resident_id] = 1; });
     const missing = active.filter(r => !checkedIn[r.id]);
-    const activities = db.prepare(`SELECT title, time, status FROM housing_activity_events WHERE date=? AND status!='cancelled' ORDER BY time`).all(date);
-    const openReq = db.prepare(`SELECT COUNT(*) c FROM housing_requests WHERE status='open'`).get().c;
-    const urgentReq = db.prepare(`SELECT COUNT(*) c FROM housing_requests WHERE status='open' AND priority='Urgent'`).get().c;
-    const openWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done'`).get().c;
-    const urgentWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done' AND priority='Urgent'`).get().c;
-    const lowStock = db.prepare(`SELECT COUNT(*) c FROM housing_inventory WHERE qty<=par`).get().c;
-    const houses = db.prepare(`SELECT id,name FROM housing_houses WHERE active=1`).all();
+    const activities = db.prepare(`SELECT title, time, status FROM housing_activity_events WHERE date=? AND status!='cancelled'${hFrag(req)} ORDER BY time`).all(date);
+    const openReq = db.prepare(`SELECT COUNT(*) c FROM housing_requests WHERE status='open'${rFrag(req)}`).get().c;
+    const urgentReq = db.prepare(`SELECT COUNT(*) c FROM housing_requests WHERE status='open' AND priority='Urgent'${rFrag(req)}`).get().c;
+    const openWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done'${hFrag(req)}`).get().c;
+    const urgentWO = db.prepare(`SELECT COUNT(*) c FROM housing_maintenance WHERE status!='done' AND priority='Urgent'${hFrag(req)}`).get().c;
+    const lowStock = db.prepare(`SELECT COUNT(*) c FROM housing_inventory WHERE qty<=par${hFrag(req)}`).get().c;
+    const houses = db.prepare(`SELECT id,name FROM housing_houses WHERE active=1${fFrag(req)}`).all();
     const doneToday = {}; db.prepare(`SELECT house_id,shift FROM housing_shift_reports WHERE date=?`).all(date).forEach(r => { doneToday[r.house_id + '|' + r.shift] = 1; });
     let reportsMissing = 0; houses.forEach(h => HOUSING_SHIFTS.forEach(s => { if (!doneToday[h.id + '|' + s]) reportsMissing++; }));
     const recognition = db.prepare(`SELECT * FROM housing_recognition ORDER BY id DESC LIMIT 6`).all();
@@ -2389,7 +2450,7 @@ export function mountHousing(app) {
 
   // Day-1 onboarding playbook per resident.
   app.get('/api/housing/firstday', requireAuth, (req, res) => {
-    const residents = db.prepare(`SELECT r.id, r.name, r.move_in, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active' ORDER BY r.move_in DESC, r.name LIMIT 80`).all().map(r => {
+    const residents = db.prepare(`SELECT r.id, r.name, r.move_in, h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active'${rFrag(req, 'r.id')} ORDER BY r.move_in DESC, r.name LIMIT 80`).all().map(r => {
       const done = db.prepare(`SELECT COUNT(*) c FROM housing_onboarding WHERE resident_id=? AND done=1`).get(r.id).c;
       return { ...r, done, total: FIRST_DAY.length };
     });
@@ -2543,11 +2604,11 @@ export function mountHousing(app) {
 
   // ════════════ Fond farewell + alumni loyalty ════════════
   app.get('/api/housing/farewell', requireAuth, (req, res) => {
-    const departing = db.prepare(`SELECT r.id,r.name,r.move_in,h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active' ORDER BY r.move_in LIMIT 80`).all().map(r => {
+    const departing = db.prepare(`SELECT r.id,r.name,r.move_in,h.name house FROM housing_residents r LEFT JOIN housing_houses h ON h.id=r.house_id WHERE r.status='active'${rFrag(req, 'r.id')} ORDER BY r.move_in LIMIT 80`).all().map(r => {
       const done = db.prepare(`SELECT COUNT(*) c FROM housing_farewell WHERE resident_id=? AND done=1`).get(r.id).c;
       return { ...r, done, total: FAREWELL.length };
     });
-    const alumni = db.prepare(`SELECT id,name,discharge_date,discharge_type,would_recommend FROM housing_residents WHERE status!='active' AND status!='waitlist' ORDER BY discharge_date DESC LIMIT 120`).all().map(a => {
+    const alumni = db.prepare(`SELECT id,name,discharge_date,discharge_type,would_recommend FROM housing_residents WHERE status!='active' AND status!='waitlist'${fFrag(req)} ORDER BY discharge_date DESC LIMIT 120`).all().map(a => {
       const last = db.prepare(`SELECT date,sober,employed,housed FROM housing_alumni_checkins WHERE resident_id=? ORDER BY date DESC LIMIT 1`).get(a.id) || null;
       const fwDone = db.prepare(`SELECT COUNT(*) c FROM housing_farewell WHERE resident_id=? AND done=1`).get(a.id).c;
       return { ...a, last, fwDone, fwTotal: FAREWELL.length };
@@ -2730,7 +2791,7 @@ export function mountHousing(app) {
   // ---- Rent Run (documented weekly collection) ----
   app.get('/api/housing/rentrun', requireAuth, (req, res) => {
     const wk = weekKey(req.query.week || todayStr());
-    const residents = db.prepare(`SELECT id,name,house_id,payer FROM housing_residents WHERE status='active' ORDER BY name`).all();
+    const residents = db.prepare(`SELECT id,name,house_id,payer FROM housing_residents WHERE status='active'${fFrag(req)} ORDER BY name`).all();
     const rows = residents.map(r => {
       const plan = currentPayplan(r.id);
       const log = db.prepare(`SELECT * FROM housing_rentlog WHERE resident_id=? AND week=? ORDER BY id DESC LIMIT 1`).get(r.id, wk);
@@ -2741,7 +2802,7 @@ export function mountHousing(app) {
         log: log || null,
       };
     });
-    const collected = db.prepare(`SELECT COALESCE(SUM(collected),0) s FROM housing_rentlog WHERE week=?`).get(wk).s;
+    const collected = db.prepare(`SELECT COALESCE(SUM(collected),0) s FROM housing_rentlog WHERE week=?${rFrag(req)}`).get(wk).s;
     const expected = rows.reduce((a, r) => a + (r.due || 0), 0);
     const worked = rows.filter(r => r.log).length;
     res.json({ week: wk, rows, stats: { expected, collected, worked, total: rows.length, noPlan: rows.filter(r => !r.hasPlan).length } });
@@ -2767,7 +2828,7 @@ export function mountHousing(app) {
 
   // ---- Employment & job search ----
   app.get('/api/housing/employment', requireAuth, (req, res) => {
-    const residents = db.prepare(`SELECT id,name,house_id FROM housing_residents WHERE status='active' ORDER BY name`).all();
+    const residents = db.prepare(`SELECT id,name,house_id FROM housing_residents WHERE status='active'${fFrag(req)} ORDER BY name`).all();
     const rows = residents.map(r => {
       const e = currentEmployment(r.id);
       const wk = jobsearchThisWeek(r.id);
@@ -2803,7 +2864,7 @@ export function mountHousing(app) {
 
   // ---- Outcomes ----
   app.get('/api/housing/outcomes', requireAuth, (req, res) => {
-    const all = db.prepare(`SELECT * FROM housing_residents`).all();
+    const all = db.prepare(`SELECT * FROM housing_residents WHERE 1=1${fFrag(req)}`).all();
     const active = all.filter(r => r.status === 'active');
     const discharged = all.filter(r => r.status === 'discharged');
     // length of stay (active + discharged)
@@ -2831,13 +2892,13 @@ export function mountHousing(app) {
     const dispo = {};
     discharged.forEach(r => { const t = r.discharge_type || 'Unknown'; dispo[t] = (dispo[t] || 0) + 1; });
     // returns to use (all-time)
-    const returns = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE type='Return to use'`).get().c;
+    const returns = db.prepare(`SELECT COUNT(*) c FROM housing_incidents WHERE type='Return to use'${hFrag(req)}`).get().c;
     // loyalty (alumni would-recommend → NPS) for the best-in-class target panel
     const recs = db.prepare(`SELECT would_recommend v FROM housing_alumni_checkins WHERE would_recommend IS NOT NULL`).all().map(r => r.v);
     const nps = recs.length ? Math.round((recs.filter(v => v >= 9).length - recs.filter(v => v <= 6).length) / recs.length * 100) : null;
     // activities programmed in the trailing week (the engagement floor we measure on)
     const wkStart = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); })();
-    const activitiesWk = db.prepare(`SELECT COUNT(*) c FROM housing_activity_events WHERE date>=? AND date<=? AND status!='cancelled'`).get(wkStart, todayStr()).c;
+    const activitiesWk = db.prepare(`SELECT COUNT(*) c FROM housing_activity_events WHERE date>=? AND date<=? AND status!='cancelled'${hFrag(req)}`).get(wkStart, todayStr()).c;
     res.json({
       avgLos, active: active.length, discharged: discharged.length,
       retention: { d30: retained(30), d90: retained(90), d180: retained(180) },

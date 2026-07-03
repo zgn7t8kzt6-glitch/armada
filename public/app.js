@@ -6324,8 +6324,22 @@ function apNoteModal(mode,id){
     <div class="toolbar" style="justify-content:flex-start;gap:10px;margin-top:6px;flex-wrap:wrap">
       <label class="hint"><input type="checkbox" id="apExpand"/> Needs a full note later (goes on my follow-ups)</label>
       ${AP_DATA&&AP_DATA.cmPush?`<label class="hint"><input type="checkbox" id="apKipu" checked/> 📤 Also chart to Kipu (Case Management note)</label>`:''}
+      ${AP_DATA&&!AP_DATA.cmPush&&AP_DATA.cmPushUnavailable?`<button class="btn btn-ghost btn-sm sans" onclick="apCopyForKipu()" title="Kipu's API doesn't accept note writes yet — copy the composed note and paste it into the Case Management Progress Note in Kipu">📋 Copy note for Kipu</button>`:''}
       <button class="btn btn-gold btn-sm sans" onclick="apNoteSave('${mode}',${id})">Save &amp; close</button></div></div>`;
   h.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+// Kipu won't accept note writes over its API (Patient data only) — so compose the
+// same chart note and put it on the clipboard for a two-tap paste into Kipu.
+async function apCopyForKipu(){
+  const dispBtn=document.querySelector('#apDisp .btn-gold');
+  const topics=[...document.querySelectorAll('#apTop .btn-gold')].map(b=>b.dataset.v);
+  const lines=['Case management session — '+today()+'.'];
+  if(dispBtn) lines.push('Client presentation: '+dispBtn.dataset.v+'.');
+  if(topics.length) lines.push('Areas addressed: '+topics.join(', ')+'.');
+  const body=($('apBody2')||{}).value||''; if(body.trim()) lines.push(body.trim());
+  lines.push('— '+(ME&&ME.name||''));
+  try{ await navigator.clipboard.writeText(lines.join('\n\n')); alert('📋 Copied — open the client in Kipu → Case Management Progress Note → paste.'); }
+  catch(e){ prompt('Copy the note:', lines.join(' | ')); }
 }
 async function apNoteSave(mode,id){
   const dispBtn=document.querySelector('#apDisp .btn-gold');

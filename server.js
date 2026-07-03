@@ -1072,7 +1072,7 @@ app.post('/api/appts/staffsetup', requireAuth, requireAppts, (req, res) => {
 // one-minute note that closes a meeting can chart itself into Kipu. Never
 // blocks the save — the note is safe here first; the push reports honestly.
 function kipuCmConfigured() {
-  return kipuConfigured() && !!(getState('kipu_template_cm_id') || getState('kipu_template_cm_name'));
+  return kipuConfigured() && !!(getState('kipu_template_cm_id') || getState('kipu_template_cm_name')) && !getState('kipu_push_unavailable');
 }
 async function pushCmNote({ client_id, user, kind, topics, disposition, body }) {
   try {
@@ -1090,7 +1090,13 @@ async function pushCmNote({ client_id, user, kind, topics, disposition, body }) 
       text: lines.join('\n\n'), authorName: user.name,
     });
     return { ok: true, path: r.path };
-  } catch (e) { return { ok: false, error: String(e.message).slice(0, 200) }; }
+  } catch (e) {
+    // Kipu's public API only allows POST/PATCH on Patient data — if it tells us
+    // the evaluation-write route doesn't exist, remember that and stop offering
+    // the push (re-saving the template config clears this to retry).
+    if (/route could not be found/i.test(e.message)) setState('kipu_push_unavailable', new Date().toISOString().slice(0, 10) + ': ' + String(e.message).slice(0, 160));
+    return { ok: false, error: String(e.message).slice(0, 200) };
+  }
 }
 app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
@@ -1121,7 +1127,7 @@ app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
     WHERE a.status='missed' AND a.missed_reason IS NULL AND NOT EXISTS (SELECT 1 FROM appointments r WHERE r.reschedule_of=a.id) ORDER BY a.date DESC LIMIT 40`).all()
     .map((a) => ({ ...a, client: a.pref || a.client_name }));
   if (!apptsLeadership(req.user)) { pending = pending.filter((p) => mine(p.by)); missed = missed.filter((m) => mine(m.staff_name)); }
-  const out = { cmPush, date: day, appts, queue, estWaitMin: estWaitMinutes(), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
+  const out = { cmPush, cmPushUnavailable: getState('kipu_push_unavailable') || null, date: day, appts, queue, estWaitMin: estWaitMinutes(), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
     staff: db.prepare(`SELECT DISTINCT name FROM users WHERE active=1 AND job_role IN ('Case Manager','Therapist','Clinical Director','Nurse','Peer Support') ORDER BY name`).all().map((x) => x.name),
     clients: db.prepare(`SELECT id, pref, name, room, therapist, case_manager FROM clients WHERE active=1 AND merged_into IS NULL ORDER BY pref, name`).all().map((c) => ({ id: c.id, label: c.pref || c.name, room: c.room, therapist: c.therapist, case_manager: c.case_manager })) };
   // Supervisor lens: the Schulze numbers — reliability made visible (30 days).
@@ -7292,6 +7298,7 @@ app.post('/api/kipu/push-note', requireAuth, canPushKipu, async (req, res) => {
 
 // Save the template config for each note type.
 app.post('/api/kipu/template-config', requireAuth, requireAdmin, (req, res) => {
+  setState('kipu_push_unavailable', '');   // explicit retry — maybe Kipu enabled the route
   const b = req.body || {};
   for (const key of ['handoff', 'cm', 'pulse', 'note']) {
     if (b[key + '_id'] != null) setState(`kipu_template_${key}_id`, String(b[key + '_id']).trim());

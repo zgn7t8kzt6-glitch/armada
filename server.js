@@ -6089,8 +6089,11 @@ app.get('/api/outpatient/adt-probe', requireAuth, requireOutpatient, async (req,
 // Dump level/UR/authorization fields from a few patients so we can find the real
 // current-level field (OP vs IOP) and the PHP authorization period (for PHP LOS).
 app.get('/api/outpatient/field-inspect', requireAuth, requireOutpatient, async (req, res) => {
-  if (!kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
-  try { res.json(await kipuOutpatientFieldInspect(outpatientLocationName(), 6)); } catch (e) { res.status(502).json({ error: e.message }); }
+  // Scoped to a facility with its own 🔌 → inspect THAT instance's charts.
+  const sc = outpatientScope(req, res); if (!sc) return;
+  if (sc.fid && !sc.isDefault && !sc.conn) return res.status(503).json({ error: `${sc.fac.name} doesn’t have its own Kipu connection yet.` });
+  if ((!sc.fid || sc.isDefault) && !kipuConfigured()) return res.status(503).json({ error: 'Kipu isn’t connected.' });
+  try { res.json(await kipuOutpatientFieldInspect(sc.fid && !sc.isDefault ? (sc.fac.kipu_location_name || '') : outpatientLocationName(), 6, sc.fid && !sc.isDefault ? sc.conn : null)); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 // Group attendance for a given day: of the people enrolled at each level, what
 // percentage attended at least one group. Matches Kipu group-session attendees

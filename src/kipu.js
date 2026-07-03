@@ -1711,7 +1711,7 @@ export async function kipuOutpatientCensus(locationName, conn = null) {
   // Second pass: pull each patient's detail to get level of care + insurance (the
   // census doesn't include them). Bounded concurrency, best-effort per patient.
   const enriched = await mapLimit(basics, +(process.env.KIPU_CONCURRENCY || 6), async (x) => {
-    let det = null, history = []; try { det = x.ks ? await kipuPatientDetail(x.ks) : null; } catch { /* best-effort */ }
+    let det = null, history = []; try { det = x.ks ? await kipuPatientDetail(x.ks, conn) : null; } catch { /* best-effort */ }
     try { history = x.ks ? await kipuProgramHistory(x.ks, conn) : []; } catch { /* best-effort */ }
     return { ...x, det, history };
   });
@@ -1969,21 +1969,22 @@ export async function kipuGroupAttendance(locationName, startDate, endDate, conn
 // from a few patients' charts, so we can find (a) the ACTUAL current level (to split
 // OP from IOP — UR LOC is the authorized level, which lags) and (b) the PHP
 // authorization period (PHP auth end ≈ step-down to IOP) to compute PHP LOS.
-export async function kipuOutpatientFieldInspect(locationName, sampleN = 6) {
+export async function kipuOutpatientFieldInspect(locationName, sampleN = 6, conn = null) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();
   let locId = null;
   try {
-    const loc = await kipuGet('/api/locations');
+    const loc = await kipuGet('/api/locations', conn);
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
-    const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
+    const hit = want ? (ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want))) : null;
     if (hit) locId = hit.id;
+    else if (ls.length === 1) locId = ls[0].id;
   } catch (e) { return { error: 'locations: ' + e.message }; }
   if (locId == null) return { error: `Location "${locationName}" not found.` };
   let path = (process.env.KIPU_ROSTER_PATH || '/api/patients/census');
   path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
-  const data = await kipuGet(path);
+  const data = await kipuGet(path, conn);
   const list = (data?.patients || data?.census || (Array.isArray(data) ? data : [])).slice(0, sampleN * 2);
   const interesting = (k) => /level|loc|\bur\b|authoriz|\bauth|program|care|partial|intensive|outpat|\bphp\b|\biop\b|\bop\b|step|frequenc|session|begin|start|end|expir|through|admit|discharge|date/i.test(k);
   const flat = {};
@@ -2000,7 +2001,7 @@ export async function kipuOutpatientFieldInspect(locationName, sampleN = 6) {
   const out = [];
   for (const p of list.slice(0, sampleN)) {
     const ks = String(pick(p, 'casefile_id', 'id', 'patient_id', 'mrn') || '');
-    let det = null; try { det = ks ? await kipuPatientDetail(ks) : null; } catch { /* best-effort */ }
+    let det = null; try { det = ks ? await kipuPatientDetail(ks, conn) : null; } catch { /* best-effort */ }
     Object.keys(flat).forEach((k) => delete flat[k]);
     scan(p, 0, 'census.'); scan(det, 0, '');
     out.push({ name: [p.first_name, p.last_name].filter(Boolean).join(' ') || p.name || ks, fields: { ...flat } });

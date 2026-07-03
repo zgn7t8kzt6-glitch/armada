@@ -1608,16 +1608,17 @@ export async function kipuListLocations() {
 export async function kipuOutpatientAdmissions(locationName, startDate, endDate, conn = null) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();
-  if (!want) return { error: 'No outpatient location name configured.' };
-  let locId = null, locName = null;
+  let locId = null, locName = null, locNames = [];
   try {
     const loc = await kipuGet('/api/locations', conn);
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
-    const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
+    locNames = ls.map((l) => l.name).filter(Boolean);
+    const hit = want ? (ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want))) : null;
     if (hit) { locId = hit.id; locName = hit.name; }
+    else if (ls.length === 1) { locId = ls[0].id; locName = ls[0].name; }   // single-site Kipu — unambiguous
   } catch (e) { return { error: 'Could not read Kipu locations: ' + e.message }; }
-  if (locId == null) return { error: `Location "${locationName}" not found in Kipu.` };
+  if (locId == null) return { error: want ? `Location "${locationName}" not found in this Kipu — it has: ${locNames.join(', ') || '(no named locations)'}. Set the facility's "Kipu name" to one of those and sync again.` : 'No location name configured for this facility.' };
   const start = String(startDate || '').slice(0, 10);
   const end = String(endDate || appToday()).slice(0, 10);
   const rows = [];
@@ -1671,16 +1672,16 @@ export async function kipuOutpatientPhpOutcomes(locationName, since, end, conn =
 export async function kipuOutpatientCensus(locationName, conn = null) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();
-  if (!want) return { error: 'No outpatient location name configured.' };
   let locId = null, locName = null, locations = [];
   try {
     const loc = await kipuGet('/api/locations', conn);
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     locations = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
-    const hit = locations.find((l) => l.name.toLowerCase() === want) || locations.find((l) => l.name.toLowerCase().includes(want));
+    const hit = want ? (locations.find((l) => l.name.toLowerCase() === want) || locations.find((l) => l.name.toLowerCase().includes(want))) : null;
     if (hit) { locId = hit.id; locName = hit.name; }
+    else if (locations.length === 1) { locId = locations[0].id; locName = locations[0].name; }   // single-site Kipu — unambiguous
   } catch (e) { return { error: 'Could not read Kipu locations: ' + e.message }; }
-  if (locId == null) return { error: `Location "${locationName}" not found in Kipu.`, locations };
+  if (locId == null) return { error: want ? `Location "${locationName}" not found in this Kipu — it has: ${locations.map((l) => l.name).filter(Boolean).join(', ') || '(no named locations)'}. Set the facility's "Kipu name" to one of those and sync again.` : 'No location name configured for this facility.', locations };
   let path = (process.env.KIPU_ROSTER_PATH || '/api/patients/census');
   path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
   const data = await kipuGet(path, conn);
@@ -1904,16 +1905,17 @@ export async function kipuUrProbe(locationName) {
 export async function kipuGroupAttendance(locationName, startDate, endDate, conn = null) {
   const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
   const want = String(locationName || '').trim().toLowerCase();
-  if (!want) return { error: 'No outpatient location name configured.' };
-  let locId = null, locName = null;
+  let locId = null, locName = null, locNames = [];
   try {
     const loc = await kipuGet('/api/locations', conn);
     const llist = loc?.locations || loc?.buildings || (Array.isArray(loc) ? loc : []);
     const ls = llist.map((l) => ({ id: l.location_id ?? l.id ?? l.value, name: String(l.location_name ?? l.name ?? l.enabled_location_name ?? '') }));
-    const hit = ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want));
+    locNames = ls.map((l) => l.name).filter(Boolean);
+    const hit = want ? (ls.find((l) => l.name.toLowerCase() === want) || ls.find((l) => l.name.toLowerCase().includes(want))) : null;
     if (hit) { locId = hit.id; locName = hit.name; }
+    else if (ls.length === 1) { locId = ls[0].id; locName = ls[0].name; }   // single-site Kipu — unambiguous
   } catch (e) { return { error: 'Could not read Kipu locations: ' + e.message }; }
-  if (locId == null) return { error: `Location "${locationName}" not found in Kipu.` };
+  if (locId == null) return { error: want ? `Location "${locationName}" not found in this Kipu — it has: ${locNames.join(', ') || '(no named locations)'}. Set the facility's "Kipu name" to one of those and sync again.` : 'No location name configured for this facility.' };
   const sd = String(startDate || '').slice(0, 10);
   const ed = String(endDate || startDate || '').slice(0, 10);
   // Pull all group sessions in the window (paginated). Kipu accepts start_date/end_date.

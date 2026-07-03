@@ -3834,11 +3834,12 @@ app.get('/api/debrief-discharges/status', requireAuth, requireAdmin, (req, res) 
 // Per-client case-management needs (AI from notes + manual), so the CM sees what
 // to help with before the client asks. Plus what each client likes.
 app.get('/api/case-management', requireAuth, (req, res) => {
-  const clients = db.prepare(`SELECT id, pref, name, room, program, likes FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const clients = db.prepare(`SELECT id, pref, name, room, program, likes FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
   const getTasks = db.prepare(`SELECT * FROM case_tasks WHERE client_id = ? ORDER BY (status='done'), id DESC`);
   const rows = clients.map((c) => ({ ...c, name: c.pref || c.name, tasks: getTasks.all(c.id) })).filter((c) => c.tasks.length || c.likes);
-  const openCount = db.prepare(`SELECT COUNT(*) n FROM case_tasks t JOIN clients c ON c.id=t.client_id WHERE t.status='open' AND c.active=1 AND c.discharge_status IS NULL`).get().n;
-  const byCat = db.prepare(`SELECT category k, COUNT(*) n FROM case_tasks t JOIN clients c ON c.id=t.client_id WHERE t.status='open' AND c.active=1 AND c.discharge_status IS NULL GROUP BY category ORDER BY n DESC`).all();
+  const openCount = db.prepare(`SELECT COUNT(*) n FROM case_tasks t JOIN clients c ON c.id=t.client_id WHERE t.status='open' AND c.active=1 AND c.discharge_status IS NULL${fc.frag('c.facility_id')}`).get().n;
+  const byCat = db.prepare(`SELECT category k, COUNT(*) n FROM case_tasks t JOIN clients c ON c.id=t.client_id WHERE t.status='open' AND c.active=1 AND c.discharge_status IS NULL${fc.frag('c.facility_id')} GROUP BY category ORDER BY n DESC`).all();
   res.json({ clients: rows, openCount, byCategory: byCat, categories: CASE_CATEGORIES });
 });
 app.post('/api/case-tasks', requireAuth, (req, res) => {
@@ -10882,7 +10883,9 @@ function geofenceCheck(body, req, out) {
   const lat = parseFloat(body?.lat), lon = parseFloat(body?.lon);
   if (!isFinite(lat) || !isFinite(lon)) return 'Clock in/out at an Armada facility — turn on location, or connect to the facility WiFi. (Ask a lead to approve this network once.)';
   const acc = Math.min(parseFloat(body?.acc) || 0, 100);   // give back up to 100m of GPS slack
-  const fences = [{ fid: defaultFacilityId(), name: 'Armada', lat: g.lat, lon: g.lon, radius: g.radius }, ...facilityFences()];
+  // Facility fences FIRST — a punch inside both a building's own fence and the
+  // legacy org fence belongs to the building, not to detox by default.
+  const fences = [...facilityFences(), { fid: defaultFacilityId(), name: 'Armada', lat: g.lat, lon: g.lon, radius: g.radius }];
   let nearest = Infinity;
   for (const f of fences) {
     const dist = metersBetween(lat, lon, f.lat, f.lon);

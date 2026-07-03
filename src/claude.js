@@ -417,6 +417,7 @@ export async function classifyDeskItem(text, buckets, facilities, roles) {
 // The bar for "ignore" is high-confidence noise; when unsure, surface as review.
 const MAIL_TRIAGE_SCHEMA = {
   type: 'object',
+  additionalProperties: false,
   properties: {
     needs_me: { type: 'boolean', description: 'true if the OWNER personally must see or act on this message.' },
     category: { type: 'string', enum: ['decision', 'followup', 'review', 'ignore'], description: 'decision = he must choose/approve something; followup = he must reply, chase, or schedule; review = worth reading, no action; ignore = noise.' },

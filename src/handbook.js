@@ -88,7 +88,7 @@ export const HANDBOOK_INTRO = {
 export const HANDBOOK = [
   {
     chapter: 1, title: 'Leadership',
-    roles: ['Executive Director', 'Director of Operations', 'Clinical Director', 'Housing Director', 'HR', 'Executive Assistant', 'House Manager'],
+    roles: ['Executive Director', 'Director of Operations', 'Clinical Director', 'Housing Director', 'HR', 'Executive Assistant', 'House Manager', 'Director of Revenue Cycle Management', 'Director of Billing Compliance'],
     purpose: [
       'Everything in this handbook depends on you. A standard is only as real as the leader who lives it, coaches it, and refuses to walk past its absence. Your team will not rise above the example you set or the behavior you tolerate.',
       'You are not here to catch people doing wrong. You are here to develop good people into extraordinary ones, remove what gets in their way, and make excellence the easiest thing to do at Armada. The standard applies to you first. It starts with you.',

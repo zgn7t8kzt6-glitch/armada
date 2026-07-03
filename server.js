@@ -125,7 +125,7 @@ function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
 setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant', 'HR'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management', 'Director of Billing Compliance', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant', 'HR'];
 // ── Phase 2 access control: the role_permissions matrix is LIVE for the corporate
 // and HR modules (first per the rebuild order; clinical switches LAST). Grant paths
 // are additive per the Constitution (Evolve Without Breaking): a matrix row can
@@ -323,7 +323,7 @@ app.post('/api/logout', (req, res) => { logout(req, res); res.json({ ok: true })
 // Outpatient (Akron House Recovery) is owner-only: the admin, plus any user ids the
 // owner explicitly grants. Walled off from everyone else.
 function outpatientAllowlist() { try { const a = JSON.parse(getState('outpatient_access') || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
-function canSeeOutpatient(user) { return !!user && (user.role === 'admin' || outpatientAllowlist().includes(user.id)); }
+function canSeeOutpatient(user) { return !!user && (user.role === 'admin' || user.job_role === 'Director of Revenue Cycle Management' || outpatientAllowlist().includes(user.id)); }
 function requireOutpatient(req, res, next) { if (!canSeeOutpatient(req.user)) return res.status(403).json({ error: 'Owner only.' }); next(); }
 
 // ── Facilities registry (all 6 locations) for the consolidated ownership view ──
@@ -559,7 +559,7 @@ app.post('/api/org/permissions', requireAuth, requireAdmin, (req, res) => {
 // platform can compute: days left, days used vs approved, linked-chart doc gaps),
 // and Action (renew / deny / close / view patient). Intelligence is rule-based
 // and cites only what's in the data — nothing invented (Principle 12).
-function canSeeAuth(user) { return !!user && (user.role === 'admin' || hasPerm(user, 'ur') || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Case Manager'].includes(user.job_role)); }
+function canSeeAuth(user) { return !!user && (user.role === 'admin' || hasPerm(user, 'ur') || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Case Manager', 'Director of Revenue Cycle Management', 'Director of Billing Compliance'].includes(user.job_role)); }
 const requireAuthReg = (req, res, next) => { if (!canSeeAuth(req.user)) return res.status(403).json({ error: 'UR / leadership access only.' }); next(); };
 const AUTH_LEVELS = ['DTX', 'RES', 'PHP', 'IOP', 'OP'];
 function authIntel(a, today) {
@@ -702,7 +702,7 @@ app.post('/api/auth-register/sync-kipu', requireAuth, requireAuthReg, async (req
     res.json(r);
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
-app.post('/api/auth-register/settings', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/auth-register/settings', requireAuth, (req, res, next) => { if (!(req.user.role === 'admin' || req.user.job_role === 'Director of Revenue Cycle Management')) return res.status(403).json({ error: 'Revenue leadership only.' }); next(); }, (req, res) => {
   setState('auth_email', String(req.body?.email || '').slice(0, 300));
   res.json({ ok: true });
 });
@@ -754,10 +754,10 @@ function classifyEncounter(name, cfg) {
 // Manager: their assigned clients. Evening/floor staff: everything unresolved.
 function canSeeBilling(user) {
   return !!user && (user.role === 'admin' || hasPerm(user, 'billing')
-    || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR', 'Therapist', 'Case Manager', 'Nurse', 'BHT / Tech'].includes(user.job_role));
+    || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR', 'Therapist', 'Case Manager', 'Nurse', 'BHT / Tech', 'Director of Revenue Cycle Management', 'Director of Billing Compliance'].includes(user.job_role));
 }
 const requireBilling = (req, res, next) => { if (!canSeeBilling(req.user)) return res.status(403).json({ error: 'Clinical or leadership access only.' }); next(); };
-function billingLeadership(user) { return user.role === 'admin' || hasPerm(user, 'billing') || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR'].includes(user.job_role); }
+function billingLeadership(user) { return user.role === 'admin' || hasPerm(user, 'billing') || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR', 'Director of Revenue Cycle Management', 'Director of Billing Compliance'].includes(user.job_role); }
 function billingScopeRows(user, rows) {
   if (billingLeadership(user)) return rows;
   const mine = (v) => String(v || '').toLowerCase().includes(String(user.name || '§none').toLowerCase());
@@ -958,7 +958,8 @@ app.get('/api/billingready/export', requireAuth, requireBilling, (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="billing-readiness-${since}_${end}.csv"`);
   res.send(csv);
 });
-app.post('/api/billingready/settings', requireAuth, requireAdmin, (req, res) => {
+const requireBillingAdmin = (req, res, next) => { if (!(req.user.role === 'admin' || ['Director of Billing Compliance', 'Director of Revenue Cycle Management'].includes(req.user.job_role))) return res.status(403).json({ error: 'Billing leadership only.' }); next(); };
+app.post('/api/billingready/settings', requireAuth, requireBillingAdmin, (req, res) => {
   const b = req.body || {};
   const list = (v) => Array.isArray(v) ? v.map((x) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 60) : undefined;
   const cur = billingCfg();

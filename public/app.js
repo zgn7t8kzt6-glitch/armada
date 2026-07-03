@@ -228,10 +228,10 @@ const VIEW_ROLES = {
   inventory:   ['Director of Operations','Catering / Dietary','Housekeeping','Nurse','Front Desk'],
   meals:       ['Director of Operations','Catering / Dietary','BHT / Tech'],
   // Clinical / care pages — the care team (+ Clinical Director)
-  clients:     [...CARE,'Front Desk'],
-  journey:     [...CARE,'Front Desk'],   // Front Desk can open a client's 360 from the Clients grid
+  clients:     [...CARE,'Front Desk','Director of Revenue Cycle Management','Director of Billing Compliance'],
+  journey:     [...CARE,'Front Desk','Director of Revenue Cycle Management','Director of Billing Compliance'],   // Front Desk can open a client's 360 from the Clients grid
   editor:      CARE,
-  records:     ['Nurse','Case Manager','Therapist','Clinical Director'],
+  records:     ['Nurse','Case Manager','Therapist','Clinical Director','Director of Revenue Cycle Management','Director of Billing Compliance'],
   rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
   bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
@@ -251,10 +251,10 @@ const VIEW_ROLES = {
   engagement:  ['BHT / Tech','Therapist','Clinical Director'],
   program:     ['BHT / Tech','Therapist','Clinical Director'],
   casemgmt:    ['Case Manager','Therapist','Clinical Director'],
-  continuum:   ['Case Manager','Clinical Director'],
+  continuum:   ['Case Manager','Clinical Director','Director of Revenue Cycle Management'],
   retention:   CARE,
   incidents:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
-  compliance:  ['Nurse','Case Manager','Therapist','Clinical Director'],
+  compliance:  ['Nurse','Case Manager','Therapist','Clinical Director','Director of Billing Compliance'],
   family:      ['Case Manager','Therapist','Clinical Director','Front Desk'],
   // Handoff — discharge & continuum (case management + clinical)
   dischargepage: ['Case Manager','Nurse','Clinical Director'],
@@ -304,6 +304,12 @@ const ROLE_MENU = {
   // The Case Manager's day, in order: home → meeting queue → caseload → the exits
   // (discharge/continuum) → the money guardrails (auths, billing readiness) → circle.
   'Case Manager': ['dashboard','appts','casemgmt','clients','records','dischargepage','continuum','authreg','billingready','family','referrals','alumni','incidents','messages','team','training','handbook','library'],
+  // Revenue lane — the money side of care, in the order the day flows:
+  // what expires (auths) → what bills today (readiness) → the charts behind it.
+  'Director of Revenue Cycle Management': ['dashboard','authreg','billingready','outpatient','clients','records','continuum','messages','team','training','handbook','library'],
+  // Compliance lane — is every billed day defensible: readiness first, then the
+  // documentation review, then the charts and auths it all points back to.
+  'Director of Billing Compliance': ['dashboard','billingready','compliance','records','clients','authreg','messages','team','training','handbook','library'],
   'Housing Director': ['housing','myrole','mygrowth','handbook','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','mygrowth','handbook','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','myrole','mygrowth','handbook','housing','voice','activities','residents','houses','mytasks','messages'],

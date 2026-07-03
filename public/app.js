@@ -6430,13 +6430,17 @@ async function deskMail(b){
   b.innerHTML='<div class="hint" style="margin-top:10px">Checking the mailbox…</div>';
   let st; try{ st=await api('/mail/status'); }catch(e){ b.innerHTML='<div class="hint" style="margin-top:10px">'+esc(e.message)+'</div>'; return; }
   if(!st.configured){
-    b.innerHTML=`<div style="margin-top:10px;max-width:640px">
+    b.innerHTML=`<div style="margin-top:10px;max-width:680px">
       <h3 style="margin:0 0 4px">📧 Connect your inbox</h3>
-      <p class="sub sans">One-time setup (5 minutes, or forward this to IT): in <strong>entra.microsoft.com</strong> → App registrations → <em>New registration</em> — name it "Armada OS Mail", single tenant. Then: Authentication → <em>Allow public client flows</em> = Yes. API permissions → add <em>Microsoft Graph → Delegated → Mail.Read</em>. Paste the <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong> from the Overview page here.</p>
+      <div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><strong class="sans">⚡ Instant setup — try this first, no IT needed</strong>
+        <p class="sub sans" style="margin:4px 0 8px">Uses Microsoft's own built-in sign-in app. One tap here, then you enter a short code on Microsoft's site and approve read-only access to your mailbox. If your company tenant allows it (most do), you're done in under a minute.</p>
+        <button class="btn btn-gold sans" onclick="mailInstantSetup()">⚡ Set up instantly</button> <span class="hint" id="mg_msg2"></span></div>
+      <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">If instant setup is blocked by your tenant — the 5-minute manual way (you or IT)</summary>
+      <p class="sub sans" style="margin:6px 0">Sign in at <strong>entra.microsoft.com</strong> (your normal Microsoft login) → App registrations → <em>New registration</em> — name it "Armada OS Mail", single tenant. Then: Authentication → <em>Allow public client flows</em> = Yes → Save. Paste the <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong> from its Overview page:</p>
       <label>Application (client) ID</label><input id="mg_client" placeholder="xxxxxxxx-xxxx-…"/>
       <label>Directory (tenant) ID</label><input id="mg_tenant" placeholder="xxxxxxxx-xxxx-…"/>
-      <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="mailSaveSetup()">Save</button><span class="hint" id="mg_msg"></span></div>
-      <p class="sub sans" style="margin-top:8px">The app only gets permission to <em>read</em> mail — it can't send or delete anything. Your password never touches it.</p></div>`;
+      <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="mailSaveSetup()">Save</button><span class="hint" id="mg_msg"></span></div></details>
+      <p class="sub sans" style="margin-top:8px">Either way: read-only. The app can never send or delete mail, and your password never touches it.</p></div>`;
     return;
   }
   if(!st.connected){
@@ -6477,6 +6481,15 @@ async function deskMail(b){
   api('/mail/muted').then(r=>{ const el=$('mailMutedList'); if(!el) return;
     el.innerHTML=(r.muted||[]).map(x=>`<div style="margin-top:3px">🔇 ${esc(x.from_email)} <span style="opacity:.7">(${esc(x.why||'')})</span> <a href="#" onclick="mailUnmute('${esc(x.from_email)}');return false">unmute</a></div>`).join('')||'No muted senders yet — tap 🔇 on any card, or dismiss the same sender 3 times and it mutes itself.';
   }).catch(()=>{});
+}
+async function mailInstantSetup(){
+  const m=$('mg_msg2'); if(m)m.textContent='Setting up…';
+  try{
+    // Microsoft's first-party public client (the Graph PowerShell app) — made for
+    // exactly this device-code sign-in; most work tenants permit it by default.
+    await api('/mail/settings',{method:'POST',body:JSON.stringify({client_id:'14d82eec-204b-4c2f-b7e8-296a70dab67e',tenant:'organizations',enabled:true})});
+    renderDeskTab();
+  }catch(e){ if(m)m.textContent=e.message; }
 }
 async function mailSaveSetup(){
   const m=$('mg_msg');

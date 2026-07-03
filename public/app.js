@@ -5931,7 +5931,7 @@ function deskCard(x,primary){
   // let buttons share a row with text inside a narrow kanban column.
   return `<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default;display:block">
     <div class="q-title" style="font-size:14.5px;line-height:1.35">${esc(x.title)}</div>
-    <div class="q-sub" style="margin-top:3px;line-height:2">${x.due_date?tag('🗓 '+esc(x.due_date)+(x.due_time?' '+esc(x.due_time):'')):''}${x.with_who?tag('👤 '+esc(x.with_who)+(x.nudged_at?' · nudged '+deskDaysAgo(x.nudged_at):'')):''}${x.bucket?tag('🏷 '+esc(x.bucket)):''}${x.facility_name?tag('📍'+esc(x.facility_name)):''}${x.source!=='app'?tag('📱'):''}</div>
+    <div class="q-sub" style="margin-top:3px;line-height:2">${x.due_date?tag('🗓 '+esc(x.due_date)+(x.due_time?' '+esc(x.due_time):'')):''}${x.with_who?tag('👤 '+esc(x.with_who)+(x.nudged_at?' · nudged '+deskDaysAgo(x.nudged_at):'')):''}${x.bucket?tag('🏷 '+esc(x.bucket)):''}${x.facility_name?tag('📍'+esc(x.facility_name)):''}${(!x.with_who&&x.suggested_role)?`<span class="badge-info" style="margin-right:4px;cursor:pointer" title="AI suggests this role — tap to pick the person" onclick="deskAssignRole(${x.id},'${esc(x.suggested_role).replace(/'/g,"\\'")}')">🎯 ${esc(x.suggested_role)} →</span>`:''}${x.source!=='app'?tag('📱'):''}</div>
     <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${x.status!=='done'?`${gold}
       <button class="btn btn-ghost btn-sm sans" title="More" onclick="deskMore(${x.id},this)">⋯</button>`
       :`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${x.id},{status:'open'})">↩︎</button>`}</div></div>`;
@@ -6040,6 +6040,14 @@ async function deskBucket(id){
   const f=prompt('Location (optional) — one of:\n'+facs.map(x=>x.name).join(' · '));
   const fac=f?facs.find(x=>x.name.toLowerCase().includes(f.toLowerCase().trim())):null;
   deskDo(id,{bucket:match,facility_id:fac?fac.id:(f===''?null:undefined)});
+}
+async function deskAssignRole(id,role){
+  const staff=((DESK_DATA||{}).staffByRole||{})[role]||[];
+  if(!staff.length){ if(confirm('No active app users with the role "'+role+'". Assign someone by name instead?')) deskWho(id); return; }
+  const pick=prompt('AI suggests a '+role+'. Who?\n'+staff.map((n,i)=>(i+1)+'. '+n).join('\n')+'\n\nType a number or a name:');
+  if(pick==null) return;
+  const name=/^\d+$/.test(pick.trim())?staff[+pick.trim()-1]:pick.trim();
+  if(name) deskDo(id,{with_who:name});
 }
 async function deskWho(id){ const w=prompt('Who has to help close this? (name — matches app users automatically)'); if(w==null) return; deskDo(id,{with_who:w}); }
 async function deskNudge(id){ try{ const r=await api('/desk/'+id+'/nudge',{method:'POST'}); alert('📣 '+(r.how||'nudged')); }catch(e){ alert(e.message);} loadMyDesk(); }

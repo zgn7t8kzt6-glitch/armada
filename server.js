@@ -1226,20 +1226,29 @@ function deskBuckets() {
 function deskClassifyAsync(id, title) {
   if (!claudeConfigured()) return;
   const facs = orgFacilities().filter((f) => f.type !== 'corporate' && f.active).map((f) => f.name);
-  classifyDeskItem(title, deskBuckets(), facs).then((r) => {
+  classifyDeskItem(title, deskBuckets(), facs, JOB_ROLES).then((r) => {
     const bucket = deskBuckets().find((b) => b.toLowerCase() === String(r.bucket || '').toLowerCase()) || null;
     const fac = r.facility ? facilityForEntity(r.facility) : null;
-    if (bucket || fac) db.prepare(`UPDATE desk_items SET bucket=COALESCE(?, bucket), facility_id=COALESCE(?, facility_id) WHERE id=?`).run(bucket, fac ? fac.id : null, id);
-  }).catch(() => { /* stays unfiled — visible, never wrong */ });
+    const role = JOB_ROLES.find((x) => x.toLowerCase() === String(r.role || '').toLowerCase()) || null;
+    if (bucket || fac || role) db.prepare(`UPDATE desk_items SET bucket=COALESCE(?, bucket), facility_id=COALESCE(?, facility_id), suggested_role=COALESCE(?, suggested_role) WHERE id=?`).run(bucket, fac ? fac.id : null, role, id);
+  }).catch((e) => console.error('[desk] classify #' + id + ':', e.message));   // loud, never silent
 }
 function noteToken() { let t = getState('desk_note_token'); if (!t) { t = crypto.randomBytes(14).toString('base64url'); setState('desk_note_token', t); } return t; }
 app.get('/api/desk', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
   const items = db.prepare(`SELECT d.*, u.name AS matched_name, f.name AS facility_name FROM desk_items d LEFT JOIN users u ON u.id=d.with_user_id LEFT JOIN org_facilities f ON f.id=d.facility_id WHERE d.owner_id=? AND (d.status != 'done' OR d.done_at >= datetime('now','-14 day')) ORDER BY d.status='done', (d.due_date IS NULL), d.due_date, d.due_time, d.id DESC`).all(req.user.id)
     .map((d) => ({ ...d, overdue: !!(d.due_date && d.due_date < today && d.status !== 'done'), snoozed: !!(d.snooze_until && d.snooze_until > today) }));
+  // Backfill: anything still unfiled gets classified now (a few per page-load —
+  // this is what catches items captured before filing existed, or after edits).
+  for (const it of items.filter((x) => x.status !== 'done' && !x.bucket && !x.suggested_role).slice(0, 8)) deskClassifyAsync(it.id, it.title);
+  // Staff by role, so a suggested role becomes an assigned NAME in two taps.
+  const staffByRole = {};
+  for (const u of db.prepare(`SELECT name, job_role FROM users WHERE active=1 AND job_role IS NOT NULL ORDER BY name`).all()) {
+    (staffByRole[u.job_role] = staffByRole[u.job_role] || []).push(u.name);
+  }
   const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || appBaseUrl(req)).replace(/\/$/, '');
   res.json({
-    today, items,
+    today, items, staffByRole,
     buckets: deskBuckets(),
     facilities: orgFacilities().filter((f) => f.type !== 'corporate' && f.active).map((f) => ({ id: f.id, name: f.name })),
     settings: { digestHour: +(getState('desk_digest_hour') || 7), email: getState('desk_email') || '', noteUrl: `${base}/api/inbound/note?t=${noteToken()}` },

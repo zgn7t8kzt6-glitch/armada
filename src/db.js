@@ -2804,3 +2804,4 @@ try {
 addColumn('order_requests', 'tracking', 'TEXT');         // carrier tracking # or URL (shown on the status page)
 addColumn('desk_items', 'bucket', 'TEXT');               // AI-filed: Clinical/Maintenance/Expansion/…
 addColumn('desk_items', 'facility_id', 'INTEGER');       // AI-matched location (owner chain, Principle 3)
+addColumn('desk_items', 'suggested_role', 'TEXT');       // AI: which role should help close this

@@ -393,23 +393,24 @@ export async function extractOrderItemsDoc(subject, bodyText, media) {
 const DESK_CLASS_SCHEMA = {
   type: 'object',
   properties: {
-    bucket: { type: 'string', description: 'Best-fit bucket from the provided list, or empty string if genuinely unclear.' },
+    bucket: { type: 'string', description: 'Best-fit request type/bucket from the provided list, or empty string if genuinely unclear.' },
     facility: { type: 'string', description: 'The facility/location this is about, EXACTLY as written in the provided list, or empty string if none is implied.' },
+    role: { type: 'string', description: 'Which staff ROLE from the provided list is best positioned to help close this item, or empty string if none fits. E.g. a maintenance issue → Director of Operations; a client-care issue → Case Manager or Clinical Director; an ordering/vendor item → Executive Assistant.' },
   },
-  required: ['bucket', 'facility'],
+  required: ['bucket', 'facility', 'role'],
 };
-export async function classifyDeskItem(text, buckets, facilities) {
+export async function classifyDeskItem(text, buckets, facilities, roles) {
   const client = await getClient();
   const response = await client.messages.create({
     model: MODEL,
-    max_tokens: 200,
-    system: G + 'You file a business owner\'s quick captured notes. Pick the single best bucket and, when a location is implied, the facility — strictly from the provided lists. Never invent categories or locations; when unsure, return empty strings.',
+    max_tokens: 250,
+    system: G + 'You file a behavioral-health company owner\'s quick captured notes. Pick the single best bucket (request type), the facility when a location is implied, and the staff role best positioned to help close it — strictly from the provided lists. Never invent; when unsure, return empty strings.',
     output_config: { effort: 'low', format: { type: 'json_schema', schema: DESK_CLASS_SCHEMA } },
-    messages: [{ role: 'user', content: `BUCKETS: ${buckets.join(' | ')}\nFACILITIES: ${facilities.join(' | ')}\n\nNOTE: ${scrub(String(text || '').slice(0, 400))}` }],
+    messages: [{ role: 'user', content: `BUCKETS: ${buckets.join(' | ')}\nFACILITIES: ${facilities.join(' | ')}\nROLES: ${(roles || []).join(' | ')}\n\nNOTE: ${scrub(String(text || '').slice(0, 400))}` }],
   });
   if (response.stop_reason === 'refusal') throw new Error('declined');
   const t = response.content.find((b) => b.type === 'text');
-  return t ? JSON.parse(t.text) : { bucket: '', facility: '' };
+  return t ? JSON.parse(t.text) : { bucket: '', facility: '', role: '' };
 }
 
 // ---- Document extraction: read an uploaded PDF/image and pull structured fields ----

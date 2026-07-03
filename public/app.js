@@ -8,7 +8,17 @@ const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&
 const initials = n => (n||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
 const today = () => new Date().toISOString().slice(0,10);
 
+// Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
+// allowlist so an unscoped endpoint never silently ignores the chip.
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals|incidents($|\?)|billingready($|\?)|appts($|\?)|inventory($|\?)|maintenance($|\?)|requests($|\?)|command\/overview|retention|opscenter|diag\/admits)/;
 async function api(path, opts={}) {
+  // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
+  // endpoint automatically — one lever instead of 90 loaders remembering to.
+  try{
+    if(typeof FAC_SCOPE==='string' && FAC_SCOPE && !/[?&]facility=/.test(path) && FAC_SCOPED_API.test(path)){
+      path += (path.includes('?')?'&':'?') + 'facility=' + encodeURIComponent(FAC_SCOPE);
+    }
+  }catch(_e){ /* scope not initialized yet — unscoped call is fine */ }
   const r = await fetch('/api'+path, { headers:{'Content-Type':'application/json'}, ...opts });
   // A 401 on a normal call means the session lapsed — bounce to login. But on the
   // login calls themselves, let the real message ("Invalid username or password")
@@ -6818,10 +6828,13 @@ function renderFacChip(){
 function facScopeChange(v){
   FAC_SCOPE=v||'';
   localStorage.setItem('facScope', FAC_SCOPE);
+  renderFacChip();
+  refreshOpsBadge();
+  // Every number on screen must reflect the chip (Design System: the definition
+  // of done for the switcher) — re-run the active view's loader.
   const active=document.querySelector('.view.active');
-  if(!active) return;
-  if(active.id==='opscenter') loadOpsCenter();
-  if(active.id==='admitcheck' && $('reconBody') && $('reconBody').innerHTML) loadAdmitRecon();
+  if(active) show(active.id);
+  if(active&&active.id==='admitcheck' && $('reconBody') && $('reconBody').innerHTML) loadAdmitRecon();
 }
 function facQ(prefix){ return FAC_SCOPE ? prefix+'facility='+encodeURIComponent(FAC_SCOPE) : ''; }
 let TODAY_ITEMS=[];

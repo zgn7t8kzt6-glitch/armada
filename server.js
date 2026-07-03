@@ -895,9 +895,10 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 app.get('/api/billingready', requireAuth, requireBilling, (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const all = db.prepare(`SELECT s.*, c.pref, c.name AS client_name, c.kipu_id, c.program, c.loc, c.therapist, c.case_manager, c.admit, c.discharge_date, c.active AS client_active,
       (SELECT COUNT(*) FROM billing_ready_notes n WHERE n.status_id=s.id) note_count
-    FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=? ORDER BY (s.status='complete'), c.name`).all(day);
+    FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=?${fc.frag('s.facility_id')} ORDER BY (s.status='complete'), c.name`).all(day);
   const rows = billingScopeRows(req.user, all).map((r) => ({
     id: r.id, client: r.pref || r.client_name, kipu: (r.kipu_id || '').split(':')[0], program: r.program || '', loc: r.loc || '',
     therapist: r.therapist || '', case_manager: r.case_manager || '', status: r.status, type: r.encounter_type || '', title: r.encounter_title || '',
@@ -1103,15 +1104,16 @@ app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
   const today = appToday();
   const cmPush = kipuCmConfigured();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const appts = db.prepare(`SELECT a.*, c.pref, c.name AS client_name, c.room, (SELECT COUNT(*) FROM quick_notes q WHERE q.appointment_id=a.id) has_note
-    FROM appointments a JOIN clients c ON c.id=a.client_id WHERE a.date=? ORDER BY a.time`).all(day)
+    FROM appointments a JOIN clients c ON c.id=a.client_id WHERE a.date=?${fc.frag('a.facility_id')} ORDER BY a.time`).all(day)
     .map((a) => ({ ...a, client: a.pref || a.client_name,
       overdue: a.date === today && ['scheduled', 'checked_in'].includes(a.status) && a.time < nowHM() }));
   // The scheduling queue is MEETING REQUESTS ONLY — clients asking for their case
   // manager / therapist / clinical time. Blankets, snacks, and everything else
   // stay in Concierge (its own view, its own bell). Two different services.
   const queue = db.prepare(`SELECT r.*, c.pref, c.name AS client_name, c.room, c.therapist, c.case_manager FROM requests r LEFT JOIN clients c ON c.id=r.client_id
-    WHERE r.status != 'Done' ORDER BY (r.priority='Urgent') DESC, r.id`).all()
+    WHERE r.status != 'Done'${fc.frag('r.facility_id')} ORDER BY (r.priority='Urgent') DESC, r.id`).all()
     .filter((r) => CARE_DEPTS.test(r.department || ''))
     .map((r) => ({ id: r.id, client_id: r.client_id, client: r.pref || r.client_name || 'Unknown', room: r.room || '', department: r.department, text: r.text, priority: r.priority,
       status: r.status, created_at: r.created_at, claimed_by: r.claimed_by || '', ready: !!r.ready_at,
@@ -1130,7 +1132,7 @@ app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
   if (!apptsLeadership(req.user)) { pending = pending.filter((p) => mine(p.by)); missed = missed.filter((m) => mine(m.staff_name)); }
   const out = { cmPush, cmPushUnavailable: getState('kipu_push_unavailable') || null, date: day, appts, queue, estWaitMin: estWaitMinutes(), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
     staff: db.prepare(`SELECT DISTINCT name FROM users WHERE active=1 AND job_role IN ('Case Manager','Therapist','Clinical Director','Nurse','Peer Support') ORDER BY name`).all().map((x) => x.name),
-    clients: db.prepare(`SELECT id, pref, name, room, therapist, case_manager FROM clients WHERE active=1 AND merged_into IS NULL ORDER BY pref, name`).all().map((c) => ({ id: c.id, label: c.pref || c.name, room: c.room, therapist: c.therapist, case_manager: c.case_manager })) };
+    clients: db.prepare(`SELECT id, pref, name, room, therapist, case_manager FROM clients WHERE active=1 AND merged_into IS NULL${fc.frag('facility_id')} ORDER BY pref, name`).all().map((c) => ({ id: c.id, label: c.pref || c.name, room: c.room, therapist: c.therapist, case_manager: c.case_manager })) };
   // Supervisor lens: the Schulze numbers — reliability made visible (30 days).
   if (apptsLeadership(req.user)) {
     const d30 = addDays(today, -30);
@@ -1576,6 +1578,23 @@ app.post('/api/org/facility-access', requireAuth, requireAdmin, (req, res) => {
 });
 // Guard for ?facility= params: the requested facility must be one the caller can
 // see (admin/ED see all). Closes the read-any-facility hole the audit flagged.
+// Facility scope for READS (Rebuild Phase 2). ?facility=<id> (validated) scopes
+// to one facility; no param = everything the caller may see (admin/ED: all).
+// fc.deny → the caller asked for a facility they can't see (endpoint 403s,
+// never silently empties — fail-visible). fc.frag(col) → safe SQL fragment.
+function facCtx(req) {
+  const q = req.query.facility;
+  if (q !== undefined && q !== '') {
+    const fid = +q;
+    if (!fid || !facilityAllowed(req.user, fid)) return { one: null, deny: true, frag: () => ' AND 1=0' };
+    return { one: fid, deny: false, frag: (col) => ` AND ${col} = ${fid}` };
+  }
+  if (req.user.role === 'admin' || req.user.job_role === 'Executive Director') return { one: null, deny: false, frag: () => '' };
+  const ids = db.prepare(`SELECT facility_id FROM user_facility_access WHERE user_id=?`).all(req.user.id).map((r) => +r.facility_id).filter(Boolean);
+  if (!ids.length) return { one: null, deny: false, frag: () => '' };   // legacy user with no access rows — unscoped, as today
+  return { one: ids.length === 1 ? ids[0] : null, deny: false, frag: (col) => ` AND ${col} IN (${ids.join(',')})` };
+}
+const denyFac = (fc, res) => { if (fc.deny) { res.status(403).json({ error: 'No access to that facility.' }); return true; } return false; };
 function facilityAllowed(user, fid) {
   if (!fid) return true;   // "all my facilities" — resolved per-user elsewhere
   if (user.role === 'admin' || ['Executive Director'].includes(user.job_role)) return true;
@@ -1628,7 +1647,8 @@ app.get('/api/me', (req, res) => {
 
 /* ---------------- clients (care cards) ---------------- */
 app.get('/api/clients', requireAuth, (req, res) => {
-  const rows = db.prepare(`SELECT * FROM clients WHERE active = 1 ORDER BY name`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const rows = db.prepare(`SELECT * FROM clients WHERE active = 1${fc.frag('facility_id')} ORDER BY name`).all();
   for (const c of rows) c.tasks = db.prepare(`SELECT * FROM tasks WHERE client_id = ? ORDER BY sort, id`).all(c.id);
   res.json({ clients: rows });
 });
@@ -1971,7 +1991,8 @@ async function sendWeeklyPollakOrder() {
 
 // The shift checklist / board, grouped by department.
 app.get('/api/inventory', requireAuth, (req, res) => {
-  const items = db.prepare(`SELECT * FROM inventory_items WHERE active = 1 ORDER BY department, sort, name`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const items = db.prepare(`SELECT * FROM inventory_items WHERE active = 1${fc.frag('facility_id')} ORDER BY department, sort, name`).all();
   const shift = currentShift();
   const tday = dayBoundsUtc(appToday());   // UTC window for the Eastern business day (counts are UTC-stamped)
   const openByItem = {};
@@ -2191,7 +2212,8 @@ function photosFor(id, legacy) {
 // Shared board + KPIs. Visible to all staff (requireAuth) so everyone can see
 // what's open and nothing is invisible.
 app.get('/api/maintenance', requireAuth, (req, res) => {
-  const rows = db.prepare(`SELECT * FROM maintenance_requests WHERE status != 'closed' OR updated_at >= datetime('now','-7 day') ORDER BY
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const rows = db.prepare(`SELECT * FROM maintenance_requests WHERE (status != 'closed' OR updated_at >= datetime('now','-7 day'))${fc.frag('facility_id')} ORDER BY
     CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'resolved' THEN 2 ELSE 3 END,
     CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, created_at DESC`).all();
   const map = (r) => ({ id: r.id, title: r.title, location: r.location || '', category: r.category, priority: r.priority,
@@ -2219,7 +2241,8 @@ app.post('/api/maintenance', requireAuth, async (req, res) => {
   // Accept one (legacy `photo`) or many (`photos[]`), capped at 6.
   const photos = (Array.isArray(b.photos) ? b.photos : (b.photo ? [b.photo] : [])).slice(0, 6);
   try { photos.forEach(validPhoto); } catch (e) { return res.status(400).json({ error: e.message }); }
-  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, reported_by_id, reported_by) VALUES (?,?,?,?,?,?,?)`)
+  const mFac = +req.query.facility || (req.body && +req.body.facility_id) || facCtx(req).one || defaultFacilityId();
+  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, reported_by_id, reported_by, facility_id) VALUES (?,?,?,?,?,?,?,${mFac || 'NULL'})`)
     .run(title, (b.location || '').trim() || null, category, priority, (b.description || '').trim() || null, req.user.id, req.user.name).lastInsertRowid;
   const insPhoto = db.prepare(`INSERT INTO maintenance_photos (request_id, photo, by_id, by_name) VALUES (?,?,?,?)`);
   for (const p of photos) insPhoto.run(id, p, req.user.id, req.user.name);
@@ -3158,7 +3181,7 @@ app.post('/api/clients', requireAuth, (req, res) => {
   const vals = CLIENT_FIELDS.map(f => b[f] ?? null);
   const info = db.prepare(
     `INSERT INTO clients (${CLIENT_FIELDS.join(',')}, facility_id) VALUES (${CLIENT_FIELDS.map(() => '?').join(',')}, ?)`
-  ).run(...vals, b.facility_id ? +b.facility_id : defaultFacilityId());
+  ).run(...vals, (b.facility_id && +b.facility_id) || +req.query.facility || facCtx(req).one || defaultFacilityId());
   saveTasks(info.lastInsertRowid, b.tasks);
   audit({ user: req.user, action: 'CREATE', entity: 'client', entity_id: info.lastInsertRowid, detail: b.name, ip: req.ip });
   publishEvent({ event: 'admission.created', entity: 'client', entity_id: info.lastInsertRowid, actor: req.user.username, summary: `${nameInitials(b.name || b.pref)} admitted` });
@@ -3733,7 +3756,8 @@ function realDischargeCount(sinceDate, untilDate) {
 
 app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
-  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, next_loc, anticipated_dc, interests FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, next_loc, anticipated_dc, interests FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
 
   // Flow
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
@@ -6210,7 +6234,8 @@ app.post('/api/clients/:id/plan-to-tasks', requireAuth, (req, res) => {
 // warning signs are trending across the center.
 app.get('/api/retention', requireAuth, (req, res) => {
   const today = appToday();
-  const clients = db.prepare(`SELECT id, name, pref, room, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const clients = db.prepare(`SELECT id, name, pref, room, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')}`).all();
   const out = clients.map((c) => {
     const ama = latestAmaRead(c.id);
     const lastPulse = db.prepare(`SELECT date, shift, concern FROM pulses WHERE client_id = ? ORDER BY id DESC LIMIT 1`).get(c.id);
@@ -8277,7 +8302,8 @@ app.get('/api/outcomes', requireAuth, (req, res) => {
 
 // Concierge requests
 app.get('/api/requests', requireAuth, (req, res) => {
-  let sql = `SELECT r.*, c.pref, c.name FROM requests r LEFT JOIN clients c ON c.id = r.client_id WHERE 1=1`;
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  let sql = `SELECT r.*, c.pref, c.name FROM requests r LEFT JOIN clients c ON c.id = r.client_id WHERE 1=1${fc.frag('r.facility_id')}`;
   const args = [];
   if (req.query.status) { sql += ` AND r.status = ?`; args.push(req.query.status); }
   if (req.query.department) { sql += ` AND r.department = ?`; args.push(req.query.department); }
@@ -8629,14 +8655,15 @@ function anticipationNudges(clients, hour) {
 }
 app.get('/api/dashboard', requireAuth, (req, res) => {
   rolloverAlerts();   // expire stale/round/prior-shift alerts before building the panel
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const today = appToday();
   const h = localHour();
   const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
   const first = (req.user.name || '').split(/\s+/)[0] || 'there';
   // Admins can preview any role's dashboard (?as=Role) for review.
   const jr = (req.user.role === 'admin' && req.query.as && JOB_ROLES.includes(req.query.as)) ? req.query.as : (req.user.job_role || '');
-  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
-  const dischToday = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, anticipated_dc, next_loc, medications, allergies FROM clients WHERE substr(discharge_date,1,10) = ? OR (anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= date('now','+1 day'))`).all(today);
+  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
+  const dischToday = db.prepare(`SELECT id, pref, name, discharge_status, discharge_reason, anticipated_dc, next_loc, medications, allergies FROM clients WHERE (substr(discharge_date,1,10) = ? OR (anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= date('now','+1 day')))${fc.frag('facility_id')}`).all(today);
   const item = (c, sub, badge) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', sub: sub || '', badge: badge || '' });
   const isNew = (c) => (c.admit || '').slice(0, 10) === today;
   const riskOf = (c) => { const a = latestAmaRead(c.id); return a && a.level ? a.level : null; };
@@ -8655,12 +8682,12 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   const personalTouches = active.filter((c) => (c.touch && c.touch.trim()) || (c.prefs && c.prefs.trim()));
   // Facility-at-a-glance — the first thing on My Shift: who's here, who's coming/going today.
   // Real discharges vs referral-outs (didn't complete intake) — count them apart.
-  const fDisch = db.prepare(`SELECT admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
+  const fDisch = db.prepare(`SELECT admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?${fc.frag('facility_id')}`).all(today);
   let fReal = 0, fReferred = 0;
   for (const c of fDisch) { if (isReferredOut(c)) fReferred++; else fReal++; }
   const facility = {
     census: active.length,
-    scheduled: db.prepare(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).get(today).n,
+    scheduled: db.prepare(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'${fc.frag('facility_id')}`).get(today).n,
     admitted: newAdmits.length,
     discharged: fReal,
     referredOut: fReferred,
@@ -8670,7 +8697,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     subtitle = 'The house at a glance — census, who\'s at risk, how we\'re serving, and what needs leadership.';
     const today2 = today;
     // De-dupe by person and split real discharges from referral-outs (didn't complete intake).
-    const dRawLd = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today2);
+    const dRawLd = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?${fc.frag('facility_id')}`).all(today2);
     const seenLd = new Set(); const dToday = []; const dReferred = [];
     for (const c of dRawLd) { const k = dupKeyOf(c); if (k && seenLd.has(k)) continue; if (k) seenLd.add(k); (isReferredOut(c) ? dReferred : dToday).push(c); }
     const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
@@ -9114,13 +9141,15 @@ app.post('/api/assistant', requireAuth, async (req, res) => {
 
 /* ---------------- Incidents (quality & safety) ---------------- */
 app.get('/api/incidents', requireAuth, (req, res) => {
-  res.json({ incidents: db.prepare(`SELECT i.*, c.pref FROM incidents i LEFT JOIN clients c ON c.id = i.client_id ORDER BY (i.status='Closed'), i.id DESC LIMIT 100`).all() });
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  res.json({ incidents: db.prepare(`SELECT i.*, c.pref FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE 1=1${fc.frag('i.facility_id')} ORDER BY (i.status='Closed'), i.id DESC LIMIT 100`).all() });
 });
 app.post('/api/incidents', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.type || !b.description?.trim()) return res.status(400).json({ error: 'Missing' });
   const needsContract = b.needs_contract ? 1 : 0;
+  const iFac = (b.facility_id && +b.facility_id) || +req.query.facility || facCtx(req).one || defaultFacilityId();
   db.prepare(`INSERT INTO incidents (client_id, type, severity, description, action_taken, needs_contract, reported_by, reported_by_name, facility_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, needsContract, req.user.id, req.user.name, b.facility_id ? +b.facility_id : defaultFacilityId());
+    .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, needsContract, req.user.id, req.user.name, iFac);
   if (b.severity === 'High' || b.severity === 'Critical') createAlert(b.client_id || null, 'incident', b.severity, `${b.severity} incident (${b.type}): ${b.description.trim().slice(0, 80)}`);
   if (needsContract) createAlert(b.client_id || null, 'behavior_contract', 'Elevated', `Incident flagged as needing a behavioral contract by ${req.user.name}: ${b.description.trim().slice(0, 70)}`);
   audit({ user: req.user, action: 'INCIDENT', entity: 'client', entity_id: b.client_id ? +b.client_id : null, detail: `${b.type}/${b.severity}${needsContract ? '/needs-contract' : ''}`, ip: req.ip });
@@ -9736,11 +9765,12 @@ app.post('/api/property/:cid/return-all', requireAuth, (req, res) => {
 app.get('/api/arrivals', requireAuth, (req, res) => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
   reconcileArrivals(); // keep it live without waiting on a sync
-  const day = db.prepare(`SELECT * FROM expected_arrivals WHERE scheduled_date = ? ORDER BY status, last_name, first_name`).all(date);
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const day = db.prepare(`SELECT * FROM expected_arrivals WHERE scheduled_date = ?${fc.frag('facility_id')} ORDER BY status, last_name, first_name`).all(date);
   // Upcoming (future scheduled, still expected) — the Salesforce-driven pipeline.
-  const upcoming = db.prepare(`SELECT * FROM expected_arrivals WHERE scheduled_date > ? AND scheduled_date <= date(?, '+21 day') AND status = 'expected' ORDER BY scheduled_date, last_name`).all(date, date);
+  const upcoming = db.prepare(`SELECT * FROM expected_arrivals WHERE scheduled_date > ? AND scheduled_date <= date(?, '+21 day') AND status = 'expected'${fc.frag('facility_id')} ORDER BY scheduled_date, last_name`).all(date, date);
   // Outstanding no-shows from the last 14 days for the follow-up queue.
-  const followUps = db.prepare(`SELECT * FROM expected_arrivals WHERE status='no_show' AND scheduled_date >= date('now','-14 day') ORDER BY scheduled_date DESC`).all();
+  const followUps = db.prepare(`SELECT * FROM expected_arrivals WHERE status='no_show' AND scheduled_date >= date('now','-14 day')${fc.frag('facility_id')} ORDER BY scheduled_date DESC`).all();
   const counts = { expected: 0, arrived: 0, no_show: 0, cancelled: 0 };
   for (const a of day) counts[a.status] = (counts[a.status] || 0) + 1;
   // Admitted in Kipu on this date but never on the schedule — a front-door gap.

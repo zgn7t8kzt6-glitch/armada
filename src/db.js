@@ -2915,3 +2915,24 @@ if (getState('demo_client_retired') !== 'done') {
     setState('demo_client_retired', 'done');
   } catch { /* clients table optional on exotic boots */ }
 }
+
+// ── REBUILD PHASE 2 — the facility switcher becomes real ──────────────────────
+// Concierge requests and maintenance finally get facility ownership. Requests
+// inherit their client's facility automatically via trigger — every insert site
+// (app, kiosk, auto-created) is covered without touching each one.
+addColumn('requests', 'facility_id', 'INTEGER');
+addColumn('maintenance_requests', 'facility_id', 'INTEGER');
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_requests_facility ON requests(facility_id)`); } catch { /* optional */ }
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_maintenance_requests_facility ON maintenance_requests(facility_id)`); } catch { /* optional */ }
+try {
+  db.exec(`CREATE TRIGGER IF NOT EXISTS trg_requests_facility AFTER INSERT ON requests
+    WHEN NEW.facility_id IS NULL AND NEW.client_id IS NOT NULL
+    BEGIN UPDATE requests SET facility_id = (SELECT facility_id FROM clients WHERE id = NEW.client_id) WHERE id = NEW.id; END;`);
+} catch (e) { console.error('[phase2] requests trigger:', e.message); }
+// One-time backfill for existing rows: a request belongs to its client's facility.
+if (getState('phase2_requests_backfill') !== 'done') {
+  try {
+    db.prepare(`UPDATE requests SET facility_id = (SELECT facility_id FROM clients WHERE id = requests.client_id) WHERE facility_id IS NULL AND client_id IS NOT NULL`).run();
+    setState('phase2_requests_backfill', 'done');
+  } catch { /* next boot */ }
+}

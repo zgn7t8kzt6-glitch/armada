@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS desk_mail_rules (
   why TEXT,                            -- 'muted' | 'auto: dismissed 3x'
   created TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
+// Addressing (how the mail reached the owner) + which rules version sorted it —
+// when the policy changes, open items re-sort themselves on the next polls.
+for (const ddl of [`ALTER TABLE desk_mail ADD COLUMN addressing TEXT`, `ALTER TABLE desk_mail ADD COLUMN rules_v INTEGER DEFAULT 1`]) {
+  try { db.exec(ddl); } catch { /* already there */ }
+}
+export const MAIL_RULES_V = 2;   // v2: direct-to-me / cc / distribution-list policy
 
 export function muteSender(fromEmail, why = 'muted') {
   const e = String(fromEmail || '').trim().toLowerCase();
@@ -143,7 +149,7 @@ export async function pollMailbox({ max = 25 } = {}) {
     // First run looks back 24h; afterwards we resume from the newest seen mail.
     const since = getState('mail_last_poll') || new Date(Date.now() - 24 * 3600e3).toISOString();
     const q = `/me/messages?$top=50&$orderby=receivedDateTime asc&$filter=receivedDateTime gt ${encodeURIComponent(since)}` +
-      `&$select=id,subject,from,receivedDateTime,bodyPreview,webLink`;
+      `&$select=id,subject,from,receivedDateTime,bodyPreview,webLink,toRecipients,ccRecipients`;
     const d = await graphGet(q);
     const msgs = Array.isArray(d.value) ? d.value : [];
     const has = db.prepare(`SELECT 1 FROM desk_mail WHERE msg_id = ?`);
@@ -166,13 +172,13 @@ export async function pollMailbox({ max = 25 } = {}) {
       }
     };
     // Second chances: anything that failed triage last time gets re-run first.
-    const retryRows = db.prepare(`SELECT id, from_name, from_email, subject, preview FROM desk_mail WHERE status='open' AND reason LIKE 'Triage failed%' LIMIT 10`).all();
+    const retryRows = db.prepare(`SELECT id, from_name, from_email, subject, preview, addressing FROM desk_mail WHERE status='open' AND (reason LIKE 'Triage failed%' OR COALESCE(rules_v,1) < ${MAIL_RULES_V}) ORDER BY (reason LIKE 'Triage failed%') DESC LIMIT 10`).all();
     for (const rr of retryRows) {
       if (rateLimited >= 2) break;   // we're being throttled — resume next cycle
       try {
-        const t2 = await runTriage({ from: `${rr.from_name} <${rr.from_email}>`, subject: rr.subject || '', preview: rr.preview || '', myEmail: getState('msgraph_user') || '' });
+        const t2 = await runTriage({ from: `${rr.from_name} <${rr.from_email}>`, subject: rr.subject || '', preview: rr.preview || '', myEmail: getState('msgraph_user') || '', addressing: rr.addressing || 'unknown' });
         const cat2 = t2.needs_me ? (['decision', 'followup', 'review'].includes(t2.category) ? t2.category : 'review') : 'ignore';
-        db.prepare(`UPDATE desk_mail SET category=?, reason=?, action=? WHERE id=?`).run(cat2, String(t2.reason || '').slice(0, 300), String(t2.action || '').slice(0, 200), rr.id);
+        db.prepare(`UPDATE desk_mail SET category=?, reason=?, action=?, rules_v=${MAIL_RULES_V} WHERE id=?`).run(cat2, String(t2.reason || '').slice(0, 300), String(t2.action || '').slice(0, 200), rr.id);
       } catch { /* stays surfaced; next poll retries again */ }
       await sleep(1500);   // pace the API — a background job has no hurry
     }
@@ -182,6 +188,12 @@ export async function pollMailbox({ max = 25 } = {}) {
       if (triaged >= max) break;   // stay gentle on the AI budget; next poll continues
       const fromName = m.from?.emailAddress?.name || '';
       const fromEmail = m.from?.emailAddress?.address || '';
+      // HOW it reached him is the strongest signal: direct → normal rules;
+      // cc → ignore unless high-stakes; via a team/distribution list → team
+      // traffic, not his (he's not in To or Cc at all).
+      const meAddr = String(getState('msgraph_user') || '').toLowerCase();
+      const inList = (arr) => (arr || []).some((x) => String(x?.emailAddress?.address || '').toLowerCase() === meAddr);
+      const addressing = meAddr && inList(m.toRecipients) ? 'direct' : (meAddr && inList(m.ccRecipients) ? 'cc' : 'list');
       // Muted senders skip triage entirely — the owner (or three of his
       // dismissals) already made this call.
       const muted = fromEmail && db.prepare(`SELECT why FROM desk_mail_rules WHERE from_email = ?`).get(fromEmail.toLowerCase());
@@ -189,12 +201,13 @@ export async function pollMailbox({ max = 25 } = {}) {
       if (muted) t = { needs_me: false, category: 'ignore', reason: `Muted sender (${muted.why}).`, action: '' };
       else {
         if (rateLimited >= 2) break;   // throttled — leave the rest for the next cycle (cursor holds)
-        try { t = await runTriage({ from: `${fromName} <${fromEmail}>`, subject: m.subject || '', preview: m.bodyPreview || '', myEmail: getState('msgraph_user') || '' }); }
+        try { t = await runTriage({ from: `${fromName} <${fromEmail}>`, subject: m.subject || '', preview: m.bodyPreview || '', myEmail: getState('msgraph_user') || '', addressing }); }
         catch (e) { console.error('[mail] triage:', e.message); t = { needs_me: true, category: 'review', reason: ('Triage failed: ' + String(e.message || e).slice(0, 140)) + ' — surfaced so nothing is missed.', action: '' }; }
         await sleep(1500);   // pace the API between messages
       }
       const cat = t.needs_me ? (['decision', 'followup', 'review'].includes(t.category) ? t.category : 'review') : 'ignore';
       ins.run(m.id, m.receivedDateTime || null, fromName, fromEmail, String(m.subject || '').slice(0, 300), String(m.bodyPreview || '').slice(0, 400), m.webLink || null, cat, String(t.reason || '').slice(0, 300), String(t.action || '').slice(0, 200));
+      db.prepare(`UPDATE desk_mail SET addressing=?, rules_v=? WHERE msg_id=?`).run(addressing, MAIL_RULES_V, m.id);
       triaged++;
       if (cat === 'ignore') ignored++; else surfaced++;
     }

@@ -3031,6 +3031,25 @@ addColumn('duty_logs', 'facility_id', 'INTEGER');
 for (const t of ['schedule_slots', 'manual_on_shift', 'rounds', 'duty_logs']) {
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_fac ON ${t}(facility_id)`); } catch { /* optional */ }
 }
+// Alerts + medical send-outs learn facilities: client-linked rows adopt the
+// client's facility; house-level rows (no client) are legacy Akron detox.
+addColumn('alerts', 'facility_id', 'INTEGER');
+addColumn('medical_sendouts', 'facility_id', 'INTEGER');
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_alerts_fac ON alerts(facility_id)`); } catch { /* optional */ }
+if (getState('phase5_alerts_backfill') !== 'done') {
+  try {
+    const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id;
+    if (dfid) {
+      for (const t of ['alerts', 'medical_sendouts']) {
+        try {
+          db.prepare(`UPDATE ${t} SET facility_id = (SELECT c.facility_id FROM clients c WHERE c.id = ${t}.client_id) WHERE facility_id IS NULL AND client_id IS NOT NULL`).run();
+          db.prepare(`UPDATE ${t} SET facility_id = ? WHERE facility_id IS NULL`).run(dfid);
+        } catch { /* table optional */ }
+      }
+      setState('phase5_alerts_backfill', 'done');
+    }
+  } catch (e) { console.error('[phase5 alerts]', e.message); }
+}
 if (getState('phase5_shift_backfill') !== 'done') {
   try {
     const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id;

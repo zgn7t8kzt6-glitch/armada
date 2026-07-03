@@ -561,7 +561,9 @@ app.get('/api/search', requireAuth, (req, res) => {
   const eaWalled = me.job_role === 'Executive Assistant' && me.role !== 'admin';   // corporate lane: no clinical
   add(() => {
     if (eaWalled) return;
-    for (const c of db.prepare(`SELECT id, name, pref, room, active FROM clients WHERE merged_into IS NULL AND (name LIKE ? OR pref LIKE ?) ORDER BY active DESC, id DESC LIMIT 6`).all(like, like)) {
+    const sFc = facCtx(req);
+    if (sFc.deny) return;
+    for (const c of db.prepare(`SELECT id, name, pref, room, active FROM clients WHERE merged_into IS NULL AND (name LIKE ? OR pref LIKE ?)${sFc.frag('facility_id')} ORDER BY active DESC, id DESC LIMIT 6`).all(like, like)) {
       out.push({ type: 'client', icon: '🛏', id: c.id, label: c.name || c.pref, sub: (c.active ? 'In care' : 'Discharged') + (c.room ? ' · Room ' + c.room : '') });
     }
   });
@@ -635,7 +637,8 @@ function authIntel(a, today) {
 }
 app.get('/api/auth-register', requireAuth, requireAuthReg, (req, res) => {
   const today = appToday();
-  const rows = db.prepare(`SELECT a.*, f.name AS facility_name FROM authorizations a LEFT JOIN org_facilities f ON f.id = a.facility_id ORDER BY (a.status IN ('denied','closed')), a.end_date`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const rows = db.prepare(`SELECT a.*, f.name AS facility_name FROM authorizations a LEFT JOIN org_facilities f ON f.id = a.facility_id LEFT JOIN clients c ON c.id = a.client_id WHERE 1=1${fc.frag('COALESCE(a.facility_id, c.facility_id)')} ORDER BY (a.status IN ('denied','closed')), a.end_date`).all();
   const auths = rows.map((a) => {
     const { daysLeft, intel } = authIntel(a, today);
     let flag = 'ok';
@@ -655,14 +658,17 @@ app.post('/api/auth-register', requireAuth, requireAuthReg, (req, res) => {
     label = c ? nameInitials(c.name) : '';
   }
   const dt = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null);
+  const arFid = (b.client_id ? db.prepare(`SELECT facility_id FROM clients WHERE id = ?`).get(+b.client_id)?.facility_id : null) || stampFac(req, res, b.facility_id);
+  if (arFid === null && res.headersSent) return;
   const info = db.prepare(`INSERT INTO authorizations (client_id, patient_label, facility_id, payor, auth_number, level_of_care, approved_days, start_date, end_date, reviewer, next_review, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(b.client_id ? +b.client_id : null, label, b.facility_id ? +b.facility_id : null, String(b.payor || '').slice(0, 80), String(b.auth_number || '').slice(0, 60), AUTH_LEVELS.includes(b.level_of_care) ? b.level_of_care : null, b.approved_days ? +b.approved_days : null, dt(b.start_date), dt(b.end_date), String(b.reviewer || '').slice(0, 80), dt(b.next_review), String(b.notes || '').slice(0, 1000));
+    .run(b.client_id ? +b.client_id : null, label, arFid || null, String(b.payor || '').slice(0, 80), String(b.auth_number || '').slice(0, 60), AUTH_LEVELS.includes(b.level_of_care) ? b.level_of_care : null, b.approved_days ? +b.approved_days : null, dt(b.start_date), dt(b.end_date), String(b.reviewer || '').slice(0, 80), dt(b.next_review), String(b.notes || '').slice(0, 1000));
   publishEvent({ event: 'auth.created', entity: 'authorization', entity_id: info.lastInsertRowid, facility_id: b.facility_id ? +b.facility_id : null, actor: req.user.username, summary: `Auth opened · ${label} · ${b.payor || 'payor tbd'}${b.end_date ? ' · expires ' + b.end_date : ''}` });
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 app.patch('/api/auth-register/:id', requireAuth, requireAuthReg, (req, res) => {
   const a = db.prepare(`SELECT * FROM authorizations WHERE id = ?`).get(req.params.id);
   if (!a) return res.status(404).json({ error: 'Not found.' });
+  if (a.facility_id && !facilityAllowed(req.user, a.facility_id)) return res.status(403).json({ error: 'No access to that facility.' });
   const b = req.body || {};
   const dt = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null);
   // Renew shortcut: extend by N days from the later of today / current end.
@@ -684,6 +690,8 @@ app.patch('/api/auth-register/:id', requireAuth, requireAuthReg, (req, res) => {
   res.json({ ok: true });
 });
 app.delete('/api/auth-register/:id', requireAuth, requireAdmin, (req, res) => {
+  const aRow = db.prepare(`SELECT facility_id FROM authorizations WHERE id = ?`).get(req.params.id);
+  if (aRow && aRow.facility_id && !facilityAllowed(req.user, aRow.facility_id)) return res.status(403).json({ error: 'No access to that facility.' });
   db.prepare(`DELETE FROM authorizations WHERE id = ?`).run(req.params.id);
   audit({ user: req.user, action: 'AUTH_DELETE', entity: 'authorization', entity_id: +req.params.id, ip: req.ip });
   res.json({ ok: true });
@@ -1012,6 +1020,7 @@ app.post('/api/billingready/run', requireAuth, requireBilling, async (req, res) 
 app.post('/api/billingready/alert/:id', requireAuth, requireBilling, (req, res) => {
   const row = db.prepare(`SELECT * FROM billing_ready_status WHERE id=?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Not found.' });
+  if (row.facility_id && !facilityAllowed(req.user, row.facility_id)) return res.status(403).json({ error: 'No access to that facility.' });
   const state = ['open', 'ack', 'in_progress', 'resolved', 'exception'].includes(req.body?.state) ? req.body.state : null;
   const note = String(req.body?.note || '').slice(0, 500);
   if (state) {
@@ -1025,6 +1034,9 @@ app.post('/api/billingready/alert/:id', requireAuth, requireBilling, (req, res) 
   res.json({ ok: true, notes: db.prepare(`SELECT by_name, note, at FROM billing_ready_notes WHERE status_id=? ORDER BY id`).all(row.id) });
 });
 app.get('/api/billingready/notes/:id', requireAuth, requireBilling, (req, res) => {
+  const st = db.prepare(`SELECT facility_id FROM billing_ready_status WHERE id=?`).get(req.params.id);
+  if (!st) return res.status(404).json({ error: 'Not found.' });
+  if (st.facility_id && !facilityAllowed(req.user, st.facility_id)) return res.status(403).json({ error: 'No access to that facility.' });
   res.json({ notes: db.prepare(`SELECT by_name, note, at FROM billing_ready_notes WHERE status_id=? ORDER BY id`).all(req.params.id) });
 });
 app.get('/api/billingready/export', requireAuth, requireBilling, (req, res) => {
@@ -1032,7 +1044,7 @@ app.get('/api/billingready/export', requireAuth, requireBilling, (req, res) => {
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : appToday();
   const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : since;
   const rows = db.prepare(`SELECT s.date, c.name client, c.kipu_id, c.program, c.loc, c.therapist, c.case_manager, s.status, s.encounter_type, s.encounter_title, s.encounter_time, s.encounter_staff, s.alert_state, s.exception_reason, s.detail, s.checked_at
-    FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date >= ? AND s.date <= ? ORDER BY s.date, c.name`).all(since, end);
+    FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date >= ? AND s.date <= ?${facCtx(req).frag('s.facility_id')} ORDER BY s.date, c.name`).all(since, end);
   const csvCell = (v) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const head = ['date', 'client', 'kipu_id', 'program', 'level_of_care', 'therapist', 'case_manager', 'status', 'encounter_type', 'encounter_title', 'encounter_time', 'encounter_staff', 'alert_state', 'exception_reason', 'detail', 'checked_at'];
   const csv = [head.join(','), ...rows.map((r) => head.map((h) => csvCell(r[h === 'level_of_care' ? 'loc' : h])).join(','))].join('\n');
@@ -1079,8 +1091,8 @@ function apptsLeadership(user) { return user.role === 'admin' || ['Executive Dir
 const nowHM = () => { const d = new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 // Estimated wait = how fast we've ACTUALLY been lately (median claim→done of the
 // last 20 resolved queue items), honest to the minute. No history → no fake number.
-function estWaitMinutes() {
-  const rows = db.prepare(`SELECT created_at, done_at FROM requests WHERE done_at IS NOT NULL ORDER BY id DESC LIMIT 20`).all();
+function estWaitMinutes(facFrag = '') {
+  const rows = db.prepare(`SELECT created_at, done_at FROM requests WHERE done_at IS NOT NULL${facFrag} ORDER BY id DESC LIMIT 20`).all();
   const mins = rows.map((r) => Math.round((Date.parse(r.done_at + 'Z') - Date.parse(r.created_at + 'Z')) / 60000)).filter((m) => m >= 0 && m < 720).sort((a, b) => a - b);
   return mins.length >= 3 ? mins[Math.floor(mins.length / 2)] : null;
 }
@@ -1211,7 +1223,7 @@ app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
     WHERE a.status='missed' AND a.missed_reason IS NULL AND NOT EXISTS (SELECT 1 FROM appointments r WHERE r.reschedule_of=a.id)${fc.frag('a.facility_id')} ORDER BY a.date DESC LIMIT 40`).all()
     .map((a) => ({ ...a, client: a.pref || a.client_name }));
   if (!apptsLeadership(req.user)) { pending = pending.filter((p) => mine(p.by)); missed = missed.filter((m) => mine(m.staff_name)); }
-  const out = { cmPush, cmPushUnavailable: getState('kipu_push_unavailable') || null, date: day, appts, queue, estWaitMin: estWaitMinutes(), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
+  const out = { cmPush, cmPushUnavailable: getState('kipu_push_unavailable') || null, date: day, appts, queue, estWaitMin: estWaitMinutes(fc.frag('facility_id')), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
     staff: db.prepare(`SELECT DISTINCT name FROM users WHERE active=1 AND job_role IN ('Case Manager','Therapist','Clinical Director','Nurse','Peer Support') ORDER BY name`).all().map((x) => x.name),
     clients: db.prepare(`SELECT id, pref, name, room, therapist, case_manager FROM clients WHERE active=1 AND merged_into IS NULL${fc.frag('facility_id')} ORDER BY pref, name`).all().map((c) => ({ id: c.id, label: c.pref || c.name, room: c.room, therapist: c.therapist, case_manager: c.case_manager })) };
   // Supervisor lens: the Schulze numbers — reliability made visible (30 days).
@@ -1219,26 +1231,26 @@ app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
     const d30 = addDays(today, -30);
     const byStaff = {};
     const S = (name) => { const k = name || '(unassigned)'; return byStaff[k] = byStaff[k] || { staff: k, completed: 0, missed: 0, notes: 0, notesFast: 0, avgResponseMin: null, _resp: [] }; };
-    for (const a of db.prepare(`SELECT staff_name, status FROM appointments WHERE date >= ?`).all(d30)) {
+    for (const a of db.prepare(`SELECT staff_name, status FROM appointments WHERE date >= ?${fc.frag('facility_id')}`).all(d30)) {
       if (a.status === 'completed') S(a.staff_name).completed++;
       if (a.status === 'missed') S(a.staff_name).missed++;
     }
-    for (const r of db.prepare(`SELECT claimed_by, created_at, done_at FROM requests WHERE done_at IS NOT NULL AND created_at >= ?`).all(d30 + ' 00:00:00')) {
+    for (const r of db.prepare(`SELECT claimed_by, created_at, done_at FROM requests WHERE done_at IS NOT NULL AND created_at >= ?${fc.frag('facility_id')}`).all(d30 + ' 00:00:00')) {
       if (!r.claimed_by) continue;
       const m = Math.round((Date.parse(r.done_at + 'Z') - Date.parse(r.created_at + 'Z')) / 60000);
       if (m >= 0 && m < 720) S(r.claimed_by)._resp.push(m);
     }
-    for (const q of db.prepare(`SELECT by_name, appointment_id, created_at, (SELECT a.date || ' ' || a.time FROM appointments a WHERE a.id=quick_notes.appointment_id) sched FROM quick_notes WHERE created_at >= ?`).all(d30 + ' 00:00:00')) {
+    for (const q of db.prepare(`SELECT qn.by_name, qn.appointment_id, qn.created_at, (SELECT a.date || ' ' || a.time FROM appointments a WHERE a.id=qn.appointment_id) sched FROM quick_notes qn LEFT JOIN clients c ON c.id = qn.client_id WHERE qn.created_at >= ?${fc.frag('c.facility_id')}`).all(d30 + ' 00:00:00')) {
       const s = S(q.by_name); s.notes++;
       if (q.sched) { const lag = (Date.parse(q.created_at + 'Z') - Date.parse(q.sched.replace(' ', 'T') + ':00')) / 60000; if (lag <= 75) s.notesFast++; }   // within ~15m of a 60m session
     }
     for (const k of Object.keys(byStaff)) { const s = byStaff[k]; s.avgResponseMin = s._resp.length ? Math.round(s._resp.reduce((a, b) => a + b, 0) / s._resp.length) : null; delete s._resp; }
-    const promises30 = db.prepare(`SELECT COUNT(*) n FROM requests WHERE promise_at IS NOT NULL AND created_at >= ?`).get(d30 + ' 00:00:00').n;
-    const kept = db.prepare(`SELECT COUNT(*) n FROM requests WHERE promise_at IS NOT NULL AND done_at IS NOT NULL AND replace(substr(done_at,1,16),'T',' ') <= promise_at AND created_at >= ?`).get(d30 + ' 00:00:00').n;
+    const promises30 = db.prepare(`SELECT COUNT(*) n FROM requests WHERE promise_at IS NOT NULL AND created_at >= ?${fc.frag('facility_id')}`).get(d30 + ' 00:00:00').n;
+    const kept = db.prepare(`SELECT COUNT(*) n FROM requests WHERE promise_at IS NOT NULL AND done_at IS NOT NULL AND replace(substr(done_at,1,16),'T',' ') <= promise_at AND created_at >= ?${fc.frag('facility_id')}`).get(d30 + ' 00:00:00').n;
     out.supervisor = {
       staff: Object.values(byStaff).sort((a, b) => (b.completed + b.notes) - (a.completed + a.notes)),
       promisesMade: promises30, promisesKept: kept, promiseRate: promises30 ? Math.round(kept / promises30 * 100) : null,
-      docCompliance: (() => { const done = db.prepare(`SELECT COUNT(*) n FROM appointments WHERE status='completed' AND date >= ?`).get(d30).n; const withNote = db.prepare(`SELECT COUNT(*) n FROM appointments WHERE status='completed' AND note_id IS NOT NULL AND date >= ?`).get(d30).n; return done ? Math.round(withNote / done * 100) : null; })(),
+      docCompliance: (() => { const done = db.prepare(`SELECT COUNT(*) n FROM appointments WHERE status='completed' AND date >= ?${fc.frag('facility_id')}`).get(d30).n; const withNote = db.prepare(`SELECT COUNT(*) n FROM appointments WHERE status='completed' AND note_id IS NOT NULL AND date >= ?${fc.frag('facility_id')}`).get(d30).n; return done ? Math.round(withNote / done * 100) : null; })(),
     };
   }
   res.json(out);
@@ -1362,8 +1374,11 @@ app.patch('/api/quicknotes/:id', requireAuth, requireAppts, (req, res) => {
 app.get('/api/kiosk/queue', requireKiosk, (req, res) => {
   const cid = +req.query.client_id;
   if (!cid) return res.json({ requests: [] });
+  const kfid = req.kioskFacilityId || defaultFacilityId();
+  const kc = db.prepare(`SELECT facility_id FROM clients WHERE id = ?`).get(cid);
+  if (kc && kc.facility_id != null && kfid && kc.facility_id !== kfid) return res.json({ requests: [] });
   const open = db.prepare(`SELECT id, department, text, status, created_at, promise_at, ready_at, claimed_by FROM requests WHERE client_id=? AND status != 'Done' ORDER BY id`).all(cid);
-  const allOpen = db.prepare(`SELECT id FROM requests WHERE status != 'Done' ORDER BY id`).all().map((x) => x.id);
+  const allOpen = db.prepare(`SELECT id FROM requests WHERE status != 'Done'${kfid ? ` AND (facility_id = ${kfid} OR facility_id IS NULL)` : ''} ORDER BY id`).all().map((x) => x.id);
   res.json({
     estWaitMin: estWaitMinutes(),
     requests: open.map((r) => ({
@@ -1467,6 +1482,7 @@ app.get('/api/mail/status', requireAuth, requireAdmin, (req, res) => {
     user: getState('msgraph_user') || '', tenant: getState('msgraph_tenant') || '',
     enabled: getState('mail_enabled') !== 'off',
     lastRun: getState('mail_last_run') || null,
+    lastError: getState('mail_last_error') || null,
     ai: claudeConfigured(),
   });
 });
@@ -1887,6 +1903,19 @@ function stampFac(req, res, bodyFid) {
   }
   return facCtx(req).one || defaultFacilityId();
 }
+// Per-client endpoints: verify the CLIENT belongs to a facility the caller may
+// see (and matches the chip's explicit pick). Returns the client row, or null
+// with a 404 already sent — a cross-facility id must be indistinguishable from
+// a nonexistent one.
+function clientFacGuard(req, res, clientId, cols = '*') {
+  const c = db.prepare(`SELECT ${cols}${cols === '*' ? '' : ', facility_id'} FROM clients WHERE id = ?`).get(clientId);
+  if (!c) { res.status(404).json({ error: 'Not found' }); return null; }
+  const fc = facCtx(req);
+  if (fc.deny || (fc.one && c.facility_id != null && c.facility_id !== fc.one) || (c.facility_id != null && !facilityAllowed(req.user, c.facility_id))) {
+    res.status(404).json({ error: 'Not found' }); return null;
+  }
+  return c;
+}
 
 // Insurance: the coverage lines we track, and which are REQUIRED so the matrix can
 // flag any entity that's missing one (configurable by the owner).
@@ -1949,8 +1978,7 @@ app.get('/api/clients', requireAuth, (req, res) => {
 });
 
 app.get('/api/clients/:id', requireAuth, (req, res) => {
-  const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
-  if (!c) return res.status(404).json({ error: 'Not found' });
+  const c = clientFacGuard(req, res, req.params.id); if (!c) return;
   c.tasks = db.prepare(`SELECT * FROM tasks WHERE client_id = ? ORDER BY sort, id`).all(c.id);
   audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: c.id, detail: c.name, ip: req.ip });
   res.json({ client: c });
@@ -1960,8 +1988,9 @@ const chartCache = new Map();   // kipu_id|all -> { at, data }; 90s TTL
 
 // ---- Medical send-outs (ED/hospital) — the census "OTHER" section ----
 app.get('/api/sendouts', requireAuth, (req, res) => {
-  const out = db.prepare(`SELECT * FROM medical_sendouts WHERE status = 'out' ORDER BY sent_at DESC`).all();
-  const recent = db.prepare(`SELECT * FROM medical_sendouts WHERE status != 'out' AND sent_at >= datetime('now','-7 day') ORDER BY sent_at DESC LIMIT 30`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const out = db.prepare(`SELECT * FROM medical_sendouts WHERE status = 'out'${shiftFrag(fc, 'facility_id')} ORDER BY sent_at DESC`).all();
+  const recent = db.prepare(`SELECT * FROM medical_sendouts WHERE status != 'out' AND sent_at >= datetime('now','-7 day')${shiftFrag(fc, 'facility_id')} ORDER BY sent_at DESC LIMIT 30`).all();
   res.json({ out, recent });
 });
 app.post('/api/sendouts', requireAuth, (req, res) => {
@@ -1969,8 +1998,10 @@ app.post('/api/sendouts', requireAuth, (req, res) => {
   let name = (b.client_name || '').trim();
   if (b.client_id) { const c = db.prepare(`SELECT pref, name FROM clients WHERE id = ?`).get(b.client_id); if (c) name = c.pref || c.name; }
   if (!name) return res.status(400).json({ error: 'Client name required' });
-  const info = db.prepare(`INSERT INTO medical_sendouts (client_id, client_name, destination, reason, sent_by) VALUES (?,?,?,?,?)`)
-    .run(b.client_id || null, name, (b.destination || '').trim() || null, (b.reason || '').trim() || null, req.user.name);
+  const soFac = (b.client_id ? db.prepare(`SELECT facility_id FROM clients WHERE id = ?`).get(b.client_id)?.facility_id : null) || stampFac(req, res);
+  if (soFac === null && res.headersSent) return;
+  const info = db.prepare(`INSERT INTO medical_sendouts (client_id, client_name, destination, reason, sent_by, facility_id) VALUES (?,?,?,?,?,?)`)
+    .run(b.client_id || null, name, (b.destination || '').trim() || null, (b.reason || '').trim() || null, req.user.name, soFac || null);
   audit({ user: req.user, action: 'SENDOUT', entity: 'client', entity_id: b.client_id || null, detail: name, ip: req.ip });
   res.json({ id: info.lastInsertRowid });
 });
@@ -2031,7 +2062,8 @@ app.post('/api/checkins', requireAuth, (req, res) => {
 // partners; conversion is measured by case manager. ----
 const AFTERCARE_DESTS = ['Armada Outpatient', 'Approved partner', 'Home / self', 'Undecided'];
 app.get('/api/continuum', requireAuth, (req, res) => {
-  const active = db.prepare(`SELECT id, pref, name, room, loc, program, admit, case_manager, next_loc, anticipated_dc, aftercare_dest, aftercare_facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const active = db.prepare(`SELECT id, pref, name, room, loc, program, admit, case_manager, next_loc, anticipated_dc, aftercare_dest, aftercare_facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
   const facName = db.prepare(`SELECT name FROM facilities WHERE id = ?`);
   const rows = active.map((c) => {
     const hasPlan = !!(c.aftercare_dest && c.aftercare_dest !== 'Undecided');
@@ -2044,7 +2076,7 @@ app.get('/api/continuum', requireAuth, (req, res) => {
   const byCM = {};
   for (const r of rows) { const k = r.caseManager || '(unassigned)'; (byCM[k] = byCM[k] || { cm: k, total: 0, planned: 0, armada: 0 }); byCM[k].total++; if (r.hasPlan) byCM[k].planned++; if (r.dest === 'Armada Outpatient') byCM[k].armada++; }
   // Discharge conversion (90d): did completed clients continue in the Armada continuum?
-  const disch = db.prepare(`SELECT aftercare_dest, discharge_status FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-90 day')`).all();
+  const disch = db.prepare(`SELECT aftercare_dest, discharge_status FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-90 day')${fc.frag('facility_id')}`).all();
   const completed = disch.filter((d) => /complete|graduat|step/i.test(d.discharge_status || ''));
   const toArmada = disch.filter((d) => d.aftercare_dest === 'Armada Outpatient').length;
   const partners = db.prepare(`SELECT id, name FROM facilities WHERE preferred = 1 ORDER BY name`).all();
@@ -2367,7 +2399,7 @@ app.post('/api/inventory/count', requireAuth, async (req, res) => {
 app.get('/api/inventory/reorders', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT r.*, i.name, i.department, i.category, i.unit, i.par_level, i.reorder_point, i.critical
     FROM reorder_requests r JOIN inventory_items i ON i.id = r.item_id
-    WHERE r.status = 'open' OR r.updated_at >= datetime('now','-14 day')
+    WHERE (r.status = 'open' OR r.updated_at >= datetime('now','-14 day'))${facCtx(req).frag('i.facility_id')}
     ORDER BY (r.status='open') DESC, (r.level='out') DESC, i.critical DESC, r.updated_at DESC`).all();
   res.json({ reorders: rows.map((r) => ({
     id: r.id, item: r.name, department: r.department, category: r.category || '', unit: r.unit,
@@ -2559,7 +2591,7 @@ app.post('/api/maintenance/settings', requireAuth, requireAdmin, (req, res) => {
 });
 // Resolved / closed history (last 30 days) — the record that it got handled.
 app.get('/api/maintenance/history', requireAuth, (req, res) => {
-  const rows = db.prepare(`SELECT * FROM maintenance_requests WHERE status IN ('resolved','closed') AND updated_at >= datetime('now','-30 day') ORDER BY updated_at DESC`).all();
+  const rows = db.prepare(`SELECT * FROM maintenance_requests WHERE status IN ('resolved','closed') AND updated_at >= datetime('now','-30 day')${facCtx(req).frag('facility_id')} ORDER BY updated_at DESC`).all();
   res.json({ history: rows.map((r) => ({ id: r.id, title: r.title, location: r.location || '', category: r.category, priority: r.priority,
     status: r.status, reportedBy: r.reported_by || '', resolution: r.resolution || '', resolvedBy: r.resolved_by || '',
     resolvedAt: r.resolved_at ? String(r.resolved_at).slice(0, 16) : String(r.updated_at).slice(0, 16),
@@ -2769,16 +2801,16 @@ app.get('/api/client-voice', requireAuth, (req, res) => {
   const since = `datetime('now','-${days} day')`, sinceD = `date('now','-${days} day')`;
   const reachouts = db.prepare(`SELECT r.id, r.text, r.priority, r.status, substr(r.created_at,1,16) at, c.pref, c.name
     FROM requests r LEFT JOIN clients c ON c.id=r.client_id
-    WHERE r.created_by_name='Client (kiosk)' AND r.department<>'Suggestion box' AND r.created_at>=${since} ORDER BY r.id DESC LIMIT 60`).all();
+    WHERE r.created_by_name='Client (kiosk)' AND r.department<>'Suggestion box' AND r.created_at>=${since}${facCtx(req).frag('r.facility_id')} ORDER BY r.id DESC LIMIT 60`).all();
   const suggestions = db.prepare(`SELECT r.id, r.text, r.status, substr(r.created_at,1,16) at, c.pref
-    FROM requests r LEFT JOIN clients c ON c.id=r.client_id WHERE r.department='Suggestion box' AND r.created_at>=${since} ORDER BY r.id DESC LIMIT 40`).all();
+    FROM requests r LEFT JOIN clients c ON c.id=r.client_id WHERE r.department='Suggestion box' AND r.created_at>=${since}${facCtx(req).frag('r.facility_id')} ORDER BY r.id DESC LIMIT 40`).all();
   const surveys = db.prepare(`SELECT sr.id, substr(sr.created_at,1,16) at, c.pref, c.name, ROUND(AVG(sa.value_num),1) score, GROUP_CONCAT(sa.value_text,' · ') comments
     FROM survey_responses sr LEFT JOIN clients c ON c.id=sr.client_id LEFT JOIN survey_answers sa ON sa.response_id=sr.id
-    WHERE sr.created_at>=${since} GROUP BY sr.id ORDER BY sr.id DESC LIMIT 40`).all();
-  const meals = db.prepare(`SELECT meal_date, meal, dish, comment, (SELECT pref FROM clients WHERE id=mf.client_id) pref
-    FROM meal_feedback mf WHERE created_at>=${since} AND comment IS NOT NULL AND comment<>'' ORDER BY id DESC LIMIT 40`).all();
-  const openReach = db.prepare(`SELECT COUNT(*) n FROM requests WHERE created_by_name='Client (kiosk)' AND status<>'Done'`).get().n;
-  const sc = db.prepare(`SELECT AVG(value_num) a FROM survey_answers sa JOIN survey_responses sr ON sr.id=sa.response_id WHERE sa.value_num IS NOT NULL AND sr.created_at>=${since}`).get().a;
+    WHERE sr.created_at>=${since}${facCtx(req).frag('c.facility_id')} GROUP BY sr.id ORDER BY sr.id DESC LIMIT 40`).all();
+  const meals = db.prepare(`SELECT mf.meal_date, mf.meal, mf.dish, mf.comment, c.pref
+    FROM meal_feedback mf LEFT JOIN clients c ON c.id = mf.client_id WHERE mf.created_at>=${since} AND mf.comment IS NOT NULL AND mf.comment<>''${facCtx(req).frag('c.facility_id')} ORDER BY mf.id DESC LIMIT 40`).all();
+  const openReach = db.prepare(`SELECT COUNT(*) n FROM requests WHERE created_by_name='Client (kiosk)' AND status<>'Done'${facCtx(req).frag('facility_id')}`).get().n;
+  const sc = db.prepare(`SELECT AVG(sa.value_num) a FROM survey_answers sa JOIN survey_responses sr ON sr.id=sa.response_id LEFT JOIN clients c ON c.id=sr.client_id WHERE sa.value_num IS NOT NULL AND sr.created_at>=${since}${facCtx(req).frag('c.facility_id')}`).get().a;
   const mlk = db.prepare(`SELECT AVG(liked) a FROM meal_feedback WHERE liked IS NOT NULL AND created_at>=${since}`).get().a;
   // Mark as seen now (clears the "new" badge for this user).
   setState('cv_seen_' + req.user.id, new Date().toISOString().replace('T', ' ').slice(0, 19));
@@ -2787,9 +2819,10 @@ app.get('/api/client-voice', requireAuth, (req, res) => {
 // Count of new kiosk feedback since this user last opened Client Voice (for the badge).
 app.get('/api/client-voice/unseen', requireAuth, (req, res) => {
   const seen = getState('cv_seen_' + req.user.id) || '1970-01-01';
-  const c1 = db.prepare(`SELECT COUNT(*) n FROM requests WHERE created_by_name='Client (kiosk)' AND created_at>?`).get(seen).n;
-  const c2 = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE created_at>?`).get(seen).n;
-  const c3 = db.prepare(`SELECT COUNT(*) n FROM meal_feedback WHERE created_at>? AND comment IS NOT NULL AND comment<>''`).get(seen).n;
+  const cvFc = facCtx(req); if (denyFac(cvFc, res)) return;
+  const c1 = db.prepare(`SELECT COUNT(*) n FROM requests WHERE created_by_name='Client (kiosk)' AND created_at>?${cvFc.frag('facility_id')}`).get(seen).n;
+  const c2 = db.prepare(`SELECT COUNT(*) n FROM survey_responses sr LEFT JOIN clients c ON c.id=sr.client_id WHERE sr.created_at>?${cvFc.frag('c.facility_id')}`).get(seen).n;
+  const c3 = db.prepare(`SELECT COUNT(*) n FROM meal_feedback mf LEFT JOIN clients c ON c.id=mf.client_id WHERE mf.created_at>? AND mf.comment IS NOT NULL AND mf.comment<>''${cvFc.frag('c.facility_id')}`).get(seen).n;
   res.json({ unseen: c1 + c2 + c3 });
 });
 
@@ -2900,7 +2933,7 @@ function dischargeMissing(c) {
 }
 app.get('/api/discharges/incomplete', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT id, pref, name, room, discharge_status, discharge_date, departure_steps, aftercare_dest, discharge_reason, discharge_improve, case_manager, therapist, discharged_by_kipu
-    FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-30 day') ORDER BY discharge_date DESC`).all();
+    FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-30 day')${facCtx(req).frag('facility_id')} ORDER BY discharge_date DESC`).all();
   const incomplete = rows.map((c) => ({ ...c, missing: dischargeMissing(c) })).filter((c) => c.missing.length)
     .map((c) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', date: (c.discharge_date || '').slice(0, 10), status: c.discharge_status || '', owner: c.case_manager || c.therapist || '', kipuStaff: c.discharged_by_kipu || '', missing: c.missing }));
   res.json({ incomplete });
@@ -2910,18 +2943,19 @@ app.get('/api/discharges/incomplete', requireAuth, (req, res) => {
 app.get('/api/voice', requireAuth, requireAdmin, (req, res) => {
   const rows = db.prepare(`SELECT ch.answer, ch.question, ch.shift, ch.by_name, substr(ch.created_at,1,16) at, c.pref, c.name, c.room
     FROM client_checkins ch LEFT JOIN clients c ON c.id = ch.client_id
-    WHERE ch.answer IS NOT NULL AND ch.answer != '' AND ch.created_at >= datetime('now','-3 day')
+    WHERE ch.answer IS NOT NULL AND ch.answer != '' AND ch.created_at >= datetime('now','-3 day')${facCtx(req).frag('c.facility_id')}
     ORDER BY ch.id DESC LIMIT 50`).all();
   const requests = db.prepare(`SELECT r.text, r.priority, substr(r.created_at,1,16) at, c.pref, c.name, c.room
     FROM requests r LEFT JOIN clients c ON c.id = r.client_id
-    WHERE r.created_by_name LIKE 'Client%' AND r.status != 'Done' AND r.created_at >= datetime('now','-3 day') ORDER BY r.id DESC LIMIT 30`).all();
+    WHERE r.created_by_name LIKE 'Client%' AND r.status != 'Done' AND r.created_at >= datetime('now','-3 day')${facCtx(req).frag('r.facility_id')} ORDER BY r.id DESC LIMIT 30`).all();
   res.json({
     checkins: rows.map((x) => ({ client: x.pref || x.name || '', room: x.room || '', answer: x.answer, question: x.question, shift: x.shift, by: x.by_name, at: x.at })),
     requests: requests.map((r) => ({ client: r.pref || r.name || 'A client', room: r.room || '', text: r.text, priority: r.priority, at: r.at })),
   });
 });
 app.get('/api/rounds/board', requireAuth, (req, res) => {
-  const active = db.prepare(`SELECT id, pref, name, room, loc, photo, obs_interval FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const active = db.prepare(`SELECT id, pref, name, room, loc, photo, obs_interval FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
   // Only a SCANNED (or Kipu-charted) check proves presence — desk taps don't count.
   const lastChk = db.prepare(`SELECT ts, by_name, status FROM obs_checks WHERE client_id = ? AND source IN ('scan','kipu') ORDER BY id DESC LIMIT 1`);
   const lastNote = db.prepare(`SELECT note, by_name FROM obs_checks WHERE client_id = ? AND status = 'note' AND note IS NOT NULL AND note != '' ORDER BY id DESC LIMIT 1`);
@@ -3183,7 +3217,8 @@ function careCardMinsSinceAdmit(c) {
   return Number.isNaN(ts) ? null : Math.floor((Date.now() - ts) / 60000);
 }
 app.get('/api/carecards', requireAuth, (req, res) => {
-  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, admit_time, touch, prefs, anchor_why, goals, triggers, safety FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY admit DESC, room`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const active = db.prepare(`SELECT id, pref, name, room, program, loc, admit, admit_time, touch, prefs, anchor_why, goals, triggers, safety FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY admit DESC, room`).all();
   const rows = active.map((c) => {
     const st = careCardStatus(c);
     const mins = careCardMinsSinceAdmit(c);
@@ -3214,7 +3249,8 @@ const DOC_REQS = [
   { key: 'cm_note', label: 'Case-management note', slaHrs: 24, form: 'cm_note' },
 ];
 app.get('/api/compliance', requireAuth, requireAdmin, (req, res) => {
-  const clients = db.prepare(`SELECT id, pref, name, room, admit, admit_time, loc, diagnosis, insurance, therapist, case_manager, referral_source, doc_forms FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const clients = db.prepare(`SELECT id, pref, name, room, admit, admit_time, loc, diagnosis, insurance, therapist, case_manager, referral_source, doc_forms FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')}`).all();
   const formsByClient = {};
   for (const c of clients) { try { formsByClient[c.id] = c.doc_forms ? JSON.parse(c.doc_forms) : null; } catch { formsByClient[c.id] = null; } }
   const out = DOC_REQS.map((rq) => {
@@ -3426,8 +3462,7 @@ app.post('/api/sms/test', requireAuth, requireAdmin, async (req, res) => {
 // FULL KIPU CHART: list every documented evaluation/form on a client, and read
 // any single one on demand. This is the whole chart, not the AI's sample.
 app.get('/api/clients/:id/chart', requireAuth, async (req, res) => {
-  const c = db.prepare(`SELECT kipu_id FROM clients WHERE id = ?`).get(req.params.id);
-  if (!c) return res.status(404).json({ error: 'Not found' });
+  const c = clientFacGuard(req, res, req.params.id, 'kipu_id'); if (!c) return;
   audit({ user: req.user, action: 'CHART_LIST', entity: 'client', entity_id: +req.params.id, ip: req.ip });
   if (!c.kipu_id || !kipuConfigured()) return res.json({ evaluations: [], extras: [], kipu: false });
   const all = req.query.all === '1';
@@ -3447,8 +3482,8 @@ app.get('/api/clients/:id/chart', requireAuth, async (req, res) => {
 });
 app.get('/api/clients/:id/chart/:evalId', requireAuth, async (req, res) => {
   if (!/^\d+$/.test(req.params.evalId)) return res.status(400).json({ error: 'Bad evaluation id' });
-  const c = db.prepare(`SELECT kipu_id FROM clients WHERE id = ?`).get(req.params.id);
-  if (!c?.kipu_id) return res.status(404).json({ error: 'No chart' });
+  const c = clientFacGuard(req, res, req.params.id, 'kipu_id'); if (!c) return;
+  if (!c.kipu_id) return res.status(404).json({ error: 'No chart' });
   try {
     const ev = await kipuEvaluation(c.kipu_id, req.params.evalId);
     audit({ user: req.user, action: 'CHART_VIEW', entity: 'client', entity_id: +req.params.id, detail: ev.name, ip: req.ip });
@@ -3700,7 +3735,7 @@ function rolloverAlerts() {
   // Anything still New from a prior shift → Missed.
   db.prepare(`UPDATE alerts SET status = 'Missed' WHERE status = 'New' AND (shift_date != ? OR shift != ?)`).run(today, sh);
 }
-function createAlert(client_id, kind, level, message) {
+function createAlert(client_id, kind, level, message, facilityId = null) {
   const today = appToday(), sh = currentShift();
   // Dedup within the CURRENT shift (not a rolling day) so a persistent condition
   // re-surfaces fresh each shift. `client_id IS ?` (not `=`) so facility-wide
@@ -3709,7 +3744,8 @@ function createAlert(client_id, kind, level, message) {
   if (dup) return;
   const ttl = ALERT_TTL_MIN[kind] || null;
   const expires = ttl ? `datetime('now','+${ttl} minutes')` : 'NULL';
-  db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles, shift, shift_date, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ${expires})`).run(client_id || null, kind, level || null, message, rolesForAlert(kind, message), sh, today);
+  const alertFac = facilityId || (client_id ? db.prepare(`SELECT facility_id FROM clients WHERE id = ?`).get(client_id)?.facility_id : null) || defaultFacilityId();
+  db.prepare(`INSERT INTO alerts (client_id, kind, level, message, roles, shift, shift_date, expires_at, facility_id) VALUES (?, ?, ?, ?, ?, ?, ?, ${expires}, ?)`).run(client_id || null, kind, level || null, message, rolesForAlert(kind, message), sh, today, alertFac || null);
   if (level === 'High' || level === 'Critical') {
     // How much to put in the SMS/email (an insecure channel). Default 'locator':
     // first name + room so the on-call leader knows WHO and WHERE, without the
@@ -3948,7 +3984,7 @@ app.get('/api/dignity', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT k.*, c.pref, c.name, c.room,
       (k.status='needed' AND k.due_by IS NOT NULL AND k.due_by < datetime('now')) AS overdue
     FROM dignity_kits k JOIN clients c ON c.id = k.client_id
-    WHERE c.active = 1 AND c.discharge_status IS NULL ORDER BY overdue DESC, k.due_by`).all();
+    WHERE c.active = 1 AND c.discharge_status IS NULL${facCtx(req).frag('c.facility_id')} ORDER BY overdue DESC, k.due_by`).all();
   const map = (r) => ({ id: r.id, client_id: r.client_id, name: r.pref || r.name, room: r.room, status: r.status,
     due_by: r.due_by, assigned_role: r.assigned_role, assigned_name: r.assigned_name,
     delivered_by: r.delivered_by, delivered_at: r.delivered_at, overdue: !!r.overdue,
@@ -3997,7 +4033,7 @@ app.post('/api/dignity/:id/reopen', requireAuth, (req, res) => {
 
 // Detox Watch: active clients with moderate/severe withdrawal or med concerns.
 app.get('/api/detox-watch', requireAuth, (req, res) => {
-  const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL${facCtx(req).frag('facility_id')}`).all();
   const rank = { Severe: 0, Moderate: 1 };
   const watch = [];
   for (const c of clients) {
@@ -4014,7 +4050,7 @@ app.get('/api/detox-watch', requireAuth, (req, res) => {
 });
 app.get('/api/discharge-learnings', requireAuth, (req, res) => {
   const rows = db.prepare(`SELECT id, pref, name, discharge_status, discharge_date, discharge_reason, discharge_evidence, discharge_doc_gap, discharge_improve
-    FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-60 day')
+    FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-60 day')${facCtx(req).frag('facility_id')}
     ORDER BY discharge_date DESC LIMIT 60`).all();
   const docGap = rows.filter((r) => r.discharge_doc_gap).length;
   res.json({ discharges: rows, docGap, total: rows.length });
@@ -4233,7 +4269,8 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday().slice(0, 8) + '01';
   const endQ = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : null;
   const end = endQ || '9999-12-31';   // open-ended when no end date is chosen
-  const scheduled = db.prepare(`SELECT status, COUNT(*) n FROM expected_arrivals WHERE scheduled_date >= ? AND scheduled_date <= ? GROUP BY status`).all(since, end);
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const scheduled = db.prepare(`SELECT status, COUNT(*) n FROM expected_arrivals WHERE scheduled_date >= ? AND scheduled_date <= ?${fc.frag('facility_id')} GROUP BY status`).all(since, end);
   const schedMap = Object.fromEntries(scheduled.map((r) => [r.status, r.n]));
   const schedTotal = scheduled.reduce((s, r) => s + r.n, 0);
 
@@ -4242,14 +4279,14 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   // still counting a genuine re-admission (same person, a DIFFERENT admit date) as its
   // own admit/discharge. Also excludes retired duplicates and referral-outs.
   const stayKey = (c) => dupKeyOf(c) + '|' + (c.admit || '').slice(0, 10);
-  const admitRows = db.prepare(`SELECT pref, name, kipu_id, admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`).all(since, end);
+  const admitRows = db.prepare(`SELECT pref, name, kipu_id, facility_id, admit, discharge_date, discharge_reason, therapist, diagnosis FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?${fc.frag('facility_id')}`).all(since, end);
   const seenA = new Set(); let admitted = 0;
   for (const c of admitRows) { if (isReferredOut(c)) continue; const k = stayKey(c); if (seenA.has(k)) continue; seenA.add(k); admitted++; }
   // People who are CURRENTLY here. A "discharge" for someone who is still an active
   // patient is a phantom (the census-churn bug) — they never actually left.
-  const activeKeys = new Set(db.prepare(`SELECT kipu_id, name, pref, facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map((c) => dupKeyOf(c)));
+  const activeKeys = new Set(db.prepare(`SELECT kipu_id, name, pref, facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL${fc.frag('facility_id')}`).all().map((c) => dupKeyOf(c)));
   const dischRaw = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist, diagnosis
-    FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ? ORDER BY discharge_date DESC`).all(since, end);
+    FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ?${fc.frag('facility_id')} ORDER BY discharge_date DESC`).all(since, end);
   const seenD = new Set(); const dischAll = [];
   for (const c of dischRaw) { const k = stayKey(c); if (seenD.has(k)) continue; seenD.add(k); dischAll.push(c); }
   const referredList = dischAll.filter((d) => isReferredOut(d)).map((d) => ({ id: d.id, name: d.pref || d.name, date: (d.discharge_date || '').slice(0, 10), status: d.discharge_status || '' }));
@@ -4366,15 +4403,16 @@ app.get('/api/diag/admits', requireAuth, requireAdmin, (req, res) => {
 app.get('/api/diag/admit-discharge', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
   const win = addDays(today, -3);
-  const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL`).get().n;
-  const scheduledToday = db.prepare(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).get(today).n;
-  const admittedToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) = ?`).get(today).n;
-  const dischargedToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?`).get(today).n;
-  const admits = db.prepare(`SELECT pref, name, admit, admit_time, source, active, room FROM clients WHERE admit IS NOT NULL AND substr(admit,1,10) >= ? ORDER BY admit DESC, admit_time DESC LIMIT 50`).all(win)
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')}`).get().n;
+  const scheduledToday = db.prepare(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'${fc.frag('facility_id')}`).get(today).n;
+  const admittedToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) = ?${fc.frag('facility_id')}`).get(today).n;
+  const dischargedToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ?${fc.frag('facility_id')}`).get(today).n;
+  const admits = db.prepare(`SELECT pref, name, admit, admit_time, source, active, room FROM clients WHERE admit IS NOT NULL AND substr(admit,1,10) >= ?${fc.frag('facility_id')} ORDER BY admit DESC, admit_time DESC LIMIT 50`).all(win)
     .map((c) => ({ name: c.pref || c.name || '—', admit: (c.admit || '').slice(0, 10), time: c.admit_time || '', source: c.source || 'manual', active: !!c.active, room: c.room || '', isToday: (c.admit || '').slice(0, 10) === today }));
-  const discharges = db.prepare(`SELECT pref, name, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis, source FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? ORDER BY discharge_date DESC LIMIT 50`).all(win)
+  const discharges = db.prepare(`SELECT pref, name, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis, source FROM clients WHERE discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ?${fc.frag('facility_id')} ORDER BY discharge_date DESC LIMIT 50`).all(win)
     .map((c) => ({ name: c.pref || c.name || '—', date: (c.discharge_date || '').slice(0, 10), status: c.discharge_status || 'Discharged', source: c.source || 'manual', isToday: (c.discharge_date || '').slice(0, 10) === today, referredOut: isReferredOut(c) }));
-  const scheduled = db.prepare(`SELECT preferred_name, first_name, last_name, scheduled_date, status FROM expected_arrivals WHERE scheduled_date >= ? ORDER BY scheduled_date DESC LIMIT 50`).all(win)
+  const scheduled = db.prepare(`SELECT preferred_name, first_name, last_name, scheduled_date, status FROM expected_arrivals WHERE scheduled_date >= ?${fc.frag('facility_id')} ORDER BY scheduled_date DESC LIMIT 50`).all(win)
     .map((s) => ({ name: s.preferred_name || [s.first_name, s.last_name].filter(Boolean).join(' ') || '—', date: s.scheduled_date || '', status: s.status || '', isToday: s.scheduled_date === today }));
   res.json({ today, facility: { census, scheduledToday, admittedToday, dischargedToday }, admits, discharges, scheduled });
 });
@@ -6536,10 +6574,10 @@ app.get('/api/command/discharge-debug', requireAuth, requireAdmin, (req, res) =>
   const flowEvents = db.prepare(`SELECT f.id feid, f.kind, f.date, f.detail, f.client_id,
       c.name, c.source, c.kipu_id, c.active, c.discharge_status, c.discharge_date, c.admit, c.created_at
     FROM flow_events f LEFT JOIN clients c ON c.id = f.client_id
-    WHERE f.date = ? AND f.kind IN ('discharge','ama') ORDER BY c.name`).all(today);
+    WHERE f.date = ? AND f.kind IN ('discharge','ama')${(() => { const fc = facCtx(req); return fc.one ? ` AND (c.facility_id = ${fc.one} OR c.id IS NULL)` : fc.frag('c.facility_id'); })()} ORDER BY c.name`).all(today);
   const orphans = flowEvents.filter((r) => r.name == null).length;
   const dischargeDateToday = db.prepare(`SELECT id, name, source, kipu_id, active, discharge_status, discharge_date, admit, created_at
-    FROM clients WHERE substr(discharge_date,1,10) = ? ORDER BY name`).all(today);
+    FROM clients WHERE substr(discharge_date,1,10) = ?${facCtx(req).frag('facility_id')} ORDER BY name`).all(today);
   const bySource = {};
   for (const c of dischargeDateToday) { const s = c.source || 'null'; bySource[s] = (bySource[s] || 0) + 1; }
   res.json({ today, flowEventCount: flowEvents.length, orphanFlowEvents: orphans, flowEvents, dischargeDateTodayCount: dischargeDateToday.length, bySource, clients: dischargeDateToday });
@@ -6665,7 +6703,7 @@ app.get('/api/retention', requireAuth, (req, res) => {
   out.sort((a, b) => (rank[b.level] || 0) - (rank[a.level] || 0) || (a.room || '').localeCompare(b.room || ''));
 
   const since = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
-  const recent = db.prepare(`SELECT triggers FROM pulses WHERE date >= ?`).all(since);
+  const recent = db.prepare(`SELECT p.triggers FROM pulses p JOIN clients c ON c.id = p.client_id WHERE p.date >= ?${fc.frag('c.facility_id')}`).all(since);
   const counts = {};
   recent.forEach((r) => safeArr(r.triggers).forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
   const triggerCounts = Object.entries(counts).map(([trigger, count]) => ({ trigger, count })).sort((a, b) => b.count - a.count);
@@ -6675,7 +6713,7 @@ app.get('/api/retention', requireAuth, (req, res) => {
     elevated: out.filter((c) => c.level === 'Elevated').length,
     notPulsedToday: out.filter((c) => !c.pulsedToday).length,
     total: out.length,
-    pulsesToday: db.prepare(`SELECT COUNT(*) n FROM pulses WHERE date = ?`).get(today).n,
+    pulsesToday: db.prepare(`SELECT COUNT(*) n FROM pulses p JOIN clients c ON c.id = p.client_id WHERE p.date = ?${fc.frag('c.facility_id')}`).get(today).n,
   };
   res.json({ clients: out, triggerCounts, summary, windowDays: 14 });
 });
@@ -7619,9 +7657,10 @@ app.post('/api/clients/:id/readmit', requireAuth, (req, res) => {
 
 // Aftercare follow-up calls
 app.get('/api/followups', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   res.json({ followups: db.prepare(
     `SELECT f.*, c.pref, c.name FROM followups f JOIN clients c ON c.id = f.client_id
-     WHERE f.status = 'Pending' ORDER BY f.due_date`).all() });
+     WHERE f.status = 'Pending'${fc.frag('c.facility_id')} ORDER BY f.due_date`).all() });
 });
 app.post('/api/followups/:id', requireAuth, (req, res) => {
   const st = ['Done', 'Unreachable', 'Pending'].includes(req.body?.status) ? req.body.status : 'Done';
@@ -8043,6 +8082,7 @@ app.post('/api/settings/oncall', requireAuth, requireAdmin, (req, res) => {
 app.get('/api/concerns', requireAuth, (req, res) => {
   res.json({ concerns: db.prepare(
     `SELECT co.*, c.pref, c.name FROM concerns co JOIN clients c ON c.id = co.client_id
+     WHERE 1=1${facCtx(req).frag('c.facility_id')}
      ORDER BY (co.status = 'Open') DESC, co.id DESC LIMIT 100`).all() });
 });
 app.post('/api/concerns', requireAuth, (req, res) => {
@@ -8062,7 +8102,7 @@ app.post('/api/concerns/:id/resolve', requireAuth, (req, res) => {
 // Delights ("whatever it takes")
 app.get('/api/delights', requireAuth, (req, res) => {
   res.json({ delights: db.prepare(
-    `SELECT d.*, c.pref FROM delights d LEFT JOIN clients c ON c.id = d.client_id ORDER BY d.id DESC LIMIT 50`).all() });
+    `SELECT d.*, c.pref FROM delights d LEFT JOIN clients c ON c.id = d.client_id WHERE 1=1${facCtx(req).frag('c.facility_id')} ORDER BY d.id DESC LIMIT 50`).all() });
 });
 app.post('/api/delights', requireAuth, (req, res) => {
   if (!req.body?.text?.trim()) return res.status(400).json({ error: 'Missing' });
@@ -8640,14 +8680,16 @@ app.post('/api/activities/bulk', requireAuth, (req, res) => {
 // Staff engagement leaderboard: who got the most clients into activities. This
 // is what we reward — recognition for the team that fights boredom.
 app.get('/api/engagement/staff', requireAuth, (req, res) => {
-  const span = (d) => db.prepare(`SELECT by_name, COUNT(*) n, COUNT(DISTINCT client_id) clients FROM activities
-    WHERE by_name IS NOT NULL AND created_at >= datetime('now','-${d} day') GROUP BY by_name ORDER BY n DESC`).all();
-  res.json({ week: span(7), month: span(30), total: db.prepare(`SELECT COUNT(*) n FROM activities`).get().n });
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const span = (d) => db.prepare(`SELECT a.by_name, COUNT(*) n, COUNT(DISTINCT a.client_id) clients FROM activities a LEFT JOIN clients c ON c.id = a.client_id
+    WHERE a.by_name IS NOT NULL AND a.created_at >= datetime('now','-${d} day')${fc.frag('c.facility_id')} GROUP BY a.by_name ORDER BY n DESC`).all();
+  res.json({ week: span(7), month: span(30), total: db.prepare(`SELECT COUNT(*) n FROM activities a LEFT JOIN clients c ON c.id = a.client_id WHERE 1=1${fc.frag('c.facility_id')}`).get().n });
 });
 // Engagement board: per active client — interests, last activity, count this
 // week — plus who hasn't engaged today (the boredom/AMA risk to encourage).
 app.get('/api/engagement', requireAuth, (req, res) => {
-  const active = db.prepare(`SELECT id, pref, name, room, interests FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const active = db.prepare(`SELECT id, pref, name, room, interests FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
   const lastBy = db.prepare(`SELECT client_id, MAX(created_at) last FROM activities GROUP BY client_id`).all().reduce((a, r) => (a[r.client_id] = r.last, a), {});
   const weekBy = db.prepare(`SELECT client_id, COUNT(*) n FROM activities WHERE created_at >= datetime('now','-7 day') GROUP BY client_id`).all().reduce((a, r) => (a[r.client_id] = r.n, a), {});
   const today = appToday();
@@ -8735,10 +8777,10 @@ app.get('/api/requests/stats', requireAuth, (req, res) => {
       AVG(CASE WHEN done_at IS NOT NULL THEN (julianday(done_at)-julianday(created_at))*1440 END) avgResolve,
       SUM(CASE WHEN acknowledged_at IS NOT NULL THEN 1 ELSE 0 END) respondedN,
       SUM(CASE WHEN acknowledged_at IS NOT NULL AND ${respMin} <= 15 THEN 1 ELSE 0 END) within15
-    FROM requests WHERE created_at >= datetime('now', ?)`).get(since);
+    FROM requests WHERE created_at >= datetime('now', ?)${facCtx(req).frag('facility_id')}`).get(since);
   const board = db.prepare(`SELECT acknowledged_by name, COUNT(*) n, AVG(${respMin}) avgResp
     FROM requests WHERE acknowledged_at IS NOT NULL AND acknowledged_by IS NOT NULL AND acknowledged_by != ''
-      AND created_at >= datetime('now', ?)
+      AND created_at >= datetime('now', ?)${facCtx(req).frag('facility_id')}
     GROUP BY acknowledged_by HAVING n >= 1 ORDER BY avgResp ASC LIMIT 10`).all(since);
   const r1 = (x) => x == null ? null : Math.round(x);
   res.json({
@@ -8822,6 +8864,7 @@ app.delete('/api/schedule/:id', requireAuth, (req, res) => { db.prepare(`DELETE 
 // Treatment goals
 app.get('/api/goals', requireAuth, (req, res) => {
   if (!req.query.client_id) return res.json({ goals: [] });
+  if (!clientFacGuard(req, res, req.query.client_id, 'id')) return;
   res.json({ goals: db.prepare(`SELECT * FROM goals WHERE client_id = ? ORDER BY (status = 'Met'), id DESC`).all(req.query.client_id) });
 });
 app.post('/api/goals', requireAuth, (req, res) => {
@@ -8838,8 +8881,7 @@ app.post('/api/goals/:id/status', requireAuth, (req, res) => {
 
 // Client 360 journey — everything about one client, in one place
 app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
-  const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
-  if (!c) return res.status(404).json({ error: 'Not found' });
+  const c = clientFacGuard(req, res, req.params.id); if (!c) return;
   audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: +req.params.id, detail: 'journey', ip: req.ip });
   const today = appToday();
   c.tasks = db.prepare(`SELECT * FROM tasks WHERE client_id = ? ORDER BY sort, id`).all(c.id);
@@ -8870,8 +8912,9 @@ app.get('/api/records/search', requireAuth, (req, res) => {
   const q = (req.query.q || '').trim();
   if (q.length < 2) return res.json({ results: [] });
   const like = '%' + q.replace(/[%_]/g, '') + '%';
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const rows = db.prepare(`SELECT id, name, pref, room, program, admit, discharge_status, discharge_date, active
-    FROM clients WHERE name LIKE ? COLLATE NOCASE OR pref LIKE ? COLLATE NOCASE OR room LIKE ? COLLATE NOCASE
+    FROM clients WHERE (name LIKE ? COLLATE NOCASE OR pref LIKE ? COLLATE NOCASE OR room LIKE ? COLLATE NOCASE)${fc.frag('facility_id')}
     ORDER BY (discharge_status IS NULL) DESC, COALESCE(discharge_date, admit) DESC LIMIT 25`).all(like, like, like);
   res.json({ results: rows.map((c) => ({
     id: c.id, name: c.pref || c.name, full: c.name, room: c.room || '', program: c.program || '',
@@ -8881,8 +8924,7 @@ app.get('/api/records/search', requireAuth, (req, res) => {
 });
 
 app.get('/api/clients/:id/record', requireAuth, (req, res) => {
-  const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.params.id);
-  if (!c) return res.status(404).json({ error: 'Not found' });
+  const c = clientFacGuard(req, res, req.params.id); if (!c) return;
   audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: c.id, detail: 'full record', ip: req.ip });
   const at = (s) => String(s || '').slice(0, 16);
   const safeTriggers = (t) => { try { return t ? JSON.parse(t) : []; } catch { return []; } };
@@ -8969,8 +9011,8 @@ function buildClientContext(c) {
 // House context. In de-identified mode, clients are labelled "Client A/B/…";
 // returns { text, map } so the caller can swap labels back to real names in the
 // AI's output (names never reach Claude).
-function buildHouseContext(shift) {
-  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room`).all();
+function buildHouseContext(shift, facFrag = '') {
+  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL${facFrag} ORDER BY room`).all();
   const map = {};
   let ctx = `Shift briefing for ${shift || 'this'} shift. ${clients.length} active clients.\n\n`;
   clients.forEach((c, i) => {
@@ -9009,7 +9051,8 @@ app.post('/api/clients/:id/care-brief', requireAuth, async (req, res) => {
 app.post('/api/shift-briefing', requireAuth, async (req, res) => {
   if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured (set ANTHROPIC_API_KEY).' });
   try {
-    const { text, map } = buildHouseContext(req.body?.shift);
+    const bfFc = facCtx(req); if (denyFac(bfFc, res)) return;
+    const { text, map } = buildHouseContext(req.body?.shift, bfFc.frag('facility_id'));
     const brief = reidentify(await generateShiftBriefing(text), map);
     audit({ user: req.user, action: 'SHIFT_BRIEF', ip: req.ip });
     res.json({ brief });
@@ -9115,7 +9158,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const seenLd = new Set(); const dToday = []; const dReferred = [];
     for (const c of dRawLd) { const k = dupKeyOf(c); if (k && seenLd.has(k)) continue; if (k) seenLd.add(k); (isReferredOut(c) ? dReferred : dToday).push(c); }
     const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
-    const openIncidents = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'`).get().n;
+    const openIncidents = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'${fc.frag('facility_id')}`).get().n;
     const incidentsRecent = db.prepare(`SELECT i.type, i.severity, i.description, c.pref, c.name FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE i.status = 'Open'${fc.frag('i.facility_id')} ORDER BY (i.severity IN ('High','Critical')) DESC, i.id DESC LIMIT 8`).all();
     // Service: warm welcome (care card) + anticipation (a delight) delivered.
     const delightSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM delights WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
@@ -9182,7 +9225,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   } else if (jr === 'Nurse') {
     subtitle = 'Medical watch — withdrawal, meds, and the safety of every client.';
     const detox = active.filter((c) => isDetoxProgram(c.program) || /3\.?7|3\.?2|wm/i.test(c.loc || ''));
-    const sendouts = db.prepare(`SELECT client_name name, destination, reason FROM medical_sendouts WHERE status = 'out' ORDER BY sent_at DESC`).all();
+    const sendouts = db.prepare(`SELECT client_name name, destination, reason FROM medical_sendouts WHERE status = 'out'${shiftFrag(fc, 'facility_id')} ORDER BY sent_at DESC`).all();
     const overdue = active.filter(obsOverdue);
     northStar = { label: 'Safety checks current', value: active.length ? Math.round((active.length - overdue.length) / active.length * 100) + '%' : '—', sev: overdue.length ? 'warn' : 'ok' };
     tiles = [
@@ -9212,7 +9255,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     // 2) At risk — the relationship/Save.
     const risk = caseload.map((c) => ({ c, lvl: riskOf(c) })).filter((x) => x.lvl === 'High' || x.lvl === 'Elevated');
     // 3) Coordination — appointments (medical/legal/other) as open case tasks.
-    const allTasks = db.prepare(`SELECT t.id, t.item, t.category, c.id cid, c.pref, c.name FROM case_tasks t JOIN clients c ON c.id = t.client_id WHERE t.status = 'open' AND c.active = 1 AND c.discharge_status IS NULL ORDER BY t.id DESC`).all();
+    const allTasks = db.prepare(`SELECT t.id, t.item, t.category, c.id cid, c.pref, c.name FROM case_tasks t JOIN clients c ON c.id = t.client_id WHERE t.status = 'open' AND c.active = 1 AND c.discharge_status IS NULL${fc.frag('c.facility_id')} ORDER BY t.id DESC`).all();
     const myTasks = mine.length ? allTasks.filter((t) => caseload.some((c) => c.id === t.cid)) : allTasks;
     // 4) Discharge arrangements + ride — approaching discharge without a set plan.
     const planNeeds = caseload.filter((c) => c.anticipated_dc && (!c.aftercare_dest || c.aftercare_dest === 'Undecided'));
@@ -9225,7 +9268,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const sessDays = +autoCfg('session_days', 7);
     const lastSess = db.prepare(`SELECT MAX(created_at) m FROM client_sessions WHERE client_id = ? AND type = '1:1'`);
     const sessionsDue = caseload.filter((c) => { const m = lastSess.get(c.id).m; return !m || (Date.now() - Date.parse(String(m).replace(' ', 'T') + 'Z')) > sessDays * 864e5; });
-    const homeworkOpen = db.prepare(`SELECT s.homework, c.id cid, c.pref, c.name FROM client_sessions s JOIN clients c ON c.id = s.client_id WHERE s.homework IS NOT NULL AND s.homework != '' AND s.homework_done = 0 AND c.active = 1 AND c.discharge_status IS NULL ORDER BY s.id DESC`).all();
+    const homeworkOpen = db.prepare(`SELECT s.homework, c.id cid, c.pref, c.name FROM client_sessions s JOIN clients c ON c.id = s.client_id WHERE s.homework IS NOT NULL AND s.homework != '' AND s.homework_done = 0 AND c.active = 1 AND c.discharge_status IS NULL${fc.frag('c.facility_id')} ORDER BY s.id DESC`).all();
     const myHomework = mine.length ? homeworkOpen.filter((h) => caseload.some((c) => c.id === h.cid)) : homeworkOpen;
     northStar = { label: 'Intake assessments done on time (24h)', value: assessedPct + '%', sev: assessOverdue.length ? 'high' : assess.length ? 'warn' : 'ok' };
     tiles = [
@@ -9249,7 +9292,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     if (myHomework.length) sections.push({ key: 'homework', title: '📚 Homework outstanding — material assigned, not yet done', cta: { label: 'Open Client Record →', view: 'records' }, items: myHomework.map((h) => ({ id: h.cid, name: h.pref || h.name, sub: h.homework })) });
   } else if (jr === 'Front Desk') {
     subtitle = 'The warm welcome — greet every arrival by name.';
-    const arr = db.prepare(`SELECT preferred_name, first_name, last_name, status, referral_source FROM expected_arrivals WHERE scheduled_date = ? ORDER BY status`).all(today);
+    const arr = db.prepare(`SELECT preferred_name, first_name, last_name, status, referral_source FROM expected_arrivals WHERE scheduled_date = ?${fc.frag('facility_id')} ORDER BY status`).all(today);
     const waiting = arr.filter((a) => a.status === 'expected'); const arrived = arr.filter((a) => a.status === 'arrived'); const noshow = arr.filter((a) => a.status === 'no_show');
     northStar = { label: 'Arriving today', value: arr.length, sev: waiting.length ? 'warn' : 'ok' };
     tiles = [
@@ -9266,8 +9309,8 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const cleaning = beds.filter((b) => /clean/i.test(b.status || ''));
     const hold = beds.filter((b) => /hold/i.test(b.status || ''));
     const openB = beds.filter((b) => /open/i.test(b.status || ''));
-    const freedToday = db.prepare(`SELECT pref, name, room, discharge_status FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
-    const arrivals = db.prepare(`SELECT preferred_name, first_name, last_name FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'`).all(today);
+    const freedToday = db.prepare(`SELECT pref, name, room, discharge_status FROM clients WHERE substr(discharge_date,1,10) = ?${fc.frag('facility_id')}`).all(today);
+    const arrivals = db.prepare(`SELECT preferred_name, first_name, last_name FROM expected_arrivals WHERE scheduled_date = ? AND status = 'expected'${fc.frag('facility_id')}`).all(today);
     const turnover = cleaning.length + freedToday.length;
     northStar = { label: 'Beds ready', value: openB.length || '—', sev: (arrivals.length > openB.length) ? 'warn' : 'ok' };
     tiles = [
@@ -9373,7 +9416,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     const roleItems = db.prepare(`SELECT COUNT(*) n FROM arrival_items WHERE active = 1 AND role = ?`).get(myArrivalRole).n;
     if (roleItems) {
       const doneCount = db.prepare(`SELECT COUNT(*) n FROM arrival_checks ch JOIN arrival_items i ON i.id = ch.item_id WHERE ch.client_id = ? AND i.role = ?`);
-      const recentAdmits = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) >= date('now','-3 day') ORDER BY admit DESC, id DESC`).all();
+      const recentAdmits = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL AND substr(admit,1,10) >= date('now','-3 day')${fc.frag('facility_id')} ORDER BY admit DESC, id DESC`).all();
       let totalOut = 0; const outRows = [];
       for (const c of recentAdmits) { const out = roleItems - doneCount.get(c.id, myArrivalRole).n; if (out > 0) { totalOut += out; outRows.push({ c, out }); } }
       tiles.push({ key: 'arrival', label: 'My arrival tasks', n: totalOut, sev: totalOut ? 'warn' : 'ok', view: 'arrivalcheck' });
@@ -9416,7 +9459,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   }
   // Operations layer — on every role's shift screen so nothing operational is
   // invisible: open maintenance work orders, and whether today's shifts are short.
-  const maintOpen = db.prepare(`SELECT id, title, location, category, priority, created_at FROM maintenance_requests WHERE status IN ('open','in_progress') ORDER BY
+  const maintOpen = db.prepare(`SELECT id, title, location, category, priority, created_at FROM maintenance_requests WHERE status IN ('open','in_progress')${fc.frag('facility_id')} ORDER BY
     CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, created_at DESC`).all();
   const maintUrgent = maintOpen.filter((r) => r.priority === 'Urgent' || r.priority === 'High').length;
   // The Director of Operations dashboard already covers maintenance + coverage in
@@ -9454,8 +9497,8 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   // so they can't clog this "drop everything" panel — see the screenshot fix).
   const fullAlertView = jr === 'Executive Director';
   const alerts = fullAlertView
-    ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' ORDER BY id DESC LIMIT 10`).all()
-    : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' AND (roles IS NULL OR roles LIKE ?) ORDER BY id DESC LIMIT 10`).all('%|' + jr + '|%');
+    ? db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds'${shiftFrag(fc, 'facility_id')} ORDER BY id DESC LIMIT 10`).all()
+    : db.prepare(`SELECT id, kind, level, message FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' AND (roles IS NULL OR roles LIKE ?)${shiftFrag(fc, 'facility_id')} ORDER BY id DESC LIMIT 10`).all('%|' + jr + '|%');
   res.json({ jobRole: jr || 'Team', greeting: `${greet}, ${first}`, subtitle, northStar, tiles, sections, nudges, milestones, stats, alerts, focus: { topic: focus.t, goal: focus.g }, wins, lean, priority, facility,
     principle: todaysPrinciple(today), safety: todaysSafety(today),   // Today at Armada — the handbook opens the day
     canPreview: req.user.role === 'admin', roles: req.user.role === 'admin' ? JOB_ROLES : undefined, previewing: jr !== (req.user.job_role || '') ? jr : null });
@@ -9465,7 +9508,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
 // warm welcome (Care Card known), anticipation (a personal touch delivered),
 // and a fond farewell (Dignity Kit at departure). Leadership's service north star.
 app.get('/api/moments', requireAuth, requireAdmin, (req, res) => {
-  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL${facCtx(req).frag('facility_id')} ORDER BY room, name`).all();
   const delightSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM delights WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
   const kitDelivered = new Set(db.prepare(`SELECT client_id FROM dignity_kits WHERE status = 'delivered'`).all().map((r) => r.client_id));
   const nm = (c) => ({ id: c.id, name: c.pref || c.name, room: c.room || '', status: c.discharge_status || '' });
@@ -9539,12 +9582,14 @@ app.post('/api/assistant', requireAuth, async (req, res) => {
   const q = (req.body?.question || '').trim();
   if (!q) return res.status(400).json({ error: 'Ask a question.' });
   try {
+    const aiFc = facCtx(req); if (denyFac(aiFc, res)) return;
     let ctx, map = null;
     if (req.body?.client_id) {
       const c = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(req.body.client_id);
-      ctx = c ? buildClientContext(c) : 'No such client.';
+      if (c && ((aiFc.one && c.facility_id != null && c.facility_id !== aiFc.one) || (c.facility_id != null && !facilityAllowed(req.user, c.facility_id)))) { ctx = 'No such client.'; }
+      else ctx = c ? buildClientContext(c) : 'No such client.';
     } else {
-      const h = buildHouseContext('current'); ctx = h.text; map = h.map;
+      const h = buildHouseContext('current', aiFc.frag('facility_id')); ctx = h.text; map = h.map;
     }
     const qOut = DEID ? scrub(q, db.prepare(`SELECT name, pref FROM clients WHERE active = 1`).all().flatMap((c) => [c.name, c.pref]).filter(Boolean)) : q;
     const answer = reidentify(await askAssistant(qOut, ctx), map);
@@ -9572,6 +9617,9 @@ app.post('/api/incidents', requireAuth, (req, res) => {
 });
 app.post('/api/incidents/:id/status', requireAuth, (req, res) => {
   const st = ['Open', 'Reviewed', 'Closed'].includes(req.body?.status) ? req.body.status : 'Reviewed';
+  const row = db.prepare(`SELECT facility_id FROM incidents WHERE id = ?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  if (row.facility_id && !facilityAllowed(req.user, row.facility_id)) return res.status(403).json({ error: 'No access to that facility.' });
   db.prepare(`UPDATE incidents SET status = ? WHERE id = ?`).run(st, req.params.id);
   res.json({ ok: true });
 });
@@ -9582,7 +9630,8 @@ app.get('/api/behavior-contracts', requireAuth, (req, res) => {
       (SELECT COUNT(*) FROM behavior_contract_notes n WHERE n.contract_id = bc.id) noteCount,
       (SELECT note FROM behavior_contract_notes n WHERE n.contract_id = bc.id ORDER BY n.id DESC LIMIT 1) lastNote
     FROM behavior_contracts bc LEFT JOIN clients c ON c.id = bc.client_id
-    ORDER BY (bc.status = 'Closed'), bc.id DESC LIMIT 100`).all();
+    /* facility truth: contracts follow their client's building */
+    WHERE 1=1${facCtx(req).frag('c.facility_id')} ORDER BY (bc.status = 'Closed'), bc.id DESC LIMIT 100`).all();
   res.json({ contracts });
 });
 app.get('/api/behavior-contracts/:id', requireAuth, (req, res) => {
@@ -9608,7 +9657,8 @@ app.get('/api/behavior-contracts/active', requireAuth, (req, res) => {
       (SELECT 1 FROM behavior_checkins k WHERE k.contract_id = bc.id AND k.shift_date = ? AND k.shift = ?) checked,
       (SELECT rating FROM behavior_checkins k WHERE k.contract_id = bc.id AND k.shift_date = ? AND k.shift = ?) thisRating
     FROM behavior_contracts bc LEFT JOIN clients c ON c.id = bc.client_id
-    WHERE bc.status = 'Active' ORDER BY bc.id DESC`).all(today, sh, today, sh);
+    /* facility truth: contracts follow their client's building */
+    WHERE bc.status = 'Active'${facCtx(req).frag('c.facility_id')} ORDER BY bc.id DESC`).all(today, sh, today, sh);
   res.json({ shift: sh, contracts: rows.map((r) => ({ id: r.id, client_id: r.client_id, name: r.pref || r.name || 'Client', room: r.room || '', reason: r.reason || '', checked: !!r.checked, rating: r.thisRating || '' })) });
 });
 app.post('/api/behavior-contracts/:id/checkin', requireAuth, (req, res) => {
@@ -9909,7 +9959,7 @@ app.get('/api/arrival/board', requireAuth, (req, res) => {
   const totalByRole = {}, gatedByRole = {};
   items.forEach((i) => { totalByRole[i.role] = (totalByRole[i.role] || 0) + 1; if (gatedIds.includes(i.id)) gatedByRole[i.role] = (gatedByRole[i.role] || 0) + 1; });
   const admits = db.prepare(`SELECT id, pref, name, room, admit FROM clients WHERE active = 1 AND discharge_status IS NULL
-    AND substr(admit,1,10) >= date('now','-5 day') ORDER BY admit DESC, id DESC`).all();
+    AND substr(admit,1,10) >= date('now','-5 day')${facCtx(req).frag('facility_id')} ORDER BY admit DESC, id DESC`).all();
   // Count manual checks but exclude the gated belongings items — those only count
   // when the signed Belongings form is done (added back below).
   const notIn = gatedIds.length ? ` AND ch.item_id NOT IN (${gatedIds.map(() => '?').join(',')})` : '';
@@ -10032,7 +10082,8 @@ function serveSig(res, dataurl) {
   res.send(Buffer.from(m[2], 'base64'));
 }
 app.get('/api/property', requireAuth, (req, res) => {
-  const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const clients = db.prepare(`SELECT id, pref, name, room FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
   const rows = clients.map((c) => {
     const meta = db.prepare(`SELECT status, intake_at FROM property_meta WHERE client_id = ?`).get(c.id) || null;
     const items = db.prepare(`SELECT COUNT(*) n FROM property_items WHERE client_id = ? AND status = 'stored'`).get(c.id).n;
@@ -10056,14 +10107,14 @@ app.get('/api/property/event/:id/photo', requireAuth, (req, res) => { const r = 
 // Quick belongings status for a client (used by the discharge guard).
 app.get('/api/clients/:id/property-status', requireAuth, (req, res) => {
   const cid = +req.params.id;
+  if (!clientFacGuard(req, res, cid, 'id')) return;
   const meta = db.prepare(`SELECT status FROM property_meta WHERE client_id = ?`).get(cid) || null;
   const storedItems = db.prepare(`SELECT COUNT(*) n FROM property_items WHERE client_id = ? AND status = 'stored'`).get(cid).n;
   res.json({ hasRecord: !!meta, returned: meta?.status === 'returned', balance: cashBalance(cid), storedItems });
 });
 app.get('/api/property/:cid', requireAuth, (req, res) => {
   const cid = +req.params.cid;
-  const c = db.prepare(`SELECT id, pref, name, room, discharge_status FROM clients WHERE id = ?`).get(cid);
-  if (!c) return res.status(404).json({ error: 'Not found' });
+  const c = clientFacGuard(req, res, cid, 'id, pref, name, room, discharge_status'); if (!c) return;
   res.json({
     client: { id: c.id, name: c.pref || c.name, room: c.room || '', discharged: !!c.discharge_status },
     meta: (() => { const mm = db.prepare(`SELECT * FROM property_meta WHERE client_id = ?`).get(cid); if (!mm) return null; const { intake_client_sig, ...rest } = mm; return { ...rest, search: jparse(mm.search, null), hasIntakeSig: !!intake_client_sig }; })(),
@@ -10209,7 +10260,8 @@ app.post('/api/arrivals/:id/status', requireAuth, (req, res) => {
 app.get('/api/arrivals/board', requireAuth, (req, res) => {
   reconcileArrivals();
   const today = appToday();
-  const rows = db.prepare(`SELECT first_name, last_name, preferred_name, status FROM expected_arrivals WHERE scheduled_date = ? AND status IN ('expected','arrived') ORDER BY status DESC, first_name`).all(today);
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const rows = db.prepare(`SELECT first_name, last_name, preferred_name, status FROM expected_arrivals WHERE scheduled_date = ? AND status IN ('expected','arrived')${fc.frag('facility_id')} ORDER BY status DESC, first_name`).all(today);
   const greet = (a) => {
     const first = (a.preferred_name || a.first_name || '').trim();
     const li = (a.last_name || '').trim().slice(0, 1);
@@ -10222,10 +10274,10 @@ app.get('/api/arrivals/board', requireAuth, (req, res) => {
 // Computes length-of-stay (LOS) and AMA patterns across time-of-admit
 // dimensions and staff attribution, plus the biggest active risks and a queue of
 // discharges still missing where/why (the manual-fallback when Kipu can't fill it).
-function buildAnalytics(days) {
+function buildAnalytics(days, facFrag = '') {
   const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
   const rows = db.prepare(`SELECT id, admit, admit_time, discharge_status, discharge_date, therapist, case_manager, referral_source
-    FROM clients WHERE admit IS NOT NULL AND admit != '' AND discharge_date IS NOT NULL AND discharge_date >= ?`).all(since);
+    FROM clients WHERE admit IS NOT NULL AND admit != '' AND discharge_date IS NOT NULL AND discharge_date >= ?${facFrag}`).all(since);
 
   // Experience score per client (avg of scale answers on the experience survey).
   const expSurvey = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get();
@@ -10290,8 +10342,9 @@ function buildAnalytics(days) {
 }
 
 app.get('/api/analytics', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const days = ({ '90': 90, '180': 180, '365': 365, '730': 730 })[String(req.query.range)] || 365;
-  res.json(buildAnalytics(days));
+  res.json(buildAnalytics(days, fc.frag('facility_id')));
 });
 
 // Fill the gap Kipu couldn't: where/why a client went. Manual fallback only.
@@ -10584,7 +10637,7 @@ app.get('/api/leadership', requireAuth, requireAdmin, (req, res) => {
   const active = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
   const amaToday = db.prepare(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) = ? AND discharge_status LIKE '%AMA%'`).get(today).n;
   const atRisk = active.filter((c) => { const a = latestAmaRead(c.id); return a && (a.level === 'High' || a.level === 'Elevated'); }).length;
-  const openIncidents = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'`).get().n;
+  const openIncidents = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'${fc.frag('facility_id')}`).get().n;
   const dcMissing = db.prepare(`SELECT departure_steps, aftercare_dest, discharge_reason, discharge_improve FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-7 day')`).all().filter((c) => dischargeMissing(c).length).length;
   const delightSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM delights WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
   let welcomed = 0, anticipated = 0;
@@ -10601,8 +10654,9 @@ app.get('/api/leadership', requireAuth, requireAdmin, (req, res) => {
 // The schedule for a date: each slot with assignments, plus live coverage
 // (needed vs scheduled vs called-off vs currently clocked-in).
 app.get('/api/staffing', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const date = (req.query.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
-  const slots = db.prepare(`SELECT * FROM schedule_slots WHERE date = ? ORDER BY
+  const slots = db.prepare(`SELECT * FROM schedule_slots WHERE date = ?${shiftFrag(fc, 'facility_id')} ORDER BY
     CASE part WHEN 'Morning' THEN 0 WHEN 'Day' THEN 1 WHEN 'Evening' THEN 2 WHEN 'Night' THEN 3 ELSE 4 END, role`).all(date);
   const getA = db.prepare(`SELECT * FROM schedule_assignments WHERE slot_id = ? ORDER BY id`);
   // Who is clocked in right now (open punch on the local business day).
@@ -10764,8 +10818,9 @@ app.get('/api/turnovers/scorecard', requireAuth, requireStaffingManager, (req, r
 // Did the scheduled people show up? Supervisor marks present/absent; we also
 // reconcile against the time clock and flag any discrepancy.
 app.get('/api/roster', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const date = (req.query.date || appToday()).slice(0, 10);
-  const slots = db.prepare(`SELECT * FROM schedule_slots WHERE date = ? ORDER BY
+  const slots = db.prepare(`SELECT * FROM schedule_slots WHERE date = ?${shiftFrag(fc, 'facility_id')} ORDER BY
     CASE part WHEN 'Morning' THEN 0 WHEN 'Day' THEN 1 WHEN 'Evening' THEN 2 WHEN 'Night' THEN 3 ELSE 4 END, role`).all(date);
   const getA = db.prepare(`SELECT * FROM schedule_assignments WHERE slot_id = ? ORDER BY id`);
   // Clock punches on this date, by user. clock_in is UTC, so match against the
@@ -10859,9 +10914,10 @@ app.get('/api/schedule/week', requireAuth, (req, res) => {
   const templates = db.prepare(`SELECT id, role, shift_label, part, sort FROM shift_templates WHERE active=1 ORDER BY sort, id`).all();
   // Existing names per template×day (from slots created by the grid).
   const cells = {};
+  const wkFc = facCtx(req); if (denyFac(wkFc, res)) return;
   const rows = db.prepare(`SELECT s.template_id, s.date, a.user_name FROM schedule_slots s
     JOIN schedule_assignments a ON a.slot_id = s.id
-    WHERE s.template_id IS NOT NULL AND s.date >= ? AND s.date <= ? AND a.status='scheduled'`).all(days[0], days[6]);
+    WHERE s.template_id IS NOT NULL AND s.date >= ? AND s.date <= ? AND a.status='scheduled'${shiftFrag(wkFc, 's.facility_id')}`).all(days[0], days[6]);
   for (const r of rows) { const k = r.template_id + '|' + r.date; cells[k] = cells[k] ? cells[k] + ', ' + r.user_name : r.user_name; }
   res.json({ start, days, templates, cells });
 });
@@ -10870,7 +10926,9 @@ app.post('/api/schedule/week', requireAuth, requireStaffingManager, (req, res) =
   const tpl = {}; db.prepare(`SELECT id, role, shift_label, part FROM shift_templates`).all().forEach((t) => { tpl[t.id] = t; });
   let saved = 0;
   const gridFid = stampFac(req, res); if (gridFid === null && res.headersSent) return;
-  const findSlot = db.prepare(`SELECT id FROM schedule_slots WHERE template_id=? AND date=?`);
+  // Keyed by facility as well — facility B saving its grid must never overwrite
+  // facility A's slot for the same template+date.
+  const findSlot = { get: (tid, date) => db.prepare(`SELECT id FROM schedule_slots WHERE template_id=? AND date=? AND facility_id IS ?`).get(tid, date, gridFid || null) };
   for (const [key, raw] of Object.entries(cells)) {
     const [tid, date] = key.split('|'); const t = tpl[tid];
     if (!t || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) continue;
@@ -10988,8 +11046,9 @@ app.post('/api/clock/allow-network', requireAuth, requireStaffingManager, (req, 
 app.post('/api/clock/clear-networks', requireAuth, requireStaffingManager, (req, res) => { setState('clock_ips', '[]'); res.json({ ok: true, ips: [] }); });
 // In-app time clock (default until an external system is connected).
 app.get('/api/clock/status', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const mine = db.prepare(`SELECT * FROM time_entries WHERE user_id = ? AND clock_out IS NULL ORDER BY id DESC LIMIT 1`).get(req.user.id);
-  const onNow = db.prepare(`SELECT user_id, user_name, clock_in FROM time_entries WHERE clock_out IS NULL ORDER BY clock_in`).all();
+  const onNow = db.prepare(`SELECT user_id, user_name, clock_in FROM time_entries WHERE clock_out IS NULL${shiftFrag(fc, 'facility_id')} ORDER BY clock_in`).all();
   res.json({ clockedIn: !!mine, since: mine?.clock_in || null, onNow, geofenceOn: geofenceCfg().on });
 });
 app.post('/api/clock/in', requireAuth, (req, res) => {
@@ -11077,6 +11136,7 @@ app.get('/api/workforce/summary', requireAuth, (req, res) => {
 /* ---------------- Family engagement ---------------- */
 app.get('/api/clients/:id/family', requireAuth, (req, res) => {
   const cid = req.params.id;
+  if (!clientFacGuard(req, res, cid, 'id')) return;
   res.json({
     contacts: db.prepare(`SELECT * FROM family_contacts WHERE client_id = ? ORDER BY id`).all(cid),
     updates: db.prepare(`SELECT * FROM family_updates WHERE client_id = ? ORDER BY id DESC LIMIT 20`).all(cid),
@@ -11110,12 +11170,14 @@ app.post('/api/visits/:id/status', requireAuth, (req, res) => {
 
 /* ---------------- Admissions pipeline + bed board ---------------- */
 app.get('/api/admissions', requireAuth, (req, res) => {
-  res.json({ admissions: db.prepare(`SELECT * FROM admissions WHERE status != 'Admitted' OR created_at >= datetime('now','-14 day') ORDER BY (status='Declined'), id DESC`).all() });
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  res.json({ admissions: db.prepare(`SELECT * FROM admissions WHERE (status != 'Admitted' OR created_at >= datetime('now','-14 day'))${fc.frag('facility_id')} ORDER BY (status='Declined'), id DESC`).all() });
 });
 app.post('/api/admissions', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.name?.trim()) return res.status(400).json({ error: 'Missing name' });
-  db.prepare(`INSERT INTO admissions (name, referral_source, phone, insurance, scheduled_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(b.name.trim(), b.referral_source || null, b.phone || null, b.insurance || null, b.scheduled_date || null, b.notes || null, req.user.id);
+  const adFid = stampFac(req, res, b.facility_id); if (adFid === null && res.headersSent) return;
+  db.prepare(`INSERT INTO admissions (name, referral_source, phone, insurance, scheduled_date, notes, created_by, facility_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(b.name.trim(), b.referral_source || null, b.phone || null, b.insurance || null, b.scheduled_date || null, b.notes || null, req.user.id, adFid || null);
   res.json({ ok: true });
 });
 app.post('/api/admissions/:id/status', requireAuth, (req, res) => {
@@ -11127,7 +11189,8 @@ app.post('/api/admissions/:id/admit', requireAuth, (req, res) => {
   const a = db.prepare(`SELECT * FROM admissions WHERE id = ?`).get(req.params.id);
   if (!a) return res.status(404).json({ error: 'Not found' });
   const room = req.body?.room || null;
-  const info = db.prepare(`INSERT INTO clients (name, room, admit) VALUES (?, ?, ?)`).run(a.name, room, new Date().toISOString().slice(0, 10));
+  const cvFid = a.facility_id || stampFac(req, res); if (cvFid === null && res.headersSent) return;
+  const info = db.prepare(`INSERT INTO clients (name, room, admit, facility_id) VALUES (?, ?, ?, ?)`).run(a.name, room, new Date().toISOString().slice(0, 10), cvFid || null);
   const cid = info.lastInsertRowid;
   db.prepare(`UPDATE admissions SET status = 'Admitted', client_id = ? WHERE id = ?`).run(cid, a.id);
   if (req.body?.bed_id) db.prepare(`UPDATE beds SET status = 'Occupied', client_id = ? WHERE id = ?`).run(cid, req.body.bed_id);
@@ -11161,7 +11224,10 @@ app.delete('/api/beds/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM
 function bedKey(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 app.get('/api/bedboard', requireAuth, (req, res) => {
   const total = +(getState('detox_bed_count') || 40);
-  const active = db.prepare(`SELECT id, pref, name, room, loc, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, name`).all();
+  // The physical bed inventory is the DEFAULT (detox) building's today; scope
+  // the client overlay so another chip pick doesn't paint its people "unplaced".
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const active = db.prepare(`SELECT id, pref, name, room, loc, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
   const beds = db.prepare(`SELECT id, room, label, unit, gender FROM beds ORDER BY unit, room, label`).all();
   // index clients by their Kipu bed string
   const byKey = {}; active.forEach((c) => { if (c.room) (byKey[bedKey(c.room)] = byKey[bedKey(c.room)] || []).push(c); });
@@ -11181,7 +11247,7 @@ app.get('/api/bedboard', requireAuth, (req, res) => {
 // One click: create a bed-inventory row for every distinct room/bed Kipu shows occupied.
 app.post('/api/bedboard/sync', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
-  const rooms = db.prepare(`SELECT DISTINCT room FROM clients WHERE active = 1 AND discharge_status IS NULL AND room IS NOT NULL AND room != ''`).all().map((r) => r.room);
+  const rooms = db.prepare(`SELECT DISTINCT room FROM clients WHERE active = 1 AND discharge_status IS NULL AND room IS NOT NULL AND room != ''${facCtx(req).frag('facility_id')}`).all().map((r) => r.room);
   const existing = new Set(db.prepare(`SELECT room, label FROM beds`).all().map((b) => bedKey((b.room || '') + (b.label || ''))));
   let added = 0;
   for (const r of rooms) { if (!existing.has(bedKey(r))) { db.prepare(`INSERT INTO beds (room, unit) VALUES (?, 'Detox')`).run(r); existing.add(bedKey(r)); added++; } }
@@ -11239,14 +11305,16 @@ function accrueRevenueThrough(today) {
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
-function revenueSnapshot() {
+function revenueSnapshot(fc = null) {
+  const cf = fc ? fc.frag('facility_id') : '';
+  const jf = fc ? fc.frag('c.facility_id') : '';
   const rates = locRates();
   const today = appToday();
   const monthStart = today.slice(0, 7) + '-01';
   const daysInMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 0)).getUTCDate();
   accrueRevenueThrough(today);
   // Forward run-rate from the live census, grouped by level of care.
-  const active = db.prepare(`SELECT loc FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const active = db.prepare(`SELECT loc FROM clients WHERE active = 1 AND discharge_status IS NULL${cf}`).all();
   const byLoc = {};
   for (const c of active) { const k = c.loc || 'Unspecified'; (byLoc[k] = byLoc[k] || { loc: k, count: 0 }).count++; }
   const census = Object.values(byLoc).map((g) => {
@@ -11256,19 +11324,22 @@ function revenueSnapshot() {
   const dailyTotal = census.reduce((s, r) => s + r.daily, 0);
   const unrated = census.filter((r) => !r.rate).reduce((s, r) => s + r.count, 0);
   // Accumulated actuals from the ledger (level-accurate, day by day).
-  const sum = (where, ...p) => db.prepare(`SELECT COALESCE(SUM(rate),0) v, COUNT(*) n FROM revenue_days ${where}`).get(...p);
-  const todayL = sum(`WHERE date = ?`, today);
-  const mtdL = sum(`WHERE date >= ? AND date <= ?`, monthStart, today);
+  const sum = (where, ...p) => db.prepare(`SELECT COALESCE(SUM(r.rate),0) v, COUNT(*) n FROM revenue_days r LEFT JOIN clients c ON c.id = r.client_id ${where}${where ? jf : (jf ? ' WHERE 1=1' + jf : '')}`).get(...p);
+  const todayL = sum(`WHERE r.date = ?`, today);
+  const mtdL = sum(`WHERE r.date >= ? AND r.date <= ?`, monthStart, today);
   const allL = sum(``);
   const ledgerStart = db.prepare(`SELECT MIN(date) m FROM revenue_days`).get().m;
-  const mtdByLoc = db.prepare(`SELECT loc, COUNT(*) days, COALESCE(SUM(rate),0) total FROM revenue_days WHERE date >= ? AND date <= ? GROUP BY loc ORDER BY total DESC`).all(monthStart, today)
+  const mtdByLoc = db.prepare(`SELECT r.loc, COUNT(*) days, COALESCE(SUM(r.rate),0) total FROM revenue_days r LEFT JOIN clients c ON c.id = r.client_id WHERE r.date >= ? AND r.date <= ?${jf} GROUP BY r.loc ORDER BY total DESC`).all(monthStart, today)
     .map((r) => ({ loc: r.loc, label: LOC_LABEL[r.loc] || r.loc || 'Unspecified', days: r.days, total: r.total }));
   return { rates, levels: ASAM_LEVELS.map((l) => ({ code: l.code, label: l.label })), census, dailyTotal,
     censusCount: active.length, unrated, monthProjection: dailyTotal * daysInMonth, annualRunRate: dailyTotal * 365,
     todayBilled: todayL.v, mtd: mtdL.v, mtdDays: mtdL.n, cumulative: allL.v, cumulativeDays: allL.n, ledgerStart,
     mtdByLoc, daysInMonth, monthLabel: today.slice(0, 7), asOf: today };
 }
-app.get('/api/finance/revenue', requireAuth, requireAdmin, (req, res) => res.json(revenueSnapshot()));
+app.get('/api/finance/revenue', requireAuth, requireAdmin, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  res.json(revenueSnapshot(fc));
+});
 app.post('/api/finance/rates', requireAuth, requireAdmin, (req, res) => {
   const cur = locRates();
   const incoming = req.body?.rates || {};
@@ -11949,13 +12020,14 @@ function surveyRecovery(clientId, answers) {
 
 // Surveys that are due: discharge survey after discharge, experience survey weekly.
 app.get('/api/surveys/due', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const exp = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get();
   const dis = db.prepare(`SELECT id FROM surveys WHERE key = 'discharge'`).get();
   const due = [];
   if (exp) {
     db.prepare(
       `SELECT c.id, c.pref, c.name FROM clients c
-       WHERE c.active = 1 AND c.discharge_status IS NULL
+       WHERE c.active = 1 AND c.discharge_status IS NULL${fc.frag('c.facility_id')}
        AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id = ? AND r.client_id = c.id AND r.created_at >= datetime('now','-7 day'))
        ORDER BY c.room, c.name`).all(exp.id)
       .forEach((c) => due.push({ survey_id: exp.id, title: 'Client Experience Survey', client_id: c.id, client: c.pref || c.name, reason: 'No experience survey in the last 7 days' }));
@@ -11963,7 +12035,7 @@ app.get('/api/surveys/due', requireAuth, (req, res) => {
   if (dis) {
     db.prepare(
       `SELECT c.id, c.pref, c.name, c.discharge_date FROM clients c
-       WHERE c.discharge_status IS NOT NULL AND c.discharge_status != 'Transferred' AND c.discharge_date >= date('now','-30 day')
+       WHERE c.discharge_status IS NOT NULL AND c.discharge_status != 'Transferred' AND c.discharge_date >= date('now','-30 day')${fc.frag('c.facility_id')}
        AND NOT EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id = ? AND r.client_id = c.id)
        ORDER BY c.discharge_date DESC`).all(dis.id)
       .forEach((c) => due.push({ survey_id: dis.id, title: 'Discharge Experience Survey', client_id: c.id, client: c.pref || c.name, reason: `Discharged ${c.discharge_date} — survey not done` }));
@@ -11973,23 +12045,25 @@ app.get('/api/surveys/due', requireAuth, (req, res) => {
 
 // Avg of scale/rating answers for a survey within a time window (SQLite 'now'
 // modifiers, or null for open-ended). Shared by the overview + the scorecard.
-function surveyWindowAvg(id, since, until) {
+function surveyWindowAvg(id, since, until, facFrag = '') {
   const conds = [`r.survey_id = ?`, `q.type IN ('scale','rating')`, `a.value_num IS NOT NULL`];
   const args = [id];
   if (since) { conds.push(`r.created_at >= datetime('now', ?)`); args.push(since); }
   if (until) { conds.push(`r.created_at < datetime('now', ?)`); args.push(until); }
   const row = db.prepare(`SELECT AVG(a.value_num) a, COUNT(DISTINCT r.id) n FROM survey_answers a
     JOIN survey_responses r ON r.id = a.response_id JOIN survey_questions q ON q.id = a.question_id
-    WHERE ${conds.join(' AND ')}`).get(...args);
+    LEFT JOIN clients c ON c.id = r.client_id
+    WHERE ${conds.join(' AND ')}${facFrag}`).get(...args);
   return { avg: row.a != null ? Math.round(row.a * 10) / 10 : null, n: row.n };
 }
 // Avg scale/rating score per calendar month for the last 6 months (for sparklines
 // + the scorecard). Returns 6 slots oldest→newest, null where no responses.
-function surveyMonthlySeries(surveyId, months = 6) {
+function surveyMonthlySeries(surveyId, months = 6, facFrag = '') {
   const rows = db.prepare(`SELECT strftime('%Y-%m', r.created_at) ym, AVG(a.value_num) a
     FROM survey_answers a JOIN survey_responses r ON r.id = a.response_id JOIN survey_questions q ON q.id = a.question_id
+    LEFT JOIN clients c ON c.id = r.client_id
     WHERE r.survey_id = ? AND q.type IN ('scale','rating') AND a.value_num IS NOT NULL
-      AND r.created_at >= datetime('now', ?) GROUP BY ym`).all(surveyId, `-${months} month`);
+      AND r.created_at >= datetime('now', ?)${facFrag} GROUP BY ym`).all(surveyId, `-${months} month`);
   const byMonth = Object.fromEntries(rows.map((r) => [r.ym, r.a]));
   const out = [];
   const now = new Date();
@@ -12003,35 +12077,40 @@ function surveyMonthlySeries(surveyId, months = 6) {
 // Results overview (admin): every survey with its response count, overall score,
 // and last response — the clean at-a-glance list to drill in or clear from.
 app.get('/api/surveys/overview', requireAuth, requireAdmin, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const ff = fc.frag('c.facility_id');
   const surveys = db.prepare(`SELECT id, key, title, description FROM surveys WHERE active = 1 ORDER BY sort, id`).all();
   res.json({ target: 4.5, surveys: surveys.map((s) => {
-    const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?`).get(s.id).n;
-    const all = surveyWindowAvg(s.id, null, null);
-    const recent = surveyWindowAvg(s.id, '-30 day', null);          // last 30 days
-    const prior = surveyWindowAvg(s.id, '-60 day', '-30 day');      // the 30 before that
+    const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id WHERE r.survey_id = ?${ff}`).get(s.id).n;
+    const all = surveyWindowAvg(s.id, null, null, ff);
+    const recent = surveyWindowAvg(s.id, '-30 day', null, ff);          // last 30 days
+    const prior = surveyWindowAvg(s.id, '-60 day', '-30 day', ff);      // the 30 before that
     const trend = (recent.avg != null && prior.avg != null) ? Math.round((recent.avg - prior.avg) * 10) / 10 : null;
-    const last = db.prepare(`SELECT MAX(created_at) m FROM survey_responses WHERE survey_id = ?`).get(s.id).m;
+    const last = db.prepare(`SELECT MAX(r.created_at) m FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id WHERE r.survey_id = ?${ff}`).get(s.id).m;
     return { id: s.id, key: s.key, title: s.title, description: s.description || '', responses,
       avg: all.avg, recentAvg: recent.avg, recentN: recent.n, priorAvg: prior.avg, trend,
       dir: trend == null ? null : (trend > 0.05 ? 'up' : trend < -0.05 ? 'down' : 'flat'),
-      spark: surveyMonthlySeries(s.id), last: last ? String(last).slice(0, 10) : '' };
+      spark: surveyMonthlySeries(s.id, 6, ff), last: last ? String(last).slice(0, 10) : '' };
   }) });
 });
 // Results (admin): per-question aggregates + recent comments.
 app.get('/api/surveys/:id/results', requireAuth, requireAdmin, (req, res) => {
   const survey = db.prepare(`SELECT * FROM surveys WHERE id = ?`).get(req.params.id);
   if (!survey) return res.status(404).json({ error: 'Not found' });
-  const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?`).get(survey.id).n;
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const ff = fc.frag('c.facility_id');
+  const responses = db.prepare(`SELECT COUNT(*) n FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id WHERE r.survey_id = ?${ff}`).get(survey.id).n;
   const questions = db.prepare(`SELECT id, category, text, type, sort FROM survey_questions WHERE survey_id = ? ORDER BY sort, id`).all(survey.id);
+  const ansJoin = `FROM survey_answers a JOIN survey_responses r ON r.id = a.response_id LEFT JOIN clients c ON c.id = r.client_id`;
   for (const q of questions) {
     if (q.type === 'scale' || q.type === 'rating') {
-      const r = db.prepare(`SELECT AVG(value_num) a, COUNT(value_num) n FROM survey_answers WHERE question_id = ?`).get(q.id);
+      const r = db.prepare(`SELECT AVG(a.value_num) a, COUNT(a.value_num) n ${ansJoin} WHERE a.question_id = ?${ff}`).get(q.id);
       q.avg = r.a != null ? Math.round(r.a * 10) / 10 : null; q.count = r.n;
     } else if (q.type === 'yesno') {
-      const r = db.prepare(`SELECT AVG(value_num) a, COUNT(value_num) n FROM survey_answers WHERE question_id = ?`).get(q.id);
+      const r = db.prepare(`SELECT AVG(a.value_num) a, COUNT(a.value_num) n ${ansJoin} WHERE a.question_id = ?${ff}`).get(q.id);
       q.yesPct = r.a != null ? Math.round(r.a * 100) : null; q.count = r.n;
     } else {
-      q.comments = db.prepare(`SELECT value_text FROM survey_answers WHERE question_id = ? AND value_text IS NOT NULL ORDER BY id DESC LIMIT 20`).all(q.id).map((x) => x.value_text);
+      q.comments = db.prepare(`SELECT a.value_text ${ansJoin} WHERE a.question_id = ? AND a.value_text IS NOT NULL${ff} ORDER BY a.id DESC LIMIT 20`).all(q.id).map((x) => x.value_text);
       q.count = q.comments.length;
     }
   }
@@ -12040,7 +12119,7 @@ app.get('/api/surveys/:id/results', requireAuth, requireAdmin, (req, res) => {
   const submissions = db.prepare(`SELECT r.id, r.created_at, c.pref, c.name, c.room, u.name staff,
       (SELECT AVG(value_num) FROM survey_answers a WHERE a.response_id = r.id AND a.value_num IS NOT NULL) avg
     FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id LEFT JOIN users u ON u.id = r.submitted_by
-    WHERE r.survey_id = ? ORDER BY r.id DESC LIMIT 60`).all(survey.id)
+    WHERE r.survey_id = ?${ff} ORDER BY r.id DESC LIMIT 60`).all(survey.id)
     .map((r) => ({ id: r.id, who: (r.pref || r.name) ? ((r.pref || r.name) + (r.room ? ' · ' + r.room : '')) : 'Anonymous',
       named: !!(r.pref || r.name), by: r.staff || '', at: String(r.created_at).slice(0, 16),
       avg: r.avg != null ? Math.round(r.avg * 10) / 10 : null }));
@@ -12048,8 +12127,10 @@ app.get('/api/surveys/:id/results', requireAuth, requireAdmin, (req, res) => {
 });
 // Answers for ONE response (admin) — drill into a single client's submission.
 app.get('/api/surveys/response/:rid', requireAuth, requireAdmin, (req, res) => {
-  const r = db.prepare(`SELECT r.id, r.created_at, c.pref, c.name, c.room FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id WHERE r.id = ?`).get(req.params.rid);
+  const r = db.prepare(`SELECT r.id, r.created_at, c.pref, c.name, c.room, c.facility_id cfac FROM survey_responses r LEFT JOIN clients c ON c.id = r.client_id WHERE r.id = ?`).get(req.params.rid);
   if (!r) return res.status(404).json({ error: 'Not found' });
+  const fc = facCtx(req);
+  if (fc.deny || (fc.one && r.cfac != null && r.cfac !== fc.one) || (r.cfac != null && !facilityAllowed(req.user, r.cfac))) return res.status(404).json({ error: 'Not found' });
   const answers = db.prepare(`SELECT q.text, q.type, a.value_num, a.value_text FROM survey_answers a JOIN survey_questions q ON q.id = a.question_id WHERE a.response_id = ? ORDER BY q.sort, q.id`).all(req.params.rid)
     .map((a) => ({ q: a.text, val: a.value_num != null ? a.value_num + '/10' : (a.value_text || '') }));
   res.json({ who: (r.pref || r.name) ? ((r.pref || r.name) + (r.room ? ' · ' + r.room : '')) : 'Anonymous', at: String(r.created_at).slice(0, 16), answers });
@@ -12059,8 +12140,12 @@ app.get('/api/surveys/response/:rid', requireAuth, requireAdmin, (req, res) => {
 app.post('/api/surveys/:id/clear', requireAuth, requireAdmin, (req, res) => {
   const survey = db.prepare(`SELECT id, title FROM surveys WHERE id = ?`).get(req.params.id);
   if (!survey) return res.status(404).json({ error: 'Not found' });
-  const before = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?`).get(survey.id).n;
-  db.prepare(`DELETE FROM survey_responses WHERE survey_id = ?`).run(survey.id);
+  // A facility pick clears ONLY that building's responses (anonymous rows have
+  // no facility and only clear from the all-facilities view — deliberate).
+  const clearFc = facCtx(req); if (denyFac(clearFc, res)) return;
+  const clearFrag = clearFc.one ? ` AND client_id IN (SELECT id FROM clients WHERE facility_id = ${clearFc.one})` : '';
+  const before = db.prepare(`SELECT COUNT(*) n FROM survey_responses WHERE survey_id = ?${clearFrag}`).get(survey.id).n;
+  db.prepare(`DELETE FROM survey_responses WHERE survey_id = ?${clearFrag}`).run(survey.id);
   audit({ user: req.user, action: 'SURVEY_CLEAR', entity: 'survey', entity_id: survey.id, detail: `cleared ${before} response(s) from ${survey.title}`, ip: req.ip });
   res.json({ ok: true, cleared: before });
 });
@@ -12110,8 +12195,9 @@ app.get('/api/alerts', requireAuth, (req, res) => {
     : `SELECT MAX(id) FROM alerts WHERE status = ?${critSub} GROUP BY client_id, kind`;
   const where = status === 'all' ? `WHERE a.id IN (${sub})` : `WHERE a.status = ?${crit} AND a.id IN (${sub})`;
   const args = status === 'all' ? [] : [status, status];
-  const rows = db.prepare(`SELECT a.*, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id ${where} ORDER BY a.id DESC LIMIT 100`).all(...args);
-  const newCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT MAX(id) FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds' GROUP BY client_id, kind)`).get().n;
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const rows = db.prepare(`SELECT a.*, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id ${where}${shiftFrag(fc, 'a.facility_id')} ORDER BY a.id DESC LIMIT 100`).all(...args);
+  const newCount = db.prepare(`SELECT COUNT(*) n FROM (SELECT MAX(id) FROM alerts WHERE status = 'New' AND level IN ('High','Critical') AND kind != 'rounds'${shiftFrag(fc, 'facility_id')} GROUP BY client_id, kind)`).get().n;
   // This shift's completion: how many alerts raised this shift have been handled.
   const today = appToday(), sh = currentShift();
   const tot = db.prepare(`SELECT COUNT(*) n FROM alerts WHERE shift_date = ? AND shift = ?`).get(today, sh).n;
@@ -12127,9 +12213,11 @@ app.post('/api/alerts/:id/ack', requireAuth, (req, res) => {
 app.get('/api/alerts/scorecard', requireAuth, requireAdmin, (req, res) => {
   rolloverAlerts();
   const today = appToday(), sh = currentShift();
-  const agg = (where, args) => { const r = db.prepare(`SELECT COUNT(*) total, SUM(status='Ack') done, SUM(status='Missed') missed FROM alerts ${where}`).get(...args); const total = r.total || 0, dn = r.done || 0, ms = r.missed || 0; return { total, done: dn, missed: ms, pct: total ? Math.round(dn / total * 100) : null }; };
-  const byStaff = db.prepare(`SELECT ack_name name, COUNT(*) done FROM alerts WHERE status = 'Ack' AND ack_name IS NOT NULL AND shift_date >= date('now','-7 day') GROUP BY ack_name ORDER BY done DESC LIMIT 10`).all();
-  const recentMissed = db.prepare(`SELECT a.message, a.shift, a.shift_date, a.level, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id WHERE a.status = 'Missed' AND a.shift_date >= date('now','-3 day') ORDER BY a.id DESC LIMIT 25`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const sf = shiftFrag(fc, 'facility_id');
+  const agg = (where, args) => { const r = db.prepare(`SELECT COUNT(*) total, SUM(status='Ack') done, SUM(status='Missed') missed FROM alerts ${where}${sf}`).get(...args); const total = r.total || 0, dn = r.done || 0, ms = r.missed || 0; return { total, done: dn, missed: ms, pct: total ? Math.round(dn / total * 100) : null }; };
+  const byStaff = db.prepare(`SELECT ack_name name, COUNT(*) done FROM alerts WHERE status = 'Ack' AND ack_name IS NOT NULL AND shift_date >= date('now','-7 day')${sf} GROUP BY ack_name ORDER BY done DESC LIMIT 10`).all();
+  const recentMissed = db.prepare(`SELECT a.message, a.shift, a.shift_date, a.level, c.pref FROM alerts a LEFT JOIN clients c ON c.id = a.client_id WHERE a.status = 'Missed' AND a.shift_date >= date('now','-3 day')${shiftFrag(fc, 'a.facility_id')} ORDER BY a.id DESC LIMIT 25`).all();
   res.json({ shift: sh, thisShift: agg(`WHERE shift_date = ? AND shift = ?`, [today, sh]), today: agg(`WHERE shift_date = ?`, [today]), week: agg(`WHERE shift_date >= date('now','-7 day')`, []), byStaff, recentMissed });
 });
 
@@ -12200,7 +12288,8 @@ app.get('/api/accountability', requireAuth, requireAdmin, (req, res) => {
 
 /* ---------------- Alumni / continuing care ---------------- */
 app.get('/api/alumni', requireAuth, (req, res) => {
-  const rows = db.prepare(`SELECT id, pref, name, room, program, sober, discharge_status, discharge_date FROM clients WHERE discharge_status IN ('Completed','AMA') ORDER BY discharge_date DESC`).all();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const rows = db.prepare(`SELECT id, pref, name, room, program, sober, discharge_status, discharge_date FROM clients WHERE discharge_status IN ('Completed','AMA')${fc.frag('facility_id')} ORDER BY discharge_date DESC`).all();
   const now = Date.now();
   for (const c of rows) {
     c.daysSober = c.sober ? Math.floor((now - new Date(c.sober + 'T00:00').getTime()) / 864e5) : null;
@@ -12398,7 +12487,11 @@ function shiftActiveNow(bucket, part) {
   if (bucket === 'therapists') return inWin(8, 18);
   return true;
 }
-function computeOnShift() {
+function computeOnShift(fid = null) {
+  const dfid = defaultFacilityId();
+  const cw = fid ? ` AND (t.facility_id = ${+fid}${+fid === dfid ? ' OR t.facility_id IS NULL' : ''})` : '';
+  const sw = fid ? ` AND (s.facility_id = ${+fid}${+fid === dfid ? ' OR s.facility_id IS NULL' : ''})` : '';
+  const mw = fid ? ` AND (facility_id = ${+fid}${+fid === dfid ? ' OR facility_id IS NULL' : ''})` : '';
   const buckets = { nurses: [], rts: [], caseManagers: [], therapists: [] };
   const add = (name, roleStr) => {
     const b = careRoleBucket(roleStr);
@@ -12406,7 +12499,7 @@ function computeOnShift() {
     if (!buckets[b].some((x) => x.toLowerCase() === String(name).toLowerCase())) buckets[b].push(name);
   };
   const clocked = db.prepare(`SELECT t.user_name, u.job_role FROM time_entries t JOIN users u ON u.id = t.user_id
-    WHERE t.clock_out IS NULL AND u.active = 1`).all();
+    WHERE t.clock_out IS NULL AND u.active = 1${cw}`).all();
   clocked.forEach((r) => add(r.user_name, r.job_role));
   // "On shift right now" = staff whose assigned shift window is active at this
   // moment, by role (nursing 12h, BHT 3×8h, case managers 2 daytime shifts, no
@@ -12414,17 +12507,18 @@ function computeOnShift() {
   const today = appToday();
   const shift = currentShift();
   const scheduled = db.prepare(`SELECT a.user_name, s.role, s.part FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id
-    WHERE s.date = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent')`).all(today);
+    WHERE s.date = ? AND a.status = 'scheduled' AND (a.attendance IS NULL OR a.attendance != 'absent')${sw}`).all(today);
   let onNowCount = 0;
   scheduled.forEach((r) => { const b = careRoleBucket(r.role); if (b && !shiftActiveNow(b, r.part)) return; add(r.user_name, r.role); onNowCount++; });
   // Manually-added on-shift staff (no user login) for today.
-  const manual = db.prepare(`SELECT name, role FROM manual_on_shift WHERE for_date = ?`).all(today);
+  const manual = db.prepare(`SELECT name, role FROM manual_on_shift WHERE for_date = ?${mw}`).all(today);
   manual.forEach((r) => add(r.name, r.role));
   return { buckets, shift, clockedInCount: clocked.length, scheduledCount: onNowCount, manualCount: manual.length };
 }
 // Manually-added on-shift staff — for people who don't have a login yet.
 app.get('/api/onshift/manual', requireAuth, (req, res) => {
-  res.json({ rows: db.prepare(`SELECT id, name, role, by_name FROM manual_on_shift WHERE for_date = ? ORDER BY id DESC`).all(appToday()) });
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  res.json({ rows: db.prepare(`SELECT id, name, role, by_name FROM manual_on_shift WHERE for_date = ?${shiftFrag(fc, 'facility_id')} ORDER BY id DESC`).all(appToday()) });
 });
 app.post('/api/onshift/manual', requireAuth, (req, res) => {
   const name = (req.body?.name || '').trim();
@@ -12443,7 +12537,7 @@ app.get('/api/kiosk/careteam', requireKiosk, (req, res) => {
     ? db.prepare(`SELECT pref, name, room, case_manager, therapist FROM clients WHERE id = ? AND active = 1 AND discharge_status IS NULL`).get(req.query.client_id)
     : null;
   if (!c) return res.status(400).json({ error: 'Please choose your name first.' });
-  const { buckets, shift } = computeOnShift();
+  const { buckets, shift } = computeOnShift(req.kioskFacilityId || defaultFacilityId());
   res.json({
     client: { name: c.pref || c.name },   // room intentionally omitted from this weakly-authed surface
     caseManager: c.case_manager || '',
@@ -12455,7 +12549,8 @@ app.get('/api/kiosk/careteam', requireKiosk, (req, res) => {
 // Admin data-health: is the kiosk's "on shift now" going to show real names? Shows
 // per-role coverage plus whether the time clock / today's schedule are populated.
 app.get('/api/care-team/onshift', requireAuth, (req, res) => {
-  const { buckets, shift, clockedInCount, scheduledCount } = computeOnShift();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const { buckets, shift, clockedInCount, scheduledCount } = computeOnShift(fc.one || null);
   res.json({ shift, onShift: buckets, clockedInCount, scheduledCount });
 });
 // Who's on shift + the lead in charge (behavioral-contract calls, decisions,
@@ -12474,15 +12569,16 @@ function shiftLead() {
 }
 const canSetLead = (u) => u.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(u.job_role || '');
 // On-shift staff with phones so the crew list can offer a one-tap call.
-function onShiftWithPhones() {
-  const { buckets, shift } = computeOnShift();
+function onShiftWithPhones(fid = null) {
+  const { buckets, shift } = computeOnShift(fid);
   const phones = {};
   db.prepare(`SELECT name, phone FROM users WHERE active = 1 AND phone IS NOT NULL AND phone != ''`).all().forEach((u) => { phones[u.name.toLowerCase()] = u.phone; });
   const wp = (arr) => (arr || []).map((n) => ({ name: n, phone: phones[String(n).toLowerCase()] || '' }));
   return { shift, team: { nurses: wp(buckets.nurses), rts: wp(buckets.rts), caseManagers: wp(buckets.caseManagers), therapists: wp(buckets.therapists) } };
 }
 app.get('/api/shift-crew', requireAuth, (req, res) => {
-  const { shift, team } = onShiftWithPhones();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const { shift, team } = onShiftWithPhones(fc.one || null);
   res.json({ shift, team, lead: shiftLead(), canSetLead: canSetLead(req.user) });
 });
 app.post('/api/shift-lead', requireAuth, (req, res) => {
@@ -12618,11 +12714,12 @@ app.post('/api/notes', requireAuth, async (req, res) => {
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/clients/:id/notes', requireAuth, (req, res) => {
+  if (!clientFacGuard(req, res, req.params.id, 'id')) return;
   audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: +req.params.id, detail: 'notes', ip: req.ip });
   res.json({ notes: db.prepare(`SELECT * FROM notes WHERE client_id = ? ORDER BY id DESC LIMIT 30`).all(req.params.id).map((n) => ({ ...n, categories: safeArr(n.categories) })) });
 });
 app.get('/api/notes/flagged', requireAuth, (req, res) => {
-  res.json({ notes: db.prepare(`SELECT n.*, c.pref FROM notes n LEFT JOIN clients c ON c.id = n.client_id WHERE n.flagged = 1 ORDER BY n.id DESC LIMIT 50`).all().map((n) => ({ ...n, categories: safeArr(n.categories) })) });
+  res.json({ notes: db.prepare(`SELECT n.*, c.pref FROM notes n LEFT JOIN clients c ON c.id = n.client_id WHERE n.flagged = 1${facCtx(req).frag('c.facility_id')} ORDER BY n.id DESC LIMIT 50`).all().map((n) => ({ ...n, categories: safeArr(n.categories) })) });
 });
 // Ingest hook for the EMR/Kipu (no session; guarded by INGEST_KEY). Maps by client_id or name.
 app.post('/api/ingest/note', async (req, res) => {
@@ -12660,7 +12757,7 @@ app.get('/api/display/data', requireKiosk, (req, res) => {
 
 /* ---------------- The Save tracker ---------------- */
 app.get('/api/saves', requireAuth, (req, res) => {
-  res.json({ saves: db.prepare(`SELECT s.*, c.pref FROM saves s LEFT JOIN clients c ON c.id = s.client_id ORDER BY s.id DESC LIMIT 50`).all() });
+  res.json({ saves: db.prepare(`SELECT s.*, c.pref FROM saves s LEFT JOIN clients c ON c.id = s.client_id WHERE 1=1${facCtx(req).frag('c.facility_id')} ORDER BY s.id DESC LIMIT 50`).all() });
 });
 app.post('/api/saves', requireAuth, (req, res) => {
   const b = req.body || {};

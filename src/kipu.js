@@ -2018,12 +2018,12 @@ export async function kipuPullAuths() {
   const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
   const dt = (v) => { const s = localDateOf(v); return /^\d{4}-\d{2}-\d{2}$/.test(s || '') ? s : null; };
   const phi = process.env.KIPU_PHI_LEVEL || 'high';
-  const clients = db.prepare(`SELECT id, name, kipu_id FROM clients WHERE active = 1 AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
+  const clients = db.prepare(`SELECT id, name, kipu_id, facility_id FROM clients WHERE active = 1 AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
   let checked = 0, created = 0, updated = 0, skipped = 0;
   const errors = [];
   const findByNum = db.prepare(`SELECT id FROM authorizations WHERE client_id = ? AND auth_number = ?`);
   const findByEnd = db.prepare(`SELECT id FROM authorizations WHERE client_id = ? AND end_date = ?`);
-  const ins = db.prepare(`INSERT INTO authorizations (client_id, patient_label, payor, auth_number, level_of_care, approved_days, start_date, end_date, reviewer, next_review, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+  const ins = db.prepare(`INSERT INTO authorizations (client_id, patient_label, payor, auth_number, level_of_care, approved_days, start_date, end_date, reviewer, next_review, notes, facility_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
   const upd = db.prepare(`UPDATE authorizations SET payor=COALESCE(?,payor), level_of_care=COALESCE(?,level_of_care), approved_days=COALESCE(?,approved_days), start_date=COALESCE(?,start_date), end_date=COALESCE(?,end_date), reviewer=COALESCE(?,reviewer), next_review=COALESCE(?,next_review), updated_at=datetime('now') WHERE id=?`);
   for (const c of clients) {
     const kid = String(c.kipu_id);
@@ -2054,7 +2054,7 @@ export async function kipuPullAuths() {
         upd.run(payor ? String(payor).slice(0, 80) : null, level, days, startDate, endDate, reviewer ? String(reviewer).slice(0, 80) : null, nextRev, existing.id);
         updated++;
       } else {
-        ins.run(c.id, nameInitials(c.name), payor ? String(payor).slice(0, 80) : '', authNum ? String(authNum).slice(0, 60) : '', level, days, startDate, endDate, reviewer ? String(reviewer).slice(0, 80) : '', nextRev, 'imported from Kipu UR');
+        ins.run(c.id, nameInitials(c.name), payor ? String(payor).slice(0, 80) : '', authNum ? String(authNum).slice(0, 60) : '', level, days, startDate, endDate, reviewer ? String(reviewer).slice(0, 80) : '', nextRev, 'imported from Kipu UR', c.facility_id || null);
         created++;
         publishEvent({ event: 'auth.created', entity: 'authorization', entity_id: c.id, actor: 'kipu', summary: `Auth imported · ${nameInitials(c.name)} · ${payor || 'payor tbd'}${endDate ? ' · expires ' + endDate : ''}` });
       }

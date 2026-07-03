@@ -1633,6 +1633,9 @@ export function mountHousing(app) {
   app.get('/api/housing/residents/:id', requireAuth, (req, res) => {
     const r = db.prepare(`SELECT * FROM housing_residents WHERE id=?`).get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Not found' });
+    // A resident from another building must read as nonexistent under a pick.
+    const rp = facPick(req);
+    if (rp !== null && r.facility_id != null && r.facility_id !== rp) return res.status(404).json({ error: 'Not found' });
     const card = residentCard(r);
     audit({ user: req.user, action: 'HOUSING_RESIDENT_VIEW', detail: r.name, ip: req.ip });
     res.json({

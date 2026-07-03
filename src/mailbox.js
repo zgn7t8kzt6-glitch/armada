@@ -148,7 +148,24 @@ export async function pollMailbox({ max = 25 } = {}) {
     const has = db.prepare(`SELECT 1 FROM desk_mail WHERE msg_id = ?`);
     const ins = db.prepare(`INSERT OR IGNORE INTO desk_mail (msg_id, received_at, from_name, from_email, subject, preview, web_link, category, reason, action)
       VALUES (?,?,?,?,?,?,?,?,?,?)`);
-    let triaged = 0, surfaced = 0, ignored = 0, newest = since;
+    let triaged = 0, surfaced = 0, ignored = 0, newest = since, lastErr = null;
+    const runTriage = async (args) => {
+      try { return await triageEmail(args); }
+      catch (e1) {
+        await new Promise((r2) => setTimeout(r2, 2500));   // one retry — transient API blips
+        try { return await triageEmail(args); }
+        catch (e2) { lastErr = String(e2.message || e2).slice(0, 200); throw e2; }
+      }
+    };
+    // Second chances: anything that failed triage last time gets re-run first.
+    const retryRows = db.prepare(`SELECT id, from_name, from_email, subject, preview FROM desk_mail WHERE status='open' AND reason LIKE 'Triage failed%' LIMIT 10`).all();
+    for (const rr of retryRows) {
+      try {
+        const t2 = await runTriage({ from: `${rr.from_name} <${rr.from_email}>`, subject: rr.subject || '', preview: rr.preview || '', myEmail: getState('msgraph_user') || '' });
+        const cat2 = t2.needs_me ? (['decision', 'followup', 'review'].includes(t2.category) ? t2.category : 'review') : 'ignore';
+        db.prepare(`UPDATE desk_mail SET category=?, reason=?, action=? WHERE id=?`).run(cat2, String(t2.reason || '').slice(0, 300), String(t2.action || '').slice(0, 200), rr.id);
+      } catch { /* stays surfaced; next poll retries again */ }
+    }
     for (const m of msgs) {
       if (m.receivedDateTime && m.receivedDateTime > newest) newest = m.receivedDateTime;
       if (has.get(m.id)) continue;
@@ -161,8 +178,8 @@ export async function pollMailbox({ max = 25 } = {}) {
       let t;
       if (muted) t = { needs_me: false, category: 'ignore', reason: `Muted sender (${muted.why}).`, action: '' };
       else {
-        try { t = await triageEmail({ from: `${fromName} <${fromEmail}>`, subject: m.subject || '', preview: m.bodyPreview || '', myEmail: getState('msgraph_user') || '' }); }
-        catch (e) { console.error('[mail] triage:', e.message); t = { needs_me: true, category: 'review', reason: 'Triage failed — surfaced so nothing is missed.', action: '' }; }
+        try { t = await runTriage({ from: `${fromName} <${fromEmail}>`, subject: m.subject || '', preview: m.bodyPreview || '', myEmail: getState('msgraph_user') || '' }); }
+        catch (e) { console.error('[mail] triage:', e.message); t = { needs_me: true, category: 'review', reason: ('Triage failed: ' + String(e.message || e).slice(0, 140)) + ' — surfaced so nothing is missed.', action: '' }; }
       }
       const cat = t.needs_me ? (['decision', 'followup', 'review'].includes(t.category) ? t.category : 'review') : 'ignore';
       ins.run(m.id, m.receivedDateTime || null, fromName, fromEmail, String(m.subject || '').slice(0, 300), String(m.bodyPreview || '').slice(0, 400), m.webLink || null, cat, String(t.reason || '').slice(0, 300), String(t.action || '').slice(0, 200));
@@ -172,7 +189,8 @@ export async function pollMailbox({ max = 25 } = {}) {
     // Only advance the cursor past what we actually triaged.
     if (triaged >= max && msgs.length > triaged) { /* keep cursor; next run resumes */ } else { setState('mail_last_poll', newest); }
     setState('mail_last_run', new Date().toISOString());
-    return { ok: true, checked: msgs.length, triaged, surfaced, ignored };
+    if (lastErr) setState('mail_last_error', lastErr); else setState('mail_last_error', '');
+    return { ok: true, checked: msgs.length, triaged, surfaced, ignored, retried: retryRows.length, lastError: lastErr };
   } catch (e) { return { error: e.message }; }
   finally { _polling = false; }
 }

@@ -19,6 +19,7 @@ import {
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
+import { classifyDeskItem } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
@@ -1213,16 +1214,34 @@ function deskCapture(ownerId, rawText, source) {
   const u = withWho ? deskMatchUser(withWho) : null;
   const info = db.prepare(`INSERT INTO desk_items (owner_id, title, kind, with_who, with_user_id, due_date, due_time, source, status) VALUES (?,?,?,?,?,?,?,?, ?)`)
     .run(ownerId, String(title).slice(0, 300), kind, withWho, u ? u.id : null, date, time, source, withWho ? 'waiting' : 'open');
+  deskClassifyAsync(info.lastInsertRowid, title);
   return { id: info.lastInsertRowid, title, date, time, withWho, matched: u ? u.name : null, kind };
+}
+function deskBuckets() {
+  try { const a = JSON.parse(getState('desk_buckets') || 'null'); if (Array.isArray(a) && a.length) return a; } catch { /* defaults */ }
+  return ['Clinical', 'Medical', 'Maintenance', 'Expansion', 'Corporate', 'HR / People', 'Finance', 'Marketing', 'IT / App', 'Personal'];
+}
+// Filing happens AFTER the save, never before — capture speed is sacred. The AI
+// picks strictly from the bucket list + facility registry; unclear stays unfiled.
+function deskClassifyAsync(id, title) {
+  if (!claudeConfigured()) return;
+  const facs = orgFacilities().filter((f) => f.type !== 'corporate' && f.active).map((f) => f.name);
+  classifyDeskItem(title, deskBuckets(), facs).then((r) => {
+    const bucket = deskBuckets().find((b) => b.toLowerCase() === String(r.bucket || '').toLowerCase()) || null;
+    const fac = r.facility ? facilityForEntity(r.facility) : null;
+    if (bucket || fac) db.prepare(`UPDATE desk_items SET bucket=COALESCE(?, bucket), facility_id=COALESCE(?, facility_id) WHERE id=?`).run(bucket, fac ? fac.id : null, id);
+  }).catch(() => { /* stays unfiled — visible, never wrong */ });
 }
 function noteToken() { let t = getState('desk_note_token'); if (!t) { t = crypto.randomBytes(14).toString('base64url'); setState('desk_note_token', t); } return t; }
 app.get('/api/desk', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
-  const items = db.prepare(`SELECT d.*, u.name AS matched_name FROM desk_items d LEFT JOIN users u ON u.id=d.with_user_id WHERE d.owner_id=? AND (d.status != 'done' OR d.done_at >= datetime('now','-14 day')) ORDER BY d.status='done', (d.due_date IS NULL), d.due_date, d.due_time, d.id DESC`).all(req.user.id)
+  const items = db.prepare(`SELECT d.*, u.name AS matched_name, f.name AS facility_name FROM desk_items d LEFT JOIN users u ON u.id=d.with_user_id LEFT JOIN org_facilities f ON f.id=d.facility_id WHERE d.owner_id=? AND (d.status != 'done' OR d.done_at >= datetime('now','-14 day')) ORDER BY d.status='done', (d.due_date IS NULL), d.due_date, d.due_time, d.id DESC`).all(req.user.id)
     .map((d) => ({ ...d, overdue: !!(d.due_date && d.due_date < today && d.status !== 'done'), snoozed: !!(d.snooze_until && d.snooze_until > today) }));
   const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || appBaseUrl(req)).replace(/\/$/, '');
   res.json({
     today, items,
+    buckets: deskBuckets(),
+    facilities: orgFacilities().filter((f) => f.type !== 'corporate' && f.active).map((f) => ({ id: f.id, name: f.name })),
     settings: { digestHour: +(getState('desk_digest_hour') || 7), email: getState('desk_email') || '', noteUrl: `${base}/api/inbound/note?t=${noteToken()}` },
   });
 });
@@ -1240,6 +1259,9 @@ app.patch('/api/desk/:id', requireAuth, requireAdmin, (req, res) => {
   if (b.snooze_days) db.prepare(`UPDATE desk_items SET snooze_until=? WHERE id=?`).run(addDays(appToday(), +b.snooze_days), d.id);
   if (b.due_date !== undefined) db.prepare(`UPDATE desk_items SET due_date=?, due_time=COALESCE(?, due_time) WHERE id=?`).run(/^\d{4}-\d{2}-\d{2}$/.test(b.due_date || '') ? b.due_date : null, /^\d{2}:\d{2}$/.test(b.due_time || '') ? b.due_time : null, d.id);
   if (b.title) db.prepare(`UPDATE desk_items SET title=? WHERE id=?`).run(String(b.title).slice(0, 300), d.id);
+  if (b.bucket !== undefined) db.prepare(`UPDATE desk_items SET bucket=? WHERE id=?`).run(String(b.bucket || '').slice(0, 40) || null, d.id);
+  if (b.facility_id !== undefined) db.prepare(`UPDATE desk_items SET facility_id=? WHERE id=?`).run(b.facility_id ? +b.facility_id : null, d.id);
+  if (b.reclassify) deskClassifyAsync(d.id, d.title);
   if (b.with_who !== undefined) {
     const u = deskMatchUser(b.with_who);
     db.prepare(`UPDATE desk_items SET with_who=?, with_user_id=?, status=CASE WHEN ? != '' AND status='open' THEN 'waiting' ELSE status END WHERE id=?`).run(String(b.with_who || '').slice(0, 80) || null, u ? u.id : null, String(b.with_who || ''), d.id);

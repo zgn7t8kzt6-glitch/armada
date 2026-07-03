@@ -388,6 +388,30 @@ export async function extractOrderItemsDoc(subject, bodyText, media) {
   return JSON.parse(t.text);
 }
 
+// Desk-note filing: bucket + facility for the owner's captures. Grounded — the
+// model picks ONLY from the provided lists; anything unclear stays unfiled.
+const DESK_CLASS_SCHEMA = {
+  type: 'object',
+  properties: {
+    bucket: { type: 'string', description: 'Best-fit bucket from the provided list, or empty string if genuinely unclear.' },
+    facility: { type: 'string', description: 'The facility/location this is about, EXACTLY as written in the provided list, or empty string if none is implied.' },
+  },
+  required: ['bucket', 'facility'],
+};
+export async function classifyDeskItem(text, buckets, facilities) {
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 200,
+    system: G + 'You file a business owner\'s quick captured notes. Pick the single best bucket and, when a location is implied, the facility — strictly from the provided lists. Never invent categories or locations; when unsure, return empty strings.',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: DESK_CLASS_SCHEMA } },
+    messages: [{ role: 'user', content: `BUCKETS: ${buckets.join(' | ')}\nFACILITIES: ${facilities.join(' | ')}\n\nNOTE: ${scrub(String(text || '').slice(0, 400))}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('declined');
+  const t = response.content.find((b) => b.type === 'text');
+  return t ? JSON.parse(t.text) : { bucket: '', facility: '' };
+}
+
 // ---- Document extraction: read an uploaded PDF/image and pull structured fields ----
 async function extractFromDoc(base64, mediaType, system, schema, instruction) {
   const client = await getClient();

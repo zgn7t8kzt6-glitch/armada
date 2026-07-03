@@ -5882,13 +5882,19 @@ async function authDel(id){
 }
 /* ── MY DESK — the owner's one capture inbox. Type it like a text; dates parse;
    waiting-on items nudge people; the morning digest does the remembering. ── */
-let DESK_DATA=null;
+let DESK_DATA=null, DESK_FILTER='';
 async function loadMyDesk(){
   const host=$('mydesk'); if(!host) return;
   host.innerHTML='<div class="card"><div class="skel" style="width:240px;height:22px;margin-bottom:14px"></div><div class="skel" style="height:60px"></div></div>';
   let d; try{ d=await api('/desk'); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'</div></div>'; return; }
   DESK_DATA=d;
-  const items=(d.items||[]).filter(x=>!x.snoozed||x.status==='done');
+  let items=(d.items||[]).filter(x=>!x.snoozed||x.status==='done');
+  // Bucket / location filter chips — AI files everything; you slice it any way.
+  const bucketsPresent=[...new Set(items.map(x=>x.bucket).filter(Boolean))];
+  const facsPresent=[...new Set(items.map(x=>x.facility_name).filter(Boolean))];
+  if(DESK_FILTER) items=items.filter(x=>x.bucket===DESK_FILTER||x.facility_name===DESK_FILTER);
+  const chip=(v,ico)=>`<button class="btn ${DESK_FILTER===v?'btn-gold':'btn-ghost'} btn-sm sans" onclick="DESK_FILTER=DESK_FILTER==='${v.replace(/'/g,"\\'")}'?'':'${v.replace(/'/g,"\\'")}';loadMyDesk()">${ico}${esc(v)}</button>`;
+  const filterRow=(bucketsPresent.length||facsPresent.length)?`<div class="chip-row" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${DESK_FILTER?chip(DESK_FILTER,'✕ '):''}${bucketsPresent.filter(b=>b!==DESK_FILTER).map(b=>chip(b,'🏷 ')).join('')}${facsPresent.filter(f=>f!==DESK_FILTER).map(f=>chip(f,'📍')).join('')}</div>`:'';
   const today=d.today;
   const overdue=items.filter(x=>x.overdue&&x.status!=='done');
   const todays=items.filter(x=>x.due_date===today&&x.status!=='done');
@@ -5899,12 +5905,13 @@ async function loadMyDesk(){
   const daysAgo=(ts)=>{ if(!ts) return null; const n=Math.round((Date.now()-Date.parse(ts+'Z'))/864e5); return n<=0?'today':n+'d ago'; };
   const row=(x)=>`<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default">
     <div class="q-main"><div class="q-title">${esc(x.title)}</div>
-      <div class="q-sub">${x.due_date?esc(x.due_date)+(x.due_time?' '+esc(x.due_time):''):''}${x.with_who?' · w/ <strong>'+esc(x.with_who)+'</strong>'+(x.matched_name?'':' <span class="badge-idle">no app match</span>'):''}${x.nudged_at?' · nudged '+daysAgo(x.nudged_at):''}${x.source!=='app'?' · 📱':''}</div></div>
+      <div class="q-sub">${x.bucket?'<span class="badge-info">🏷 '+esc(x.bucket)+'</span> ':''}${x.facility_name?'<span class="badge-idle">📍'+esc(x.facility_name)+'</span> ':''}${x.due_date?esc(x.due_date)+(x.due_time?' '+esc(x.due_time):''):''}${x.with_who?' · w/ <strong>'+esc(x.with_who)+'</strong>'+(x.matched_name?'':' <span class="badge-idle">no app match</span>'):''}${x.nudged_at?' · nudged '+daysAgo(x.nudged_at):''}${x.source!=='app'?' · 📱':''}</div></div>
     <div style="display:flex;gap:4px;flex-wrap:wrap">
       ${x.status!=='done'?`<button class="btn btn-gold btn-sm sans" onclick="deskDo(${x.id},{status:'done'})">✓</button>
       <button class="btn btn-ghost btn-sm sans" title="Snooze to tomorrow" onclick="deskDo(${x.id},{snooze_days:1})">😴</button>
       <button class="btn btn-ghost btn-sm sans" title="Pick a date" onclick="deskDate(${x.id})">🗓</button>
       <button class="btn btn-ghost btn-sm sans" title="Who has to help close this?" onclick="deskWho(${x.id})">👤</button>
+      <button class="btn btn-ghost btn-sm sans" title="File it: bucket + location" onclick="deskBucket(${x.id})">🏷</button>
       ${x.with_who?`<button class="btn btn-ghost btn-sm sans" title="Nudge them — lands in their Today inbox" onclick="deskNudge(${x.id})">📣</button>`:''}`
       :`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${x.id},{status:'open'})">↩︎</button>`}
       <button class="btn btn-ghost btn-sm sans" onclick="deskDel(${x.id})">🗑</button></div></div>`;
@@ -5912,6 +5919,7 @@ async function loadMyDesk(){
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">My Desk</h3><p class="sub sans" style="margin:0">One inbox for everything on your plate. Type it like a text — dates and people parse themselves ("call landlord friday 3pm with Josh").</p></div>
       <button class="btn btn-ghost btn-sm sans" onclick="deskDigestNow(this)">☀️ Send digest now</button></div>
     <div class="toolbar" style="gap:8px;margin-top:10px"><input id="deskCap" placeholder="What do you need to remember?" style="flex:1;min-width:200px;font-size:16px;padding:12px" onkeydown="if(event.key==='Enter')deskAdd()"/><button class="btn btn-gold sans" onclick="deskAdd()">Save</button></div>
+    ${filterRow}
     ${sec('🔥 Overdue',overdue,true)}${sec('📅 Today',todays)}${sec('⏳ Waiting on people',waiting)}${sec('🗓 Coming up',upcoming)}${sec('💡 No date yet',someday)}
     ${(!items.length)?'<div class="empty"><div class="e-ico">🌤</div>Desk is clear. Text yourself the next thing that pops into your head.</div>':''}
     ${done.length?`<details style="margin-top:12px"><summary class="hint" style="cursor:pointer">✅ Done recently (${done.length})</summary>${done.map(row).join('')}</details>`:''}</div>
@@ -5931,6 +5939,15 @@ async function deskAdd(){
 }
 async function deskDo(id,body){ try{ await api('/desk/'+id,{method:'PATCH',body:JSON.stringify(body)}); }catch(e){ alert(e.message);} loadMyDesk(); }
 async function deskDate(id){ const dt=prompt('Due date (YYYY-MM-DD), blank to clear:'); if(dt==null) return; const tm=dt?prompt('Time (HH:MM, optional):','')||'':''; deskDo(id,{due_date:dt,due_time:tm}); }
+async function deskBucket(id){
+  const d=DESK_DATA||{}; const buckets=d.buckets||[]; const facs=d.facilities||[];
+  const b=prompt('Bucket — one of:\n'+buckets.join(' · ')+'\n(blank to clear)');
+  if(b==null) return;
+  const match=buckets.find(x=>x.toLowerCase()===b.toLowerCase().trim())||b.trim();
+  const f=prompt('Location (optional) — one of:\n'+facs.map(x=>x.name).join(' · '));
+  const fac=f?facs.find(x=>x.name.toLowerCase().includes(f.toLowerCase().trim())):null;
+  deskDo(id,{bucket:match,facility_id:fac?fac.id:(f===''?null:undefined)});
+}
 async function deskWho(id){ const w=prompt('Who has to help close this? (name — matches app users automatically)'); if(w==null) return; deskDo(id,{with_who:w}); }
 async function deskNudge(id){ try{ const r=await api('/desk/'+id+'/nudge',{method:'POST'}); const m=r.how||'nudged'; alert('📣 '+m); }catch(e){ alert(e.message);} loadMyDesk(); }
 async function deskDel(id){ if(!confirm('Delete this item?')) return; try{ await api('/desk/'+id,{method:'DELETE'}); }catch(e){ alert(e.message);} loadMyDesk(); }

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260703AK" />
+<link rel="stylesheet" href="/styles.css?v=20260703AL" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -95,7 +95,7 @@
     <!-- REVENUE — Revenue OS -->
     <button data-view="authreg">Authorizations</button>
     <button data-view="billingready">Billing Readiness</button>
-    <button data-view="outpatient">Armada Clinical</button>
+    <button data-view="outpatient">Outpatient</button>
     <button data-view="finance" data-admin>Revenue</button>
     <button data-view="expenses" data-admin>Budget</button>
     <!-- FACILITY — the building runs -->
@@ -148,9 +148,9 @@
     <button data-view="audit" data-admin>Audit Log</button>
     <button data-view="guide" data-admin>Owner's Guide</button>
     <button data-view="dupes" data-admin>Merge Duplicates</button>
-    <!-- Hilltop Recovery Home (sober-living suite) -->
+    <!-- Sober-living suite (Hilltop + Reverie — the facility chip says which) -->
     <div class="side-cap" data-group="housing" data-cap>Daily</div>
-    <button data-view="housing">Hilltop HQ</button>
+    <button data-view="housing">Housing HQ</button>
     <button data-view="staffhub">Staff Hub</button>
     <button data-view="voice">Resident Voice &amp; Kiosk</button>
     <button data-view="activities">Activities &amp; Engagement</button>
@@ -376,7 +376,7 @@
           <li><b>Settings → Clock-in location lock</b> — set the geofence + <b>Allow this WiFi</b>.</li>
           <li><b>Users</b> — add staff (email invite to sign up), set roles &amp; <b>phone numbers</b>. Revenue, Budget, Documentation, 90-Day Plan.</li></ul></div>
       </div>
-      <div class="card"><h3>Who sees what</h3><p class="sub sans">Frontline staff (BHT, Nurse, Front Desk) get a clean top tools bar with only their tools — no sidebar, no leadership tabs. Hilltop (sober-living) staff see only Hilltop, never the detox side. Employees, Client Voice, personality profiles, and Settings are leadership-only.</p></div>
+      <div class="card"><h3>Who sees what</h3><p class="sub sans">Frontline staff (BHT, Nurse, Front Desk) get a clean top tools bar with only their tools — no sidebar, no leadership tabs. Sober-living staff see only the housing suite, never the detox side. Employees, Client Voice, personality profiles, and Settings are leadership-only.</p></div>
     </section>
 
     <section id="command" class="view">
@@ -2397,8 +2397,8 @@
     <section id="housing" class="view">
       <div class="card hq-hero">
         <div class="cmd-hero-row">
-          <div><h3 style="font-size:21px">⛰ Hilltop Recovery Home — HQ</h3>
-            <p class="sub">Every Hilltop recovery residence on one screen — NARR / Ohio Recovery Housing Level 2 &amp; 3, run hand-in-glove with clinical PHP · IOP · OP. <em>Warm arrival, anticipated stay, fond farewell — the door is always open.</em></p></div>
+          <div><h3 style="font-size:21px">⛰ Recovery Housing — HQ</h3>
+            <p class="sub">Every recovery residence on one screen — NARR / Ohio Recovery Housing Level 2 &amp; 3, run hand-in-glove with clinical PHP · IOP · OP. <em>Warm arrival, anticipated stay, fond farewell — the door is always open.</em></p></div>
           <div class="cmd-hero-actions"><button class="btn btn-ghost sans" onclick="loadHousingHQ()">↻ Refresh</button></div>
         </div>
         <div id="hqKpis" class="ret-cards" style="margin-top:14px"></div>
@@ -2618,7 +2618,7 @@
     <section id="voice" class="view">
       <div class="card">
         <div class="cmd-hero-row">
-          <div><h3>🗣️ Resident Voice &amp; Hilltop kiosk</h3><p class="sub sans" style="margin:0">Everything residents send from the Hilltop Recovery Home kiosk — daily check-ins, requests, ideas and surveys. This is Hilltop's own channel; it never touches the clinical/detox side.</p></div>
+          <div><h3>🗣️ Resident Voice &amp; house kiosk</h3><p class="sub sans" style="margin:0">Everything residents send from the house kiosk — daily check-ins, requests, ideas and surveys. This is the residences' own channel; it never touches the clinical/detox side.</p></div>
           <button class="btn btn-ghost sans" onclick="openSlKioskCode()">⚙ Kiosk setup</button>
         </div>
         <div id="voiceKpis" class="ret-cards" style="margin-top:12px"></div>
@@ -2644,7 +2644,7 @@
     <section id="staffhub" class="view">
       <div class="card hq-hero">
         <div class="cmd-hero-row">
-          <div><h3>⛰ Staff Hub — your shift, the Hilltop way</h3><p class="sub sans" style="margin:0">What to focus on first, the daily standard we live by, the first-day playbook for new residents, and recognition for the team. This is how we run a best-in-class recovery home.</p></div>
+          <div><h3>⛰ Staff Hub — your shift, done right</h3><p class="sub sans" style="margin:0">What to focus on first, the daily standard we live by, the first-day playbook for new residents, and recognition for the team. This is how we run a best-in-class recovery home.</p></div>
           <span class="seg" id="hubSeg">
             <button class="on" data-t="focus" onclick="setHubTab('focus')">My Shift</button>
             <button data-t="lineup" onclick="setHubTab('lineup')">Line-up</button>
@@ -2672,7 +2672,7 @@
 
     <section id="hfarewell" class="view">
       <div class="card hq-hero">
-        <div><h3>👋 Farewell &amp; Alumni — the fond goodbye</h3><p class="sub sans" style="margin:0">A planned, dignified exit and a door that’s always open. Run the farewell playbook, track alumni, and measure loyalty — would they recommend Hilltop?</p></div>
+        <div><h3>👋 Farewell &amp; Alumni — the fond goodbye</h3><p class="sub sans" style="margin:0">A planned, dignified exit and a door that’s always open. Run the farewell playbook, track alumni, and measure loyalty — would they recommend us?</p></div>
       </div>
       <div id="fwBody"></div>
     </section>
@@ -2727,7 +2727,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260703AK"></script>
-<script src="/housing.js?v=20260703AK"></script>
+<script src="/app.js?v=20260703AL"></script>
+<script src="/housing.js?v=20260703AL"></script>
 </body>
 </html>

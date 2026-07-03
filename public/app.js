@@ -190,7 +190,7 @@ const GROUPS=[
   {g:'revenue',label:'Revenue',first:'authreg'},
   {g:'facility',label:'Facility',first:'inventory'},
   {g:'team',label:'Team',first:'mytasks'},
-  {g:'housing',label:'Hilltop',first:'housing'},
+  {g:'housing',label:'Sober Living',first:'housing'},
   {g:'enterprise',label:'Enterprise',first:'ownership'},
   {g:'insight',label:'Insight',first:'outcomes',admin:true},
   {g:'command',label:'Admin',first:'settings',admin:true},
@@ -206,8 +206,11 @@ const GROUP_OF={
   casemgmt:'stay',appts:'stay',retention:'stay',surveys:'stay',clientvoice:'stay',incidents:'stay',compliance:'stay',
   // Discharge — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
-  // Revenue — Revenue OS: authorizations, money in, outpatient economics
-  authreg:'revenue',billingready:'revenue',outpatient:'revenue',finance:'revenue',expenses:'revenue',
+  // Revenue — Revenue OS: authorizations, money in
+  authreg:'revenue',billingready:'revenue',finance:'revenue',expenses:'revenue',
+  // Outpatient day programs (PHP/IOP/OP) live under Care — the facility chip
+  // says WHICH program (Armada Clinical, Dayton, Spark); the sidebar stays functional.
+  outpatient:'stay',
   // Hilltop — the recovery-residence suite (separate world)
   housing:'housing',staffhub:'housing',hstaffdev:'housing',houses:'housing',fleet:'housing',residents:'housing',resident:'housing',intake:'housing',screens:'housing',houselife:'housing',housingstaff:'housing',shiftreports:'housing',hincidents:'housing',voice:'housing',hmaint:'housing',activities:'housing',hfarewell:'housing',movement:'housing',coordination:'housing',employment:'housing',rentrun:'housing',ledger:'housing',orh:'housing',housingoutcomes:'housing',
   // Team — culture, recognition, learning, tasks
@@ -656,7 +659,7 @@ function show(v){
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   try{ navRecordRecent(v); }catch(_e){ /* shortcuts optional */ }
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',billingready:'Billing Readiness',mydesk:'My Desk',appts:'Scheduling & Queue',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',billingready:'Billing Readiness',mydesk:'My Desk',appts:'Scheduling & Queue',housing:'Recovery Housing — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
@@ -7686,7 +7689,8 @@ async function loadOutpatient(){
   const other=roster.filter(x=>!['PHP','IOP'].includes(x.locClass));
   const lb=d.levelBreakdown||{};
   const lbHtml=Object.keys(lb).length?`<details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Level-of-care breakdown — what Kipu returned per person (tap to diagnose counts)</summary><div style="margin-top:4px">${Object.entries(lb).map(([k,n])=>`<div class="hint" style="font-family:monospace;font-size:12px">${esc(k)} — <strong>${n}</strong></div>`).join('')}</div></details>`:'';
-  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>🏥 Akron Outpatient <span class="hint" style="font-weight:400">· ${esc(d.location||'')}</span></h3><p class="sub sans">Live from Kipu — your outpatient census &amp; movement, by level of care and payer. ${esc(asOf)} · auto-refreshes daily.</p></div>
+  const opFacName=((ME.facilities||[]).find(f=>String(f.id)===String(FAC_SCOPE))||{}).name;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3>🏥 ${esc(opFacName||'Outpatient — PHP · IOP · OP')}${opFacName?'':` <span class="hint" style="font-weight:400">· ${esc(d.location||'')}</span>`}</h3><p class="sub sans">Live from Kipu — your outpatient census &amp; movement, by level of care and payer. ${esc(asOf)} · auto-refreshes daily.</p></div>
       <button class="btn btn-gold btn-sm sans" onclick="refreshOutpatient(this)">↻ Refresh from Kipu</button></div>
       ${d.kipuReady?'':'<div class="pc-note" style="color:var(--danger)">Kipu isn’t connected — set it up in Settings → Integrations.</div>'}
       <div class="ret-cards" style="margin-top:8px">${box(c.PHP||0,'In PHP now','rc-elev')}${box(c.IOP||0,'In IOP now')}${box(c.OP||0,'OP')}${box(c.total||0,'Total enrolled')}</div>

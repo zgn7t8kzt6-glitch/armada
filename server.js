@@ -329,6 +329,19 @@ app.post('/api/logout', (req, res) => { logout(req, res); res.json({ ok: true })
 function outpatientAllowlist() { try { const a = JSON.parse(getState('outpatient_access') || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
 function canSeeOutpatient(user) { return !!user && (user.role === 'admin' || user.job_role === 'Director of Revenue Cycle Management' || outpatientAllowlist().includes(user.id)); }
 function requireOutpatient(req, res, next) { if (!canSeeOutpatient(req.user)) return res.status(403).json({ error: 'Owner only.' }); next(); }
+// One-time: everyone on the outpatient allowlist works the outpatient program,
+// but the foundation access seed only gave them detox — so their facility chip
+// couldn't reach Armada Clinical once the roster became facility-scoped.
+try {
+  if (getState('outpatient_access_backfill') !== 'done') {
+    const opf = db.prepare(`SELECT id FROM org_facilities WHERE fkey='akron-house'`).get()?.id;
+    if (opf) {
+      const ins = db.prepare(`INSERT OR IGNORE INTO user_facility_access (user_id, facility_id, role) VALUES (?,?,(SELECT job_role FROM users WHERE id=?))`);
+      for (const uid of outpatientAllowlist()) { try { ins.run(uid, opf, uid); } catch { /* user may be gone */ } }
+      setState('outpatient_access_backfill', 'done');
+    }
+  }
+} catch (e) { console.error('[outpatient access]', e.message); }
 
 // ── Facilities registry (all 6 locations) for the consolidated ownership view ──
 // Two Kipu connections: 'armada' (the existing login — Akron detox, Akron House,
@@ -4407,10 +4420,17 @@ function outpatientLocationName() { return (getState('outpatient_location') || O
 const opDays = (a, b) => { if (!a || !b) return null; const n = Math.round((Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / 864e5); return Number.isFinite(n) && n >= 0 ? n : null; };
 const avg1 = (arr) => arr.length ? +(arr.reduce((x, y) => x + y, 0) / arr.length).toFixed(1) : null;
 app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
-  // Facility truth: an explicit pick shows ONLY that program's roster. Spark
-  // with no sync yet reads 0 — never a mirror of Akron's census.
-  const fc = facCtx(req); if (denyFac(fc, res)) return;
-  const rows = db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist, payer FROM outpatient_clients WHERE active = 1${fc.frag('facility_id')} ORDER BY loc_class, name`).all();
+  // Facility truth: an EXPLICIT chip pick shows ONLY that program's roster —
+  // Spark with no sync yet reads 0, never a mirror of Akron's census. No pick
+  // (All facilities / legacy staff) keeps today's full roster.
+  let opPick = null;
+  if (req.query.facility !== undefined && req.query.facility !== '') {
+    const fid = +req.query.facility;
+    if (!Number.isInteger(fid) || fid <= 0 || !facilityAllowed(req.user, fid)) return res.status(403).json({ error: 'No access to that facility.' });
+    opPick = fid;
+  }
+  const opFrag = opPick ? ` AND facility_id = ${opPick}` : '';
+  const rows = db.prepare(`SELECT kipu_id, name, pref, level, loc_class, admit, mrn, therapist, payer FROM outpatient_clients WHERE active = 1${opFrag} ORDER BY loc_class, name`).all();
   const counts = { total: rows.length, PHP: 0, IOP: 0, OP: 0, Other: 0 };
   for (const r of rows) counts[r.loc_class] = (counts[r.loc_class] || 0) + 1;
   const access = req.user.role === 'admin'
@@ -4419,18 +4439,18 @@ app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
   // Raw level-of-care text → count + how we classified it, so a 61-vs-40 mismatch is
   // diagnosable at a glance (e.g. everyone's level text reading the same value).
   const lb = {};
-  for (const r of db.prepare(`SELECT level, loc_class, COUNT(*) n FROM outpatient_clients WHERE active = 1${fc.frag('facility_id')} GROUP BY level, loc_class`).all()) {
+  for (const r of db.prepare(`SELECT level, loc_class, COUNT(*) n FROM outpatient_clients WHERE active = 1${opFrag} GROUP BY level, loc_class`).all()) {
     lb[(r.level || '(blank)') + '  →  ' + r.loc_class] = r.n;
   }
   // Connection + sync stamps are per facility: the default program reads the env
   // connection; any other facility reads ITS OWN 🔌 connection (none = not ready).
   const opFid = outpatientFacilityId();
-  const scopedElsewhere = fc.one && fc.one !== opFid;
-  const conn = scopedElsewhere ? resolveKipuConn(fc.one) : null;
+  const scopedElsewhere = opPick && opPick !== opFid;
+  const conn = scopedElsewhere ? resolveKipuConn(opPick) : null;
   res.json({
-    location: scopedElsewhere ? (db.prepare(`SELECT kipu_location_name FROM org_facilities WHERE id=?`).get(fc.one)?.kipu_location_name || '') : outpatientLocationName(),
+    location: scopedElsewhere ? (db.prepare(`SELECT kipu_location_name FROM org_facilities WHERE id=?`).get(opPick)?.kipu_location_name || '') : outpatientLocationName(),
     kipuReady: scopedElsewhere ? !!conn : kipuConfigured(),
-    asOf: scopedElsewhere ? (getState('outpatient_synced_at_' + fc.one) || null) : (getState('outpatient_synced_at') || null),
+    asOf: scopedElsewhere ? (getState('outpatient_synced_at_' + opPick) || null) : (getState('outpatient_synced_at') || null),
     counts,
     levelBreakdown: lb,
     roster: rows.map((r) => ({ name: r.pref || r.name, level: r.level, locClass: r.loc_class, admit: r.admit, therapist: r.therapist, mrn: r.mrn, payer: r.payer || '' })),

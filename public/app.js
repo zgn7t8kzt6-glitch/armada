@@ -296,6 +296,44 @@ const isHousingRole = () => !!(ME && HOUSING_ROLES.includes(ME.job_role));
 // The handful of shared pages housing staff still get (their own tasks/comms/learning) —
 // everything else clinical/detox stays hidden from them.
 const UNIVERSAL_VIEWS = ['myrole','mystats','mygrowth','mytasks','messages','team','training','library','standard','handbook'];
+/* ── FACILITY-FIRST NAVIGATION ─────────────────────────────────────────────────
+   Pick a facility in the switcher and the sidebar becomes THAT facility's
+   dashboard — built from its service-line module set (org registry). A detox
+   shows rounds/beds/billing-readiness; a sober-living home shows the housing
+   suite; Corporate shows the corporate lane. "All facilities" shows everything
+   the role allows (the leadership rollup). Views not mapped here are personal/
+   role-level and always follow the existing role rules. */
+const VIEW_MODULE = {
+  // front door
+  arrivals:'arrivals', arrivalcheck:'arrivals', admissions:'admissions', referrals:'admissions', partners:'admissions',
+  // clinical core
+  clients:'census', journey:'census', editor:'census', property:'census', command:'census', admitcheck:'census',
+  records:'clinical', report:'clinical', program:'clinical', casemgmt:'casemgmt',
+  rounds:'rounds', roundscan:'rounds', bedmap:'beds', bedboard:'beds', laundry:'beds',
+  appts:'scheduling', concierge:'concierge', meals:'concierge', dignity:'concierge',
+  engagement:'morale', retention:'morale', surveys:'morale', clientvoice:'morale',
+  incidents:'incidents', compliance:'compliance',
+  dischargepage:'discharges', continuum:'discharges', alumni:'discharges',
+  // money
+  authreg:'authregister', billingready:'billingready', outpatient:'outpatient_census', finance:'finance', expenses:'finance',
+  // building
+  inventory:'inventory', maintenance:'maintenance',
+  operations:'staffing', coverage:'staffing', schedule:'staffing', roster:'staffing', weekgrid:'staffing', assign:'staffing', staffmodel:'staffing', staffsignins:'staffing',
+  // housing suite (sober living)
+  housing:'housing', staffhub:'housing', hstaffdev:'housing', houses:'housing', fleet:'housing', residents:'housing', resident:'housing', intake:'housing', screens:'housing', houselife:'housing', housingstaff:'housing', shiftreports:'housing', hincidents:'housing', voice:'housing', hmaint:'housing', activities:'housing', hfarewell:'housing', movement:'housing', coordination:'housing', employment:'housing', housingoutcomes:'housing',
+  rentrun:'rent', ledger:'rent', orh:'orh',
+  // corporate lane
+  ownership:'corporate', corphub:'corporate', plan:'corporate', excellence:'corporate', playbook:'corporate',
+  hcos:'hr', onboarding:'hr', leadership:'hr', hiring:'hr',
+};
+function curFacility(){ if(typeof FAC_SCOPE!=='string'||!FAC_SCOPE||!ME) return null; return (ME.facilities||[]).find(f=>String(f.id)===FAC_SCOPE)||null; }
+function moduleVisible(v){
+  const m=VIEW_MODULE[v]; if(!m) return true;                 // unmapped → role rules only
+  const fac=curFacility(); if(!fac) return true;              // All facilities → everything the role allows
+  return (fac.modules||[]).includes(m);
+}
+// Where each facility TYPE lands when you switch to it — its natural home page.
+const TYPE_HOME = { 'detox':'opscenter', 'residential':'opscenter', 'outpatient':'outpatient', 'sober-living':'housing', 'corporate':'corphub' };
 // Corporate Operations (Chava): walled to her lane — the hub, ordering, maintenance.
 const CORPORATE_VIEWS = ['corphub','opscenter','inventory','maintenance'];
 let PREVIEW_ROLE=null;   // admin "preview as" — see the app exactly as a role does
@@ -419,7 +457,7 @@ function buttonShowable(b){
   const v=b.dataset.view;
   let adminHidden = b.hasAttribute('data-admin') && ME && ME.role!=='admin';
   if(adminHidden && VIEW_ROLES[v] && canSeeView(v)) adminHidden=false;
-  return !adminHidden && !b.hasAttribute('data-subview') && canSeeView(v);
+  return !adminHidden && !b.hasAttribute('data-subview') && canSeeView(v) && moduleVisible(v);
 }
 function groupVisible(g){
   if(g==='today' || g==='team') return true;   // Home + culture: always
@@ -6971,9 +7009,17 @@ function renderFacChip(){
     chip.style.display='';
     return;
   }
-  chip.innerHTML=`🏥 <select id="facChipSel" onchange="facScopeChange(this.value)" style="border:none;background:transparent;font:inherit;color:inherit;max-width:170px;cursor:pointer" title="Facility scope — screens filter to this facility as each comes online">
+  // Grouped by service line — the switcher reads like the company actually is.
+  const TYPE_LABEL={ 'detox':'Detox & Residential', 'residential':'Detox & Residential', 'outpatient':'Outpatient (PHP/IOP/OP)', 'sober-living':'Sober Living', 'corporate':'Corporate' };
+  const TYPE_ORDER=['detox','residential','outpatient','sober-living','corporate'];
+  const byType={};
+  for(const f of facs){ const k=TYPE_LABEL[f.type]||'Other'; (byType[k]=byType[k]||[]).push(f); }
+  const groups=[...new Set(TYPE_ORDER.map(t=>TYPE_LABEL[t]))].filter(k=>byType[k]);
+  if(byType['Other']) groups.push('Other');
+  const opt=f=>`<option value="${f.id}" ${String(FAC_SCOPE)===String(f.id)?'selected':''}>${esc(f.name)}</option>`;
+  chip.innerHTML=`🏥 <select id="facChipSel" onchange="facScopeChange(this.value)" style="border:none;background:transparent;font:inherit;color:inherit;max-width:190px;cursor:pointer" title="Pick a facility — the whole app becomes that facility's dashboard">
     <option value="" ${FAC_SCOPE===''?'selected':''}>All facilities (${facs.length})</option>
-    ${facs.map(f=>`<option value="${f.id}" ${String(FAC_SCOPE)===String(f.id)?'selected':''}>${esc(f.name)}</option>`).join('')}</select>`;
+    ${groups.map(g=>`<optgroup label="${esc(g)}">${byType[g].map(opt).join('')}</optgroup>`).join('')}</select>`;
   chip.style.display='';
 }
 function facScopeChange(v){
@@ -6981,9 +7027,20 @@ function facScopeChange(v){
   localStorage.setItem('facScope', FAC_SCOPE);
   renderFacChip();
   refreshOpsBadge();
-  // Every number on screen must reflect the chip (Design System: the definition
-  // of done for the switcher) — re-run the active view's loader.
+  // The sidebar becomes THIS facility's toolset (its service-line modules).
+  try{ applyNavVisibility(); }catch(_e){ /* flat menus have no sections */ }
   const active=document.querySelector('.view.active');
+  const fac=curFacility();
+  const prevType=window.PREV_FAC_TYPE||null;
+  window.PREV_FAC_TYPE=fac?fac.type:'all';
+  // Switching to a DIFFERENT KIND of facility lands on its natural home — pick
+  // Hilltop and you're on the Housing HQ, pick Corporate and you're in the hub.
+  // Same-type switches (Akron detox → Wheatfield) keep your place, re-scoped.
+  if(fac && (fac.type!==prevType || (active && !moduleVisible(active.id)))){
+    const home=TYPE_HOME[fac.type];
+    show(home && canSeeView(home) && moduleVisible(home) ? home : 'dashboard');
+    return;
+  }
   if(active) show(active.id);
   if(active&&active.id==='admitcheck' && $('reconBody') && $('reconBody').innerHTML) loadAdmitRecon();
 }

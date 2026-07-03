@@ -1745,14 +1745,18 @@ app.get('/api/me', (req, res) => {
     // Facility scope for the shell chip: explicit user_facility_access rows win;
     // org-wide roles fall back to every operating facility; everyone else to detox.
     try {
-      let facs = db.prepare(`SELECT f.id, f.fkey, f.name FROM user_facility_access ua JOIN org_facilities f ON f.id = ua.facility_id WHERE ua.user_id = ? AND f.active = 1 ORDER BY f.sort, f.id`).all(user.id);
+      let facs = db.prepare(`SELECT f.id, f.fkey, f.name, f.type, f.modules FROM user_facility_access ua JOIN org_facilities f ON f.id = ua.facility_id WHERE ua.user_id = ? AND f.active = 1 ORDER BY f.sort, f.id`).all(user.id);
       if (!facs.length) {
         const orgWide = user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(user.job_role || '');
+        // Org-wide users also get Corporate in the switcher — it's a real "place"
+        // with its own toolset, not a hidden mode (facility-first navigation).
         facs = orgWide
-          ? db.prepare(`SELECT id, fkey, name FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id`).all()
-          : db.prepare(`SELECT id, fkey, name FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id LIMIT 1`).all();
+          ? db.prepare(`SELECT id, fkey, name, type, modules FROM org_facilities WHERE active = 1 ORDER BY (type='corporate'), sort, id`).all()
+          : db.prepare(`SELECT id, fkey, name, type, modules FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id LIMIT 1`).all();
       }
-      user.facilities = facs;
+      // Each chip entry carries its TYPE and resolved MODULE SET — the sidebar
+      // rebuilds itself from this when the user switches facilities.
+      user.facilities = facs.map((f) => ({ id: f.id, fkey: f.fkey, name: f.name, type: f.type || 'outpatient', modules: facilityModules(f) }));
     } catch { user.facilities = []; }
   }
   res.json({ user: user || null });

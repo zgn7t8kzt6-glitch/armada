@@ -2993,7 +2993,7 @@ export const TYPE_MODULES = {
   'detox':        ['census', 'admissions', 'arrivals', 'discharges', 'clinical', 'rounds', 'beds', 'billingready', 'authregister', 'casemgmt', 'scheduling', 'concierge', 'incidents', 'inventory', 'maintenance', 'staffing', 'compliance', 'morale'],
   'residential':  ['census', 'admissions', 'arrivals', 'discharges', 'clinical', 'rounds', 'beds', 'billingready', 'authregister', 'casemgmt', 'scheduling', 'concierge', 'incidents', 'inventory', 'maintenance', 'staffing', 'compliance', 'morale'],
   'outpatient':   ['outpatient_census', 'admissions', 'discharges', 'clinical', 'billingready', 'authregister', 'casemgmt', 'scheduling', 'incidents', 'compliance', 'staffing', 'morale'],
-  'sober-living': ['housing', 'rent', 'orh', 'incidents', 'maintenance', 'inventory', 'staffing', 'compliance', 'morale'],
+  'sober-living': ['housing', 'rent', 'orh', 'maintenance', 'inventory', 'staffing'],   // incidents/surveys/compliance live INSIDE the housing suite
   'corporate':    ['corporate', 'hr', 'finance', 'compliance', 'maintenance', 'inventory', 'staffing'],
 };
 export function defaultModulesFor(type) {

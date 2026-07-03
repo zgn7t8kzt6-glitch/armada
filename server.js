@@ -4,13 +4,13 @@ import QRCode from 'qrcode';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { db, audit, getState, setState, publishEvent, nameInitials, defaultFacilityId } from './src/db.js';
+import { db, audit, getState, setState, publishEvent, nameInitials, defaultFacilityId, MODULE_CATALOG, TYPE_MODULES, defaultModulesFor, facilityModules } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured, smsStatus, DEFAULT_CC } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -1522,7 +1522,8 @@ app.post('/api/desk/digest-now', requireAuth, requireAdmin, async (req, res) => 
 });
 
 app.get('/api/org/facilities', requireAuth, (req, res) => {
-  res.json({ facilities: orgFacilities(), departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
+  const facs = orgFacilities().map((f) => ({ ...f, modules: facilityModules(f) }));
+  res.json({ facilities: facs, departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
 });
 // Facility TYPES define the service line; each type turns a default module set on.
 // (Rebuild Blueprint §4 — configure, don't fork.)
@@ -1545,10 +1546,100 @@ app.post('/api/org/facilities', requireAuth, requireAdmin, (req, res) => {
       String(b.kipu_location_name || '').slice(0, 120) || '', JSON.stringify([name.slice(0, 120)]), (b.beds === '' || b.beds == null) ? null : +b.beds,
       sortMax + 1, String(b.timezone || '').slice(0, 60) || 'America/New_York',
       Array.isArray(b.services) ? JSON.stringify(b.services.map((x) => String(x).slice(0, 40)).slice(0, 12)) : null,
-      Array.isArray(b.modules) ? JSON.stringify(b.modules.map((x) => String(x).slice(0, 40)).slice(0, 40)) : null);
+      JSON.stringify(Array.isArray(b.modules) && b.modules.length ? b.modules.map((x) => String(x).slice(0, 40)).slice(0, 40) : defaultModulesFor(type)));
   try { publishEvent({ event: 'facility.created', entity: 'org_facility', entity_id: Number(info.lastInsertRowid), facility_id: Number(info.lastInsertRowid), actor: req.user.username, summary: `${name} onboarded (${type})` }); } catch { /* feed only */ }
   audit({ user: req.user, action: 'FACILITY_CREATE', entity: 'org_facility', entity_id: Number(info.lastInsertRowid), detail: `${name} · ${type}`, ip: req.ip });
   res.json({ ok: true, id: Number(info.lastInsertRowid), fkey });
+});
+// The module catalog + type defaults — drives the onboarding wizard's checkboxes.
+app.get('/api/org/module-catalog', requireAuth, requireAdmin, (req, res) => {
+  res.json({ catalog: MODULE_CATALOG, byType: TYPE_MODULES, types: FACILITY_TYPES_ORG });
+});
+// ── Per-facility Kipu connection (Rebuild Phase 3) ────────────────────────────
+// Resolve a facility's Kipu connection from facility_integrations, else null so the
+// caller falls back to the shared env credentials. NEVER exposed to the client.
+function resolveKipuConn(facilityId) {
+  try {
+    const row = db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu' AND active=1`).get(+facilityId);
+    if (!row?.config) return null;
+    const c = JSON.parse(row.config);
+    if (c.accessId && c.secretKey && c.appId) return c;
+  } catch { /* fall back to env */ }
+  return null;
+}
+// Non-secret status of a facility's integrations (booleans + location only) —
+// the secret keys are write-only and never returned.
+app.get('/api/org/facilities/:id/integrations', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`SELECT kind, config, active, updated_at, updated_by FROM facility_integrations WHERE facility_id=?`).all(+req.params.id);
+  const out = {};
+  for (const r of rows) {
+    let c = {}; try { c = JSON.parse(r.config || '{}'); } catch { /* corrupt */ }
+    out[r.kind] = r.kind === 'kipu'
+      ? { configured: !!(c.accessId && c.secretKey && c.appId), baseUrl: c.baseUrl || '', locationId: c.locationId || '', active: !!r.active, updatedAt: r.updated_at, updatedBy: r.updated_by }
+      : { configured: !!(c.instanceUrl || c.facilityValue), facilityValue: c.facilityValue || '', active: !!r.active, updatedAt: r.updated_at, updatedBy: r.updated_by };
+  }
+  res.json({ integrations: out });
+});
+// Save a facility's Kipu (or Salesforce) connection. Secrets flow upload→DB only.
+app.post('/api/org/facilities/:id/integrations', requireAuth, requireAdmin, (req, res) => {
+  const fac = db.prepare(`SELECT id, name FROM org_facilities WHERE id=?`).get(+req.params.id);
+  if (!fac) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  const kind = b.kind === 'salesforce' ? 'salesforce' : 'kipu';
+  // Merge onto any existing config so a blank secret means "keep the saved one".
+  let cur = {};
+  try { cur = JSON.parse(db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind=?`).get(fac.id, kind)?.config || '{}'); } catch { /* fresh */ }
+  let cfg;
+  if (kind === 'kipu') {
+    cfg = {
+      accessId: (b.accessId != null && String(b.accessId).trim()) ? String(b.accessId).trim() : cur.accessId,
+      secretKey: (b.secretKey != null && String(b.secretKey).trim()) ? String(b.secretKey).trim() : cur.secretKey,
+      appId: (b.appId != null && String(b.appId).trim()) ? String(b.appId).trim() : cur.appId,
+      baseUrl: b.baseUrl != null ? String(b.baseUrl).trim() : (cur.baseUrl || ''),
+      locationId: b.locationId != null ? String(b.locationId).trim() : (cur.locationId || ''),
+    };
+  } else {
+    cfg = { instanceUrl: b.instanceUrl != null ? String(b.instanceUrl).trim() : cur.instanceUrl, facilityValue: b.facilityValue != null ? String(b.facilityValue).trim() : cur.facilityValue };
+  }
+  db.prepare(`INSERT INTO facility_integrations (facility_id, kind, config, active, updated_at, updated_by) VALUES (?,?,?,?,datetime('now'),?)
+    ON CONFLICT(facility_id, kind) DO UPDATE SET config=excluded.config, active=excluded.active, updated_at=excluded.updated_at, updated_by=excluded.updated_by`)
+    .run(fac.id, kind, JSON.stringify(cfg), b.active === false ? 0 : 1, req.user.name);
+  audit({ user: req.user, action: 'INTEGRATION_SET', entity: 'org_facility', entity_id: fac.id, detail: `${fac.name} · ${kind}`, ip: req.ip });   // never log secrets
+  res.json({ ok: true });
+});
+// Test a facility's Kipu connection (its own credentials, or env fallback) — this is
+// how you verify Spark/Wheatfield keys before turning on a live sync.
+app.post('/api/org/facilities/:id/kipu-test', requireAuth, requireAdmin, async (req, res) => {
+  const fac = db.prepare(`SELECT id, kipu_location_name FROM org_facilities WHERE id=?`).get(+req.params.id);
+  if (!fac) return res.status(404).json({ error: 'Not found.' });
+  const conn = resolveKipuConn(fac.id);
+  if (!kipuConnConfigured(conn)) return res.status(400).json({ error: conn ? 'This connection is incomplete.' : 'No Kipu connection saved for this facility, and no shared credentials to fall back on.' });
+  try {
+    const locId = (db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu'`).get(fac.id)?.config
+      ? JSON.parse(db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu'`).get(fac.id).config).locationId : '') || '';
+    const r = await kipuTest(conn, locId);
+    res.json({ ok: true, own: !!conn, sampleCount: r.sampleCount });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Manually sync ONE facility's Kipu roster with its own connection (Phase 3).
+// Deliberately manual — a second facility's live sync is verified by hand before
+// anyone wires it into the 6h auto-scheduler, so a bad location filter can't
+// silently corrupt census. Stamps every synced row with THIS facility.
+let _facSyncRunning = false;
+app.post('/api/org/facilities/:id/kipu-sync', requireAuth, requireAdmin, async (req, res) => {
+  const fac = db.prepare(`SELECT id, name, kipu_location_name FROM org_facilities WHERE id=?`).get(+req.params.id);
+  if (!fac) return res.status(404).json({ error: 'Not found.' });
+  const conn = resolveKipuConn(fac.id);
+  if (!conn) return res.status(400).json({ error: 'Save this facility\'s own Kipu connection first — the shared credentials belong to the primary facility and must not be re-stamped here.' });
+  if (_facSyncRunning) return res.status(409).json({ error: 'A facility sync is already running — try again in a moment.' });
+  let locId = ''; try { locId = JSON.parse(db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu'`).get(fac.id)?.config || '{}').locationId || ''; } catch { /* none */ }
+  _facSyncRunning = true;
+  try {
+    const r = await kipuSyncRoster({ conn, facilityId: fac.id, locationId: locId, locationName: fac.kipu_location_name || '' });
+    audit({ user: req.user, action: 'KIPU_FACILITY_SYNC', entity: 'org_facility', entity_id: fac.id, detail: `${fac.name}: ${JSON.stringify(r).slice(0, 120)}`, ip: req.ip });
+    res.json({ ok: true, result: r });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+  finally { _facSyncRunning = false; }
 });
 app.post('/api/org/facilities/:id', requireAuth, requireAdmin, (req, res) => {
   const f = db.prepare(`SELECT * FROM org_facilities WHERE id=?`).get(req.params.id);
@@ -4157,11 +4248,13 @@ function isShellDuplicate(c, childCountFn) {
 // intact). Off via setState('auto_dedupe','off').
 function autoMergeShellDuplicates() {
   if (getState('auto_dedupe') === 'off') return 0;
-  const rows = db.prepare(`SELECT id, pref, name, kipu_id, admit, admit_time, discharge_reason, therapist, diagnosis, allergies, medications, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, admit, admit_time, discharge_reason, therapist, diagnosis, allergies, medications, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
   const childTbls = clientChildTables();
   const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
   const groups = {};
-  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; (groups[k] = groups[k] || []).push(c); }
+  // Group by Kipu MASTER id AND facility — a person with episodes at two facilities
+  // must NEVER be merged across them (Rebuild Phase 3: cross-facility collapse guard).
+  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; const gk = k + '|' + (c.facility_id || 0); (groups[gk] = groups[gk] || []).push(c); }
   let total = 0;
   for (const k of Object.keys(groups)) {
     const g = groups[k]; if (g.length < 2) continue;
@@ -4182,11 +4275,11 @@ function autoMergeShellDuplicates() {
 // the sync bug — into the row that DOES have the real activity. Rows with real linked
 // records (rounds, notes, incidents…) are kept as genuine stays. Reversible.
 function cleanupChurnDuplicates() {
-  const rows = db.prepare(`SELECT id, pref, name, kipu_id, admit, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, admit, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
   const childTbls = clientChildTables();
   const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
   const groups = {};
-  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; (groups[k] = groups[k] || []).push(c); }
+  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; const gk = k + '|' + (c.facility_id || 0); (groups[gk] = groups[gk] || []).push(c); }
   let total = 0;
   for (const k of Object.keys(groups)) {
     const g = groups[k]; if (g.length < 2) continue;
@@ -4300,14 +4393,22 @@ app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
 // Pull the outpatient census and update the history (admit = PHP start, detect
 // PHP→IOP transition, mark drop-offs as discharged). Shared by the manual button
 // AND the daily scheduler. Returns { error } or { location, counts }.
+// Which registry facility owns the outpatient census (matches the location name).
+function outpatientFacilityId() {
+  const loc = outpatientLocationName().toLowerCase();
+  const f = orgFacilities().find((x) => x.type === 'outpatient' && (x.kipu_location_name || '').toLowerCase() === loc)
+        || orgFacilities().find((x) => x.type === 'outpatient' && (x.name || '').toLowerCase().includes(loc));
+  return f ? f.id : null;
+}
 async function syncOutpatient() {
   if (!kipuConfigured()) return { error: 'Kipu isn’t connected.' };
   let r; try { r = await kipuOutpatientCensus(outpatientLocationName()); } catch (e) { return { error: e.message }; }
   if (r.error) return { error: r.error };
   const today = appToday();
+  const opFac = outpatientFacilityId();
   const get = db.prepare(`SELECT kipu_id, iop_start, admit FROM outpatient_clients WHERE kipu_id = ?`);
-  const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id,name,pref,level,loc_class,admit,mrn,therapist,payer,php_start,iop_start,first_seen,last_seen,active,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'))`);
+  const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id,name,pref,level,loc_class,admit,mrn,therapist,payer,php_start,iop_start,first_seen,last_seen,active,facility_id,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,${opFac || 'NULL'},datetime('now'))`);
   // Prefer the LATEST admission date Kipu has (the most recent stay), per the rule
   // "last admission date → first IOP date".
   const upd = db.prepare(`UPDATE outpatient_clients SET name=?,pref=?,level=?,loc_class=?,admit=COALESCE(NULLIF(?,''),admit),mrn=?,therapist=?,

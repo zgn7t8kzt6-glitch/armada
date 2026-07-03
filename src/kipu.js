@@ -29,6 +29,19 @@ function admitTimeFrom(admitVal, createdVal) {
   return (c && c !== '00:00') ? c : null;
 }
 
+// A Kipu CONNECTION: per-facility credentials (Rebuild Phase 3) or the env default.
+// Pass a conn to kipuGet/kipuPost to talk to a second Kipu instance (e.g. Spark);
+// omit it and the shared env credentials are used — every existing call is unchanged.
+function kipuCreds(conn) {
+  if (conn && conn.accessId && conn.secretKey && conn.appId) {
+    return { accessId: conn.accessId, secretKey: conn.secretKey, appId: conn.appId, base: (conn.baseUrl || 'https://api.kipuapi.com').trim() };
+  }
+  return { accessId: process.env.KIPU_ACCESS_ID, secretKey: process.env.KIPU_SECRET_KEY, appId: process.env.KIPU_APP_ID, base: process.env.KIPU_BASE_URL || 'https://api.kipuapi.com' };
+}
+export function kipuConnConfigured(conn) {
+  const c = kipuCreds(conn);
+  return Boolean(c.accessId && c.secretKey && c.appId);
+}
 export function kipuConfigured() {
   return Boolean(process.env.KIPU_ACCESS_ID && process.env.KIPU_SECRET_KEY && process.env.KIPU_APP_ID);
 }
@@ -44,23 +57,24 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-async function kipuGet(path) {
-  if (!kipuConfigured()) throw new Error('Kipu not configured. Set KIPU_ACCESS_ID, KIPU_SECRET_KEY, and KIPU_APP_ID.');
-  const base = process.env.KIPU_BASE_URL || 'https://api.kipuapi.com';
-  const app = process.env.KIPU_APP_ID;
+async function kipuGet(path, conn) {
+  const cr = kipuCreds(conn);
+  if (!cr.accessId || !cr.secretKey || !cr.appId) throw new Error('Kipu not configured. Set KIPU_ACCESS_ID, KIPU_SECRET_KEY, and KIPU_APP_ID (or the facility\'s connection).');
+  const base = cr.base;
+  const app = cr.appId;
   const uri = path + (path.includes('?') ? '&' : '?') + 'app_id=' + encodeURIComponent(app);
   const contentType = 'application/vnd.kipusystems+json; version=3';
   const date = new Date().toUTCString();
   const contentMd5 = crypto.createHash('md5').update('').digest('base64');
   const canonical = [contentType, contentMd5, uri, date].join(',');
-  const sig = crypto.createHmac('sha1', process.env.KIPU_SECRET_KEY).update(canonical).digest('base64');
+  const sig = crypto.createHmac('sha1', cr.secretKey).update(canonical).digest('base64');
   const r = await fetch(base + uri, {
     headers: {
       Accept: contentType,
       'Content-Type': contentType,
       'Content-MD5': contentMd5,
       Date: date,
-      Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}`,
+      Authorization: `APIAuth ${cr.accessId}:${sig}`,
     },
   });
   const text = await r.text();
@@ -192,17 +206,18 @@ async function evalListRaw(casefileId, { all = false } = {}) {
 }
 
 // POST with HMAC signing — body MD5 goes into the canonical string.
-async function kipuPost(path, body) {
-  if (!kipuConfigured()) throw new Error('Kipu not configured. Set KIPU_ACCESS_ID, KIPU_SECRET_KEY, and KIPU_APP_ID.');
-  const base = process.env.KIPU_BASE_URL || 'https://api.kipuapi.com';
-  const app = process.env.KIPU_APP_ID;
+async function kipuPost(path, body, conn) {
+  const cr = kipuCreds(conn);
+  if (!cr.accessId || !cr.secretKey || !cr.appId) throw new Error('Kipu not configured. Set KIPU_ACCESS_ID, KIPU_SECRET_KEY, and KIPU_APP_ID (or the facility\'s connection).');
+  const base = cr.base;
+  const app = cr.appId;
   const uri = path + (path.includes('?') ? '&' : '?') + 'app_id=' + encodeURIComponent(app);
   const contentType = 'application/vnd.kipusystems+json; version=3';
   const date = new Date().toUTCString();
   const bodyStr = JSON.stringify(body);
   const contentMd5 = crypto.createHash('md5').update(bodyStr).digest('base64');
   const canonical = [contentType, contentMd5, uri, date].join(',');
-  const sig = crypto.createHmac('sha1', process.env.KIPU_SECRET_KEY).update(canonical).digest('base64');
+  const sig = crypto.createHmac('sha1', cr.secretKey).update(canonical).digest('base64');
   const r = await fetch(base + uri, {
     method: 'POST',
     headers: {
@@ -210,7 +225,7 @@ async function kipuPost(path, body) {
       'Content-Type': contentType,
       'Content-MD5': contentMd5,
       Date: date,
-      Authorization: `APIAuth ${process.env.KIPU_ACCESS_ID}:${sig}`,
+      Authorization: `APIAuth ${cr.accessId}:${sig}`,
     },
     body: bodyStr,
   });
@@ -308,10 +323,12 @@ export async function kipuPushNote(casefileId, { templateId, templateName, text,
 }
 
 // Quick connectivity check.
-export async function kipuTest() {
-  const path = process.env.KIPU_TEST_PATH || '/api/patients/census';
-  const data = await kipuGet(path);
-  const n = Array.isArray(data?.patients) ? data.patients.length : (Array.isArray(data) ? data.length : null);
+export async function kipuTest(conn, locationId) {
+  let path = process.env.KIPU_TEST_PATH || '/api/patients/census';
+  const loc = (locationId || '').toString().trim();
+  if (loc && !/location_id=/.test(path)) path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(loc);
+  const data = await kipuGet(path, conn);
+  const n = Array.isArray(data?.patients) ? data.patients.length : (Array.isArray(data?.census) ? data.census.length : (Array.isArray(data) ? data.length : null));
   return { ok: true, sampleCount: n };
 }
 
@@ -419,9 +436,9 @@ function kipuDetailPaths(casefileId) {
     `/api/patients/${e(uuid)}?phi_level=${phi}&patient_master_id=${master}`,
   ];
 }
-async function kipuPatientDetail(casefileId) {
+async function kipuPatientDetail(casefileId, conn) {
   for (const path of kipuDetailPaths(casefileId)) {
-    try { const d = await kipuGet(path); const det = d?.patient || (Array.isArray(d?.patients) ? d.patients[0] : null) || d; if (det && typeof det === 'object') return det; }
+    try { const d = await kipuGet(path, conn); const det = d?.patient || (Array.isArray(d?.patients) ? d.patients[0] : null) || d; if (det && typeof det === 'object') return det; }
     catch { /* try next shape */ }
   }
   return null;
@@ -460,21 +477,24 @@ function deriveLevelDates(history, admit, classify, localDateOf) {
 // to name). Non-destructive: only fills blank fields on existing clients so it
 // can't clobber staff edits. Maps the analytics fields (admit time, therapist,
 // discharge where/why) whenever Kipu charts them — so they're never re-entered.
-export async function kipuSyncRoster() {
+export async function kipuSyncRoster(opts = {}) {
+  // Rebuild Phase 3: opts lets a SECOND facility sync with its own connection.
+  // Defaults reproduce the original env-based detox behavior exactly.
+  const conn = opts.conn || null;
   let path = process.env.KIPU_ROSTER_PATH || '/api/patients/census';
-  // Scope the census to one location server-side when KIPU_LOCATION_ID is set.
-  const locId = (process.env.KIPU_LOCATION_ID || '').trim();
+  // Scope the census to one location server-side (per-facility override, else env).
+  const locId = (opts.locationId != null ? String(opts.locationId) : (process.env.KIPU_LOCATION_ID || '')).trim();
   if (locId && !/location_id=/.test(path)) path += (path.includes('?') ? '&' : '?') + 'location_id=' + encodeURIComponent(locId);
-  const data = await kipuGet(path);
+  const data = await kipuGet(path, conn);
   const list = data?.patients || data?.census || (Array.isArray(data) ? data : []);
   let created = 0, matched = 0;
   const seenKids = new Set();    // de-dupe: the census feed can return the same casefile twice
   const claimedRows = new Set(); // app rows already taken this sync — never merge two people onto one
   const byKipu = db.prepare(`SELECT id, loc, active FROM clients WHERE kipu_id = ?`);
   const byName = db.prepare(`SELECT id, loc, active, kipu_id FROM clients WHERE name = ? OR pref = ?`);
-  // New rows are stamped with the detox facility — this sync IS the detox roster,
-  // and per-facility scoping needs every row owned (Constitution, Principle 3).
-  const facId = defaultFacilityId();
+  // New rows are stamped with the syncing facility (opts.facilityId), else detox.
+  // Every row must be owned so per-facility scoping is honest (Constitution, P3).
+  const facId = opts.facilityId || defaultFacilityId();
   const ins = db.prepare(`INSERT INTO clients (name, pref, room, program, loc, admit, admit_time, therapist, case_manager, referral_source, dob, diagnosis, allergies, insurance, phone, pronouns, language, mrn, payment_method, next_loc, anticipated_dc, kipu_id, facility_id, source, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'kipu', 1)`);
   const admRef = db.prepare(`SELECT referral_source FROM admissions WHERE referral_source IS NOT NULL AND referral_source != '' AND (name = ? OR name = ?) ORDER BY id DESC LIMIT 1`);
   // Flow-event recorder: one row per real transition, so re-running the sync
@@ -502,8 +522,8 @@ export async function kipuSyncRoster() {
 
   // Location scoping. Prefer KIPU_LOCATION_ID (exact); fall back to a
   // KIPU_LOCATION name match. Belt-and-suspenders on top of the API filter.
-  const wantLocId = (process.env.KIPU_LOCATION_ID || '').trim();
-  const wantLoc = (process.env.KIPU_LOCATION || '').trim().toLowerCase();
+  const wantLocId = (opts.locationId != null ? String(opts.locationId) : (process.env.KIPU_LOCATION_ID || '')).trim();
+  const wantLoc = (opts.locationName != null ? String(opts.locationName) : (process.env.KIPU_LOCATION || '')).trim().toLowerCase();
   const matchesLoc = (p) => {
     if (wantLocId) {
       const id = pick(p, 'location_id', 'locationId', 'location_id_value', 'location');
@@ -534,7 +554,7 @@ export async function kipuSyncRoster() {
       if (raw) kids.push(String(raw));
     }
     const uniq = [...new Set(kids)].slice(0, +(process.env.KIPU_DETAIL_MAX || 400));
-    const fetched = await mapLimit(uniq, +(process.env.KIPU_CONCURRENCY || 6), async (kid) => [kid, await kipuPatientDetail(kid).catch(() => null)]);
+    const fetched = await mapLimit(uniq, +(process.env.KIPU_CONCURRENCY || 6), async (kid) => [kid, await kipuPatientDetail(kid, conn).catch(() => null)]);
     for (const f of fetched) if (f && f[1]) detailMap.set(f[0], f[1]);
   }
 
@@ -720,7 +740,7 @@ export async function kipuSyncRoster() {
       const phi = process.env.KIPU_PHI_LEVEL || 'high';
       let dpath = `/api/patients/census?phi_level=${phi}&start_date=${start}&end_date=${appToday()}`;
       if (locId) dpath += `&location_id=${encodeURIComponent(locId)}`;
-      const dd = await kipuGet(dpath);
+      const dd = await kipuGet(dpath, conn);
       const dlist = dd?.patients || dd?.census || (Array.isArray(dd) ? dd : []);
       const activeMasters = new Set(activeKids.map((k) => String(k).split(':')[0]));
       const flat2 = (v) => Array.isArray(v) ? v.filter(Boolean).join(', ') : (v != null ? String(v) : null);
@@ -739,7 +759,7 @@ export async function kipuSyncRoster() {
         toImport.push({ p, kid: ks, dDate: dOnly });
       }
       const enriched = await mapLimit(toImport, +(process.env.KIPU_CONCURRENCY || 6), async (x) => {
-        let det = null; try { det = await kipuPatientDetail(x.kid); } catch { /* best-effort */ }
+        let det = null; try { det = await kipuPatientDetail(x.kid, conn); } catch { /* best-effort */ }
         return { ...x, det };
       });
       const seenNow = new Set();

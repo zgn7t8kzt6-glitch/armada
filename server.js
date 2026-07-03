@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -3911,6 +3911,36 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
 // each: readmission (same person, second casefile), duplicate rows in the window,
 // same-day discharge (chart opened but SF may mark not-admitted), manual rows.
 // Read-only; built to settle "the app says 90, Salesforce says 85" by name.
+// Are providers co-signing the Nurse Assessments? Scans recent admits' matching
+// evaluations and reports every signature-shaped field Kipu's detail exposes —
+// run this first to learn the tenant's shape, then we wire the real detector.
+// ?q=nurs.*assess &days=14 &max=6 — PHI-light output (client initials only).
+app.get('/api/diag/kipu-cosign', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (!kipuConfigured()) return res.status(400).json({ error: 'Kipu is not connected.' });
+    const rx = new RegExp(req.query.q || 'nurs.*assess', 'i');
+    const days = Math.min(Math.max(+req.query.days || 14, 1), 60);
+    const maxScans = Math.min(Math.max(+req.query.max || 6, 1), 12);
+    const since = addDays(appToday(), -days);
+    const clients = db.prepare(`SELECT id, name, kipu_id, admit FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND (active = 1 OR substr(COALESCE(admit,''),1,10) >= ?) ORDER BY admit DESC LIMIT 40`).all(since);
+    const out = [];
+    let scanned = 0;
+    for (const c of clients) {
+      if (scanned >= maxScans) break;
+      let evals = [];
+      try { evals = await kipuFindEvalsByName(c.kipu_id, rx, since); } catch (e) { out.push({ client: nameInitials(c.name), error: 'list: ' + e.message.slice(0, 120) }); continue; }
+      for (const ev of evals.slice(0, 2)) {
+        if (scanned >= maxScans) break;
+        scanned++;
+        try {
+          const scan = await kipuEvalSignatureScan(c.kipu_id, ev.id);
+          out.push({ client: nameInitials(c.name), evalId: ev.id, name: ev.name, listStatus: ev.status, date: ev.date, detailStatus: scan.status, topKeys: scan.topKeys, signatureFields: scan.signatureFields });
+        } catch (e) { out.push({ client: nameInitials(c.name), evalId: ev.id, name: ev.name, error: 'detail: ' + e.message.slice(0, 120) }); }
+      }
+    }
+    res.json({ ok: true, pattern: String(rx), since, scanned, results: out });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 app.get('/api/diag/admits', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : today.slice(0, 8) + '01';

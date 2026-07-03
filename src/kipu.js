@@ -1067,6 +1067,49 @@ export async function kipuEvaluation(casefileId, evalId) {
   return { id: evalId, name: String(ev?.name || 'Note').trim(), date: String(ev?.created_at || ev?.evaluation_date || '').slice(0, 10), content: content.slice(0, 24000) };
 }
 
+// ---- Provider co-signature detection ────────────────────────────────────────
+// The billing rule: a Nurse Assessment needs the provider's SECOND signature
+// (attestation). Kipu's list view doesn't show signatures, but the evaluation
+// DETAIL often does — shapes vary by tenant/template, so first we PROBE: deep-scan
+// the detail for every key that smells like a signature and report path + value.
+function collectSignatures(obj) {
+  const hits = [];
+  const walk = (o, path, depth) => {
+    if (!o || depth > 8) return;
+    if (Array.isArray(o)) { o.forEach((v, i) => walk(v, path + '[' + i + ']', depth + 1)); return; }
+    if (typeof o !== 'object') return;
+    for (const [k, v] of Object.entries(o)) {
+      const p = path ? path + '.' + k : k;
+      if (/sign|attest|review(ed)?_?by|co.?sign|credential|practitioner|provider/i.test(k)) {
+        if (v && typeof v === 'object') { hits.push({ path: p, value: JSON.stringify(v).slice(0, 400) }); continue; }
+        if (v != null && v !== '') { hits.push({ path: p, value: String(v).slice(0, 200) }); continue; }
+        hits.push({ path: p, value: '(empty)' });
+        continue;
+      }
+      if (v && typeof v === 'object') walk(v, p, depth + 1);
+    }
+  };
+  walk(obj, '', 0);
+  return hits;
+}
+// Find a patient's evaluations whose NAME matches a pattern, recent first.
+export async function kipuFindEvalsByName(casefileId, regex, sinceDate) {
+  const list = await evalListRaw(casefileId, { all: false });
+  return list
+    .map((x) => ({ id: x.id ?? x.evaluation_id, name: String(x.name || x.evaluation_name || ''), status: String(x.status || ''), date: String(x.created_at || x.evaluation_date || x.updated_at || '').slice(0, 10) }))
+    .filter((x) => x.id != null && regex.test(x.name) && (!sinceDate || !x.date || x.date >= sinceDate))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+// Fetch one evaluation's full detail and report everything signature-shaped.
+export async function kipuEvalSignatureScan(casefileId, evalId) {
+  const ev = await fetchEvalDetail(casefileId, evalId);
+  return {
+    name: String(ev?.name || ''), status: String(ev?.status || ''),
+    topKeys: Object.keys(ev || {}).slice(0, 40),
+    signatureFields: collectSignatures(ev),
+  };
+}
+
 // Rounds / observation forms are charted as evaluations. Match by name.
 const ROUNDS_RE = new RegExp(process.env.KIPU_ROUNDS_PATTERN ||
   'round|q ?15|q ?30|q ?60|15 ?min|30 ?min|hourly|observation|safety ?check|bed ?check|whereabouts|precaution|loc(?:ation)? ?check|sleep ?check|visual ?check|monitor', 'i');

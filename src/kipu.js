@@ -199,6 +199,40 @@ export async function kipuTest() {
   return { ok: true, sampleCount: n };
 }
 
+// Evaluation TEMPLATES (the form definitions, e.g. "Case Management Note").
+// The documented V3 route is GET /api/evaluations — each row is a template with
+// id + name. (/api/evaluation_templates and similar guesses 404: no such routes.)
+export async function kipuListEvalTemplates({ q = '' } = {}) {
+  const tried = [];
+  let list = null, baseUsed = null;
+  for (const base of ['/api/evaluations', '/api/evaluations?evaluation_content=standard']) {
+    try {
+      const d = await kipuGet(base);
+      const arr = d?.evaluations || (Array.isArray(d) ? d : null);
+      if (Array.isArray(arr)) { list = arr; baseUsed = base; break; }
+      tried.push({ path: base, note: 'unexpected shape — keys: ' + Object.keys(d || {}).slice(0, 6).join(', ') });
+    } catch (e) { tried.push({ path: base, error: e.message }); }
+  }
+  if (!list) return { ok: false, tried };
+  const sep = baseUsed.includes('?') ? '&' : '?';
+  const seen = new Set(list.map((x) => x.id));
+  for (let pg = 2; pg <= 40; pg++) {
+    let chunk = [];
+    try { const d = await kipuGet(baseUsed + sep + 'page=' + pg); chunk = d?.evaluations || (Array.isArray(d) ? d : []); }
+    catch { break; }
+    if (!chunk.length) break;
+    const fresh = chunk.filter((x) => x.id != null && !seen.has(x.id));
+    if (!fresh.length) break;
+    fresh.forEach((x) => seen.add(x.id));
+    list = list.concat(fresh);
+    if (list.length > 3000) break;
+  }
+  const needle = String(q || '').toLowerCase();
+  const rows = list.map((x) => ({ id: x.id, name: x.name || x.title || '', enabled: x.enabled }))
+    .filter((x) => !needle || String(x.name).toLowerCase().includes(needle));
+  return { ok: true, total: list.length, baseUsed, matches: rows.slice(0, 100) };
+}
+
 // Deep-search an object for the first value whose KEY matches a pattern (the
 // level of care / referral source can live nested in the patient detail).
 // Pull a human name out of a value that may be a plain string or an object —

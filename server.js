@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListEvalTemplates } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -3872,6 +3872,13 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
 // each: readmission (same person, second casefile), duplicate rows in the window,
 // same-day discharge (chart opened but SF may mark not-admitted), manual rows.
 // Read-only; built to settle "the app says 90, Salesforce says 85" by name.
+// Which Kipu form templates exist (and their ids)? ?q=case narrows by name —
+// this is how you find the evaluation_template_id for e.g. the Case Management
+// Note without a Kipu support ticket. Read-only.
+app.get('/api/diag/kipu-eval-templates', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await kipuListEvalTemplates({ q: req.query.q || '' })); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
 app.get('/api/diag/admits', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : today.slice(0, 8) + '01';

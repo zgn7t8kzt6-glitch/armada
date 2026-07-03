@@ -298,9 +298,21 @@ const ROLE_MENU = {
   // My Role is folded into My Shift (its own collapsible at the bottom) — no tab.
   'BHT / Tech': ['dashboard','mystats','mygrowth','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','library'],
   'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','library'],
+  'Case Manager': [
+    { t:'Start of day — read My Shift', d:'Your tiles show who needs you: new admits without a case plan, discharges coming, meetings requested.', v:'dashboard' },
+    { t:'Work the meeting queue', d:'Clients asked for you by name — promise a time, meet, and close each with the one-minute note.', v:'appts' },
+    { t:'Discharges in the next 72 hours', d:'Aftercare confirmed, ride arranged, meds plan, continuum referral — the fond farewell starts days early.', v:'dischargepage' },
+    { t:'Authorization check', d:'Nothing expires unseen — renew or escalate anything inside the window.', v:'authreg' },
+    { t:'Billing readiness — your caseload', d:'Every client of yours needs today\'s qualifying encounter documented before 4 PM.', v:'billingready' },
+    { t:'Family touchpoints', d:'One update to a family member changes their whole week. Log the contact.', v:'family' },
+    { t:'End of day — clear your follow-ups', d:'Expand any quick notes flagged for a full note; reschedule anything missed. Leave nothing hanging.', v:'appts' },
+  ],
   'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
   'Executive Assistant': ['corphub','opscenter','inventory','maintenance','myrole','mygrowth','messages'],
+  // The Case Manager's day, in order: home → meeting queue → caseload → the exits
+  // (discharge/continuum) → the money guardrails (auths, billing readiness) → circle.
+  'Case Manager': ['dashboard','appts','casemgmt','clients','records','dischargepage','continuum','authreg','billingready','family','referrals','alumni','incidents','messages','team','training','library'],
   'Housing Director': ['housing','myrole','mygrowth','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','mygrowth','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','myrole','mygrowth','housing','voice','activities','residents','houses','mytasks','messages'],
@@ -322,6 +334,15 @@ const SHIFT_FLOW = {
     { t:'Every hour — verify Rounds', d:'Lay eyes on every client and log it by scanning each room.', v:'roundscan' },
     { t:'Clinical care', d:'Meds, vitals, and withdrawal monitoring — document as you go.', v:'records' },
     { t:'End of shift — hand off clean', d:'Update records and leave a clear note for the next nurse.', v:'messages' },
+  ],
+  'Case Manager': [
+    { t:'Start of day — read My Shift', d:'Your tiles show who needs you: new admits without a case plan, discharges coming, meetings requested.', v:'dashboard' },
+    { t:'Work the meeting queue', d:'Clients asked for you by name — promise a time, meet, and close each with the one-minute note.', v:'appts' },
+    { t:'Discharges in the next 72 hours', d:'Aftercare confirmed, ride arranged, meds plan, continuum referral — the fond farewell starts days early.', v:'dischargepage' },
+    { t:'Authorization check', d:'Nothing expires unseen — renew or escalate anything inside the window.', v:'authreg' },
+    { t:'Billing readiness — your caseload', d:'Every client of yours needs today\'s qualifying encounter documented before 4 PM.', v:'billingready' },
+    { t:'Family touchpoints', d:'One update to a family member changes their whole week. Log the contact.', v:'family' },
+    { t:'End of day — clear your follow-ups', d:'Expand any quick notes flagged for a full note; reschedule anything missed. Leave nothing hanging.', v:'appts' },
   ],
   'Front Desk': [
     { t:'Start of shift — read My Shift', d:'See who’s arriving today and what the door needs.', v:'dashboard' },
@@ -350,6 +371,7 @@ function canSeeView(v){
   if(!ME) return true;
   // Admin "preview as" — restrict to exactly what that role sees.
   if(PREVIEW_ROLE==='Executive Assistant') return CORPORATE_VIEWS.includes(v)||UNIVERSAL_VIEWS.includes(v);
+  if(PREVIEW_ROLE) return (ROLE_MENU[PREVIEW_ROLE]||[]).includes(v)||UNIVERSAL_VIEWS.includes(v);
   // Akron Outpatient is owner-only: the admin, plus anyone the owner explicitly grants.
   // Even Exec/Ops directors don't see it unless granted — so this check comes first.
   if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
@@ -6192,22 +6214,25 @@ async function saveFacilities(){
   try{ await api('/facilities',{method:'POST',body:JSON.stringify({facilities:fs})}); if(m)m.textContent='✓ Saved'; loadOwnership(); }
   catch(e){ if(m)m.textContent=e.message; }
 }
-function previewAsChava(){
-  PREVIEW_ROLE='Executive Assistant';
-  showPreviewBanner();
+function previewAsRole(role){
+  if(!ROLE_MENU[role]){ alert('No focused menu defined for '+role+' yet.'); return; }
+  PREVIEW_ROLE=role;
+  showPreviewBanner(role);
   renderGroups();
-  show('corphub');
+  show(ROLE_MENU[role][0]);
 }
+function previewAsChava(){ previewAsRole('Executive Assistant'); }
 function exitPreview(){
   PREVIEW_ROLE=null;
   const b=document.getElementById('previewBanner'); if(b) b.remove();
+  const sel=document.getElementById('previewSel'); if(sel) sel.value='';
   renderGroups();
-  show('corphub');
+  show(ME&&ME.role==='admin'?'opscenter':'dashboard');
 }
-function showPreviewBanner(){
+function showPreviewBanner(role){
   let b=document.getElementById('previewBanner');
   if(!b){ b=document.createElement('div'); b.id='previewBanner'; b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#5b3fa0;color:#fff;padding:9px 14px;text-align:center;font-family:system-ui,sans-serif;font-size:14px;box-shadow:0 -2px 10px rgba(0,0,0,.25)'; document.body.appendChild(b); }
-  b.innerHTML='👁 Previewing the <strong>Corporate</strong> view — exactly what the corporate team (e.g. Chava, Executive Assistant) sees. <button onclick="exitPreview()" style="margin-left:10px;background:#fff;color:#5b3fa0;border:none;border-radius:5px;padding:5px 12px;cursor:pointer;font-weight:700">Exit preview</button>';
+  b.innerHTML='👁 Previewing as <strong>'+esc(role||'Executive Assistant')+'</strong> — exactly what they see, in their order. <button onclick="exitPreview()" style="margin-left:10px;background:#fff;color:#5b3fa0;border:none;border-radius:5px;padding:5px 12px;cursor:pointer;font-weight:700">Exit preview</button>';
 }
 /* ───────── HCOS — Human Capital Operating System (HR command center) ───────── */
 let HCOS_TAB='dashboard', HCOS_PERSON=null, HCOS_PEOPLE=[];

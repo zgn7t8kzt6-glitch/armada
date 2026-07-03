@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624CT" />
+<link rel="stylesheet" href="/styles.css?v=20260624CU" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -178,6 +178,10 @@
   </nav>
     <a class="side-kiosk sans" id="clientKioskLink" href="/kiosk.html" target="_blank" title="Open the client kiosk on this device">📱 Client Kiosk ↗</a>
     <a class="side-kiosk sans" href="/training.html" target="_blank" title="Self-playing staff training" style="background:linear-gradient(160deg,#2d6168,#235056)">▶ Staff Training ↗</a>
+    <select id="previewSel" class="sans" data-admin onchange="if(this.value)previewAsRole(this.value)" style="display:none;margin:6px 14px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--muted);background:var(--paper)">
+      <option value="">👁 Preview a role…</option>
+      <option>Case Manager</option><option>Nurse</option><option>BHT / Tech</option><option>Front Desk</option><option>Executive Assistant</option><option>Housing Director</option><option>House Manager</option><option>Recovery Coach</option>
+    </select>
     <div class="side-foot sans">
       <div class="side-user"><span class="avatar avatar-sm" id="sideAvatar"></span><span id="whoami"></span></div>
       <div class="side-actions">
@@ -2659,7 +2663,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624CT"></script>
-<script src="/housing.js?v=20260624CT"></script>
+<script src="/app.js?v=20260624CU"></script>
+<script src="/housing.js?v=20260624CU"></script>
 </body>
 </html>

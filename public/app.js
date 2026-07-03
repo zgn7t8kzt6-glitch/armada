@@ -5409,7 +5409,16 @@ async function loadMyStats(){
       ${strong.length?`<div class="pc-note" style="margin-top:10px;color:var(--good)">💪 Crushing it: ${strong.map(esc).join(', ')} — nice work!</div>`:''}
       ${improve.length?`<div class="pc-note" style="margin-top:6px;color:var(--danger)">🎯 Focus here: ${improve.map(esc).join(', ')}</div>`:''}</div>
     <div class="card"><h3>Care &amp; extras you delivered</h3><div class="ret-cards">${extras}</div></div>
-    ${wows.length?`<div class="card"><h3>👏 Recognition you've received (30 days)</h3>${wows.map(w=>`<div class="pc-note">👏 ${esc(w.text)} <span class="hint">— ${esc(w.by_name||'')}, ${esc(w.at||'')}</span></div>`).join('')}</div>`:''}
+    ${(()=>{ const ex=d.excellence||{}; const rec=[...(ex.recognized30||[]).map(r=>({t:r.text,p:r.principle,by:r.by_name,at:r.at})),...wows.map(w=>({t:w.text,p:null,by:w.by_name,at:w.at}))];
+      return `<div class="card" style="border-left:4px solid var(--gold)"><h3>🌟 My Excellence</h3>
+      <div class="ret-cards" style="margin-top:8px">
+        <div class="ret-card"><div class="n">${rec.length}</div><div class="l">Recognition received (30d)</div></div>
+        <div class="ret-card"><div class="n">${ex.given30||0}</div><div class="l">Recognition you gave (30d)</div></div>
+        <div class="ret-card" style="cursor:pointer" onclick="show('team')"><div class="n">${ex.reflectionDone?'✓':'—'}</div><div class="l">Friday reflection ${ex.reflectionDone?'in':'(Team page)'}</div></div>
+        <div class="ret-card" style="cursor:pointer" onclick="show('team')"><div class="n">${ex.exsurveyDone?'✓':'—'}</div><div class="l">Monthly survey ${ex.exsurveyDone?'in':'(Team page)'}</div></div>
+      </div>
+      ${rec.length?rec.slice(0,8).map(r=>`<div class="pc-note">👏 ${esc(r.t)}${r.p?` <span class="badge" style="background:#faf6ee;border:1px solid #e7d9b6;color:#8a6d1f">${esc(r.p)}</span>`:''} <span class="hint">— ${esc(r.by||'')}, ${esc(r.at||'')}</span></div>`).join(''):'<div class="hint" style="margin-top:8px">No recognition logged yet this month — go be the reason someone else gets some. 🌟</div>'}
+      </div>`; })()}
     <div id="teamStats"></div>`;
   if(d.canManage) loadTeamStats();
 }
@@ -8048,8 +8057,46 @@ async function loadWorkplace(){
     <div class="ret-card ${d.openVoice?'rc-warn':''}"><div class="n">${d.openVoice}</div><div class="l">Open staff voice</div></div>
     <div class="ret-card"><div class="n">${d.voiceClosedWeek}</div><div class="l">Loops closed this week</div></div>`;
   $('wpMostRecognized').innerHTML = (d.mostRecognized||[]).length ? d.mostRecognized.map(r=>`<div class="pc-note">🏅 <strong>${esc(r.name)}</strong> <span class="hint">· ${r.n}×</span></div>`).join('') : '<div class="hint">No recognitions logged this week yet.</div>';
+  renderExcellenceScoreboard(d.excellence);
   loadVoiceInto('wpVoice');
   loadGrowth();
+}
+// Excellence Scoreboard (Phase 2) — is the operating rhythm actually running?
+function renderExcellenceScoreboard(x){
+  const host=$('wpExcellence'); if(!host) return;
+  if(!x){ host.innerHTML=''; return; }
+  const pctStaff=n=>x.staffCount?` <span class="hint">of ${x.staffCount}</span>`:'';
+  const turn = x.headcount ? Math.round(x.termed90/(x.headcount+x.termed90)*100) : null;
+  const bar=(q,a)=>a==null?'':`<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:13px"><span>${esc(q)}</span><strong style="color:${a>=4?'var(--good)':a>=3?'#9a6a1f':'var(--danger)'}">${a}/5</strong></div><div class="res-track" style="height:8px;margin-top:3px"><div class="res-fill" style="width:${a/5*100}%;background:${a>=4?'var(--good)':a>=3?'#c8a44d':'var(--danger)'}"></div></div></div>`;
+  host.innerHTML=`
+    <div class="cmd-hero-row"><div><h3 style="margin:0">📐 Excellence Scoreboard</h3><p class="sub sans" style="margin:0">The operating rhythm, measured — line-ups run, recognition tied to principles, coaching circled back, every voice heard.</p></div></div>
+    <div class="ret-cards" style="margin-top:10px">
+      <div class="ret-card ${x.lineups7<7?'rc-warn':''}"><div class="n">${x.lineups7}</div><div class="l">Line-ups logged (7d)</div></div>
+      <div class="ret-card"><div class="n">${x.coachingMonth}</div><div class="l">Coaching notes this month</div></div>
+      <div class="ret-card ${x.followupsOverdue?'rc-high':''}"><div class="n">${x.followupsOverdue}</div><div class="l">Coaching follow-ups overdue</div></div>
+      <div class="ret-card"><div class="n">${x.trainingWeek}${pctStaff()}</div><div class="l">Reviewed the standard (7d)</div></div>
+      <div class="ret-card"><div class="n">${x.reflectionsWeek}${pctStaff()}</div><div class="l">Friday reflections this week</div></div>
+      <div class="ret-card ${turn!=null&&turn>15?'rc-high':''}"><div class="n">${turn==null?'—':turn+'%'}</div><div class="l">Turnover (90d)${x.termed90?' · '+x.termed90+' left':''}</div></div>
+    </div>
+    <div class="grid2" style="margin-top:12px">
+      <div><strong class="sans">📊 Monthly excellence survey · ${esc(x.month)} ${x.surveyN?`(${x.surveyN} response${x.surveyN===1?'':'s'}, anonymous)`:''}</strong>
+        ${x.surveyAvgs?x.surveyQuestions.map((q,i)=>bar(q,x.surveyAvgs[i])).join(''):'<div class="hint" style="margin-top:6px">No responses yet this month — it\'s on everyone\'s Today list until they answer. Mention it at the line-up.</div>'}
+        ${x.surveyN?`<button class="btn btn-ghost btn-sm sans" style="margin-top:4px" onclick="showExsResults()">Trend + by role + comments ›</button>`:''}</div>
+      <div><strong class="sans">🌟 Recognition by principle (30d)</strong>
+        ${(x.recogByPrinciple||[]).length?x.recogByPrinciple.map(r=>`<div class="pc-note">${esc(r.principle)} <span class="hint">· ${r.n}×</span></div>`).join(''):'<div class="hint" style="margin-top:6px">No principle-tagged recognition yet — the 🌟 Recognize button asks which principle they lived.</div>'}
+        <div class="hint" style="margin-top:6px">The principles nobody is recognizing are the ones nobody is seeing lived. Coach there.</div></div>
+    </div>`;
+}
+// Survey drill-down: month-over-month trend, by-role slice, anonymous comments.
+async function showExsResults(){
+  let d; try{ d=await api('/exsurvey/results'); }catch(e){ alert(e.message); return; }
+  const months=d.months.map(m=>`<tr><td>${esc(m.month)}</td><td>${m.n}</td>${m.avgs.map(a=>`<td style="color:${a==null?'var(--muted)':a>=4?'var(--good)':a>=3?'#9a6a1f':'var(--danger)'}">${a==null?'—':a}</td>`).join('')}</tr>`).join('');
+  hmodalPlain(`<h3>📊 Excellence survey — results</h3>
+    <p class="sub sans">Q1–Q6: ${d.questions.map((q,i)=>`<strong>Q${i+1}</strong> ${esc(q)}`).join(' · ')}</p>
+    <div style="overflow-x:auto"><table class="tbl"><tr><th>Month</th><th>n</th>${d.questions.map((_,i)=>`<th>Q${i+1}</th>`).join('')}</tr>${months}</table></div>
+    ${d.byRole.length?`<div class="cmd-sub">By role · ${esc(d.month)} <span class="hint">(lowest first — that's where the system is breaking)</span></div>${d.byRole.map(r=>`<div class="pc-note">${esc(r.role)} <span class="hint">· ${r.avg==null?'—':r.avg+'/5'} · ${r.n} response${r.n===1?'':'s'}</span></div>`).join('')}`:''}
+    ${d.comments.length?`<div class="cmd-sub">Comments · ${esc(d.month)} (anonymous)</div>${d.comments.map(c=>`<div class="pc-note">“${esc(c)}”</div>`).join('')}`:''}
+    <div class="toolbar" style="margin-top:14px"><button class="btn btn-ghost sans" onclick="closeHModal()">Close</button></div>`);
 }
 async function loadVoiceInto(elId){
   const feed=$(elId); if(!feed) return;
@@ -8214,6 +8261,25 @@ function hbChapterHtml(c){
     <div style="margin-top:10px"><h4 style="margin:0 0 4px">Ask yourself every day</h4><ul style="margin:4px 0;padding-left:18px;font-size:13px;line-height:1.6">${c.questions.map(q=>`<li>${esc(q)}</li>`).join('')}</ul></div>
     <p class="sub sans" style="margin-top:10px;font-style:italic">${esc(c.closing)}</p>`;
 }
+// 📊 Monthly Excellence Survey (Phase 2) — the handbook's six employee questions,
+// 1-5 agree, anonymous (answers carry role only; the done-marker is separate).
+let EXS={};
+async function loadExSurvey(){
+  const card=$('exSurveyCard'), box=$('exSurveyQs'); if(!card||!box) return;
+  let d; try{ d=await api('/exsurvey'); }catch(e){ return; }
+  if(d.done){ card.innerHTML='<h3>📊 Monthly excellence survey</h3><p class="sub sans" style="margin:0">✓ Thank you — this month\'s survey is in (anonymously). See you next month.</p>'; return; }
+  EXS={};
+  box.innerHTML=d.questions.map((q,i)=>{ const qi='q'+(i+1);
+    return `<div style="margin:8px 0"><div class="sans" style="font-size:13px;margin-bottom:4px">${esc(q)}</div>
+      <div data-q="${qi}" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${[1,2,3,4,5].map(n=>`<button type="button" class="btn btn-ghost btn-sm sans exs-b" onclick="pickExs('${qi}',${n},this)">${n}</button>`).join('')}<span class="hint" style="margin-left:6px">1 = strongly disagree · 5 = strongly agree</span></div></div>`;
+  }).join('');
+}
+function pickExs(q,n,btn){ EXS[q]=n; btn.parentElement.querySelectorAll('.exs-b').forEach(b=>{ b.classList.toggle('btn-gold',b===btn); b.classList.toggle('btn-ghost',b!==btn); }); }
+async function submitExSurvey(){
+  if(!Object.keys(EXS).length){ if($('exs_msg'))$('exs_msg').textContent='Pick at least one answer.'; return; }
+  try{ await api('/exsurvey',{method:'POST',body:JSON.stringify({...EXS,comment:($('exs_comment')||{}).value||''})}); loadExSurvey(); }
+  catch(e){ if($('exs_msg'))$('exs_msg').textContent=e.message; }
+}
 // Coaching-from-the-standard picker: the ten principles + every chapter's
 // "What Excellence Is Not" lines — point at the written line, never coach by mood.
 async function fillStdSelect(id, preferTitle){
@@ -8251,6 +8317,7 @@ async function loadTeam(){
   loadStaffVoice();
   loadExtraMile();
   renderBelonging();
+  loadExSurvey();
   const [{value}, t, {staff}] = await Promise.all([api('/lineup'), api('/team'), api('/staff')]);
   $('teamValue').textContent = value;
   $('trainBtn').disabled = t.trainedToday; $('trainMsg').textContent = t.trainedToday ? `✓ reviewed · ${t.trainingCount} on the team today` : `${t.trainingCount} teammates reviewed today`;

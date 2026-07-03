@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624DB" />
+<link rel="stylesheet" href="/styles.css?v=20260624DC" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1709,6 +1709,13 @@
         </div>
         <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold sans" onclick="submitReflection()">Submit reflection</button><span class="hint" id="rf_msg"></span></div>
       </div>
+      <div class="card" id="exSurveyCard" style="border-left:4px solid #7a5cc0">
+        <h3>📊 Monthly excellence survey <span class="hint" style="font-weight:400">· six questions · anonymous</span></h3>
+        <p class="sub sans" style="margin:0 0 8px">Does the standard actually reach you? Your answers are stored without your name — only your role, so leadership can see where the system is breaking, not who said it.</p>
+        <div id="exSurveyQs"></div>
+        <div class="field" id="exSurveyCommentWrap" style="margin-top:6px"><label>Anything else? (optional, still anonymous)</label><textarea id="exs_comment" rows="2"></textarea></div>
+        <div class="toolbar" style="justify-content:flex-start;margin-top:6px"><button class="btn btn-gold sans" id="exsSubmitBtn" onclick="submitExSurvey()">Submit survey</button><span class="hint" id="exs_msg"></span></div>
+      </div>
       <div class="card" id="belongCard" style="border-left:4px solid #7a5cc0">
         <h3>💜 Belonging check-in <span class="hint" style="font-weight:400">· anonymous</span></h3>
         <p class="sub sans" style="margin:0 0 8px">Three quick questions — no name attached. Just an honest read so leadership knows how we're really doing.</p>
@@ -1741,6 +1748,7 @@
         <div class="cmd-hero-row"><div><h3>🏆 Best Place to Work</h3><p class="sub sans" style="margin:0">Ladies and Gentlemen serving Ladies and Gentlemen. Morale, recognition, voice, and growth — the leadership view.</p></div><button class="btn btn-ghost sans" onclick="loadWorkplace()">Refresh</button></div>
         <div id="wpKpis" class="ret-cards" style="margin-top:12px"></div>
       </div>
+      <div class="card" id="wpExcellence" style="border-left:4px solid var(--gold)"></div>
       <div class="row" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
         <div class="card" style="flex:1;min-width:280px">
           <h3>🙌 Recognize a teammate (from leadership)</h3>
@@ -2684,7 +2692,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624DB"></script>
-<script src="/housing.js?v=20260624DB"></script>
+<script src="/app.js?v=20260624DC"></script>
+<script src="/housing.js?v=20260624DC"></script>
 </body>
 </html>

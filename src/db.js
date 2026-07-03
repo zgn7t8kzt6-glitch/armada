@@ -2822,4 +2822,32 @@ CREATE TABLE IF NOT EXISTS weekly_reflections (
   proud TEXT, barrier TEXT, lived TEXT, improve TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(user_id, week)
+);
+-- Phase 2 (Measurement): the monthly Excellence Survey. Answers are stored WITHOUT
+-- the person's name (role only, for slicing) — the done-marker lives in a separate
+-- table so we can prompt/dedupe without ever being able to join a person to answers.
+CREATE TABLE IF NOT EXISTS excellence_surveys (
+  id INTEGER PRIMARY KEY,
+  month TEXT NOT NULL,                      -- 'YYYY-MM'
+  role TEXT,                                -- job role only — never the name
+  q1 INTEGER, q2 INTEGER, q3 INTEGER, q4 INTEGER, q5 INTEGER, q6 INTEGER,  -- 1-5 agree
+  comment TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS excellence_survey_done (
+  user_id INTEGER NOT NULL,
+  month TEXT NOT NULL,
+  PRIMARY KEY (user_id, month)
 );`);
+// One-time: the two Excellence questions the client experience survey was missing
+// ("did someone keep their promises" / "did staff work together") — the handbook's
+// client-side measures, asked in the clients' own survey.
+if (getState('exp_survey_excellence_v1') !== 'done') {
+  const sid = db.prepare(`SELECT id FROM surveys WHERE key = 'experience'`).get()?.id;
+  if (sid) {
+    const ins = db.prepare(`INSERT INTO survey_questions (survey_id, category, text, type, sort) VALUES (?,?,?,?,?)`);
+    ins.run(sid, 'Excellence', 'People here keep their promises — if they said they would do something, they did it.', 'scale', 98);
+    ins.run(sid, 'Excellence', 'The staff work together as one team around my care.', 'scale', 99);
+    setState('exp_survey_excellence_v1', 'done');
+  }
+}

@@ -496,6 +496,11 @@ app.get('/api/today', requireAuth, (req, res) => {
     if (db.prepare(`SELECT 1 FROM weekly_reflections WHERE user_id=? AND week=?`).get(me.id, excWeek(today))) return;
     items.push({ label: '🪞 Weekly reflection — four questions, two minutes', sub: 'What made you proud? Who lived the standards?', overdue: false, view: 'team' });
   });
+  // Monthly Excellence Survey — six questions, anonymous; stands until answered.
+  add(() => {
+    if (db.prepare(`SELECT 1 FROM excellence_survey_done WHERE user_id=? AND month=?`).get(me.id, today.slice(0, 7))) return;
+    items.push({ label: '📊 Monthly excellence survey — six questions, anonymous', sub: 'Team page · your answers are stored without your name', overdue: false, view: 'team' });
+  });
   items.sort((a, b) => (b.overdue ? 1 : 0) - (a.overdue ? 1 : 0));
   res.json({ today, items: items.slice(0, 15) });
 });
@@ -6338,7 +6343,19 @@ app.get('/api/my-stats', requireAuth, (req, res) => {
   const prev = prevOverall(req.user);
   const wowsForMe = db.prepare(`SELECT text, by_name, substr(created_at,1,10) at FROM wows WHERE recognize=? AND created_at>=datetime('now','-30 day') ORDER BY id DESC LIMIT 8`).all(req.user.name);
   const canManage = req.user.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(req.user.job_role || '');
-  res.json({ ...s, prevOverall: prev, trend: (s.overall != null && prev != null) ? s.overall - prev : null, wowsForMe, canManage });
+  // My Excellence (Phase 2): recognition received & given, and whether my two
+  // rhythm items — the Friday reflection and the monthly survey — are in.
+  const excellence = (() => { try {
+    const first = (req.user.name || '').split(/\s+/)[0] || '';
+    return {
+      recognized30: db.prepare(`SELECT story text, principle, by_name, substr(created_at,1,10) at FROM extra_mile WHERE created_at>=datetime('now','-30 day') AND (lower(trim(person))=lower(?) OR lower(trim(person))=lower(?)) ORDER BY id DESC LIMIT 8`).all(req.user.name || '', first),
+      given30: db.prepare(`SELECT COUNT(*) n FROM extra_mile WHERE by_name=? AND created_at>=datetime('now','-30 day')`).get(req.user.name || '').n
+             + db.prepare(`SELECT COUNT(*) n FROM kudos WHERE from_id=? AND created_at>=datetime('now','-30 day')`).get(req.user.id).n,
+      reflectionDone: !!db.prepare(`SELECT 1 FROM weekly_reflections WHERE user_id=? AND week=?`).get(req.user.id, excWeek(appToday())),
+      exsurveyDone: !!db.prepare(`SELECT 1 FROM excellence_survey_done WHERE user_id=? AND month=?`).get(req.user.id, appToday().slice(0, 7)),
+    };
+  } catch (e) { return null; } })();
+  res.json({ ...s, prevOverall: prev, trend: (s.overall != null && prev != null) ? s.overall - prev : null, wowsForMe, canManage, excellence });
 });
 const canSeeTeamStats = (u) => u.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(u.job_role || '');
 // Leadership: drill into one person's full breakdown.
@@ -10983,7 +11000,29 @@ app.get('/api/workplace', requireAuth, (req, res) => {
   db.prepare(`SELECT to_name FROM kudos WHERE to_name IS NOT NULL AND to_name != '' AND created_at >= ${since7}`).all().forEach((r) => { const k = r.to_name.trim(); tally[k] = (tally[k] || 0) + 1; });
   db.prepare(`SELECT recognize FROM wows WHERE recognize IS NOT NULL AND recognize != '' AND created_at >= ${since7}`).all().forEach((r) => { const k = r.recognize.trim(); tally[k] = (tally[k] || 0) + 1; });
   const mostRecognized = Object.entries(tally).map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n).slice(0, 8);
-  res.json({ morale, pulse, belonging: belongingStats(30), kudosWeek, wowRecWeek, recognitionsWeek: kudosWeek + wowRecWeek, callOffsWeek, openVoice, voiceClosedWeek, mostRecognized });
+  // Excellence Scoreboard (Phase 2): is the operating rhythm actually running?
+  // Line-ups happening, recognition tied to principles, coaching circled back,
+  // reflections read, the monthly survey answered — culture, measured.
+  const excellence = (() => { try {
+    const month = appToday().slice(0, 7);
+    const sv = db.prepare(`SELECT COUNT(*) n, AVG(q1) a1, AVG(q2) a2, AVG(q3) a3, AVG(q4) a4, AVG(q5) a5, AVG(q6) a6 FROM excellence_surveys WHERE month=?`).get(month);
+    return {
+      month,
+      surveyN: sv.n,
+      surveyAvgs: sv.n ? [sv.a1, sv.a2, sv.a3, sv.a4, sv.a5, sv.a6].map((x) => x == null ? null : Math.round(x * 10) / 10) : null,
+      surveyQuestions: EXQ,
+      lineups7: db.prepare(`SELECT COUNT(*) n FROM lineup_log WHERE date >= date('now','-7 day')`).get().n,
+      recogByPrinciple: db.prepare(`SELECT principle, COUNT(*) n FROM extra_mile WHERE principle IS NOT NULL AND created_at >= datetime('now','-30 day') GROUP BY principle ORDER BY n DESC`).all(),
+      coachingMonth: db.prepare(`SELECT COUNT(*) n FROM hr_coaching WHERE created_at >= ?`).get(month + '-01').n,
+      followupsOverdue: db.prepare(`SELECT COUNT(*) n FROM hr_coaching WHERE follow_up IS NOT NULL AND followed_up_at IS NULL AND follow_up < ?`).get(appToday()).n,
+      trainingWeek: db.prepare(`SELECT COUNT(DISTINCT user_id) n FROM training_ack WHERE date >= date('now','-7 day')`).get().n,
+      reflectionsWeek: db.prepare(`SELECT COUNT(*) n FROM weekly_reflections WHERE week = ?`).get(excWeek(appToday())).n,
+      staffCount: db.prepare(`SELECT COUNT(*) n FROM users WHERE active=1 AND role!='admin'`).get().n,
+      termed90: db.prepare(`SELECT COUNT(*) n FROM hr_employees WHERE term_date IS NOT NULL AND term_date >= date('now','-90 day')`).get().n,
+      headcount: db.prepare(`SELECT COUNT(*) n FROM hr_employees WHERE status='active'`).get().n,
+    };
+  } catch (e) { console.error('[excellence scoreboard]', e.message); return null; } })();
+  res.json({ morale, pulse, belonging: belongingStats(30), kudosWeek, wowRecWeek, recognitionsWeek: kudosWeek + wowRecWeek, callOffsWeek, openVoice, voiceClosedWeek, mostRecognized, excellence });
 });
 // Growth check-ins (leadership logs goals + 1:1 notes per teammate).
 app.get('/api/growth', requireAuth, (req, res) => {
@@ -11088,6 +11127,46 @@ app.get('/api/reflections', requireAuth, (req, res) => {
   if (!isLeader(req.user)) return res.status(403).json({ error: 'Leadership only.' });
   const wk = excWeek(appToday());
   res.json({ week: wk, rows: db.prepare(`SELECT user_name, week, proud, barrier, lived, improve, substr(created_at,1,10) at FROM weekly_reflections WHERE week >= date(?, '-7 day') ORDER BY week DESC, user_name`).all(wk) });
+});
+// Phase 2 (Measurement): the monthly Excellence Survey — the handbook's six
+// employee questions. Answers are anonymous (role only); a separate done-marker
+// drives the prompt without ever joining a person to their answers.
+const EXQ = [
+  'I know exactly what excellence looks like in my role.',
+  'My supervisor coaches from the written standards, not by mood.',
+  'I was recognized for something specific in the last week.',
+  'My supervisor removes barriers that get in my way.',
+  'I feel respected here.',
+  'I would recommend Armada as a place to work.',
+];
+app.get('/api/exsurvey', requireAuth, (req, res) => {
+  const month = appToday().slice(0, 7);
+  res.json({ month, questions: EXQ, done: !!db.prepare(`SELECT 1 FROM excellence_survey_done WHERE user_id=? AND month=?`).get(req.user.id, month) });
+});
+app.post('/api/exsurvey', requireAuth, (req, res) => {
+  const month = appToday().slice(0, 7);
+  if (db.prepare(`SELECT 1 FROM excellence_survey_done WHERE user_id=? AND month=?`).get(req.user.id, month)) {
+    return res.status(400).json({ error: 'You already answered this month — thank you.' });
+  }
+  const b = req.body || {};
+  const q = [1, 2, 3, 4, 5, 6].map((i) => { const v = +b['q' + i]; return v >= 1 && v <= 5 ? v : null; });
+  if (!q.some((v) => v != null)) return res.status(400).json({ error: 'Answer at least one question.' });
+  db.prepare(`INSERT INTO excellence_surveys (month, role, q1, q2, q3, q4, q5, q6, comment) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(month, req.user.job_role || null, ...q, String(b.comment || '').slice(0, 1000) || null);
+  db.prepare(`INSERT INTO excellence_survey_done (user_id, month) VALUES (?,?)`).run(req.user.id, month);
+  res.json({ ok: true });
+});
+app.get('/api/exsurvey/results', requireAuth, (req, res) => {
+  if (!isLeader(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  const months = db.prepare(`SELECT month, COUNT(*) n, AVG(q1) a1, AVG(q2) a2, AVG(q3) a3, AVG(q4) a4, AVG(q5) a5, AVG(q6) a6
+    FROM excellence_surveys GROUP BY month ORDER BY month DESC LIMIT 4`).all()
+    .map((m) => ({ month: m.month, n: m.n, avgs: [m.a1, m.a2, m.a3, m.a4, m.a5, m.a6].map((x) => x == null ? null : Math.round(x * 10) / 10) }));
+  const month = appToday().slice(0, 7);
+  const byRole = db.prepare(`SELECT role, COUNT(*) n, (AVG(q1)+AVG(q2)+AVG(q3)+AVG(q4)+AVG(q5)+AVG(q6))/6 avg
+    FROM excellence_surveys WHERE month=? AND role IS NOT NULL GROUP BY role ORDER BY avg`).all(month)
+    .map((r) => ({ role: r.role, n: r.n, avg: r.avg == null ? null : Math.round(r.avg * 10) / 10 }));
+  const comments = db.prepare(`SELECT comment FROM excellence_surveys WHERE month=? AND comment IS NOT NULL AND comment != ''`).all(month).map((r) => r.comment);
+  res.json({ questions: EXQ, months, byRole, comments, month });
 });
 app.post('/api/training-ack', requireAuth, (req, res) => {
   const today = appToday();

@@ -9637,6 +9637,16 @@ app.get('/api/behavior-contracts', requireAuth, (req, res) => {
     WHERE 1=1${facCtx(req).frag('c.facility_id')} ORDER BY (bc.status = 'Closed'), bc.id DESC LIMIT 100`).all();
   res.json({ contracts });
 });
+app.get('/api/behavior-contracts/active', requireAuth, (req, res) => {
+  const today = appToday(), sh = currentShift();
+  const rows = db.prepare(`SELECT bc.id, bc.client_id, bc.reason, c.pref, c.name, c.room,
+      (SELECT 1 FROM behavior_checkins k WHERE k.contract_id = bc.id AND k.shift_date = ? AND k.shift = ?) checked,
+      (SELECT rating FROM behavior_checkins k WHERE k.contract_id = bc.id AND k.shift_date = ? AND k.shift = ?) thisRating
+    FROM behavior_contracts bc LEFT JOIN clients c ON c.id = bc.client_id
+    /* facility truth: contracts follow their client's building */
+    WHERE bc.status = 'Active'${facCtx(req).frag('c.facility_id')} ORDER BY bc.id DESC`).all(today, sh, today, sh);
+  res.json({ shift: sh, contracts: rows.map((r) => ({ id: r.id, client_id: r.client_id, name: r.pref || r.name || 'Client', room: r.room || '', reason: r.reason || '', checked: !!r.checked, rating: r.thisRating || '' })) });
+});
 app.get('/api/behavior-contracts/:id', requireAuth, (req, res) => {
   const bc = db.prepare(`SELECT bc.*, c.pref FROM behavior_contracts bc LEFT JOIN clients c ON c.id = bc.client_id WHERE bc.id = ?`).get(req.params.id);
   if (!bc) return res.status(404).json({ error: 'Not found' });
@@ -9654,16 +9664,6 @@ app.post('/api/behavior-contracts', requireAuth, (req, res) => {
 });
 // Active contracts + whether each got a behavioral check-in this shift (so My Shift
 // can flag them prominently and prompt the check-in every shift).
-app.get('/api/behavior-contracts/active', requireAuth, (req, res) => {
-  const today = appToday(), sh = currentShift();
-  const rows = db.prepare(`SELECT bc.id, bc.client_id, bc.reason, c.pref, c.name, c.room,
-      (SELECT 1 FROM behavior_checkins k WHERE k.contract_id = bc.id AND k.shift_date = ? AND k.shift = ?) checked,
-      (SELECT rating FROM behavior_checkins k WHERE k.contract_id = bc.id AND k.shift_date = ? AND k.shift = ?) thisRating
-    FROM behavior_contracts bc LEFT JOIN clients c ON c.id = bc.client_id
-    /* facility truth: contracts follow their client's building */
-    WHERE bc.status = 'Active'${facCtx(req).frag('c.facility_id')} ORDER BY bc.id DESC`).all(today, sh, today, sh);
-  res.json({ shift: sh, contracts: rows.map((r) => ({ id: r.id, client_id: r.client_id, name: r.pref || r.name || 'Client', room: r.room || '', reason: r.reason || '', checked: !!r.checked, rating: r.thisRating || '' })) });
-});
 app.post('/api/behavior-contracts/:id/checkin', requireAuth, (req, res) => {
   const today = appToday(), sh = currentShift();
   const bc = db.prepare(`SELECT id, client_id FROM behavior_contracts WHERE id = ?`).get(req.params.id);

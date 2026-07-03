@@ -786,14 +786,19 @@ function billingScopeRows(user, rows) {
 }
 // The sweep: judge every active client's day from their Kipu chart.
 let _billingRunning = false;
-async function runBillingSweep({ date, byName = 'scheduler' } = {}) {
+async function runBillingSweep({ date, byName = 'scheduler', facilityId = null } = {}) {
   if (_billingRunning) return { ok: false, error: 'A check is already running.' };
   _billingRunning = true;
   try {
     const day = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : appToday();
     const cfg = billingCfg();
+    // Per-facility runs judge THAT building's clients against ITS Kipu connection
+    // (Ohio facilities share the env connection; Spark brings its own via 🔌).
+    const swFac = facilityId ? db.prepare(`SELECT id, fkey, name FROM org_facilities WHERE id=?`).get(+facilityId) : null;
+    const swFrag = swFac ? ` AND facility_id = ${swFac.id}` : '';
+    const swConn = swFac ? resolveKipuConn(swFac.id) : null;
     // Active clients + anyone discharged TODAY (their last day still needs its encounter).
-    const actives = db.prepare(`SELECT id, name, pref, kipu_id, facility_id, program, loc, therapist, case_manager, admit, discharge_date FROM clients WHERE merged_into IS NULL AND (active = 1 OR substr(COALESCE(discharge_date,''),1,10) = ?)`).all(day);
+    const actives = db.prepare(`SELECT id, name, pref, kipu_id, facility_id, program, loc, therapist, case_manager, admit, discharge_date FROM clients WHERE merged_into IS NULL AND (active = 1 OR substr(COALESCE(discharge_date,''),1,10) = ?)${swFrag}`).all(day);
     const upsert = db.prepare(`INSERT INTO billing_ready_status (date, client_id, facility_id, status, encounter_type, encounter_title, encounter_time, encounter_staff, detail, checked_at)
       VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
       ON CONFLICT(date, client_id) DO UPDATE SET status=excluded.status, encounter_type=excluded.encounter_type, encounter_title=excluded.encounter_title, encounter_time=excluded.encounter_time, encounter_staff=excluded.encounter_staff, detail=excluded.detail, checked_at=excluded.checked_at
@@ -802,10 +807,10 @@ async function runBillingSweep({ date, byName = 'scheduler' } = {}) {
     let complete = 0, missing = 0, review = 0, errors = 0;
     const judgeOne = async (c) => {
       let status = 'missing', type = null, title = null, time = null, staff = null, detail = null;
-      if (!kipuConfigured()) { status = 'sync_error'; detail = 'Kipu is not connected.'; }
+      if (!swConn && !kipuConfigured()) { status = 'sync_error'; detail = 'Kipu is not connected.'; }
       else if (!c.kipu_id) { status = 'sync_error'; detail = 'No Kipu chart linked to this client.'; }
       else {
-        const r = await kipuDayEncounters(c.kipu_id, day);
+        const r = await kipuDayEncounters(c.kipu_id, day, swConn);
         if (!r.ok) { status = 'sync_error'; detail = 'Kipu fetch failed: ' + (r.error || 'unknown'); }
         else {
           const done = (n) => !cfg.requireCompleted || !n.status || /complete|signed|final/i.test(n.status);
@@ -820,7 +825,7 @@ async function runBillingSweep({ date, byName = 'scheduler' } = {}) {
             const order = (r.notes || []).find((n) => /action order|admit/i.test(n.name));
             if (assess) {
               status = 'complete'; type = 'Nursing Assessment'; title = assess.name; time = assess.time || null;
-              staff = assess.author || (assess.id ? await kipuNoteAuthor(c.kipu_id, assess.id) : null);
+              staff = assess.author || (assess.id ? await kipuNoteAuthor(c.kipu_id, assess.id, swConn) : null);
               detail = 'Intake day — verify On-Call Provider listed + provider/supervisor attestation' + (order ? '' : '; no Doctor\u2019s Action Order (Admit to LOC) found yet') + '.';
             } else {
               status = 'missing';
@@ -835,7 +840,7 @@ async function runBillingSweep({ date, byName = 'scheduler' } = {}) {
             if (ready.length) {
               const q = ready[0];
               status = 'complete'; type = typeOf(q.name); title = q.name; time = q.time || null;
-              staff = q.author || (q.id ? await kipuNoteAuthor(c.kipu_id, q.id) : null);
+              staff = q.author || (q.id ? await kipuNoteAuthor(c.kipu_id, q.id, swConn) : null);
               const usual = (cfg.locUsual || {})[locCode];
               if (usual && ready.length < usual) detail = `${locCode}: ${ready.length} qualifying note${ready.length === 1 ? '' : 's'} — payors usually expect ${usual}.`;
             } else if (matches.length) {
@@ -856,7 +861,7 @@ async function runBillingSweep({ date, byName = 'scheduler' } = {}) {
             if (q) {
               status = 'complete'; type = q.type; title = q.name; time = q.time || null;
               staff = q.author || null;
-              if (!staff && q.id) staff = await kipuNoteAuthor(c.kipu_id, q.id);
+              if (!staff && q.id) staff = await kipuNoteAuthor(c.kipu_id, q.id, swConn);
               if (!locCode) detail = 'No level of care on the chart — judged by the global rules; set the LOC for payor-exact checking.';
             } else if (qOpen) { status = 'needs_review'; type = qOpen.type; title = qOpen.name; time = qOpen.time || null; detail = 'Qualifying note exists but is still in progress — finish/sign it.'; }
             else if (unk) { status = 'needs_review'; type = unk.type; title = unk.name; time = unk.time || null; detail = unk.cls === 'review' ? 'Note type is mapped to Needs Review.' : `Unmapped note type "${unk.name}" — map it in settings.`; }
@@ -885,30 +890,54 @@ async function runBillingSweep({ date, byName = 'scheduler' } = {}) {
     await Promise.all(Array.from({ length: 5 }, async () => { let c; while ((c = queue.shift())) { try { await judgeOne(c); } catch { errors++; } } }));
     db.prepare(`INSERT INTO billing_ready_runs (date, by_name, active_n, complete_n, missing_n, review_n, error_n) VALUES (?,?,?,?,?,?,?)`)
       .run(day, byName, actives.length, complete, missing, review, errors);
-    publishEvent({ event: 'billing.day_checked', entity: 'billing', actor: byName, summary: `Billing readiness ${day}: ${complete}/${actives.length} complete · ${missing} missing · ${review} review${errors ? ' · ' + errors + ' sync errors' : ''}` });
-    if (missing + errors > 0) publishEvent({ event: 'billing.day_at_risk', entity: 'billing', actor: 'system', summary: `${missing + errors} client day${missing + errors === 1 ? '' : 's'} at risk for ${day}` });
+    const facTag = swFac ? `${swFac.name} · ` : '';
+    publishEvent({ event: 'billing.day_checked', entity: 'billing', actor: byName, summary: `${facTag}Billing readiness ${day}: ${complete}/${actives.length} complete · ${missing} missing · ${review} review${errors ? ' · ' + errors + ' sync errors' : ''}` });
+    if (missing + errors > 0) publishEvent({ event: 'billing.day_at_risk', entity: 'billing', actor: 'system', summary: `${facTag}${missing + errors} client day${missing + errors === 1 ? '' : 's'} at risk for ${day}` });
     // End-of-day email to the evening team (names are internal-operational — same policy as the census email).
     if ((missing + review + errors) > 0 && emailConfigured()) {
-      const rows = db.prepare(`SELECT s.*, c.pref, c.name, c.therapist, c.case_manager, c.program, c.loc FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=? AND s.status IN ('missing','needs_review','sync_error') ORDER BY s.status`).all(day);
+      const rows = db.prepare(`SELECT s.*, c.pref, c.name, c.therapist, c.case_manager, c.program, c.loc FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=? AND s.status IN ('missing','needs_review','sync_error')${swFac ? ` AND s.facility_id = ${swFac.id}` : ''} ORDER BY s.status`).all(day);
       const esc3 = htmlEsc;
       const line = (r) => `<div>• <strong>${esc3(r.pref || r.name)}</strong>${r.loc ? ' · ' + esc3(r.loc) : ''} — ${r.status === 'missing' ? '<span style="color:#b00">no qualifying encounter</span>' : esc3(r.detail || r.status)}${r.therapist ? ' · therapist: ' + esc3(r.therapist) : ''}${r.case_manager ? ' · CM: ' + esc3(r.case_manager) : ''}</div>`;
-      const to = (cfg.email || '').trim() || insuranceRecipients();
-      sendEmail({ to, subject: `Billing readiness ${day}: ${missing} missing, ${review} to review${errors ? ', ' + errors + ' sync errors' : ''}`, html: `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:620px"><h2 style="margin:0 0 4px">Documentation needed before end of day</h2><p style="color:#666;margin:0 0 12px">Billing readiness check · ${esc3(day)} · every client day needs one qualifying encounter</p>${rows.map(line).join('')}<p style="color:#555;margin-top:14px;font-size:13px">Open the app → Revenue → Billing Readiness to work the list and resolve alerts.</p></div>` }).catch((e) => console.error('[billing] email:', e.message));
+      // Each facility can route its list to its own team (⚙️ billing_email);
+      // fall back to the global config, then the insurance recipients.
+      const to = (swFac && (facSetting(swFac.id, 'billing_email') || '').trim()) || (cfg.email || '').trim() || insuranceRecipients();
+      sendEmail({ to, subject: `${facTag}Billing readiness ${day}: ${missing} missing, ${review} to review${errors ? ', ' + errors + ' sync errors' : ''}`, html: `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:620px"><h2 style="margin:0 0 4px">Documentation needed before end of day</h2><p style="color:#666;margin:0 0 12px">${swFac ? esc3(swFac.name) + ' · ' : ''}Billing readiness check · ${esc3(day)} · every client day needs one qualifying encounter</p>${rows.map(line).join('')}<p style="color:#555;margin-top:14px;font-size:13px">Open the app → Revenue → Billing Readiness to work the list and resolve alerts.</p></div>` }).catch((e) => console.error('[billing] email:', e.message));
     }
-    return { ok: true, date: day, active: actives.length, complete, missing, review, errors };
+    return { ok: true, date: day, facility: swFac ? swFac.fkey : null, active: actives.length, complete, missing, review, errors };
   } finally { _billingRunning = false; }
 }
-// Scheduler: at the configured hour (facility time), run once per day.
+// Scheduler: each facility runs once per day at the configured hour IN ITS OWN
+// TIMEZONE (Wheatfield is Central — its day must not close on Akron's clock).
+// One latch per facility; runs are serialized (runBillingSweep refuses overlap).
+// Facilities without the billingready module or without clients are latched
+// silently so they never email an empty report.
+try {
+  // Deploy-day seed: the old single latch becomes the detox facility's latch,
+  // so the first fan-out day doesn't double-run Akron.
+  const legacy = getState('billing_ready_ran');
+  if (legacy && !getState('billing_ready_ran_detox-akron')) setState('billing_ready_ran_detox-akron', legacy);
+} catch { /* state optional */ }
 setInterval(() => {
-  try {
+  (async () => {
     const cfg = billingCfg();
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ }));
-    const today = appToday();
-    if (now.getHours() >= (cfg.checkHour ?? 16) && getState('billing_ready_ran') !== today) {
-      setState('billing_ready_ran', today);
-      runBillingSweep({ date: today }).then((r) => console.log('[billing] scheduled check:', JSON.stringify(r))).catch((e) => console.error('[billing] check:', e.message));
+    for (const fac of orgFacilities()) {
+      try {
+        if (fac.type === 'corporate') continue;
+        if (!facilityModules(fac).includes('billingready')) continue;
+        if (hourInTz(fac.timezone) < (cfg.checkHour ?? 16)) continue;
+        const today = todayInTz(fac.timezone);
+        const latch = 'billing_ready_ran_' + fac.fkey;
+        if (getState(latch) === today) continue;
+        setState(latch, today);
+        const n = db.prepare(`SELECT COUNT(*) c FROM clients WHERE merged_into IS NULL AND facility_id = ? AND (active = 1 OR substr(COALESCE(discharge_date,''),1,10) = ?)`).get(fac.id, today).c;
+        if (!n) continue;   // nothing admitted there yet — no run, no email
+        const r = await runBillingSweep({ date: today, facilityId: fac.id });
+        // A manual run can hold the lock; un-latch so the next tick retries.
+        if (r && r.ok === false) { setState(latch, ''); continue; }
+        console.log('[billing] scheduled check:', JSON.stringify(r));
+      } catch (e) { console.error('[billing] scheduler (' + fac.fkey + '):', e.message); }
     }
-  } catch (e) { console.error('[billing] scheduler:', e.message); }
+  })().catch((e) => console.error('[billing] scheduler:', e.message));
 }, 5 * 60 * 1000);
 app.get('/api/billingready', requireAuth, requireBilling, (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
@@ -940,7 +969,15 @@ app.get('/api/billingready', requireAuth, requireBilling, (req, res) => {
 app.post('/api/billingready/run', requireAuth, requireBilling, async (req, res) => {
   if (!billingLeadership(req.user)) return res.status(403).json({ error: 'Leadership can run checks.' });
   try {
-    const r = await runBillingSweep({ date: req.body?.date, byName: req.user.name });
+    // Honor the facility chip: scoped runs judge only that building's clients.
+    let runFac = null;
+    const q = req.body?.facility ?? req.query.facility;
+    if (q !== undefined && q !== '' && q !== null) {
+      const fid = +q;
+      if (!Number.isInteger(fid) || fid <= 0 || !facilityAllowed(req.user, fid)) return res.status(403).json({ error: 'No access to that facility.' });
+      runFac = fid;
+    }
+    const r = await runBillingSweep({ date: req.body?.date, byName: req.user.name, facilityId: runFac });
     audit({ user: req.user, action: 'BILLING_CHECK', detail: JSON.stringify(r).slice(0, 200), ip: req.ip });
     res.json(r);
   } catch (e) { res.status(502).json({ error: e.message }); }
@@ -1609,7 +1646,7 @@ app.get('/api/org/facilities/:id/integrations', requireAuth, requireAdmin, (req,
   for (const r of rows) {
     let c = {}; try { c = JSON.parse(r.config || '{}'); } catch { /* corrupt */ }
     out[r.kind] = r.kind === 'kipu'
-      ? { configured: !!(c.accessId && c.secretKey && c.appId), baseUrl: c.baseUrl || '', locationId: c.locationId || '', active: !!r.active, updatedAt: r.updated_at, updatedBy: r.updated_by }
+      ? { configured: !!(c.accessId && c.secretKey && c.appId), baseUrl: c.baseUrl || '', locationId: c.locationId || '', autoSync: !!c.autoSync, active: !!r.active, updatedAt: r.updated_at, updatedBy: r.updated_by }
       : { configured: !!(c.instanceUrl || c.facilityValue), facilityValue: c.facilityValue || '', active: !!r.active, updatedAt: r.updated_at, updatedBy: r.updated_by };
   }
   res.json({ integrations: out });
@@ -1631,6 +1668,8 @@ app.post('/api/org/facilities/:id/integrations', requireAuth, requireAdmin, (req
       appId: (b.appId != null && String(b.appId).trim()) ? String(b.appId).trim() : cur.appId,
       baseUrl: b.baseUrl != null ? String(b.baseUrl).trim() : (cur.baseUrl || ''),
       locationId: b.locationId != null ? String(b.locationId).trim() : (cur.locationId || ''),
+      // Opt-in only AFTER a supervised manual sync proved the location filter.
+      autoSync: b.autoSync != null ? !!b.autoSync : !!cur.autoSync,
     };
   } else {
     cfg = { instanceUrl: b.instanceUrl != null ? String(b.instanceUrl).trim() : cur.instanceUrl, facilityValue: b.facilityValue != null ? String(b.facilityValue).trim() : cur.facilityValue };
@@ -11998,35 +12037,59 @@ app.post('/api/alumni/:id/notes', requireAuth, (req, res) => {
 /* ---------------- Client-facing kiosk (no staff login; guarded by a code) ---------------- */
 function kioskCode() { return getState('kiosk_code') || process.env.KIOSK_CODE || 'armada'; }
 function kioskCodeIsWeak() { const c = kioskCode(); return !c || c.toLowerCase() === 'armada' || c.length < 6; }
-function kioskCodeValid(req) {
-  const got = String(req.query.code || req.body?.code || ''), want = String(kioskCode());
-  if (!got || got.length !== want.length) return false;
-  try { return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want)); } catch { return false; }
+function kioskCodeValid(req) {   // → false | { fid } (0 = the main/default building)
+  const got = String(req.query.code || req.body?.code || '');
+  if (!got) return false;
+  const eq = (want) => { const w = String(want); try { return got.length === w.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(w)); } catch { return false; } };
+  if (eq(kioskCode())) return { fid: 0 };
+  // Each facility can carry its own kiosk code (⚙️ settings) — the code says
+  // WHICH building's kiosk this device is, so its resident list stays local.
+  try {
+    for (const f of orgFacilities()) {
+      const kc = facSetting(f.id, 'kiosk_code');
+      if (kc && eq(kc)) return { fid: f.id };
+    }
+  } catch { /* registry optional */ }
+  return false;
 }
 // Per-device kiosk token, so the raw shared code stops riding on every request
 // once a device has authenticated. Signed with a server secret; expires in 12h.
 function kioskSecret() { let s = getState('kiosk_token_secret'); if (!s) { s = crypto.randomBytes(32).toString('hex'); setState('kiosk_token_secret', s); } return s; }
-function signKioskToken() {
+function signKioskToken(fid = 0) {
   const exp = Date.now() + 12 * 3600e3;
-  const sig = crypto.createHmac('sha256', kioskSecret()).update(String(exp)).digest('hex').slice(0, 32);
-  return `${exp}.${sig}`;
+  const sig = crypto.createHmac('sha256', kioskSecret()).update(`${exp}.${fid || 0}`).digest('hex').slice(0, 32);
+  return `${exp}.${fid || 0}.${sig}`;
 }
-function verifyKioskToken(tok) {
+function verifyKioskToken(tok) {   // → false | { fid } — fid rides in the token, signed
   if (!tok || typeof tok !== 'string') return false;
-  const [expStr, sig] = tok.split('.');
-  const exp = +expStr;
-  if (!exp || exp < Date.now()) return false;
-  const want = crypto.createHmac('sha256', kioskSecret()).update(String(exp)).digest('hex').slice(0, 32);
-  try { return crypto.timingSafeEqual(Buffer.from(sig || ''), Buffer.from(want)); } catch { return false; }
+  const parts = tok.split('.');
+  const safeEq = (a, b) => { try { return a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch { return false; } };
+  if (parts.length === 3) {
+    const exp = +parts[0];
+    if (!exp || exp < Date.now()) return false;
+    const want = crypto.createHmac('sha256', kioskSecret()).update(`${parts[0]}.${parts[1]}`).digest('hex').slice(0, 32);
+    return safeEq(parts[2] || '', want) ? { fid: +parts[1] || 0 } : false;
+  }
+  // Legacy 2-part token from before facility kiosks (≤12h old) — default building.
+  if (parts.length === 2) {
+    const exp = +parts[0];
+    if (!exp || exp < Date.now()) return false;
+    const want = crypto.createHmac('sha256', kioskSecret()).update(String(exp)).digest('hex').slice(0, 32);
+    return safeEq(parts[1] || '', want) ? { fid: 0 } : false;
+  }
+  return false;
 }
 // Gate every kiosk endpoint: accept an already-authenticated device token, else
 // validate the code (rate-limited per IP) and mint a token cookie for the device.
 function requireKiosk(req, res, next) {
-  if (verifyKioskToken(req.cookies?.kioskToken)) return next();   // already-authed device — never throttled
+  const tok = verifyKioskToken(req.cookies?.kioskToken);
+  if (tok) { req.kioskFacilityId = tok.fid || null; return next(); }   // already-authed device — never throttled
   const key = 'kioskfail:' + req.ip;
   if (rlOver(key, 15, 10 * 60 * 1000)) return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes.' });
-  if (kioskCodeValid(req)) {
-    res.cookie('kioskToken', signKioskToken(), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', expires: new Date(Date.now() + 12 * 3600e3) });
+  const ok = kioskCodeValid(req);
+  if (ok) {
+    req.kioskFacilityId = ok.fid || null;
+    res.cookie('kioskToken', signKioskToken(ok.fid), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', expires: new Date(Date.now() + 12 * 3600e3) });
     return next();
   }
   rlHit(key, 10 * 60 * 1000);   // only wrong-code guesses count toward the limit
@@ -12040,8 +12103,9 @@ app.get('/api/kiosk/data', requireKiosk, (req, res) => {
   for (const s of surveys) s.questions = db.prepare(`SELECT id, category, text, type FROM survey_questions WHERE survey_id = ? ORDER BY sort, id`).all(s.id);
   res.json({
     // The kiosk is on the unit and only weakly authenticated — expose preferred
-    // name + room only, never the full legal name.
-    clients: db.prepare(`SELECT id, pref, room FROM clients WHERE active = 1 AND discharge_status IS NULL ORDER BY room, pref`).all(),
+    // name + room only, never the full legal name. A device authed with a
+    // facility's own code lists only THAT building's clients.
+    clients: db.prepare(`SELECT id, pref, room FROM clients WHERE active = 1 AND discharge_status IS NULL AND (facility_id IS NULL OR facility_id = ?) ORDER BY room, pref`).all(req.kioskFacilityId || defaultFacilityId()),
     departments: DEPARTMENTS, surveys, menu: menuForDate(appToday()),
   });
 });
@@ -12514,6 +12578,32 @@ if (kipuConfigured()) {
     setTimeout(autoSync, 30000);                 // first run shortly after boot
     setInterval(autoSync, hrs * 3600 * 1000);    // then on the interval
   }
+}
+// Per-facility auto-sync (Phase 4): a facility whose own 🔌 connection has been
+// verified by a hand-run sync can opt into the schedule (autoSync in its config).
+// Runs whether or not the primary env connection exists; kipuSyncRoster's chain
+// serializes everything, and each facility's failure is isolated to its log line.
+{
+  const hrs = process.env.KIPU_SYNC_HOURS != null ? +process.env.KIPU_SYNC_HOURS : 6;
+  if (hrs > 0) {
+    const facAutoSync = async () => {
+      let rows = [];
+      try { rows = db.prepare(`SELECT fi.facility_id, fi.config, f.name, f.kipu_location_name FROM facility_integrations fi JOIN org_facilities f ON f.id = fi.facility_id AND f.active = 1 WHERE fi.kind = 'kipu' AND fi.active = 1`).all(); } catch { return; }
+      for (const row of rows) {
+        try {
+          let c = {}; try { c = JSON.parse(row.config || '{}'); } catch { continue; }
+          if (!c.autoSync) continue;
+          if (!(c.accessId && c.secretKey && c.appId)) continue;
+          const r = await kipuSyncRoster({ conn: c, facilityId: row.facility_id, locationId: c.locationId || '', locationName: row.kipu_location_name || '' });
+          console.log(`[kipu] facility auto-sync ${row.name}: ${r.activeNow} active (${r.created} new, ${r.deactivated} discharged)`);
+        } catch (e) { console.error('[kipu] facility auto-sync (' + row.name + '):', e.message); }
+      }
+    };
+    setTimeout(facAutoSync, 90000);              // after the primary's first pass
+    setInterval(facAutoSync, hrs * 3600 * 1000);
+  }
+}
+if (kipuConfigured()) {
   // Daily automated outpatient refresh — builds the PHP→IOP movement & LOS history
   // on its own (once the owner has used it at least once / configured the location).
   const runOutpatient = async () => {

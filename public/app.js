@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals|incidents($|\?)|billingready($|\?)|appts($|\?)|inventory($|\?)|maintenance($|\?)|requests($|\?|\/count)|command\/overview|retention|opscenter|diag\/admits|outpatient($|\?)|housing\/)/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals|incidents($|\?)|billingready($|\?|\/run)|appts($|\?)|inventory($|\?)|maintenance($|\?)|requests($|\?|\/count)|command\/overview|retention|opscenter|diag\/admits|outpatient($|\?)|housing\/)/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -6056,7 +6056,8 @@ async function loadOrgFacs(){
     <td><input data-of="${f.id}" data-k="kipu_location_name" value="${esc(f.kipu_location_name||'')}" style="width:130px"/></td>
     <td class="toolbar" style="gap:4px"><button class="btn btn-ghost btn-sm sans" onclick="saveOrgFac(${f.id})">Save</button>
       <button class="btn btn-ghost btn-sm sans" title="Modules this facility gets" onclick="editFacModules(${f.id})">🧩</button>
-      <button class="btn btn-ghost btn-sm sans" title="Kipu / integration connection" onclick="editFacIntegration(${f.id})">🔌</button></td></tr>`).join('')}</table>
+      <button class="btn btn-ghost btn-sm sans" title="Kipu / integration connection" onclick="editFacIntegration(${f.id})">🔌</button>
+      <button class="btn btn-ghost btn-sm sans" title="This building's settings: clock-in geofence, on-call, kiosk code, report emails" onclick="editFacSettings(${f.id})">⚙️</button></td></tr>`).join('')}</table>
   <div class="hint" style="margin-top:4px">Regions: Ohio · Indiana · Corporate. Every new module keys on this list (facility_id), so keep it accurate.</div>
   <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px">
     <strong class="sans" style="font-size:13px">＋ Onboard a facility</strong>
@@ -6108,11 +6109,12 @@ async function editFacIntegration(id){
     <label>App ID (recipient/location id)</label><input id="ki_app" placeholder="${k.configured?'•••••• (saved)':'Kipu App ID'}"/>
     <label>Base URL <span class="hint">(optional)</span></label><input id="ki_base" value="${esc(k.baseUrl||'')}" placeholder="https://api.kipuapi.com"/>
     <label>Location ID <span class="hint">(scopes the census to this site)</span></label><input id="ki_loc" value="${esc(k.locationId||'')}" placeholder="e.g. 12345"/>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:8px;text-transform:none;letter-spacing:0"><input type="checkbox" id="ki_auto" ${k.autoSync?'checked':''}/> Auto-sync this facility's roster on the schedule <span class="hint">(turn on only AFTER a manual ▶ sync looked right)</span></label>
     <div class="toolbar" style="justify-content:flex-start;gap:6px;margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="testFacKipu(${id})">Test connection</button><button class="btn btn-ghost btn-sm sans" onclick="syncFacKipu(${id})" title="Pull this facility's roster now (manual, stamps this facility)">▶ Sync roster now</button><span class="hint" id="ki_msg"></span></div>`);
   save.textContent='Save connection';
   save.onclick=async()=>{
     const g=x=>($(x)||{}).value||'';
-    try{ await api('/org/facilities/'+id+'/integrations',{method:'POST',body:JSON.stringify({kind:'kipu',accessId:g('ki_access'),secretKey:g('ki_secret'),appId:g('ki_app'),baseUrl:g('ki_base'),locationId:g('ki_loc')})}); if($('ki_msg'))$('ki_msg').textContent='✓ Saved'; }
+    try{ await api('/org/facilities/'+id+'/integrations',{method:'POST',body:JSON.stringify({kind:'kipu',accessId:g('ki_access'),secretKey:g('ki_secret'),appId:g('ki_app'),baseUrl:g('ki_base'),locationId:g('ki_loc'),autoSync:!!($('ki_auto')||{}).checked})}); if($('ki_msg'))$('ki_msg').textContent='✓ Saved'; }
     catch(e){ if($('ki_msg'))$('ki_msg').textContent=e.message; }
   };
 }
@@ -6121,6 +6123,56 @@ async function syncFacKipu(id){ const m=$('ki_msg'); if(!confirm('Pull this faci
 async function saveOrgFac(id){
   const b={}; document.querySelectorAll(`[data-of="${id}"]`).forEach(el=>{ b[el.dataset.k]=el.value; });
   try{ await api('/org/facilities/'+id,{method:'POST',body:JSON.stringify(b)}); loadOrgFacs(); }catch(e){ alert(e.message); }
+}
+// ⚙️ Per-facility operations settings: each building runs on its own numbers.
+async function editFacSettings(id){
+  let d,st; try{ [d,st]=await Promise.all([api('/org/facilities'),api('/org/facilities/'+id+'/settings')]); }catch(e){ alert(e.message); return; }
+  const f=(d.facilities||[]).find(x=>x.id===id); if(!f) return;
+  const s=st.settings||{};
+  const save=hmodal(`<h3>⚙️ ${esc(f.name)} — building settings</h3>
+    <p class="sub sans" style="margin:0 0 8px">Everything here applies to THIS building only. Blank = fall back to the company-wide setting.</p>
+    <strong class="sans" style="font-size:12px">Clock-in geofence</strong>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;margin:4px 0 8px">
+      <input id="fs_lat" value="${esc(s.geo_lat||'')}" placeholder="Latitude" style="width:110px"/>
+      <input id="fs_lon" value="${esc(s.geo_lon||'')}" placeholder="Longitude" style="width:110px"/>
+      <input id="fs_radius" value="${esc(s.geo_radius||'')}" placeholder="Radius (m)" style="width:90px"/>
+      <button class="btn btn-ghost btn-sm sans" onclick="fsUseHere()" title="Use this device's current location">📍 Use my location</button>
+    </div>
+    <strong class="sans" style="font-size:12px">On-call</strong>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;margin:4px 0 8px">
+      <input id="fs_phone" value="${esc(s.oncall_phone||'')}" placeholder="On-call phone" style="width:150px"/>
+      <input id="fs_oncall" value="${esc(s.oncall_email||'')}" placeholder="On-call email" style="min-width:200px"/>
+    </div>
+    <strong class="sans" style="font-size:12px">Kiosk</strong>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;margin:4px 0 8px">
+      <input id="fs_kiosk" value="${esc(s.kiosk_code||'')}" placeholder="This building's kiosk code" style="width:200px"/>
+      <span class="hint">A kiosk signed in with this code lists only this building's clients.</span>
+    </div>
+    <strong class="sans" style="font-size:12px">Report recipients</strong>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;margin:4px 0 2px">
+      <input id="fs_billing" value="${esc(s.billing_email||'')}" placeholder="Billing-readiness email(s)" style="min-width:220px"/>
+      <input id="fs_report" value="${esc(s.report_email||'')}" placeholder="Daily report email(s)" style="min-width:220px"/>
+    </div>`);
+  save.textContent='Save settings';
+  save.onclick=async()=>{
+    const g=x=>($(x)||{}).value||'';
+    try{
+      await api('/org/facilities/'+id+'/settings',{method:'POST',body:JSON.stringify({
+        geo_lat:g('fs_lat').trim(), geo_lon:g('fs_lon').trim(), geo_radius:g('fs_radius').trim(),
+        oncall_phone:g('fs_phone').trim(), oncall_email:g('fs_oncall').trim(),
+        kiosk_code:g('fs_kiosk').trim(), billing_email:g('fs_billing').trim(), report_email:g('fs_report').trim(),
+      })});
+      closeHModal();
+    }catch(e){ alert(e.message); }
+  };
+}
+function fsUseHere(){
+  if(!navigator.geolocation){ alert('This device cannot share its location.'); return; }
+  navigator.geolocation.getCurrentPosition(p=>{
+    if($('fs_lat'))$('fs_lat').value=p.coords.latitude.toFixed(6);
+    if($('fs_lon'))$('fs_lon').value=p.coords.longitude.toFixed(6);
+    if($('fs_radius')&&!$('fs_radius').value)$('fs_radius').value='300';
+  },()=>alert('Could not read this device\'s location — enter the coordinates by hand.'),{enableHighAccuracy:true,timeout:8000});
 }
 // ── Permission matrix editor: roles × modules; a check GRANTS the module live ──
 let PERM_DATA=null;

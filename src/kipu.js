@@ -153,7 +153,7 @@ export async function kipuPatientPhoto(casefileId, conn) {
 // have several casefiles (re-admissions); a note may belong to a different
 // casefile than the current stay, so try master-scoped addressing first (works
 // across stays), then casefile-scoped. Throws the last error if all fail.
-async function fetchEvalDetail(casefileId, evalId) {
+async function fetchEvalDetail(casefileId, evalId, conn = null) {
   const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
   const phi = process.env.KIPU_PHI_LEVEL || 'high';
   const e = encodeURIComponent;
@@ -167,7 +167,7 @@ async function fetchEvalDetail(casefileId, evalId) {
   ];
   let lastErr = 'detail fetch failed';
   for (const url of cands) {
-    try { const d = await kipuGet(url); const ev = d?.patient_evaluation || d?.evaluation || d; if (ev && typeof ev === 'object') return ev; }
+    try { const d = await kipuGet(url, conn); const ev = d?.patient_evaluation || d?.evaluation || d; if (ev && typeof ev === 'object') return ev; }
     catch (err) { lastErr = String(err.message || err).slice(0, 160); }
   }
   throw new Error(lastErr);
@@ -176,7 +176,7 @@ async function fetchEvalDetail(casefileId, evalId) {
 // The list of a patient's evaluations. By default scoped to the CURRENT stay
 // (the casefile) via the master sub-resource; pass { all:true } for the whole
 // cross-admission history. Walks every page until exhausted.
-async function evalListRaw(casefileId, { all = false } = {}) {
+async function evalListRaw(casefileId, { all = false, conn = null } = {}) {
   const s = String(casefileId), master = s.split(':')[0], uuid = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
   const phi = process.env.KIPU_PHI_LEVEL || 'high', e = encodeURIComponent;
   const tmpl = process.env.KIPU_NOTES_PATH || '/api/patient_evaluations?patient_id={id}';
@@ -185,7 +185,7 @@ async function evalListRaw(casefileId, { all = false } = {}) {
     : [`/api/patients/${master}/patient_evaluations?phi_level=${phi}&patient_master_id=${e(uuid)}`, tmpl.replace('{id}', s)];
   let list = null, baseUsed = null;
   for (const base of bases) {
-    try { const d = await kipuGet(base); const arr = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : null); if (Array.isArray(arr)) { list = arr; baseUsed = base; break; } }
+    try { const d = await kipuGet(base, conn); const arr = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : null); if (Array.isArray(arr)) { list = arr; baseUsed = base; break; } }
     catch { /* try next base */ }
   }
   if (!list) return [];
@@ -193,7 +193,7 @@ async function evalListRaw(casefileId, { all = false } = {}) {
   const seenIds = new Set(list.map((x) => x.id ?? x.evaluation_id));
   for (let pg = 2; pg <= 80; pg++) {
     let chunk = [];
-    try { const d = await kipuGet(baseUsed + sep + 'page=' + pg); chunk = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : []); }
+    try { const d = await kipuGet(baseUsed + sep + 'page=' + pg, conn); chunk = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : []); }
     catch { break; }
     if (!chunk.length) break;
     const fresh = chunk.filter((x) => { const k = x.id ?? x.evaluation_id; if (k == null || seenIds.has(k)) return false; seenIds.add(k); return true; });
@@ -2066,9 +2066,9 @@ export async function kipuPullAuths() {
 // to reading the newest few note DETAILS for their dates so the day can still
 // be judged. dated:false + notes:[] means "couldn't determine" — the caller
 // must show that as a sync problem, never as complete.
-export async function kipuDayEncounters(casefileId, date) {
+export async function kipuDayEncounters(casefileId, date, conn = null) {
   let list;
-  try { list = await evalListRaw(casefileId, { all: false }); }
+  try { list = await evalListRaw(casefileId, { all: false, conn }); }
   catch (e) { return { ok: false, error: e.message }; }
   const anyDated = list.some((x) => x.created_at);
   if (anyDated) {
@@ -2082,7 +2082,7 @@ export async function kipuDayEncounters(casefileId, date) {
   const out = [];
   await mapLimit(recent, 4, async (x) => {
     try {
-      const ev = await fetchEvalDetail(casefileId, x.id ?? x.evaluation_id);
+      const ev = await fetchEvalDetail(casefileId, x.id ?? x.evaluation_id, conn);
       const d = String(ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '').slice(0, 10);
       if (d === date) out.push({ id: x.id ?? x.evaluation_id, name: String(x.name || ''), status: String(x.status || ev?.status || ''), time: (String(ev?.created_at || '').match(/[T ](\d{2}:\d{2})/) || [])[1] || '', author: evalAuthor(x, ev) });
     } catch { /* skip note */ }
@@ -2090,7 +2090,7 @@ export async function kipuDayEncounters(casefileId, date) {
   return { ok: true, dated: false, notes: out };
 }
 // Author of one specific note (used only for the note that qualified the day).
-export async function kipuNoteAuthor(casefileId, evalId) {
-  try { const ev = await fetchEvalDetail(casefileId, evalId); return evalAuthor(ev) || null; }
+export async function kipuNoteAuthor(casefileId, evalId, conn = null) {
+  try { const ev = await fetchEvalDetail(casefileId, evalId, conn); return evalAuthor(ev) || null; }
   catch { return null; }
 }

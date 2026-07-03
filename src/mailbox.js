@@ -25,7 +25,33 @@ db.exec(`CREATE TABLE IF NOT EXISTS desk_mail (
   acted_at TEXT,
   created TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_desk_mail_cat ON desk_mail(category, status);`);
+CREATE INDEX IF NOT EXISTS idx_desk_mail_cat ON desk_mail(category, status);
+CREATE TABLE IF NOT EXISTS desk_mail_rules (
+  id INTEGER PRIMARY KEY,
+  from_email TEXT UNIQUE,              -- sender to auto-ignore
+  why TEXT,                            -- 'muted' | 'auto: dismissed 3x'
+  created TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+
+export function muteSender(fromEmail, why = 'muted') {
+  const e = String(fromEmail || '').trim().toLowerCase();
+  if (!e) return false;
+  db.prepare(`INSERT OR IGNORE INTO desk_mail_rules (from_email, why) VALUES (?,?)`).run(e, why);
+  return true;
+}
+export function unmuteSender(fromEmail) {
+  db.prepare(`DELETE FROM desk_mail_rules WHERE from_email = ?`).run(String(fromEmail || '').trim().toLowerCase());
+}
+export function mutedSenders() { return db.prepare(`SELECT from_email, why, created FROM desk_mail_rules ORDER BY id DESC`).all(); }
+// The learning loop: three dismissals of the same sender = he's told us enough.
+export function noteDismissal(fromEmail) {
+  const e = String(fromEmail || '').trim().toLowerCase();
+  if (!e) return null;
+  const n = db.prepare(`SELECT COUNT(*) c FROM desk_mail WHERE lower(from_email)=? AND status='dismissed'`).get(e).c;
+  const kept = db.prepare(`SELECT COUNT(*) c FROM desk_mail WHERE lower(from_email)=? AND status='done'`).get(e).c;
+  if (n >= 3 && kept === 0) { muteSender(e, 'auto: dismissed 3×'); return e; }
+  return null;
+}
 
 const LOGIN = 'https://login.microsoftonline.com';
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -129,9 +155,15 @@ export async function pollMailbox({ max = 25 } = {}) {
       if (triaged >= max) break;   // stay gentle on the AI budget; next poll continues
       const fromName = m.from?.emailAddress?.name || '';
       const fromEmail = m.from?.emailAddress?.address || '';
+      // Muted senders skip triage entirely — the owner (or three of his
+      // dismissals) already made this call.
+      const muted = fromEmail && db.prepare(`SELECT why FROM desk_mail_rules WHERE from_email = ?`).get(fromEmail.toLowerCase());
       let t;
-      try { t = await triageEmail({ from: `${fromName} <${fromEmail}>`, subject: m.subject || '', preview: m.bodyPreview || '', myEmail: getState('msgraph_user') || '' }); }
-      catch (e) { console.error('[mail] triage:', e.message); t = { needs_me: true, category: 'review', reason: 'Triage failed — surfaced so nothing is missed.', action: '' }; }
+      if (muted) t = { needs_me: false, category: 'ignore', reason: `Muted sender (${muted.why}).`, action: '' };
+      else {
+        try { t = await triageEmail({ from: `${fromName} <${fromEmail}>`, subject: m.subject || '', preview: m.bodyPreview || '', myEmail: getState('msgraph_user') || '' }); }
+        catch (e) { console.error('[mail] triage:', e.message); t = { needs_me: true, category: 'review', reason: 'Triage failed — surfaced so nothing is missed.', action: '' }; }
+      }
       const cat = t.needs_me ? (['decision', 'followup', 'review'].includes(t.category) ? t.category : 'review') : 'ignore';
       ins.run(m.id, m.receivedDateTime || null, fromName, fromEmail, String(m.subject || '').slice(0, 300), String(m.bodyPreview || '').slice(0, 400), m.webLink || null, cat, String(t.reason || '').slice(0, 300), String(t.action || '').slice(0, 200));
       triaged++;

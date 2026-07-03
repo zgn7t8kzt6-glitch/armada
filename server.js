@@ -22,7 +22,7 @@ import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ens
 import { classifyDeskItem, draftDeskEmail } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
-import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard } from './src/mailbox.js';
+import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard, muteSender, unmuteSender, mutedSenders, noteDismissal } from './src/mailbox.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
 import { ARMADA_PRINCIPLES, ARMADA_STANDARD, ALL_BEHIND_YOU, HANDBOOK, HANDBOOK_INTRO, todaysPrinciple, todaysSafety, chapterForRole } from './src/handbook.js';
 
@@ -1489,17 +1489,27 @@ app.post('/api/mail/poll', requireAuth, requireAdmin, async (req, res) => {
   res.json(r);
 });
 app.get('/api/mail/board', requireAuth, requireAdmin, (req, res) => res.json(mailBoard()));
+app.post('/api/mail/mute', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.unmute) { unmuteSender(b.from_email); return res.json({ ok: true }); }
+  if (!muteSender(b.from_email)) return res.status(400).json({ error: 'Which sender?' });
+  res.json({ ok: true });
+});
+app.get('/api/mail/muted', requireAuth, requireAdmin, (req, res) => res.json({ muted: mutedSenders() }));
 app.post('/api/mail/:id', requireAuth, requireAdmin, (req, res) => {
   const m = db.prepare(`SELECT * FROM desk_mail WHERE id=?`).get(+req.params.id);
   if (!m) return res.status(404).json({ error: 'Not found.' });
   const b = req.body || {};
+  let autoMuted = null;
   if (b.status && ['done', 'dismissed', 'open'].includes(b.status)) {
     db.prepare(`UPDATE desk_mail SET status=?, acted_at=CASE WHEN ?='open' THEN NULL ELSE datetime('now') END WHERE id=?`).run(b.status, b.status, m.id);
+    // Learning loop: a third dismissal of the same sender mutes them for good.
+    if (b.status === 'dismissed') autoMuted = noteDismissal(m.from_email);
   }
   if (b.category && ['decision', 'followup', 'review', 'ignore'].includes(b.category)) {
     db.prepare(`UPDATE desk_mail SET category=? WHERE id=?`).run(b.category, m.id);
   }
-  res.json({ ok: true });
+  res.json({ ok: true, autoMuted });
 });
 app.post('/api/mail/:id/to-desk', requireAuth, requireAdmin, (req, res) => {
   const m = db.prepare(`SELECT * FROM desk_mail WHERE id=?`).get(+req.params.id);

@@ -6456,6 +6456,7 @@ async function deskMail(b){
     <div class="toolbar" style="gap:4px;margin-top:6px;justify-content:flex-start">
       <button class="btn btn-ghost btn-sm sans" title="Handled" onclick="mailAct(${m.id},'done')">✓</button>
       <button class="btn btn-ghost btn-sm sans" title="Dismiss" onclick="mailAct(${m.id},'dismissed')">✕</button>
+      <button class="btn btn-ghost btn-sm sans" title="Never show this sender again" onclick="mailMute('${esc(m.from_email||'')}',${m.id})">🔇</button>
       <button class="btn btn-ghost btn-sm sans" title="Make it a Desk task" onclick="mailToDesk(${m.id})">➕ Desk</button>
       ${m.web_link?`<a class="btn btn-ghost btn-sm sans" href="${esc(m.web_link)}" target="_blank" rel="noopener">↗ Open</a>`:''}
     </div></div>`;
@@ -6471,7 +6472,11 @@ async function deskMail(b){
     </div>
     <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Recently ignored (${(d.ignoredRecent||[]).length}) — spot checks welcome</summary>
       ${(d.ignoredRecent||[]).map(m=>`<div class="hint" style="margin-top:4px">• <strong>${esc(m.subject||'')}</strong> — ${esc(m.from_name||m.from_email||'')} <span style="opacity:.7">(${esc(m.reason||'')})</span></div>`).join('')||'<div class="hint">None yet.</div>'}
-    </details></div>`;
+    </details>
+    <details style="margin-top:6px"><summary class="hint" style="cursor:pointer">Muted senders — never triaged, never shown</summary><div id="mailMutedList" class="hint" style="margin-top:4px">Loading…</div></details></div>`;
+  api('/mail/muted').then(r=>{ const el=$('mailMutedList'); if(!el) return;
+    el.innerHTML=(r.muted||[]).map(x=>`<div style="margin-top:3px">🔇 ${esc(x.from_email)} <span style="opacity:.7">(${esc(x.why||'')})</span> <a href="#" onclick="mailUnmute('${esc(x.from_email)}');return false">unmute</a></div>`).join('')||'No muted senders yet — tap 🔇 on any card, or dismiss the same sender 3 times and it mutes itself.';
+  }).catch(()=>{});
 }
 async function mailSaveSetup(){
   const m=$('mg_msg');
@@ -6497,7 +6502,18 @@ async function mailPoll(btn){
   if(btn){ btn.disabled=false; btn.textContent='↻ Check now'; }
   renderDeskTab();
 }
-async function mailAct(id,status){ try{ await api('/mail/'+id,{method:'POST',body:JSON.stringify({status})}); }catch(_e){} renderDeskTab(); }
+async function mailAct(id,status){
+  try{ const r=await api('/mail/'+id,{method:'POST',body:JSON.stringify({status})});
+    if(r.autoMuted) alert('Got it — that\'s the third dismissal from '+r.autoMuted+', so they\'re muted from now on. Unmute anytime under "Muted senders."');
+  }catch(_e){}
+  renderDeskTab();
+}
+async function mailMute(email,id){
+  if(!email){ alert('No sender address on this one.'); return; }
+  try{ await api('/mail/mute',{method:'POST',body:JSON.stringify({from_email:email})}); if(id) await api('/mail/'+id,{method:'POST',body:JSON.stringify({status:'dismissed'})}); }catch(e){ alert(e.message); }
+  renderDeskTab();
+}
+async function mailUnmute(email){ try{ await api('/mail/mute',{method:'POST',body:JSON.stringify({from_email:email,unmute:true})}); }catch(_e){} renderDeskTab(); }
 async function mailToDesk(id){ try{ await api('/mail/'+id+'/to-desk',{method:'POST'}); }catch(e){ alert(e.message); } renderDeskTab(); }
 async function mailDisconnect(){ if(!confirm('Sign this mailbox out? Triage stops until you reconnect.'))return; try{ await api('/mail/disconnect',{method:'POST'}); }catch(_e){} renderDeskTab(); }
 function deskSetup(b){

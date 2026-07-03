@@ -2955,3 +2955,53 @@ if (getState('phase2_legacy_facility_backfill') !== 'done') {
     }
   } catch (e) { console.error('[phase2 backfill]', e.message); }
 }
+
+// ── REBUILD PHASE 3 — per-facility integrations + service-line modules ────────
+// Each facility can carry its OWN Kipu instance / location, Salesforce scope, etc.
+// Secrets live here (upload→DB, never in the repo, never returned by read APIs) —
+// the resolver falls back to the shared env credentials when a facility has none,
+// so the existing Armada connection keeps working with zero config.
+db.exec(`CREATE TABLE IF NOT EXISTS facility_integrations (
+  id INTEGER PRIMARY KEY,
+  facility_id INTEGER NOT NULL REFERENCES org_facilities(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                       -- 'kipu' | 'salesforce'
+  config TEXT,                              -- JSON (credentials + location); secret
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by TEXT,
+  UNIQUE(facility_id, kind)
+);`);
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_facility_integrations_fac ON facility_integrations(facility_id)`); } catch { /* optional */ }
+
+// Outpatient census rows finally carry their facility (Wheatfield/Spark/Dayton each
+// have their own outpatient location). Legacy NULLs → detox by the Phase-2 backfill
+// is wrong for outpatient, so stamp them to the configured outpatient location once.
+addColumn('outpatient_clients', 'facility_id', 'INTEGER');
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_outpatient_clients_fac ON outpatient_clients(facility_id)`); } catch { /* optional */ }
+
+// ── Service-line module matrix: what each facility TYPE gets by default ────────
+// Onboarding a facility of a given type turns these modules on; the owner can then
+// override per facility (org_facilities.modules JSON). Shared modules (team, tasks,
+// messages, reports) apply to every type. This is the "configure, don't fork" lever.
+export const MODULE_CATALOG = [
+  'census', 'admissions', 'arrivals', 'discharges', 'clinical', 'rounds', 'beds',
+  'billingready', 'authregister', 'casemgmt', 'scheduling', 'concierge', 'incidents',
+  'inventory', 'maintenance', 'staffing', 'compliance', 'morale', 'housing',
+  'outpatient_census', 'rent', 'orh', 'corporate', 'hr', 'finance',
+];
+export const TYPE_MODULES = {
+  'detox':        ['census', 'admissions', 'arrivals', 'discharges', 'clinical', 'rounds', 'beds', 'billingready', 'authregister', 'casemgmt', 'scheduling', 'concierge', 'incidents', 'inventory', 'maintenance', 'staffing', 'compliance', 'morale'],
+  'residential':  ['census', 'admissions', 'arrivals', 'discharges', 'clinical', 'rounds', 'beds', 'billingready', 'authregister', 'casemgmt', 'scheduling', 'concierge', 'incidents', 'inventory', 'maintenance', 'staffing', 'compliance', 'morale'],
+  'outpatient':   ['outpatient_census', 'admissions', 'discharges', 'clinical', 'billingready', 'authregister', 'casemgmt', 'scheduling', 'incidents', 'compliance', 'staffing', 'morale'],
+  'sober-living': ['housing', 'rent', 'orh', 'incidents', 'maintenance', 'inventory', 'staffing', 'compliance', 'morale'],
+  'corporate':    ['corporate', 'hr', 'finance', 'compliance', 'maintenance', 'inventory', 'staffing'],
+};
+export function defaultModulesFor(type) {
+  return (TYPE_MODULES[type] || TYPE_MODULES['outpatient']).slice();
+}
+// The modules a facility actually has (its override, else its type default).
+export function facilityModules(fac) {
+  if (!fac) return [];
+  try { const m = JSON.parse(fac.modules || 'null'); if (Array.isArray(m) && m.length) return m; } catch { /* fall through */ }
+  return defaultModulesFor(fac.type);
+}

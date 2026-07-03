@@ -4,13 +4,13 @@ import QRCode from 'qrcode';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { db, audit, getState, setState, publishEvent, nameInitials, defaultFacilityId } from './src/db.js';
+import { db, audit, getState, setState, publishEvent, nameInitials, defaultFacilityId, MODULE_CATALOG, TYPE_MODULES, defaultModulesFor, facilityModules } from './src/db.js';
 import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, emailStatus, surveyMetrics, sendEmail, sendSms, smsConfigured, smsStatus, DEFAULT_CC } from './src/report.js';
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -1522,7 +1522,8 @@ app.post('/api/desk/digest-now', requireAuth, requireAdmin, async (req, res) => 
 });
 
 app.get('/api/org/facilities', requireAuth, (req, res) => {
-  res.json({ facilities: orgFacilities(), departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
+  const facs = orgFacilities().map((f) => ({ ...f, modules: facilityModules(f) }));
+  res.json({ facilities: facs, departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
 });
 // Facility TYPES define the service line; each type turns a default module set on.
 // (Rebuild Blueprint §4 — configure, don't fork.)
@@ -1545,10 +1546,100 @@ app.post('/api/org/facilities', requireAuth, requireAdmin, (req, res) => {
       String(b.kipu_location_name || '').slice(0, 120) || '', JSON.stringify([name.slice(0, 120)]), (b.beds === '' || b.beds == null) ? null : +b.beds,
       sortMax + 1, String(b.timezone || '').slice(0, 60) || 'America/New_York',
       Array.isArray(b.services) ? JSON.stringify(b.services.map((x) => String(x).slice(0, 40)).slice(0, 12)) : null,
-      Array.isArray(b.modules) ? JSON.stringify(b.modules.map((x) => String(x).slice(0, 40)).slice(0, 40)) : null);
+      JSON.stringify(Array.isArray(b.modules) && b.modules.length ? b.modules.map((x) => String(x).slice(0, 40)).slice(0, 40) : defaultModulesFor(type)));
   try { publishEvent({ event: 'facility.created', entity: 'org_facility', entity_id: Number(info.lastInsertRowid), facility_id: Number(info.lastInsertRowid), actor: req.user.username, summary: `${name} onboarded (${type})` }); } catch { /* feed only */ }
   audit({ user: req.user, action: 'FACILITY_CREATE', entity: 'org_facility', entity_id: Number(info.lastInsertRowid), detail: `${name} · ${type}`, ip: req.ip });
   res.json({ ok: true, id: Number(info.lastInsertRowid), fkey });
+});
+// The module catalog + type defaults — drives the onboarding wizard's checkboxes.
+app.get('/api/org/module-catalog', requireAuth, requireAdmin, (req, res) => {
+  res.json({ catalog: MODULE_CATALOG, byType: TYPE_MODULES, types: FACILITY_TYPES_ORG });
+});
+// ── Per-facility Kipu connection (Rebuild Phase 3) ────────────────────────────
+// Resolve a facility's Kipu connection from facility_integrations, else null so the
+// caller falls back to the shared env credentials. NEVER exposed to the client.
+function resolveKipuConn(facilityId) {
+  try {
+    const row = db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu' AND active=1`).get(+facilityId);
+    if (!row?.config) return null;
+    const c = JSON.parse(row.config);
+    if (c.accessId && c.secretKey && c.appId) return c;
+  } catch { /* fall back to env */ }
+  return null;
+}
+// Non-secret status of a facility's integrations (booleans + location only) —
+// the secret keys are write-only and never returned.
+app.get('/api/org/facilities/:id/integrations', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`SELECT kind, config, active, updated_at, updated_by FROM facility_integrations WHERE facility_id=?`).all(+req.params.id);
+  const out = {};
+  for (const r of rows) {
+    let c = {}; try { c = JSON.parse(r.config || '{}'); } catch { /* corrupt */ }
+    out[r.kind] = r.kind === 'kipu'
+      ? { configured: !!(c.accessId && c.secretKey && c.appId), baseUrl: c.baseUrl || '', locationId: c.locationId || '', active: !!r.active, updatedAt: r.updated_at, updatedBy: r.updated_by }
+      : { configured: !!(c.instanceUrl || c.facilityValue), facilityValue: c.facilityValue || '', active: !!r.active, updatedAt: r.updated_at, updatedBy: r.updated_by };
+  }
+  res.json({ integrations: out });
+});
+// Save a facility's Kipu (or Salesforce) connection. Secrets flow upload→DB only.
+app.post('/api/org/facilities/:id/integrations', requireAuth, requireAdmin, (req, res) => {
+  const fac = db.prepare(`SELECT id, name FROM org_facilities WHERE id=?`).get(+req.params.id);
+  if (!fac) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  const kind = b.kind === 'salesforce' ? 'salesforce' : 'kipu';
+  // Merge onto any existing config so a blank secret means "keep the saved one".
+  let cur = {};
+  try { cur = JSON.parse(db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind=?`).get(fac.id, kind)?.config || '{}'); } catch { /* fresh */ }
+  let cfg;
+  if (kind === 'kipu') {
+    cfg = {
+      accessId: (b.accessId != null && String(b.accessId).trim()) ? String(b.accessId).trim() : cur.accessId,
+      secretKey: (b.secretKey != null && String(b.secretKey).trim()) ? String(b.secretKey).trim() : cur.secretKey,
+      appId: (b.appId != null && String(b.appId).trim()) ? String(b.appId).trim() : cur.appId,
+      baseUrl: b.baseUrl != null ? String(b.baseUrl).trim() : (cur.baseUrl || ''),
+      locationId: b.locationId != null ? String(b.locationId).trim() : (cur.locationId || ''),
+    };
+  } else {
+    cfg = { instanceUrl: b.instanceUrl != null ? String(b.instanceUrl).trim() : cur.instanceUrl, facilityValue: b.facilityValue != null ? String(b.facilityValue).trim() : cur.facilityValue };
+  }
+  db.prepare(`INSERT INTO facility_integrations (facility_id, kind, config, active, updated_at, updated_by) VALUES (?,?,?,?,datetime('now'),?)
+    ON CONFLICT(facility_id, kind) DO UPDATE SET config=excluded.config, active=excluded.active, updated_at=excluded.updated_at, updated_by=excluded.updated_by`)
+    .run(fac.id, kind, JSON.stringify(cfg), b.active === false ? 0 : 1, req.user.name);
+  audit({ user: req.user, action: 'INTEGRATION_SET', entity: 'org_facility', entity_id: fac.id, detail: `${fac.name} · ${kind}`, ip: req.ip });   // never log secrets
+  res.json({ ok: true });
+});
+// Test a facility's Kipu connection (its own credentials, or env fallback) — this is
+// how you verify Spark/Wheatfield keys before turning on a live sync.
+app.post('/api/org/facilities/:id/kipu-test', requireAuth, requireAdmin, async (req, res) => {
+  const fac = db.prepare(`SELECT id, kipu_location_name FROM org_facilities WHERE id=?`).get(+req.params.id);
+  if (!fac) return res.status(404).json({ error: 'Not found.' });
+  const conn = resolveKipuConn(fac.id);
+  if (!kipuConnConfigured(conn)) return res.status(400).json({ error: conn ? 'This connection is incomplete.' : 'No Kipu connection saved for this facility, and no shared credentials to fall back on.' });
+  try {
+    const locId = (db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu'`).get(fac.id)?.config
+      ? JSON.parse(db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu'`).get(fac.id).config).locationId : '') || '';
+    const r = await kipuTest(conn, locId);
+    res.json({ ok: true, own: !!conn, sampleCount: r.sampleCount });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Manually sync ONE facility's Kipu roster with its own connection (Phase 3).
+// Deliberately manual — a second facility's live sync is verified by hand before
+// anyone wires it into the 6h auto-scheduler, so a bad location filter can't
+// silently corrupt census. Stamps every synced row with THIS facility.
+let _facSyncRunning = false;
+app.post('/api/org/facilities/:id/kipu-sync', requireAuth, requireAdmin, async (req, res) => {
+  const fac = db.prepare(`SELECT id, name, kipu_location_name FROM org_facilities WHERE id=?`).get(+req.params.id);
+  if (!fac) return res.status(404).json({ error: 'Not found.' });
+  const conn = resolveKipuConn(fac.id);
+  if (!conn) return res.status(400).json({ error: 'Save this facility\'s own Kipu connection first — the shared credentials belong to the primary facility and must not be re-stamped here.' });
+  if (_facSyncRunning) return res.status(409).json({ error: 'A facility sync is already running — try again in a moment.' });
+  let locId = ''; try { locId = JSON.parse(db.prepare(`SELECT config FROM facility_integrations WHERE facility_id=? AND kind='kipu'`).get(fac.id)?.config || '{}').locationId || ''; } catch { /* none */ }
+  _facSyncRunning = true;
+  try {
+    const r = await kipuSyncRoster({ conn, facilityId: fac.id, locationId: locId, locationName: fac.kipu_location_name || '' });
+    audit({ user: req.user, action: 'KIPU_FACILITY_SYNC', entity: 'org_facility', entity_id: fac.id, detail: `${fac.name}: ${JSON.stringify(r).slice(0, 120)}`, ip: req.ip });
+    res.json({ ok: true, result: r });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+  finally { _facSyncRunning = false; }
 });
 app.post('/api/org/facilities/:id', requireAuth, requireAdmin, (req, res) => {
   const f = db.prepare(`SELECT * FROM org_facilities WHERE id=?`).get(req.params.id);
@@ -3971,8 +4062,8 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
   for (const c of admitRows) { if (isReferredOut(c)) continue; const k = stayKey(c); if (seenA.has(k)) continue; seenA.add(k); admitted++; }
   // People who are CURRENTLY here. A "discharge" for someone who is still an active
   // patient is a phantom (the census-churn bug) — they never actually left.
-  const activeKeys = new Set(db.prepare(`SELECT kipu_id, name, pref FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map((c) => dupKeyOf(c)));
-  const dischRaw = db.prepare(`SELECT id, pref, name, kipu_id, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist, diagnosis
+  const activeKeys = new Set(db.prepare(`SELECT kipu_id, name, pref, facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all().map((c) => dupKeyOf(c)));
+  const dischRaw = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, discharge_status, discharge_reason, discharge_improve, admit, discharge_date, referral_source, therapist, diagnosis
     FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ? ORDER BY discharge_date DESC`).all(since, end);
   const seenD = new Set(); const dischAll = [];
   for (const c of dischRaw) { const k = stayKey(c); if (seenD.has(k)) continue; seenD.add(k); dischAll.push(c); }
@@ -4114,7 +4205,10 @@ function clientChildTables() {
   return out;
 }
 const dupNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
-const dupKeyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || dupNorm(c.name);
+// Person-within-facility key (review fix): the same human at two facilities is
+// two EPISODES — never one "duplicate" group. Rows selected for dup work must
+// include facility_id or they fall into the shared 0-bucket.
+const dupKeyOf = (c) => (((c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || dupNorm(c.name)) + '|' + (c.facility_id || 0));
 // Shared merge core (used by the manual tool AND the automatic de-dupe). Reassigns
 // every client-linked table to the kept record, backfills only stable identity/
 // clinical fields when blank (never discharge/location state), and RETIRES the
@@ -4157,11 +4251,13 @@ function isShellDuplicate(c, childCountFn) {
 // intact). Off via setState('auto_dedupe','off').
 function autoMergeShellDuplicates() {
   if (getState('auto_dedupe') === 'off') return 0;
-  const rows = db.prepare(`SELECT id, pref, name, kipu_id, admit, admit_time, discharge_reason, therapist, diagnosis, allergies, medications, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, admit, admit_time, discharge_reason, therapist, diagnosis, allergies, medications, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
   const childTbls = clientChildTables();
   const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
   const groups = {};
-  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; (groups[k] = groups[k] || []).push(c); }
+  // Group by Kipu MASTER id AND facility — a person with episodes at two facilities
+  // must NEVER be merged across them (Rebuild Phase 3: cross-facility collapse guard).
+  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; const gk = k + '|' + (c.facility_id || 0); (groups[gk] = groups[gk] || []).push(c); }
   let total = 0;
   for (const k of Object.keys(groups)) {
     const g = groups[k]; if (g.length < 2) continue;
@@ -4182,11 +4278,11 @@ function autoMergeShellDuplicates() {
 // the sync bug — into the row that DOES have the real activity. Rows with real linked
 // records (rounds, notes, incidents…) are kept as genuine stays. Reversible.
 function cleanupChurnDuplicates() {
-  const rows = db.prepare(`SELECT id, pref, name, kipu_id, admit, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, admit, active FROM clients WHERE merged_into IS NULL AND kipu_id IS NOT NULL AND kipu_id != ''`).all();
   const childTbls = clientChildTables();
   const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
   const groups = {};
-  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; (groups[k] = groups[k] || []).push(c); }
+  for (const c of rows) { const k = String(c.kipu_id).split(':')[0]; if (!k) continue; const gk = k + '|' + (c.facility_id || 0); (groups[gk] = groups[gk] || []).push(c); }
   let total = 0;
   for (const k of Object.keys(groups)) {
     const g = groups[k]; if (g.length < 2) continue;
@@ -4209,12 +4305,14 @@ function cleanupChurnDuplicates() {
 // every discharge metric at the source, not query-by-query. Reversible.
 function cleanupPhantomDischarges() {
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
-  const keyOf = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || norm(c.name);
+  // Person AND facility: a discharge row at facility B is never a phantom of an
+  // active stay at facility A (review fix — cross-facility guard).
+  const keyOf = (c) => (((c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || norm(c.name)) + '|' + (c.facility_id || 0));
   const childTbls = clientChildTables();
   const childCount = (id) => { let n = 0; for (const t of childTbls) { try { n += db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE client_id = ?`).get(id).n; } catch {} } return n; };
   const activeByKey = {};
-  for (const a of db.prepare(`SELECT id, kipu_id, name FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all()) { const k = keyOf(a); if (k && !activeByKey[k]) activeByKey[k] = a; }
-  const disch = db.prepare(`SELECT id, kipu_id, name, discharge_status, discharge_reason FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL`).all();
+  for (const a of db.prepare(`SELECT id, kipu_id, name, facility_id FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).all()) { const k = keyOf(a); if (k && !activeByKey[k]) activeByKey[k] = a; }
+  const disch = db.prepare(`SELECT id, kipu_id, name, facility_id, discharge_status, discharge_reason FROM clients WHERE merged_into IS NULL AND discharge_date IS NOT NULL`).all();
   let total = 0;
   for (const d of disch) {
     const k = keyOf(d); const act = activeByKey[k]; if (!act || act.id === d.id) continue;   // person not currently here → leave it
@@ -4229,7 +4327,7 @@ function cleanupPhantomDischarges() {
   return total;
 }
 app.get('/api/diag/duplicates', requireAuth, requireAdmin, (req, res) => {
-  const rows = db.prepare(`SELECT id, pref, name, kipu_id, room, admit, admit_time, discharge_date, discharge_status, source, active, therapist, diagnosis FROM clients WHERE merged_into IS NULL ORDER BY name, id`).all();
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, room, admit, admit_time, discharge_date, discharge_status, source, active, therapist, diagnosis FROM clients WHERE merged_into IS NULL ORDER BY name, id`).all();
   const groups = {};
   for (const c of rows) { const k = dupKeyOf(c); if (!k) continue; (groups[k] = groups[k] || []).push(c); }
   const childTbls = clientChildTables();
@@ -4250,6 +4348,11 @@ app.post('/api/diag/merge', requireAuth, requireAdmin, (req, res) => {
   const keep = +req.body?.keep;
   const dupes = Array.isArray(req.body?.dupes) ? [...new Set(req.body.dupes.map(Number))].filter((x) => x && x !== keep) : [];
   if (!keep || !dupes.length) return res.status(400).json({ error: 'Pick a record to keep and at least one duplicate to merge.' });
+  // Review fix: never merge across facilities — an episode at another facility is
+  // a different stay, not a duplicate (person-level linking is Phase 6's job).
+  const keepFac = db.prepare(`SELECT facility_id FROM clients WHERE id=?`).get(keep)?.facility_id || 0;
+  const crossFac = dupes.filter((d) => (db.prepare(`SELECT facility_id FROM clients WHERE id=?`).get(d)?.facility_id || 0) !== keepFac);
+  if (crossFac.length) return res.status(400).json({ error: `Refusing to merge across facilities (rows ${crossFac.join(', ')} belong to a different facility). Same person at two facilities = two episodes, not a duplicate.` });
   const r = mergeClients(keep, dupes, req.user.name);
   if (r.error) return res.status(r.error === 'Keep record not found.' ? 404 : 500).json({ error: r.error });
   audit({ user: req.user, action: 'CLIENT_MERGE', detail: `kept ${keep}, merged ${r.merged} (${dupes.join(',')})`, ip: req.ip });
@@ -4300,14 +4403,33 @@ app.get('/api/outpatient', requireAuth, requireOutpatient, (req, res) => {
 // Pull the outpatient census and update the history (admit = PHP start, detect
 // PHP→IOP transition, mark drop-offs as discharged). Shared by the manual button
 // AND the daily scheduler. Returns { error } or { location, counts }.
+// Which registry facility owns the outpatient census (matches the location name).
+function outpatientFacilityId() {
+  const loc = outpatientLocationName().toLowerCase();
+  const f = orgFacilities().find((x) => x.type === 'outpatient' && (x.kipu_location_name || '').toLowerCase() === loc)
+        || orgFacilities().find((x) => x.type === 'outpatient' && (x.name || '').toLowerCase().includes(loc));
+  return f ? f.id : null;
+}
+// Review fix: legacy outpatient rows predate facility_id — adopt them into the
+// configured outpatient facility once (latched). They are NOT detox rows.
+try {
+  if (getState('phase3_outpatient_backfill') !== 'done') {
+    const opf = outpatientFacilityId();
+    if (opf) {
+      db.prepare(`UPDATE outpatient_clients SET facility_id=? WHERE facility_id IS NULL`).run(opf);
+      setState('phase3_outpatient_backfill', 'done');
+    }
+  }
+} catch (e) { console.error('[phase3 outpatient backfill]', e.message); }
 async function syncOutpatient() {
   if (!kipuConfigured()) return { error: 'Kipu isn’t connected.' };
   let r; try { r = await kipuOutpatientCensus(outpatientLocationName()); } catch (e) { return { error: e.message }; }
   if (r.error) return { error: r.error };
   const today = appToday();
+  const opFac = outpatientFacilityId();
   const get = db.prepare(`SELECT kipu_id, iop_start, admit FROM outpatient_clients WHERE kipu_id = ?`);
-  const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id,name,pref,level,loc_class,admit,mrn,therapist,payer,php_start,iop_start,first_seen,last_seen,active,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,datetime('now'))`);
+  const ins = db.prepare(`INSERT INTO outpatient_clients (kipu_id,name,pref,level,loc_class,admit,mrn,therapist,payer,php_start,iop_start,first_seen,last_seen,active,facility_id,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,${opFac || 'NULL'},datetime('now'))`);
   // Prefer the LATEST admission date Kipu has (the most recent stay), per the rule
   // "last admission date → first IOP date".
   const upd = db.prepare(`UPDATE outpatient_clients SET name=?,pref=?,level=?,loc_class=?,admit=COALESCE(NULLIF(?,''),admit),mrn=?,therapist=?,
@@ -8724,7 +8846,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     subtitle = 'The house at a glance — census, who\'s at risk, how we\'re serving, and what needs leadership.';
     const today2 = today;
     // De-dupe by person and split real discharges from referral-outs (didn't complete intake).
-    const dRawLd = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?${fc.frag('facility_id')}`).all(today2);
+    const dRawLd = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?${fc.frag('facility_id')}`).all(today2);
     const seenLd = new Set(); const dToday = []; const dReferred = [];
     for (const c of dRawLd) { const k = dupKeyOf(c); if (k && seenLd.has(k)) continue; if (k) seenLd.add(k); (isReferredOut(c) ? dReferred : dToday).push(c); }
     const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
@@ -12409,7 +12531,7 @@ function buildMorningBrief() {
   const byLoc = {};
   for (const c of active) { const k = (c.loc && c.loc !== 'Unspecified') ? c.loc : (parseLoc(c.program) || 'Unspecified'); byLoc[k] = (byLoc[k] || 0) + 1; }
   const admitsToday = active.filter((c) => (c.admit || '').slice(0, 10) === today).length;
-  const dRawMb = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
+  const dRawMb = db.prepare(`SELECT id, pref, name, kipu_id, facility_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?`).all(today);
   const seenMb = new Set(); const dToday = [];   // real discharges only (deduped, referral-outs excluded)
   for (const c of dRawMb) { const k = dupKeyOf(c); if (k && seenMb.has(k)) continue; if (k) seenMb.add(k); if (!isReferredOut(c)) dToday.push(c); }
   const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;

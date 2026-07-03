@@ -6013,7 +6013,9 @@ async function loadOrgFacs(){
     <td><input data-of="${f.id}" data-k="type" value="${esc(f.type||'')}" style="width:100px"/></td>
     <td><input data-of="${f.id}" data-k="beds" value="${f.beds!=null?f.beds:''}" style="width:60px"/></td>
     <td><input data-of="${f.id}" data-k="kipu_location_name" value="${esc(f.kipu_location_name||'')}" style="width:130px"/></td>
-    <td><button class="btn btn-ghost btn-sm sans" onclick="saveOrgFac(${f.id})">Save</button></td></tr>`).join('')}</table>
+    <td class="toolbar" style="gap:4px"><button class="btn btn-ghost btn-sm sans" onclick="saveOrgFac(${f.id})">Save</button>
+      <button class="btn btn-ghost btn-sm sans" title="Modules this facility gets" onclick="editFacModules(${f.id})">🧩</button>
+      <button class="btn btn-ghost btn-sm sans" title="Kipu / integration connection" onclick="editFacIntegration(${f.id})">🔌</button></td></tr>`).join('')}</table>
   <div class="hint" style="margin-top:4px">Regions: Ohio · Indiana · Corporate. Every new module keys on this list (facility_id), so keep it accurate.</div>
   <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px">
     <strong class="sans" style="font-size:13px">＋ Onboard a facility</strong>
@@ -6037,6 +6039,44 @@ async function addOrgFac(){
     if($('nf_msg'))$('nf_msg').textContent='✓ Onboarded — key: '+r.fkey; loadOrgFacs(); }
   catch(e){ if($('nf_msg'))$('nf_msg').textContent=e.message; }
 }
+// 🧩 Which modules a facility gets (defaults by service-line type; editable).
+let MODCAT=null;
+async function editFacModules(id){
+  let d,cat; try{ [d,cat]=await Promise.all([api('/org/facilities'),api('/org/module-catalog')]); }catch(e){ alert(e.message); return; }
+  MODCAT=cat; const f=(d.facilities||[]).find(x=>x.id===id); if(!f) return;
+  const on=new Set(f.modules||[]);
+  const save=hmodal(`<h3>🧩 ${esc(f.name)} — modules</h3>
+    <p class="sub sans" style="margin:0 0 8px">Defaults come from the <strong>${esc(f.type)}</strong> service line. Turn modules on or off for this facility — the rest of the app follows.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:340px;overflow:auto">${(cat.catalog||[]).map(m=>`<label style="display:flex;align-items:center;gap:5px;background:var(--cream);border:1px solid var(--line);border-radius:6px;padding:4px 8px;text-transform:none;letter-spacing:0"><input type="checkbox" class="fm" value="${esc(m)}" ${on.has(m)?'checked':''}/> ${esc(m)}</label>`).join('')}</div>
+    <div class="toolbar" style="justify-content:flex-start;margin-top:8px;gap:6px"><button class="btn btn-ghost btn-sm sans" onclick="fmReset('${esc(f.type)}')">↺ Reset to ${esc(f.type)} defaults</button></div>`);
+  save.onclick=async()=>{
+    const mods=[...document.querySelectorAll('.fm:checked')].map(c=>c.value);
+    try{ await api('/org/facilities/'+id,{method:'POST',body:JSON.stringify({modules:mods})}); closeHModal(); loadOrgFacs(); }catch(e){ alert(e.message); }
+  };
+}
+function fmReset(type){ const def=new Set((MODCAT&&MODCAT.byType&&MODCAT.byType[type])||[]); document.querySelectorAll('.fm').forEach(c=>{ c.checked=def.has(c.value); }); }
+// 🔌 Per-facility Kipu connection: enter its own credentials, Test, then sync.
+async function editFacIntegration(id){
+  let d,st; try{ [d,st]=await Promise.all([api('/org/facilities'),api('/org/facilities/'+id+'/integrations')]); }catch(e){ alert(e.message); return; }
+  const f=(d.facilities||[]).find(x=>x.id===id); if(!f) return;
+  const k=(st.integrations||{}).kipu||{};
+  const save=hmodal(`<h3>🔌 ${esc(f.name)} — Kipu connection</h3>
+    <p class="sub sans" style="margin:0 0 8px">${k.configured?'✓ A connection is saved. Leave a field blank to keep the stored secret.':'Enter this facility\'s OWN Kipu API credentials. Leave blank to use the shared credentials.'} Secrets are stored server-side and never shown again.</p>
+    <label>Access ID</label><input id="ki_access" placeholder="${k.configured?'•••••• (saved)':'Kipu Access ID'}"/>
+    <label>Secret Key</label><input id="ki_secret" type="password" placeholder="${k.configured?'•••••• (saved)':'Kipu Secret Key'}"/>
+    <label>App ID (recipient/location id)</label><input id="ki_app" placeholder="${k.configured?'•••••• (saved)':'Kipu App ID'}"/>
+    <label>Base URL <span class="hint">(optional)</span></label><input id="ki_base" value="${esc(k.baseUrl||'')}" placeholder="https://api.kipuapi.com"/>
+    <label>Location ID <span class="hint">(scopes the census to this site)</span></label><input id="ki_loc" value="${esc(k.locationId||'')}" placeholder="e.g. 12345"/>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;margin-top:8px"><button class="btn btn-ghost btn-sm sans" onclick="testFacKipu(${id})">Test connection</button><button class="btn btn-ghost btn-sm sans" onclick="syncFacKipu(${id})" title="Pull this facility's roster now (manual, stamps this facility)">▶ Sync roster now</button><span class="hint" id="ki_msg"></span></div>`);
+  save.textContent='Save connection';
+  save.onclick=async()=>{
+    const g=x=>($(x)||{}).value||'';
+    try{ await api('/org/facilities/'+id+'/integrations',{method:'POST',body:JSON.stringify({kind:'kipu',accessId:g('ki_access'),secretKey:g('ki_secret'),appId:g('ki_app'),baseUrl:g('ki_base'),locationId:g('ki_loc')})}); if($('ki_msg'))$('ki_msg').textContent='✓ Saved'; }
+    catch(e){ if($('ki_msg'))$('ki_msg').textContent=e.message; }
+  };
+}
+async function testFacKipu(id){ const m=$('ki_msg'); if(m)m.textContent='Testing…'; try{ const r=await api('/org/facilities/'+id+'/kipu-test',{method:'POST'}); if(m)m.textContent=`✓ Connected${r.own?' (own credentials)':' (shared credentials)'} — ${r.sampleCount==null?'reachable':r.sampleCount+' on census'}`; }catch(e){ if(m)m.textContent='✗ '+e.message; } }
+async function syncFacKipu(id){ const m=$('ki_msg'); if(!confirm('Pull this facility\'s Kipu roster now? New patients will be stamped to THIS facility.'))return; if(m)m.textContent='Syncing…'; try{ const r=await api('/org/facilities/'+id+'/kipu-sync',{method:'POST'}); if(m)m.textContent='✓ Synced: '+JSON.stringify(r.result||{}).slice(0,80); loadOrgFacs(); }catch(e){ if(m)m.textContent='✗ '+e.message; } }
 async function saveOrgFac(id){
   const b={}; document.querySelectorAll(`[data-of="${id}"]`).forEach(el=>{ b[el.dataset.k]=el.value; });
   try{ await api('/org/facilities/'+id,{method:'POST',body:JSON.stringify(b)}); loadOrgFacs(); }catch(e){ alert(e.message); }

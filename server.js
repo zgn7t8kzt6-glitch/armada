@@ -22,6 +22,7 @@ import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ens
 import { classifyDeskItem, draftDeskEmail } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
+import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard } from './src/mailbox.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
 import { ARMADA_PRINCIPLES, ARMADA_STANDARD, ALL_BEHIND_YOU, HANDBOOK, HANDBOOK_INTRO, todaysPrinciple, todaysSafety, chapterForRole } from './src/handbook.js';
 
@@ -1458,6 +1459,64 @@ app.get('/api/desk', requireAuth, requireAdmin, (req, res) => {
     settings: { digestHour: +(getState('desk_digest_hour') || 7), email: getState('desk_email') || '', noteUrl: `${base}/api/inbound/note?t=${noteToken()}` },
   });
 });
+// ── Owner's inbox triage (Desk mail board) ────────────────────────────────────
+// Owner-only, like the Desk itself. Tokens never leave the DB; Mail.Read only.
+app.get('/api/mail/status', requireAuth, requireAdmin, (req, res) => {
+  res.json({
+    configured: mailConfigured(), connected: mailConnected(),
+    user: getState('msgraph_user') || '', tenant: getState('msgraph_tenant') || '',
+    enabled: getState('mail_enabled') !== 'off',
+    lastRun: getState('mail_last_run') || null,
+    ai: claudeConfigured(),
+  });
+});
+app.post('/api/mail/settings', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.client_id != null) setState('msgraph_client_id', String(b.client_id).trim().slice(0, 80));
+  if (b.tenant != null) setState('msgraph_tenant', String(b.tenant).trim().slice(0, 80));
+  if (b.enabled != null) setState('mail_enabled', b.enabled ? 'on' : 'off');
+  audit({ user: req.user, action: 'MAIL_SETTINGS', ip: req.ip });   // never log the values
+  res.json({ ok: true });
+});
+app.post('/api/mail/connect', requireAuth, requireAdmin, async (req, res) => {
+  try { const r = await startDeviceFlow(); if (r.error) return res.status(400).json(r); res.json(r); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/mail/disconnect', requireAuth, requireAdmin, (req, res) => { disconnectMailbox(); audit({ user: req.user, action: 'MAIL_DISCONNECT', ip: req.ip }); res.json({ ok: true }); });
+app.post('/api/mail/poll', requireAuth, requireAdmin, async (req, res) => {
+  const r = await pollMailbox({ max: 25 });
+  if (r.error) return res.status(502).json(r);
+  res.json(r);
+});
+app.get('/api/mail/board', requireAuth, requireAdmin, (req, res) => res.json(mailBoard()));
+app.post('/api/mail/:id', requireAuth, requireAdmin, (req, res) => {
+  const m = db.prepare(`SELECT * FROM desk_mail WHERE id=?`).get(+req.params.id);
+  if (!m) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  if (b.status && ['done', 'dismissed', 'open'].includes(b.status)) {
+    db.prepare(`UPDATE desk_mail SET status=?, acted_at=CASE WHEN ?='open' THEN NULL ELSE datetime('now') END WHERE id=?`).run(b.status, b.status, m.id);
+  }
+  if (b.category && ['decision', 'followup', 'review', 'ignore'].includes(b.category)) {
+    db.prepare(`UPDATE desk_mail SET category=? WHERE id=?`).run(b.category, m.id);
+  }
+  res.json({ ok: true });
+});
+app.post('/api/mail/:id/to-desk', requireAuth, requireAdmin, (req, res) => {
+  const m = db.prepare(`SELECT * FROM desk_mail WHERE id=?`).get(+req.params.id);
+  if (!m) return res.status(404).json({ error: 'Not found.' });
+  const r = deskCapture(req.user.id, `${m.action || 'Handle'}: ${m.subject}${m.from_name ? ' (from ' + m.from_name + ')' : ''}`, 'mail');
+  db.prepare(`UPDATE desk_mail SET status='done', acted_at=datetime('now') WHERE id=?`).run(m.id);
+  res.json({ ok: true, ...r });
+});
+// Poll on a schedule once connected (and AI is up) — every 10 minutes.
+setInterval(() => {
+  try {
+    if (getState('mail_enabled') === 'off') return;
+    if (!mailConnected() || !claudeConfigured()) return;
+    pollMailbox({ max: 25 }).then((r) => { if (r && r.ok && (r.triaged || 0) > 0) console.log('[mail] poll:', JSON.stringify(r)); }).catch((e) => console.error('[mail] poll:', e.message));
+  } catch (e) { console.error('[mail] scheduler:', e.message); }
+}, 10 * 60 * 1000);
+
 app.post('/api/desk', requireAuth, requireAdmin, (req, res) => {
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Say the thing — dates parse themselves.' });

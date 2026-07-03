@@ -6285,7 +6285,7 @@ async function loadMyDesk(){
     waiting:live.filter(x=>x.status==='waiting').length, inbox:live.filter(x=>deskLane(x)==='inbox').length,
     done7:items.filter(x=>x.status==='done').length };
   const stat=(nn,l,tab,sev)=>`<div class="ret-card ${sev||''}" style="cursor:pointer" onclick="DESK_TAB='${tab}';renderDeskTab()"><div class="n">${nn}</div><div class="l">${l}</div></div>`;
-  const tabs=[['focus','🎯 Focus'],['board','📋 Board'],['buckets','🗂 Buckets'],['places','📍 Locations'],['people','👥 People'],['setup','⚙️']];
+  const tabs=[['focus','🎯 Focus'],['board','📋 Board'],['mail','📧 Mail'],['buckets','🗂 Buckets'],['places','📍 Locations'],['people','👥 People'],['setup','⚙️']];
   host.innerHTML=`<div class="card">
     <div class="cmd-hero-row"><div><h3 style="margin:0">My Desk</h3><p class="sub sans" style="margin:0">Say it like a text — dates, people &amp; buckets file themselves.</p></div>
       <button class="btn btn-ghost btn-sm sans" onclick="deskDigestNow(this)">☀️ Digest now</button></div>
@@ -6301,6 +6301,7 @@ function renderDeskTab(){
   document.querySelectorAll('#deskTabs button').forEach(x=>x.classList.toggle('active',x.getAttribute('onclick').includes("'"+DESK_TAB+"'")));
   if(DESK_TAB==='focus') return deskFocus(b);
   if(DESK_TAB==='board') return deskBoard(b);
+  if(DESK_TAB==='mail') return deskMail(b);
   if(DESK_TAB==='buckets') return deskGrouped(b,'bucket','🏷','Unfiled — tap 🏷 to file');
   if(DESK_TAB==='places') return deskGrouped(b,'facility_name','📍','No location');
   if(DESK_TAB==='people') return deskPeople(b);
@@ -6422,6 +6423,83 @@ async function deskNudgeAll(ids){
   for(const id of ids){ try{ await api('/desk/'+id+'/nudge',{method:'POST'}); }catch(_e){} }
   loadMyDesk();
 }
+/* ── 📧 Mail — the inbox, triaged: AI reads everything, only what needs YOU
+   makes the board. Decision needed / Follow-up / Review; the rest is counted
+   and ignored. Connect once with a Microsoft code — no password enters the app. */
+async function deskMail(b){
+  b.innerHTML='<div class="hint" style="margin-top:10px">Checking the mailbox…</div>';
+  let st; try{ st=await api('/mail/status'); }catch(e){ b.innerHTML='<div class="hint" style="margin-top:10px">'+esc(e.message)+'</div>'; return; }
+  if(!st.configured){
+    b.innerHTML=`<div style="margin-top:10px;max-width:640px">
+      <h3 style="margin:0 0 4px">📧 Connect your inbox</h3>
+      <p class="sub sans">One-time setup (5 minutes, or forward this to IT): in <strong>entra.microsoft.com</strong> → App registrations → <em>New registration</em> — name it "Armada OS Mail", single tenant. Then: Authentication → <em>Allow public client flows</em> = Yes. API permissions → add <em>Microsoft Graph → Delegated → Mail.Read</em>. Paste the <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong> from the Overview page here.</p>
+      <label>Application (client) ID</label><input id="mg_client" placeholder="xxxxxxxx-xxxx-…"/>
+      <label>Directory (tenant) ID</label><input id="mg_tenant" placeholder="xxxxxxxx-xxxx-…"/>
+      <div class="toolbar" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-gold sans" onclick="mailSaveSetup()">Save</button><span class="hint" id="mg_msg"></span></div>
+      <p class="sub sans" style="margin-top:8px">The app only gets permission to <em>read</em> mail — it can't send or delete anything. Your password never touches it.</p></div>`;
+    return;
+  }
+  if(!st.connected){
+    b.innerHTML=`<div style="margin-top:10px;max-width:640px">
+      <h3 style="margin:0 0 4px">📧 Sign in to your mailbox</h3>
+      <p class="sub sans">Tap the button, then enter the code at Microsoft — that's the whole sign-in.</p>
+      <div class="toolbar" style="justify-content:flex-start"><button class="btn btn-gold sans" onclick="mailConnect()">Connect Microsoft 365</button><span class="hint" id="mg_msg"></span></div>
+      <div id="mg_code"></div></div>`;
+    return;
+  }
+  let d; try{ d=await api('/mail/board'); }catch(e){ b.innerHTML='<div class="hint" style="margin-top:10px">'+esc(e.message)+'</div>'; return; }
+  const card=(m)=>`<div class="q-row" style="display:block;padding:10px 12px">
+    <div style="font-weight:600">${esc(m.subject||'(no subject)')}</div>
+    <div class="hint">${esc(m.from_name||m.from_email||'')} · ${esc((m.received_at||'').slice(0,16).replace('T',' '))}</div>
+    ${m.action?`<div style="color:var(--gold,#a07828);font-size:13px;margin-top:2px">→ ${esc(m.action)}</div>`:''}
+    ${m.reason?`<div class="hint" style="font-size:12px;margin-top:2px">${esc(m.reason)}</div>`:''}
+    <div class="toolbar" style="gap:4px;margin-top:6px;justify-content:flex-start">
+      <button class="btn btn-ghost btn-sm sans" title="Handled" onclick="mailAct(${m.id},'done')">✓</button>
+      <button class="btn btn-ghost btn-sm sans" title="Dismiss" onclick="mailAct(${m.id},'dismissed')">✕</button>
+      <button class="btn btn-ghost btn-sm sans" title="Make it a Desk task" onclick="mailToDesk(${m.id})">➕ Desk</button>
+      ${m.web_link?`<a class="btn btn-ghost btn-sm sans" href="${esc(m.web_link)}" target="_blank" rel="noopener">↗ Open</a>`:''}
+    </div></div>`;
+  const col=(title,arr,color)=>`<div class="trello-col"><div class="trello-head" style="border-top:3px solid ${color};border-radius:12px 12px 0 0"><strong class="sans">${title}</strong> <span class="hint">${arr.length}</span></div><div class="trello-body">${arr.map(card).join('')||'<div class="hint" style="padding:8px">Nothing waiting.</div>'}</div></div>`;
+  b.innerHTML=`<div style="margin-top:10px">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">📧 ${esc(st.user||'Inbox')}</h3>
+      <p class="sub sans" style="margin:0">Read &amp; ignored today: <strong>${d.ignoredToday}</strong> · handled today: <strong>${d.doneToday}</strong>${st.lastRun?' · last check '+esc(st.lastRun.slice(11,16)):''} · checks every 10 min</p></div>
+      <div class="toolbar" style="gap:6px"><button class="btn btn-ghost btn-sm sans" onclick="mailPoll(this)">↻ Check now</button><button class="btn btn-ghost btn-sm sans" onclick="mailDisconnect()" title="Sign this mailbox out">Sign out</button></div></div>
+    <div class="trello" style="margin-top:8px">
+      ${col('🔴 Decision needed', d.decision, '#c0392b')}
+      ${col('🟠 Follow-up', d.followup, '#d29a5e')}
+      ${col('🟡 Review', d.review, '#c9a35c')}
+    </div>
+    <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Recently ignored (${(d.ignoredRecent||[]).length}) — spot checks welcome</summary>
+      ${(d.ignoredRecent||[]).map(m=>`<div class="hint" style="margin-top:4px">• <strong>${esc(m.subject||'')}</strong> — ${esc(m.from_name||m.from_email||'')} <span style="opacity:.7">(${esc(m.reason||'')})</span></div>`).join('')||'<div class="hint">None yet.</div>'}
+    </details></div>`;
+}
+async function mailSaveSetup(){
+  const m=$('mg_msg');
+  try{ await api('/mail/settings',{method:'POST',body:JSON.stringify({client_id:($('mg_client')||{}).value||'',tenant:($('mg_tenant')||{}).value||'',enabled:true})}); if(m)m.textContent='✓ Saved'; renderDeskTab(); }
+  catch(e){ if(m)m.textContent=e.message; }
+}
+async function mailConnect(){
+  const m=$('mg_msg'), c=$('mg_code');
+  try{
+    const r=await api('/mail/connect',{method:'POST'});
+    if(c)c.innerHTML=`<div class="card" style="margin-top:10px;text-align:center"><div class="hint">Go to</div><div style="font-size:18px;font-weight:700">${esc(r.verification_uri)}</div><div class="hint" style="margin-top:6px">and enter this code:</div><div style="font-size:30px;font-weight:800;letter-spacing:4px;margin:6px 0">${esc(r.user_code)}</div><div class="hint">This page updates by itself once you're signed in.</div></div>`;
+    let tries=0;
+    const iv=setInterval(async()=>{
+      tries++;
+      try{ const s=await api('/mail/status'); if(s.connected){ clearInterval(iv); renderDeskTab(); mailPoll(); } }catch(_e){}
+      if(tries>60) clearInterval(iv);
+    },5000);
+  }catch(e){ if(m)m.textContent=e.message; }
+}
+async function mailPoll(btn){
+  if(btn){ btn.disabled=true; btn.textContent='Checking…'; }
+  try{ await api('/mail/poll',{method:'POST'}); }catch(e){ if(btn) alert(e.message); }
+  if(btn){ btn.disabled=false; btn.textContent='↻ Check now'; }
+  renderDeskTab();
+}
+async function mailAct(id,status){ try{ await api('/mail/'+id,{method:'POST',body:JSON.stringify({status})}); }catch(_e){} renderDeskTab(); }
+async function mailToDesk(id){ try{ await api('/mail/'+id+'/to-desk',{method:'POST'}); }catch(e){ alert(e.message); } renderDeskTab(); }
+async function mailDisconnect(){ if(!confirm('Sign this mailbox out? Triage stops until you reconnect.'))return; try{ await api('/mail/disconnect',{method:'POST'}); }catch(_e){} renderDeskTab(); }
 function deskSetup(b){
   const d=DESK_DATA;
   b.innerHTML=`<div style="margin-top:10px">

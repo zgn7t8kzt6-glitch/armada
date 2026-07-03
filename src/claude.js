@@ -413,6 +413,32 @@ export async function classifyDeskItem(text, buckets, facilities, roles) {
   return t ? JSON.parse(t.text) : { bucket: '', facility: '', role: '' };
 }
 
+// Inbox triage: does this email actually need the OWNER, and how urgently?
+// The bar for "ignore" is high-confidence noise; when unsure, surface as review.
+const MAIL_TRIAGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    needs_me: { type: 'boolean', description: 'true if the OWNER personally must see or act on this message.' },
+    category: { type: 'string', enum: ['decision', 'followup', 'review', 'ignore'], description: 'decision = he must choose/approve something; followup = he must reply, chase, or schedule; review = worth reading, no action; ignore = noise.' },
+    reason: { type: 'string', description: 'One short sentence: why this category.' },
+    action: { type: 'string', description: 'If it needs him: the single next action in 12 words or fewer. Else empty string.' },
+  },
+  required: ['needs_me', 'category', 'reason', 'action'],
+};
+export async function triageEmail({ from, subject, preview, myEmail }) {
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 300,
+    system: G + 'You triage the inbox of the OWNER of Armada Recovery (behavioral-health company: detox, outpatient, sober living). Decide if a message needs HIM personally. IGNORE with confidence: newsletters, marketing, automated notifications/receipts, system alerts meant for IT, mass announcements, and threads where he is CC\'d while someone else clearly owns the next step. DECISION: he must approve, choose, or authorize (money, hiring, contracts, legal, clinical escalations). FOLLOWUP: a person is waiting on his reply, or he must chase or schedule something. REVIEW: he should read it but nothing is required. When genuinely unsure between ignore and review, choose review — never silently drop something that might matter. Judge only from what is given; do not invent context.',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: MAIL_TRIAGE_SCHEMA } },
+    messages: [{ role: 'user', content: `OWNER'S ADDRESS: ${myEmail || '(unknown)'}\nFROM: ${scrub(String(from || '').slice(0, 160))}\nSUBJECT: ${scrub(String(subject || '').slice(0, 250))}\nPREVIEW: ${scrub(String(preview || '').slice(0, 400))}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('declined');
+  const t = response.content.find((b) => b.type === 'text');
+  return t ? JSON.parse(t.text) : { needs_me: true, category: 'review', reason: '', action: '' };
+}
+
 // Desk → email: draft the email that gets a captured task moving. The owner edits
 // before sending — this writes the first 90%, never hits Send itself.
 const DESK_EMAIL_SCHEMA = {

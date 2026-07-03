@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListEvalTemplates } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -3872,13 +3872,6 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
 // each: readmission (same person, second casefile), duplicate rows in the window,
 // same-day discharge (chart opened but SF may mark not-admitted), manual rows.
 // Read-only; built to settle "the app says 90, Salesforce says 85" by name.
-// Which Kipu form templates exist (and their ids)? ?q=case narrows by name —
-// this is how you find the evaluation_template_id for e.g. the Case Management
-// Note without a Kipu support ticket. Read-only.
-app.get('/api/diag/kipu-eval-templates', requireAuth, requireAdmin, async (req, res) => {
-  try { res.json(await kipuListEvalTemplates({ q: req.query.q || '' })); }
-  catch (e) { res.status(502).json({ error: e.message }); }
-});
 app.get('/api/diag/admits', requireAuth, requireAdmin, (req, res) => {
   const today = appToday();
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : today.slice(0, 8) + '01';
@@ -7228,6 +7221,57 @@ app.post('/api/kipu/notes-preview', requireAuth, requireAdmin, async (req, res) 
     const breakdown = blocks.map((b) => { const m = b.match(/^\[([^\]]+)\]/); return { head: m ? m[1] : '?', chars: b.length }; });
     res.json({ chars: txt.length, noteCount: breakdown.length, breakdown, therapist: np.therapist || null, case_manager: np.case_manager || null, debug: np.debug || null, preview: txt.slice(0, 4000) });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Probe Kipu for available evaluation templates (what types of notes can we create?).
+app.post('/api/kipu/templates', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await kipuListTemplates()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Push a note from this app into a patient's Kipu chart.
+// Body: { client_id, text, note_type ('handoff'|'cm'|'pulse'|'note'), template_id?, template_name? }
+app.post('/api/kipu/push-note', requireAuth, requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const clientId = b.client_id;
+  if (!clientId || !b.text) return res.status(400).json({ error: 'client_id and text are required.' });
+  const c = db.prepare(`SELECT kipu_id, pref, name FROM clients WHERE id = ?`).get(+clientId);
+  if (!c?.kipu_id) return res.status(400).json({ error: 'This client has no Kipu id — sync the roster.' });
+
+  // Prefer an explicitly passed template; fall back to stored settings per note type.
+  const typeKey = b.note_type || 'note';
+  const stateKey = `kipu_template_${typeKey}`;
+  const templateId = b.template_id ?? getState(stateKey + '_id') ?? null;
+  const templateName = b.template_name ?? getState(stateKey + '_name') ?? null;
+
+  try {
+    const result = await kipuPushNote(c.kipu_id, {
+      templateId: templateId ? +templateId : undefined,
+      templateName: templateName || undefined,
+      text: b.text,
+      authorName: req.user.name || req.user.username || '',
+      noteDate: b.note_date || undefined,
+    });
+    audit({ user: req.user, action: 'KIPU_PUSH_NOTE', detail: `${typeKey} for client ${c.pref || c.name}`, ip: req.ip });
+    res.json(result);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Save the template config for each note type.
+app.post('/api/kipu/template-config', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  for (const key of ['handoff', 'cm', 'pulse', 'note']) {
+    if (b[key + '_id'] != null) setState(`kipu_template_${key}_id`, String(b[key + '_id']).trim());
+    if (b[key + '_name'] != null) setState(`kipu_template_${key}_name`, String(b[key + '_name']).trim());
+  }
+  res.json({ ok: true });
+});
+
+app.get('/api/kipu/template-config', requireAuth, requireAdmin, (req, res) => {
+  const cfg = {};
+  for (const key of ['handoff', 'cm', 'pulse', 'note']) {
+    cfg[key] = { id: getState(`kipu_template_${key}_id`) || '', name: getState(`kipu_template_${key}_name`) || '' };
+  }
+  res.json(cfg);
 });
 // Clean reset: wipe the roster and rebuild it from the live Kipu active census
 // (use after test-syncs left stale/duplicate clients).

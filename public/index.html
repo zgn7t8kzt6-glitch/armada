@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260624DF" />
+<link rel="stylesheet" href="/styles.css?v=20260703AB" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1370,6 +1370,41 @@
           </div>
           <p class="hint">Open any patient in Kipu, copy the browser URL, and replace the patient id with a token: <strong>{master}</strong> (the numeric id), <strong>{casefile}</strong> (the UUID), or <strong>{id}</strong> (both). Example: <code>https://ahr11701.kipuworks.com/patients/{master}</code>.</p>
         </div>
+        <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+          <label>Push notes into Kipu <span class="hint" style="font-weight:400">— write notes from this app directly into a patient's Kipu chart</span></label>
+          <p class="hint" style="margin:4px 0 10px">Step 1: Click "Probe templates" to discover what evaluation templates exist in your Kipu account. Step 2: Enter the template name or ID to use for each note type. Notes require write permission on your Kipu API key — contact your Kipu rep if pushes return 403.</p>
+          <div class="toolbar" style="justify-content:flex-start;margin-bottom:10px">
+            <button class="btn btn-ghost sans" onclick="kipuProbeTemplates()">Probe templates</button>
+            <span id="kipuTplMsg" class="hint" style="align-self:center"></span>
+          </div>
+          <pre id="kipuTplResult" style="display:none;white-space:pre-wrap;max-height:240px;overflow:auto;background:#fbfaf7;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px;margin-bottom:12px"></pre>
+          <div class="grid2" style="gap:8px">
+            <div>
+              <label style="font-size:12px;color:var(--muted)">Case management notes</label>
+              <input id="tplCmName" placeholder="Template name e.g. Case Management Note" style="margin-top:4px"/>
+              <input id="tplCmId" placeholder="Template ID (number, if known)" style="margin-top:4px"/>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--muted)">Shift handoff notes</label>
+              <input id="tplHandoffName" placeholder="Template name e.g. Progress Note" style="margin-top:4px"/>
+              <input id="tplHandoffId" placeholder="Template ID (number, if known)" style="margin-top:4px"/>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--muted)">Pulse / daily check-in</label>
+              <input id="tplPulseName" placeholder="Template name e.g. BHT Note" style="margin-top:4px"/>
+              <input id="tplPulseId" placeholder="Template ID (number, if known)" style="margin-top:4px"/>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--muted)">General notes</label>
+              <input id="tplNoteName" placeholder="Template name e.g. Nursing Note" style="margin-top:4px"/>
+              <input id="tplNoteId" placeholder="Template ID (number, if known)" style="margin-top:4px"/>
+            </div>
+          </div>
+          <div class="toolbar" style="justify-content:flex-start;margin-top:10px">
+            <button class="btn btn-gold sans" onclick="saveKipuTemplates()">Save template config</button>
+            <span id="kipuTplSaveMsg" class="hint" style="align-self:center"></span>
+          </div>
+        </div>
       </div>
       <div class="card">
         <h3>Email</h3>
@@ -2692,7 +2727,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260624DF"></script>
-<script src="/housing.js?v=20260624DF"></script>
+<script src="/app.js?v=20260703AB"></script>
+<script src="/housing.js?v=20260703AB"></script>
 </body>
 </html>

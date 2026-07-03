@@ -1742,17 +1742,21 @@ app.get('/api/me', (req, res) => {
   const user = currentUser(req);
   if (user) {
     user.outpatientAccess = canSeeOutpatient(user); user.corpAccess = canSeeCorp(user); user.hrAccess = canSeeHR(user); user.opsAccess = canSeeOps(user); user.authAccess = canSeeAuth(user); user.billingAccess = canSeeBilling(user); user.apptsAccess = canSeeAppts(user);
-    // Facility scope for the shell chip: explicit user_facility_access rows win;
-    // org-wide roles fall back to every operating facility; everyone else to detox.
+    // Facility scope for the shell chip. Org-wide roles are resolved DYNAMICALLY
+    // (never from stored rows) so a facility added after their access rows were
+    // seeded still shows up — facilityAllowed() already lets them in everywhere,
+    // and the chip must agree with enforcement. Everyone else: explicit
+    // user_facility_access rows win, with a detox fallback for legacy users.
     try {
-      let facs = db.prepare(`SELECT f.id, f.fkey, f.name, f.type, f.modules FROM user_facility_access ua JOIN org_facilities f ON f.id = ua.facility_id WHERE ua.user_id = ? AND f.active = 1 ORDER BY f.sort, f.id`).all(user.id);
-      if (!facs.length) {
-        const orgWide = user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(user.job_role || '');
+      const orgWide = user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(user.job_role || '');
+      let facs;
+      if (orgWide) {
         // Org-wide users also get Corporate in the switcher — it's a real "place"
         // with its own toolset, not a hidden mode (facility-first navigation).
-        facs = orgWide
-          ? db.prepare(`SELECT id, fkey, name, type, modules FROM org_facilities WHERE active = 1 ORDER BY (type='corporate'), sort, id`).all()
-          : db.prepare(`SELECT id, fkey, name, type, modules FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id LIMIT 1`).all();
+        facs = db.prepare(`SELECT id, fkey, name, type, modules FROM org_facilities WHERE active = 1 ORDER BY (type='corporate'), sort, id`).all();
+      } else {
+        facs = db.prepare(`SELECT f.id, f.fkey, f.name, f.type, f.modules FROM user_facility_access ua JOIN org_facilities f ON f.id = ua.facility_id WHERE ua.user_id = ? AND f.active = 1 ORDER BY f.sort, f.id`).all(user.id);
+        if (!facs.length) facs = db.prepare(`SELECT id, fkey, name, type, modules FROM org_facilities WHERE active = 1 AND type != 'corporate' ORDER BY sort, id LIMIT 1`).all();
       }
       // Each chip entry carries its TYPE and resolved MODULE SET — the sidebar
       // rebuilds itself from this when the user switches facilities.

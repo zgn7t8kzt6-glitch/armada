@@ -3005,3 +3005,21 @@ export function facilityModules(fac) {
   try { const m = JSON.parse(fac.modules || 'null'); if (Array.isArray(m) && m.length) return m; } catch { /* fall through */ }
   return defaultModulesFor(fac.type);
 }
+
+// Registry v2 added Spark/Reverie Greenwood AFTER the foundation access seed ran,
+// so users in the "all facilities" group (marked by holding a corporate row) never
+// got rows for them and the facility chip hid both buildings. One-time repair.
+// Org-wide roles (admin/ED/EA) are now resolved dynamically in /api/me, so their
+// chip can't go stale again; this covers the rest of that group (e.g. HR).
+if (getState('greenwood_access_backfill') !== 'done') {
+  try {
+    const corp = db.prepare(`SELECT id FROM org_facilities WHERE fkey='corporate'`).get()?.id;
+    if (corp) {
+      const newFacs = db.prepare(`SELECT id FROM org_facilities WHERE fkey IN ('spark-greenwood','reverie-greenwood')`).all();
+      const allAccess = db.prepare(`SELECT user_id, role FROM user_facility_access WHERE facility_id=?`).all(corp);
+      const ins = db.prepare(`INSERT OR IGNORE INTO user_facility_access (user_id, facility_id, role) VALUES (?,?,?)`);
+      for (const u of allAccess) for (const f of newFacs) ins.run(u.user_id, f.id, u.role);
+      setState('greenwood_access_backfill', 'done');
+    }
+  } catch (e) { console.error('[greenwood access]', e.message); }
+}

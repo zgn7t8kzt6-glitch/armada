@@ -5927,17 +5927,19 @@ function deskCard(x,primary){
   const gold = primary!==undefined?primary
     : lane==='waiting'?`<button class="btn btn-gold btn-sm sans" onclick="deskNudge(${x.id})">📣 Nudge</button>`
     : `<button class="btn btn-gold btn-sm sans" onclick="deskDo(${x.id},{status:'done'})">✓ Done</button>`;
-  return `<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default;align-items:flex-start">
-    <div class="q-main"><div class="q-title" style="font-size:14.5px">${esc(x.title)}</div>
-      <div class="q-sub" style="margin-top:2px">${x.due_date?tag('🗓 '+esc(x.due_date)+(x.due_time?' '+esc(x.due_time):'')):''}${x.with_who?tag('👤 '+esc(x.with_who)+(x.nudged_at?' · nudged '+deskDaysAgo(x.nudged_at):'')):''}${x.bucket?tag('🏷 '+esc(x.bucket)):''}${x.facility_name?tag('📍'+esc(x.facility_name)):''}${x.source!=='app'?tag('📱'):''}</div></div>
-    <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${x.status!=='done'?`${gold}
+  // STACKED layout — title gets the full width, actions live UNDERNEATH. Never
+  // let buttons share a row with text inside a narrow kanban column.
+  return `<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default;display:block">
+    <div class="q-title" style="font-size:14.5px;line-height:1.35">${esc(x.title)}</div>
+    <div class="q-sub" style="margin-top:3px;line-height:2">${x.due_date?tag('🗓 '+esc(x.due_date)+(x.due_time?' '+esc(x.due_time):'')):''}${x.with_who?tag('👤 '+esc(x.with_who)+(x.nudged_at?' · nudged '+deskDaysAgo(x.nudged_at):'')):''}${x.bucket?tag('🏷 '+esc(x.bucket)):''}${x.facility_name?tag('📍'+esc(x.facility_name)):''}${x.source!=='app'?tag('📱'):''}</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${x.status!=='done'?`${gold}
       <button class="btn btn-ghost btn-sm sans" title="More" onclick="deskMore(${x.id},this)">⋯</button>`
       :`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${x.id},{status:'open'})">↩︎</button>`}</div></div>`;
 }
 function deskMore(id,btn){
   const host=btn.closest('.q-row');
   const bar=document.createElement('div');
-  bar.className='toolbar'; bar.style.cssText='justify-content:flex-end;gap:4px;flex-wrap:wrap;width:100%;margin-top:6px';
+  bar.className='toolbar'; bar.style.cssText='justify-content:flex-start;gap:4px;flex-wrap:wrap;width:100%;margin-top:6px';
   bar.innerHTML=`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${id},{status:'done'})">✓ Done</button>
     <button class="btn btn-ghost btn-sm sans" onclick="deskDo(${id},{snooze_days:1})">😴 Tomorrow</button>
     <button class="btn btn-ghost btn-sm sans" onclick="deskDo(${id},{snooze_days:7})">😴 Next week</button>
@@ -5974,7 +5976,7 @@ function deskBoard(b){
   ];
   const colCard=([k,label,hint,list])=>`<div class="card" style="margin:0"><h3 style="margin:0 0 2px">${label} <span class="hint" style="font-weight:400">${list.length}</span></h3><div class="hint" style="margin-bottom:6px">${hint}</div>
     ${list.length?list.map(x=>deskCard(x, k==='inbox'?`<button class="btn btn-gold btn-sm sans" onclick="deskDate(${x.id})">🗓 Schedule</button>`:undefined)).join(''):'<div class="hint" style="padding:10px 4px">empty</div>'}</div>`;
-  b.innerHTML=`<div class="corp-kanban" style="margin-top:10px">${cols.map(colCard).join('')}</div>`;
+  b.innerHTML=`<div class="corp-kanban" style="margin-top:10px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))">${cols.map(colCard).join('')}</div>`;
 }
 function deskGrouped(b,key,ico,unfiledLabel){
   const d=DESK_DATA, today=d.today;

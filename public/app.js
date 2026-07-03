@@ -6321,8 +6321,9 @@ function apNoteModal(mode,id){
     <div class="hint" style="margin:8px 0 2px">What did you cover? (tap all that apply)</div>
     <div class="oi-action" id="apTop">${AP_TOPICS.map(t=>`<button class="btn btn-ghost btn-sm sans" data-v="${t}" onclick="this.classList.toggle('btn-gold')">${t}</button>`).join('')}</div>
     <textarea id="apBody2" placeholder="One line if it helps (or use your keyboard's 🎤 dictation)…" style="width:100%;margin-top:8px" rows="2"></textarea>
-    <div class="toolbar" style="justify-content:flex-start;gap:10px;margin-top:6px">
+    <div class="toolbar" style="justify-content:flex-start;gap:10px;margin-top:6px;flex-wrap:wrap">
       <label class="hint"><input type="checkbox" id="apExpand"/> Needs a full note later (goes on my follow-ups)</label>
+      ${AP_DATA&&AP_DATA.cmPush?`<label class="hint"><input type="checkbox" id="apKipu" checked/> 📤 Also chart to Kipu (Case Management note)</label>`:''}
       <button class="btn btn-gold btn-sm sans" onclick="apNoteSave('${mode}',${id})">Save &amp; close</button></div></div>`;
   h.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
@@ -6331,11 +6332,14 @@ async function apNoteSave(mode,id){
   const disp=dispBtn?dispBtn.dataset.v:'';
   const topics=[...document.querySelectorAll('#apTop .btn-gold')].map(b=>b.dataset.v);
   const body=($('apBody2')||{}).value||'';
-  const payload={disposition:disp,topics,body,needs_expansion:($('apExpand')||{}).checked};
+  const payload={disposition:disp,topics,body,needs_expansion:($('apExpand')||{}).checked,push_kipu:!!($('apKipu')&&$('apKipu').checked)};
   try{
-    if(mode==='appt') await api('/appts/'+id+'/complete',{method:'POST',body:JSON.stringify(payload)});
-    else await api('/appts/queue/'+id,{method:'POST',body:JSON.stringify({action:'done',...payload})});
+    let r;
+    if(mode==='appt') r=await api('/appts/'+id+'/complete',{method:'POST',body:JSON.stringify(payload)});
+    else r=await api('/appts/queue/'+id,{method:'POST',body:JSON.stringify({action:'done',...payload})});
     $('apModalHost').innerHTML=''; loadAppts();
+    // The note is ALWAYS saved here first — report the Kipu push honestly either way.
+    if(payload.push_kipu&&r&&r.kipu) alert(r.kipu.ok?'✓ Saved — and charted to Kipu.':'Saved here ✓ — but the Kipu push failed: '+(r.kipu.error||'unknown')+'\n\nThe note is safe in Armada; chart it in Kipu manually or fix the template config and try again.');
   }catch(e){ alert(e.message); }
 }
 function apMyDay(b){

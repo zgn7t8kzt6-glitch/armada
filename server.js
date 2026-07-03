@@ -1068,9 +1068,34 @@ app.post('/api/appts/staffsetup', requireAuth, requireAppts, (req, res) => {
   audit({ user: req.user, action: 'STAFF_AVAIL', detail: staff, ip: req.ip });
   res.json({ ok: true });
 });
+// Kipu CM-note push: when the Case Management template is configured, the
+// one-minute note that closes a meeting can chart itself into Kipu. Never
+// blocks the save — the note is safe here first; the push reports honestly.
+function kipuCmConfigured() {
+  return kipuConfigured() && !!(getState('kipu_template_cm_id') || getState('kipu_template_cm_name'));
+}
+async function pushCmNote({ client_id, user, kind, topics, disposition, body }) {
+  try {
+    const c = db.prepare(`SELECT kipu_id FROM clients WHERE id=?`).get(client_id);
+    if (!c?.kipu_id) return { ok: false, error: 'No Kipu chart linked to this client.' };
+    const topicsStr = Array.isArray(topics) ? topics.join(', ') : String(topics || '');
+    const lines = [`${kind || 'Case management'} session — ${appToday()}.`];
+    if (disposition) lines.push(`Client presentation: ${disposition}.`);
+    if (topicsStr) lines.push(`Areas addressed: ${topicsStr}.`);
+    if (String(body || '').trim()) lines.push(String(body).trim());
+    lines.push(`— ${user.name} (charted from Armada OS)`);
+    const r = await kipuPushNote(c.kipu_id, {
+      templateId: getState('kipu_template_cm_id') || undefined,
+      templateName: getState('kipu_template_cm_name') || undefined,
+      text: lines.join('\n\n'), authorName: user.name,
+    });
+    return { ok: true, path: r.path };
+  } catch (e) { return { ok: false, error: String(e.message).slice(0, 200) }; }
+}
 app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
   const today = appToday();
+  const cmPush = kipuCmConfigured();
   const appts = db.prepare(`SELECT a.*, c.pref, c.name AS client_name, c.room, (SELECT COUNT(*) FROM quick_notes q WHERE q.appointment_id=a.id) has_note
     FROM appointments a JOIN clients c ON c.id=a.client_id WHERE a.date=? ORDER BY a.time`).all(day)
     .map((a) => ({ ...a, client: a.pref || a.client_name,
@@ -1096,7 +1121,7 @@ app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
     WHERE a.status='missed' AND a.missed_reason IS NULL AND NOT EXISTS (SELECT 1 FROM appointments r WHERE r.reschedule_of=a.id) ORDER BY a.date DESC LIMIT 40`).all()
     .map((a) => ({ ...a, client: a.pref || a.client_name }));
   if (!apptsLeadership(req.user)) { pending = pending.filter((p) => mine(p.by)); missed = missed.filter((m) => mine(m.staff_name)); }
-  const out = { date: day, appts, queue, estWaitMin: estWaitMinutes(), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
+  const out = { cmPush, date: day, appts, queue, estWaitMin: estWaitMinutes(), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
     staff: db.prepare(`SELECT DISTINCT name FROM users WHERE active=1 AND job_role IN ('Case Manager','Therapist','Clinical Director','Nurse','Peer Support') ORDER BY name`).all().map((x) => x.name),
     clients: db.prepare(`SELECT id, pref, name, room, therapist, case_manager FROM clients WHERE active=1 AND merged_into IS NULL ORDER BY pref, name`).all().map((c) => ({ id: c.id, label: c.pref || c.name, room: c.room, therapist: c.therapist, case_manager: c.case_manager })) };
   // Supervisor lens: the Schulze numbers — reliability made visible (30 days).
@@ -1186,7 +1211,7 @@ app.patch('/api/appts/:id', requireAuth, requireAppts, (req, res) => {
   res.json({ ok: true });
 });
 // Completing a meeting REQUIRES the quick note — documentation before done, always.
-app.post('/api/appts/:id/complete', requireAuth, requireAppts, (req, res) => {
+app.post('/api/appts/:id/complete', requireAuth, requireAppts, async (req, res) => {
   const a = db.prepare(`SELECT * FROM appointments WHERE id=?`).get(req.params.id);
   if (!a) return res.status(404).json({ error: 'Not found.' });
   const b = req.body || {};
@@ -1196,10 +1221,13 @@ app.post('/api/appts/:id/complete', requireAuth, requireAppts, (req, res) => {
   const noteId = saveQuickNote({ user: req.user, client_id: a.client_id, appointment_id: a.id, kind: a.kind, topics: b.topics, disposition: b.disposition, body: b.body, needs_expansion: b.needs_expansion });
   db.prepare(`UPDATE appointments SET status='completed', note_id=?, updated_at=datetime('now') WHERE id=?`).run(noteId, a.id);
   publishEvent({ event: 'appointment.completed', entity: 'appointment', entity_id: a.id, facility_id: a.facility_id, actor: req.user.username, summary: `${a.kind} completed · documented` });
-  res.json({ ok: true, noteId });
+  // Optional: chart the note straight into Kipu (saved here FIRST — push never loses the note).
+  let kipu;
+  if (req.body?.push_kipu && kipuCmConfigured()) kipu = await pushCmNote({ client_id: a.client_id, user: req.user, kind: a.kind, topics: b.topics, disposition: b.disposition, body: b.body });
+  res.json({ ok: true, noteId, kipu });
 });
 // Queue actions on concierge requests: claim / promise / ready / done(+note).
-app.post('/api/appts/queue/:id', requireAuth, requireAppts, (req, res) => {
+app.post('/api/appts/queue/:id', requireAuth, requireAppts, async (req, res) => {
   const r = db.prepare(`SELECT * FROM requests WHERE id=?`).get(req.params.id);
   if (!r) return res.status(404).json({ error: 'Not found.' });
   const b = req.body || {};
@@ -1222,6 +1250,11 @@ app.post('/api/appts/queue/:id', requireAuth, requireAppts, (req, res) => {
         return res.status(400).json({ error: 'This was a care contact — one-minute note before closing it.' });
       }
       saveQuickNote({ user: req.user, client_id: r.client_id, request_id: r.id, kind: r.department, topics: b.topics, disposition: b.disposition, body: b.body, needs_expansion: b.needs_expansion });
+      if (b.push_kipu && kipuCmConfigured()) {
+        const kipu = await pushCmNote({ client_id: r.client_id, user: req.user, kind: r.department, topics: b.topics, disposition: b.disposition, body: b.body });
+        db.prepare(`UPDATE requests SET status='Done', done_by=?, done_at=datetime('now'), claimed_by=COALESCE(claimed_by, ?) WHERE id=?`).run(req.user.id, req.user.name, r.id);
+        return res.json({ ok: true, kipu });
+      }
     }
     db.prepare(`UPDATE requests SET status='Done', done_by=?, done_at=datetime('now'), claimed_by=COALESCE(claimed_by, ?) WHERE id=?`).run(req.user.id, req.user.name, r.id);
   } else return res.status(400).json({ error: 'Unknown action.' });
@@ -7230,7 +7263,8 @@ app.post('/api/kipu/templates', requireAuth, requireAdmin, async (req, res) => {
 
 // Push a note from this app into a patient's Kipu chart.
 // Body: { client_id, text, note_type ('handoff'|'cm'|'pulse'|'note'), template_id?, template_name? }
-app.post('/api/kipu/push-note', requireAuth, requireAdmin, async (req, res) => {
+const canPushKipu = (req, res, next) => { if (!(req.user.role === 'admin' || ['Case Manager', 'Clinical Director', 'Therapist', 'Nurse'].includes(req.user.job_role))) return res.status(403).json({ error: 'Care team only.' }); next(); };
+app.post('/api/kipu/push-note', requireAuth, canPushKipu, async (req, res) => {
   const b = req.body || {};
   const clientId = b.client_id;
   if (!clientId || !b.text) return res.status(400).json({ error: 'client_id and text are required.' });

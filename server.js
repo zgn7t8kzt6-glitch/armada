@@ -19,7 +19,7 @@ import {
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
-import { classifyDeskItem } from './src/claude.js';
+import { classifyDeskItem, draftDeskEmail } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
@@ -1373,6 +1373,39 @@ app.post('/api/desk/:id/nudge', requireAuth, requireAdmin, async (req, res) => {
 app.delete('/api/desk/:id', requireAuth, requireAdmin, (req, res) => {
   db.prepare(`DELETE FROM desk_items WHERE id=? AND owner_id=?`).run(req.params.id, req.user.id);
   res.json({ ok: true });
+});
+// ✉️ Email from the board: AI drafts the email that gets this item done; the
+// owner edits and sends without leaving My Desk. Draft ≠ send — always reviewed.
+app.post('/api/desk/:id/draft', requireAuth, requireAdmin, async (req, res) => {
+  const d = db.prepare(`SELECT d.*, u.name AS uname, u.username AS uemail, f.name AS facility_name FROM desk_items d LEFT JOIN users u ON u.id=d.with_user_id LEFT JOIN org_facilities f ON f.id=d.facility_id WHERE d.id=? AND d.owner_id=?`).get(req.params.id, req.user.id);
+  if (!d) return res.status(404).json({ error: 'Not found.' });
+  const to = d.uemail && /@/.test(d.uemail) ? d.uemail : '';
+  if (!claudeConfigured()) {
+    // Fail-visible: no AI → an honest skeleton, never a fake "draft".
+    return res.json({ to, recipient: d.uname || d.with_who || '', ai: false, subject: d.title.slice(0, 70), body: `Hi${d.uname ? ' ' + d.uname.split(' ')[0] : ''},\n\n${d.title}${d.due_date ? ' — needed by ' + d.due_date + '.' : '.'}\n\nCan you take this and let me know when it's handled?\n\n${(req.user.name || '').split(' ')[0]}` });
+  }
+  try {
+    const draft = await draftDeskEmail({ title: d.title, bucket: d.bucket, facility: d.facility_name, role: d.suggested_role, withWho: d.with_who, due: d.due_date, senderName: req.user.name, recipientName: d.uname });
+    res.json({ to, recipient: d.uname || d.with_who || '', ai: true, subject: String(draft.subject || d.title.slice(0, 70)), body: String(draft.body || '') });
+  } catch (e) { res.status(502).json({ error: 'Draft failed: ' + e.message }); }
+});
+app.post('/api/desk/:id/email', requireAuth, requireAdmin, async (req, res) => {
+  const d = db.prepare(`SELECT * FROM desk_items WHERE id=? AND owner_id=?`).get(req.params.id, req.user.id);
+  if (!d) return res.status(404).json({ error: 'Not found.' });
+  if (!emailConfigured()) return res.status(400).json({ error: 'Email is not configured (Settings → Email).' });
+  const b = req.body || {};
+  const to = String(b.to || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return res.status(400).json({ error: 'Who is this going to? Add a valid email.' });
+  const subject = String(b.subject || '').trim().slice(0, 150);
+  const body = String(b.body || '').trim().slice(0, 6000);
+  if (!subject || !body) return res.status(400).json({ error: 'Subject and body required.' });
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:560px;line-height:1.55">${body.split(/\n{2,}/).map((p) => `<p>${htmlEsc(p).replace(/\n/g, '<br>')}</p>`).join('')}</div>`;
+  try { await sendEmail({ to, subject, html, suppressCc: true }); } catch (e) { return res.status(502).json({ error: e.message }); }
+  // The email IS the follow-up: record who we're now waiting on so the board shows it.
+  const u = db.prepare(`SELECT id, name FROM users WHERE active=1 AND lower(username)=lower(?)`).get(to);
+  db.prepare(`UPDATE desk_items SET nudged_at=datetime('now'), status=CASE WHEN status='open' THEN 'waiting' ELSE status END, with_who=COALESCE(with_who, ?), with_user_id=COALESCE(with_user_id, ?) WHERE id=?`)
+    .run(u ? u.name : to.split('@')[0], u ? u.id : null, d.id);
+  res.json({ ok: true, sent: to });
 });
 app.post('/api/desk/settings', requireAuth, requireAdmin, (req, res) => {
   const b = req.body || {};

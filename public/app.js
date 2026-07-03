@@ -5955,6 +5955,7 @@ function deskCard(x,primary){
     <div class="q-title" style="font-size:14.5px;line-height:1.35">${esc(x.title)}</div>
     <div class="q-sub" style="margin-top:3px;line-height:2">${x.due_date?tag('🗓 '+esc(x.due_date)+(x.due_time?' '+esc(x.due_time):'')):''}${x.with_who?tag('👤 '+esc(x.with_who)+(x.nudged_at?' · nudged '+deskDaysAgo(x.nudged_at):'')):''}${x.bucket?tag('🏷 '+esc(x.bucket)):''}${x.facility_name?tag('📍'+esc(x.facility_name)):''}${(!x.with_who&&x.suggested_role)?`<span class="badge-info" style="margin-right:4px;cursor:pointer" title="AI suggests this role — tap to pick the person" onclick="deskAssignRole(${x.id},'${esc(x.suggested_role).replace(/'/g,"\\'")}')">🎯 ${esc(x.suggested_role)} →</span>`:''}${x.source!=='app'?tag('📱'):''}</div>
     <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${x.status!=='done'?`${gold}
+      <button class="btn btn-ghost btn-sm sans" title="AI drafts the email that gets this done — you edit, then send" onclick="deskEmail(${x.id},this)">✉️ Email</button>
       <button class="btn btn-ghost btn-sm sans" title="More" onclick="deskMore(${x.id},this)">⋯</button>`
       :`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${x.id},{status:'open'})">↩︎</button>`}</div></div>`;
 }
@@ -6073,6 +6074,31 @@ async function deskAssignRole(id,role){
 }
 async function deskWho(id){ const w=prompt('Who has to help close this? (name — matches app users automatically)'); if(w==null) return; deskDo(id,{with_who:w}); }
 async function deskNudge(id){ try{ const r=await api('/desk/'+id+'/nudge',{method:'POST'}); alert('📣 '+(r.how||'nudged')); }catch(e){ alert(e.message);} loadMyDesk(); }
+// ✉️ Email from the board — AI writes the first draft, you own the send.
+async function deskEmail(id,btn){
+  const label=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='✦ drafting…'; }
+  let d; try{ d=await api('/desk/'+id+'/draft',{method:'POST'}); }
+  catch(e){ alert(e.message); if(btn){ btn.disabled=false; btn.textContent=label; } return; }
+  if(btn){ btn.disabled=false; btn.textContent=label; }
+  const save=hmodal(`<h3>✉️ Send it${d.recipient?' — '+esc(d.recipient):''}</h3>
+    <p class="sub sans" style="margin:0 0 8px">${d.ai?'✦ Drafted by AI from the task — read it, make it yours, send.':'AI is off — here\'s an honest skeleton to fill in.'}</p>
+    <label>To</label><input id="de_to" type="email" value="${esc(d.to||'')}" placeholder="who@armadarecovery.com"/>
+    <label>Subject</label><input id="de_subject" value="${esc(d.subject||'')}"/>
+    <label>Body</label><textarea id="de_body" rows="10">${esc(d.body||'')}</textarea>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;margin-top:4px">${d.ai?`<button class="btn btn-ghost btn-sm sans" onclick="deskRedraft(${id})">↻ Redraft</button>`:''}<span class="hint" id="de_msg"></span></div>`);
+  save.textContent='Send email';
+  save.onclick=async()=>{
+    save.disabled=true; save.textContent='Sending…';
+    try{ const r=await api('/desk/'+id+'/email',{method:'POST',body:JSON.stringify({to:$('de_to').value.trim(),subject:$('de_subject').value,body:$('de_body').value})});
+      closeHModal(); alert('✉️ Sent to '+r.sent+' — the item now shows who you\'re waiting on.'); loadMyDesk(); }
+    catch(e){ save.disabled=false; save.textContent='Send email'; if($('de_msg'))$('de_msg').textContent=e.message; }
+  };
+}
+async function deskRedraft(id){
+  const m=$('de_msg'); if(m)m.textContent='✦ redrafting…';
+  try{ const d=await api('/desk/'+id+'/draft',{method:'POST'}); $('de_subject').value=d.subject||''; $('de_body').value=d.body||''; if(m)m.textContent=''; }
+  catch(e){ if(m)m.textContent=e.message; }
+}
 async function deskDel(id){ if(!confirm('Delete this item?')) return; try{ await api('/desk/'+id,{method:'DELETE'}); }catch(e){ alert(e.message);} loadMyDesk(); }
 async function deskSaveSettings(){ try{ await api('/desk/settings',{method:'POST',body:JSON.stringify({digestHour:+(($('deskHour')||{}).value||7),email:($('deskEmail')||{}).value||'',buckets:(($('deskBuckets')||{}).value||'').split('\n').map(x=>x.trim()).filter(Boolean)})}); loadMyDesk(); }catch(e){ alert(e.message); } }
 async function deskDigestNow(btn){ btn.disabled=true; try{ const r=await api('/desk/digest-now',{method:'POST'}); alert(r.sent?'☀️ Digest sent.':'Not sent: '+(r.reason||'')); }catch(e){ alert(e.message);} btn.disabled=false; }

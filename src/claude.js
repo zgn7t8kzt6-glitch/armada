@@ -413,6 +413,38 @@ export async function classifyDeskItem(text, buckets, facilities, roles) {
   return t ? JSON.parse(t.text) : { bucket: '', facility: '', role: '' };
 }
 
+// Desk → email: draft the email that gets a captured task moving. The owner edits
+// before sending — this writes the first 90%, never hits Send itself.
+const DESK_EMAIL_SCHEMA = {
+  type: 'object',
+  properties: {
+    subject: { type: 'string', description: 'Short, specific subject line — what needs to happen, not "Follow up".' },
+    body: { type: 'string', description: 'The email body as plain text with blank lines between paragraphs. 3–7 sentences: what is needed, any date/context provided, and a clear ask with a reply-by. Warm, direct, zero corporate filler. Sign off with the sender\'s first name only.' },
+  },
+  required: ['subject', 'body'],
+};
+export async function draftDeskEmail({ title, bucket, facility, role, withWho, due, senderName, recipientName }) {
+  const client = await getClient();
+  const ctx = [
+    recipientName || withWho ? `RECIPIENT: ${recipientName || withWho}` : 'RECIPIENT: (unknown — write so it works for whoever it goes to)',
+    bucket ? `CATEGORY: ${bucket}` : '',
+    facility ? `FACILITY: ${facility}` : '',
+    role ? `LIKELY ROLE: ${role}` : '',
+    due ? `NEEDED BY: ${due}` : '',
+  ].filter(Boolean).join('\n');
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 600,
+    system: G + 'You draft short, effective work emails for the owner of Armada Recovery (behavioral health: detox, outpatient, sober living). He captured a task on his desk and needs the email that gets it done. Write in his voice: warm, direct, no corporate filler. Ask for a specific action with a specific reply-by. Never include client/patient names or health details — if the task implies a client, refer to them generically ("a client"). Do not invent facts beyond what the task says.',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: DESK_EMAIL_SCHEMA } },
+    messages: [{ role: 'user', content: `SENDER: ${senderName}\n${ctx}\n\nTASK (as captured): ${scrub(String(title || '').slice(0, 400))}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('declined');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) throw new Error('no draft returned');
+  return JSON.parse(t.text);
+}
+
 // ---- Document extraction: read an uploaded PDF/image and pull structured fields ----
 async function extractFromDoc(base64, mediaType, system, schema, instruction) {
   const client = await getClient();

@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { db } from './db.js';
+import { db, getState } from './db.js';
 import { createUser } from './auth.js';
 
 // One-time import of the org-wide employee roster (name + entity/location). Job title
@@ -102,6 +102,9 @@ export function ensureSampleData() {
 // so it loads once and never duplicates. NOTE: a relative's first name and a
 // date remain in this text; it is sample/pilot data, not Safe-Harbor de-id.
 export function ensureExampleClient12A() {
+  // Rebuild Phase 1: the demo client was inflating the real census by 1 — once
+  // retired, it stays retired (and fresh installs start with a truthful zero).
+  if (getState('demo_client_retired') === 'done') return;
   if (db.prepare(`SELECT id FROM clients WHERE name = ?`).get('Sample Client 12A')) return;
   // Don't seed the demo client once a real Kipu roster is present (it would
   // skew the live census count).

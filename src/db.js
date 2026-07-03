@@ -2792,15 +2792,22 @@ addColumn('requests', 'promised_by', 'TEXT');
 addColumn('requests', 'claimed_by', 'TEXT');             // who picked it up (response-time metric)
 addColumn('requests', 'claimed_at', 'TEXT');
 addColumn('requests', 'ready_at', 'TEXT');               // staff ready — kiosk flashes "you're up"
-// Standing ownership repair: any operational row that arrived without a facility
-// belongs to detox (all writes now stamp explicitly; this catches rows created
-// between the foundation seed and the stamping code, and is a no-op after that).
+// One-FINAL-time ownership repair (Rebuild Blueprint, Phase 1): legacy rows that
+// arrived without a facility belong to detox. This used to run on EVERY boot,
+// which meant any future facility's unstamped row would be silently re-owned by
+// Akron — so it now runs once and latches. After this, unstamped rows are a
+// visible defect to surface, never a silent reassignment.
 try {
-  const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id;
-  if (dfid) for (const t of ['clients', 'expected_arrivals', 'incidents', 'admissions']) {
-    try { db.prepare(`UPDATE ${t} SET facility_id=? WHERE facility_id IS NULL`).run(dfid); } catch { /* table optional */ }
+  if (getState('facility_null_repair_final') !== 'done') {
+    const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id;
+    if (dfid) {
+      for (const t of ['clients', 'expected_arrivals', 'incidents', 'admissions']) {
+        try { db.prepare(`UPDATE ${t} SET facility_id=? WHERE facility_id IS NULL`).run(dfid); } catch { /* table optional */ }
+      }
+      setState('facility_null_repair_final', 'done');
+    }
   }
-} catch { /* registry not seeded yet (fresh boot order) — seed backfills anyway */ }
+} catch { /* registry not seeded yet (fresh boot order) — next boot latches */ }
 addColumn('order_requests', 'tracking', 'TEXT');         // carrier tracking # or URL (shown on the status page)
 addColumn('desk_items', 'bucket', 'TEXT');               // AI-filed: Clinical/Maintenance/Expansion/…
 addColumn('desk_items', 'facility_id', 'INTEGER');       // AI-matched location (owner chain, Principle 3)
@@ -2850,4 +2857,61 @@ if (getState('exp_survey_excellence_v1') !== 'done') {
     ins.run(sid, 'Excellence', 'The staff work together as one team around my care.', 'scale', 99);
     setState('exp_survey_excellence_v1', 'done');
   }
+}
+
+// ── REBUILD PHASE 1 — Foundation integrity (docs/ARMADA-REBUILD-BLUEPRINT.md) ──
+// All additive, idempotent, state-latched. Empty DB and yesterday's DB both boot.
+
+// 1a. growth_checkins was CREATE'd twice with incompatible shapes; the first
+// (staff_id/goal/note) wins on any real DB, so the second family of endpoints
+// (user_id/progress/support/self) threw 'no such column'. Give the winning
+// table the missing columns so BOTH endpoint families work everywhere.
+addColumn('growth_checkins', 'user_id', 'INTEGER');
+addColumn('growth_checkins', 'progress', 'TEXT');
+addColumn('growth_checkins', 'support', 'TEXT');
+addColumn('growth_checkins', 'self', 'TEXT');
+
+// 1b. The registry gains what the rebuild needs: a facility keeps its own clock
+// (Wheatfield IN is Central time), its service list, and its module set.
+addColumn('org_facilities', 'timezone', 'TEXT');   // IANA tz; falls back to APP_TZ
+addColumn('org_facilities', 'services', 'TEXT');   // JSON array, e.g. ["detox","residential"]
+addColumn('org_facilities', 'modules', 'TEXT');    // JSON array; defaulted by type when blank
+
+// 1c. Registry corrections + the two missing Greenwood facilities (owner, 2026-07-03):
+// Wheatfield offers the same services as Akron detox (type detox, not outpatient);
+// "Akron House" is what the owner calls Armada Clinical; Spark/Reverie Greenwood
+// exist in the real world but not in the registry.
+if (getState('org_registry_v2') !== 'done') {
+  try {
+    db.prepare(`UPDATE org_facilities SET type='detox', services=COALESCE(services,'["detox","residential"]') WHERE fkey='wheatfield'`).run();
+    const old = db.prepare(`SELECT name, entity_aliases FROM org_facilities WHERE fkey='akron-house'`).get();
+    if (old && !/clinical/i.test(old.name || '')) {
+      let aliases = []; try { aliases = JSON.parse(old.entity_aliases || '[]'); } catch { /* fresh */ }
+      if (!aliases.includes(old.name)) aliases.push(old.name);
+      db.prepare(`UPDATE org_facilities SET name='Armada Clinical of Akron', entity_aliases=? WHERE fkey='akron-house'`).run(JSON.stringify(aliases));
+    }
+    const insF = db.prepare(`INSERT INTO org_facilities (fkey, name, brand, region, type, kipu_location_name, entity_aliases, active, sort)
+      SELECT ?,?,?,?,?,?,?,1,? WHERE NOT EXISTS (SELECT 1 FROM org_facilities WHERE fkey=?)`);
+    insF.run('spark-greenwood', 'Spark Recovery of Greenwood', 'Spark', 'Indiana', 'outpatient', 'Greenwood', '["Spark Recovery of Greenwood"]', 60, 'spark-greenwood');
+    insF.run('reverie-greenwood', 'Reverie Sober Living of Greenwood', 'Reverie', 'Indiana', 'sober-living', '', '["Reverie Sober Living of Greenwood"]', 61, 'reverie-greenwood');
+    // Timezones: Wheatfield IN sits in Central time; everything else Eastern.
+    db.prepare(`UPDATE org_facilities SET timezone='America/Chicago' WHERE fkey='wheatfield' AND (timezone IS NULL OR timezone='')`).run();
+    db.prepare(`UPDATE org_facilities SET timezone='America/New_York' WHERE timezone IS NULL OR timezone=''`).run();
+    setState('org_registry_v2', 'done');
+  } catch (e) { console.error('[registry v2]', e.message); }
+}
+
+// 1d. facility_id was un-indexed everywhere (Gate 5: a query scoped by
+// facility_id must scale). Idempotent; skips tables that don't exist yet.
+for (const t of ['clients', 'shifts', 'inventory_items', 'incidents', 'expected_arrivals', 'admissions', 'desk_items', 'appointments', 'authorizations', 'billing_ready_status', 'org_events', 'user_facility_access']) {
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_facility ON ${t}(facility_id)`); } catch { /* table optional */ }
+}
+
+// 1e. The demo client ("Sample Client 12A") was seeded ACTIVE into the census —
+// retire it once (reversible; the row is kept, just no longer counted in care).
+if (getState('demo_client_retired') !== 'done') {
+  try {
+    db.prepare(`UPDATE clients SET active=0, discharge_status='Administrative', discharge_date=COALESCE(discharge_date, date('now')) WHERE name='Sample Client 12A' AND source IS NULL`).run();
+    setState('demo_client_retired', 'done');
+  } catch { /* clients table optional on exotic boots */ }
 }

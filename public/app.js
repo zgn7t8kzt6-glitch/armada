@@ -75,7 +75,7 @@ async function confirmMfa(){
 let idleTimer=null;
 function resetIdle(){ clearTimeout(idleTimer); idleTimer=setTimeout(()=>{ if(ME){ alert('Signed out after 15 minutes of inactivity.'); doLogout(); } }, 15*60000); }
 ['click','keydown','mousemove','touchstart'].forEach(ev=>document.addEventListener(ev, resetIdle, {passive:true}));
-async function doLogout(){ await api('/logout',{method:'POST'}); location.reload(); }
+async function doLogout(){ try{ localStorage.removeItem('facScope'); }catch(e){} await api('/logout',{method:'POST'}); location.reload(); }
 
 /* ---- night mode + PWA + voice ---- */
 function applyTheme(t){ document.documentElement.dataset.theme = t==='dark'?'dark':''; const b=$('themeBtn'); if(b) b.textContent = t==='dark'?'☀️':'🌙'; }
@@ -4153,10 +4153,26 @@ async function loadUsers(){
         <td style="text-align:center">${status}<br><label class="hint" style="text-transform:none;letter-spacing:0"><input type="checkbox" class="us-active" ${u.active!==0?'checked':''}/> active</label></td>
         <td class="toolbar" style="gap:6px">
           <button class="btn btn-gold btn-sm sans" onclick="saveUser(${u.id})">Save</button>
+          <button class="btn btn-ghost btn-sm sans" title="Which facilities this person can see" onclick="editUserFacilities(${u.id}, ${JSON.stringify(u.name).replace(/"/g,'&quot;')})">🏥</button>
           ${u.pending?`<button class="btn btn-ghost btn-sm sans" onclick="reinvite(${u.id})">Resend invite</button>`:''}
           <button class="btn btn-ghost btn-sm sans" onclick="deleteUser(${u.id}, ${JSON.stringify(u.name).replace(/"/g,'&quot;')})" style="color:var(--danger)">Delete</button>
         </td></tr>`;
     }).join('')}</table><div id="userMsg" class="hint" style="margin-top:6px"></div>`;
+}
+// 🏥 Facility access: which facilities a user can see (drives the topbar chip
+// AND the server-side ?facility= guard). Rebuild Phase 1.
+async function editUserFacilities(uid,uname){
+  let facs,access;
+  try{ [facs,access]=await Promise.all([api('/org/facilities'),api('/org/facility-access')]); }catch(e){ alert(e.message); return; }
+  const mine=new Set(access.rows.filter(r=>r.user_id===uid).map(r=>r.facility_id));
+  const save=hmodal(`<h3>🏥 ${esc(uname)} — facility access</h3>
+    <p class="sub sans" style="margin:0 0 8px">Check every facility this person works with. No checks = they fall back to the default (detox) wall.</p>
+    ${(facs.facilities||[]).filter(f=>f.active).map(f=>`<label style="display:flex;align-items:center;gap:8px;margin:4px 0;text-transform:none;letter-spacing:0"><input type="checkbox" class="ufa" value="${f.id}" ${mine.has(f.id)?'checked':''}/> ${esc(f.name)} <span class="hint">· ${esc(f.type||'')}</span></label>`).join('')}`);
+  save.onclick=async()=>{
+    const ids=[...document.querySelectorAll('.ufa:checked')].map(c=>+c.value);
+    try{ await api('/org/facility-access',{method:'POST',body:JSON.stringify({user_id:uid,facility_ids:ids})}); closeHModal(); alert('✓ Saved — takes effect on their next page load.'); }
+    catch(e){ alert(e.message); }
+  };
 }
 async function saveDomains(){
   const list = $('u_domains').value.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);
@@ -5877,7 +5893,28 @@ async function loadOrgFacs(){
     <td><input data-of="${f.id}" data-k="beds" value="${f.beds!=null?f.beds:''}" style="width:60px"/></td>
     <td><input data-of="${f.id}" data-k="kipu_location_name" value="${esc(f.kipu_location_name||'')}" style="width:130px"/></td>
     <td><button class="btn btn-ghost btn-sm sans" onclick="saveOrgFac(${f.id})">Save</button></td></tr>`).join('')}</table>
-  <div class="hint" style="margin-top:4px">Regions: Ohio · Indiana · Corporate. Every new module keys on this list (facility_id), so keep it accurate.</div>`;
+  <div class="hint" style="margin-top:4px">Regions: Ohio · Indiana · Corporate. Every new module keys on this list (facility_id), so keep it accurate.</div>
+  <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:10px">
+    <strong class="sans" style="font-size:13px">＋ Onboard a facility</strong>
+    <div class="hint" style="margin:2px 0 6px">A new facility goes live with configuration alone — it appears in every dropdown, dashboard, and rollup the moment you add it.</div>
+    <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
+      <input id="nf_name" placeholder="Facility name" style="min-width:220px"/>
+      <input id="nf_brand" placeholder="Brand (Armada / Spark / …)" style="width:140px"/>
+      <input id="nf_region" placeholder="State / region" style="width:110px"/>
+      <select id="nf_type"><option value="detox">detox + residential</option><option value="outpatient">outpatient (PHP/IOP/OP)</option><option value="sober-living">sober living</option><option value="corporate">corporate</option></select>
+      <input id="nf_beds" type="number" placeholder="Beds" style="width:70px"/>
+      <input id="nf_kipu" placeholder="Kipu location name (optional)" style="width:170px"/>
+      <select id="nf_tz"><option value="America/New_York">Eastern</option><option value="America/Chicago">Central</option></select>
+      <button class="btn btn-gold btn-sm sans" onclick="addOrgFac()">Onboard facility</button><span class="hint" id="nf_msg"></span>
+    </div>
+  </div>`;
+}
+async function addOrgFac(){
+  const g=id=>($(id)||{}).value||'';
+  if(!g('nf_name').trim()){ if($('nf_msg'))$('nf_msg').textContent='Name the facility.'; return; }
+  try{ const r=await api('/org/facilities',{method:'POST',body:JSON.stringify({name:g('nf_name'),brand:g('nf_brand'),region:g('nf_region'),type:g('nf_type'),beds:g('nf_beds'),kipu_location_name:g('nf_kipu'),timezone:g('nf_tz')})});
+    if($('nf_msg'))$('nf_msg').textContent='✓ Onboarded — key: '+r.fkey; loadOrgFacs(); }
+  catch(e){ if($('nf_msg'))$('nf_msg').textContent=e.message; }
 }
 async function saveOrgFac(id){
   const b={}; document.querySelectorAll(`[data-of="${id}"]`).forEach(el=>{ b[el.dataset.k]=el.value; });
@@ -6755,8 +6792,11 @@ function renderShellContext(){
 let FAC_SCOPE=null;   // facility id as string, '' = all facilities
 function facScopeInit(){
   if(FAC_SCOPE!==null) return;
+  const mine=(ME.facilities||[]).map(f=>String(f.id));
   const saved=localStorage.getItem('facScope');
-  if(saved!==null){ FAC_SCOPE=saved; return; }
+  // Only trust a saved scope the CURRENT user can actually see — a shared floor
+  // workstation must never leak one user's facility scope to the next.
+  if(saved!==null&&(saved===''||mine.includes(saved))){ FAC_SCOPE=saved; return; }
   const detox=(ME.facilities||[]).find(f=>f.fkey==='detox-akron');
   FAC_SCOPE = detox ? String(detox.id) : '';
 }

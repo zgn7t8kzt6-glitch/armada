@@ -374,6 +374,7 @@ function facilityForEntity(name) {
 function canSeeOps(user) { return !!user && (user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR', 'Executive Assistant'].includes(user.job_role)); }
 app.get('/api/opscenter', requireAuth, (req, res) => {
   if (!canSeeOps(req.user)) return res.status(403).json({ error: 'Leadership only.' });
+  if (req.query.facility && !facilityAllowed(req.user, +req.query.facility)) return res.status(403).json({ error: 'No access to that facility.' });
   const today = appToday();
   const t = [];
   const add = (fn) => { try { const x = fn(); if (x) t.push(x); } catch { /* tile skipped */ } };
@@ -1517,14 +1518,69 @@ app.post('/api/desk/digest-now', requireAuth, requireAdmin, async (req, res) => 
 app.get('/api/org/facilities', requireAuth, (req, res) => {
   res.json({ facilities: orgFacilities(), departments: db.prepare(`SELECT * FROM org_departments ORDER BY sort`).all() });
 });
+// Facility TYPES define the service line; each type turns a default module set on.
+// (Rebuild Blueprint §4 — configure, don't fork.)
+const FACILITY_TYPES_ORG = ['detox', 'residential', 'outpatient', 'sober-living', 'corporate'];
+// Onboard a NEW facility — the Constitution's promise: a new facility goes live
+// with configuration alone. Creates the registry row; dropdowns/rollups pick it
+// up immediately (they all read orgFacilities()).
+app.post('/api/org/facilities', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Facility name required.' });
+  const type = FACILITY_TYPES_ORG.includes(b.type) ? b.type : 'outpatient';
+  const fkey = String(b.fkey || name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  if (!fkey) return res.status(400).json({ error: 'Could not derive a key from the name.' });
+  if (db.prepare(`SELECT 1 FROM org_facilities WHERE fkey=?`).get(fkey)) return res.status(400).json({ error: `A facility with key "${fkey}" already exists.` });
+  const sortMax = db.prepare(`SELECT COALESCE(MAX(sort),0) m FROM org_facilities`).get().m;
+  const info = db.prepare(`INSERT INTO org_facilities (fkey, name, brand, region, type, kipu_location_name, entity_aliases, beds, active, sort, timezone, services, modules)
+    VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)`)
+    .run(fkey, name.slice(0, 120), String(b.brand || '').slice(0, 40) || null, String(b.region || '').slice(0, 40) || null, type,
+      String(b.kipu_location_name || '').slice(0, 120) || '', JSON.stringify([name.slice(0, 120)]), (b.beds === '' || b.beds == null) ? null : +b.beds,
+      sortMax + 1, String(b.timezone || '').slice(0, 60) || 'America/New_York',
+      Array.isArray(b.services) ? JSON.stringify(b.services.map((x) => String(x).slice(0, 40)).slice(0, 12)) : null,
+      Array.isArray(b.modules) ? JSON.stringify(b.modules.map((x) => String(x).slice(0, 40)).slice(0, 40)) : null);
+  try { publishEvent({ event: 'facility.created', entity: 'org_facility', entity_id: Number(info.lastInsertRowid), facility_id: Number(info.lastInsertRowid), actor: req.user.username, summary: `${name} onboarded (${type})` }); } catch { /* feed only */ }
+  audit({ user: req.user, action: 'FACILITY_CREATE', entity: 'org_facility', entity_id: Number(info.lastInsertRowid), detail: `${name} · ${type}`, ip: req.ip });
+  res.json({ ok: true, id: Number(info.lastInsertRowid), fkey });
+});
 app.post('/api/org/facilities/:id', requireAuth, requireAdmin, (req, res) => {
   const f = db.prepare(`SELECT * FROM org_facilities WHERE id=?`).get(req.params.id);
   if (!f) return res.status(404).json({ error: 'Not found.' });
   const b = req.body || {};
-  db.prepare(`UPDATE org_facilities SET name=COALESCE(?,name), brand=COALESCE(?,brand), region=COALESCE(?,region), type=COALESCE(?,type), kipu_location_name=COALESCE(?,kipu_location_name), beds=?, active=COALESCE(?,active) WHERE id=?`)
-    .run(b.name!=null?String(b.name).slice(0,120):null, b.brand!=null?String(b.brand).slice(0,40):null, b.region!=null?String(b.region).slice(0,40):null, b.type!=null?String(b.type).slice(0,30):null, b.kipu_location_name!=null?String(b.kipu_location_name).slice(0,120):null, (b.beds===''||b.beds==null)?f.beds:+b.beds, b.active!=null?(b.active?1:0):null, f.id);
+  db.prepare(`UPDATE org_facilities SET name=COALESCE(?,name), brand=COALESCE(?,brand), region=COALESCE(?,region), type=COALESCE(?,type), kipu_location_name=COALESCE(?,kipu_location_name), beds=?, active=COALESCE(?,active), timezone=COALESCE(?,timezone), services=COALESCE(?,services), modules=COALESCE(?,modules) WHERE id=?`)
+    .run(b.name!=null?String(b.name).slice(0,120):null, b.brand!=null?String(b.brand).slice(0,40):null, b.region!=null?String(b.region).slice(0,40):null, b.type!=null?String(b.type).slice(0,30):null, b.kipu_location_name!=null?String(b.kipu_location_name).slice(0,120):null, (b.beds===''||b.beds==null)?f.beds:+b.beds, b.active!=null?(b.active?1:0):null,
+      b.timezone!=null?String(b.timezone).slice(0,60):null, Array.isArray(b.services)?JSON.stringify(b.services):null, Array.isArray(b.modules)?JSON.stringify(b.modules):null, f.id);
   res.json({ ok: true });
 });
+// Which facilities can each user see? (Rebuild Phase 1: the table finally gets a
+// writer beyond the one-time seed — and the ?facility= guard below reads it.)
+app.get('/api/org/facility-access', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`SELECT ua.user_id, ua.facility_id, u.name AS user_name FROM user_facility_access ua JOIN users u ON u.id=ua.user_id ORDER BY u.name`).all();
+  res.json({ rows });
+});
+app.post('/api/org/facility-access', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const uid = +b.user_id;
+  if (!uid || !db.prepare(`SELECT 1 FROM users WHERE id=?`).get(uid)) return res.status(400).json({ error: 'Unknown user.' });
+  const ids = Array.isArray(b.facility_ids) ? b.facility_ids.map(Number).filter((n) => db.prepare(`SELECT 1 FROM org_facilities WHERE id=?`).get(n)) : [];
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM user_facility_access WHERE user_id=?`).run(uid);
+    const ins = db.prepare(`INSERT INTO user_facility_access (user_id, facility_id, role) VALUES (?,?, (SELECT job_role FROM users WHERE id=?))`);
+    for (const fid of ids) ins.run(uid, fid, uid);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); return res.status(500).json({ error: e.message }); }
+  audit({ user: req.user, action: 'FACILITY_ACCESS_SET', entity: 'user', entity_id: uid, detail: `facilities: ${ids.join(',') || 'none'}`, ip: req.ip });
+  res.json({ ok: true, count: ids.length });
+});
+// Guard for ?facility= params: the requested facility must be one the caller can
+// see (admin/ED see all). Closes the read-any-facility hole the audit flagged.
+function facilityAllowed(user, fid) {
+  if (!fid) return true;   // "all my facilities" — resolved per-user elsewhere
+  if (user.role === 'admin' || ['Executive Director'].includes(user.job_role)) return true;
+  return !!db.prepare(`SELECT 1 FROM user_facility_access WHERE user_id=? AND facility_id=?`).get(user.id, +fid);
+}
 
 // Insurance: the coverage lines we track, and which are REQUIRED so the matrix can
 // flag any entity that's missing one (configurable by the owner).
@@ -3942,6 +3998,7 @@ app.get('/api/diag/kipu-cosign', requireAuth, requireAdmin, async (req, res) => 
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/diag/admits', requireAuth, requireAdmin, (req, res) => {
+  if (req.query.facility && !facilityAllowed(req.user, +req.query.facility)) return res.status(403).json({ error: 'No access to that facility.' });
   const today = appToday();
   const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : today.slice(0, 8) + '01';
   const end = /^\d{4}-\d{2}-\d{2}$/.test(req.query.end || '') ? req.query.end : today;

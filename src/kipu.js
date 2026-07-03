@@ -752,10 +752,14 @@ export async function kipuSyncRoster() {
         const admit = localDateOf(pick(p, 'admission_date', 'admit_date') || g('admission_date'));
         const admitTimeD = admitTimeFrom(pick(p, 'admission_date', 'admit_date', 'admitted_at') || g('admission_date'), pick(p, 'created_at', 'created_date') || g('created_at'));
         const program = cleanLoc(g('level_of_care', 'program'));
+        // 23 placeholders: ...diagnosis, ALLERGIES, insurance, phone, pronouns, language,
+        // mrn, payment, next_loc, anticipated_dc, kipu_id, FACILITY_ID. This call used to
+        // pass 21 args (allergies + facility_id missing -> insurance landed in the
+        // allergies slot and better-sqlite3 threw, silently disabling the whole importer).
         const info = ins.run(name, p.first_name || name, g('bed_name', 'bed_number', 'room_name', 'room_number', 'room', 'bed'), program, realLoc(program), admit, admitTimeD, null, null,
-          g('referrer_name', 'first_contact_name'), flat2(pick(p, 'dob', 'date_of_birth')), flat2(pick(p, 'diagnosis_codes')),
+          g('referrer_name', 'first_contact_name'), flat2(pick(p, 'dob', 'date_of_birth')), flat2(pick(p, 'diagnosis_codes')), null,
           flat2(pick(p, 'insurance_company')), flat2(pick(p, 'phone')), flat2(pick(p, 'pronouns')), flat2(pick(p, 'preferred_language')),
-          flat2(pick(p, 'mr_number')), null, null, null, kid);
+          flat2(pick(p, 'mr_number')), null, null, null, kid, facId);
         db.prepare(`UPDATE clients SET active = 0, discharge_status = ?, discharge_date = ?, discharge_destination = ?, discharge_reason = ?, discharged_by_kipu = ? WHERE id = ?`)
           .run(g('discharge_type', 'discharge_type_code', 'discharge_or_transition_name') || 'Discharged', dDate, g('discharge_or_transition_name'), g('discharge_reason'),
             g('discharged_by', 'discharge_clinician', 'discharged_by_name') || deepFind(det, /discharg.*(by|clinician|provider|staff)|disposition.*by/i) || null, info.lastInsertRowid);

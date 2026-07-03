@@ -6638,6 +6638,14 @@ async function addOrder(){
 }
 async function setOrder(id,status){ try{ await api('/corp/orders/'+id,{method:'PATCH',body:JSON.stringify({status})}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
 async function emailLandlord(id,btn){ if(btn)btn.disabled=true; try{ const r=await api('/corp/orders/'+id+'/email-landlord',{method:'POST'}); alert(r.sent?('✓ Emailed the landlord ('+r.to+').'):('Could not email landlord: '+(r.reason||'no landlord on file for this facility — add it on the lease.'))); }catch(e){ alert(e.message); } if(btn)btn.disabled=false; }
+async function sendItInstructions(btn){
+  const to=(($('inItEmail')||{}).value||'').trim();
+  if(!/@/.test(to)){ const m=$('inItMsg'); if(m) m.textContent='Enter the IT company\'s email first.'; return; }
+  btn.disabled=true;
+  try{ await api('/corp/intake/send-instructions',{method:'POST',body:JSON.stringify({to})}); const m=$('inItMsg'); if(m) m.textContent='✓ Sent — the setup instructions are on their way.'; }
+  catch(e){ const m=$('inItMsg'); if(m) m.textContent='⚠️ '+e.message; }
+  btn.disabled=false;
+}
 async function orderTracking(id){
   const t=prompt('Tracking number or carrier link (the office manager sees this on their status page):');
   if(t==null) return;

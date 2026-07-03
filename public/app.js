@@ -6467,7 +6467,7 @@ async function deskMail(b){
   const col=(title,arr,color)=>`<div class="trello-col"><div class="trello-head" style="border-top:3px solid ${color};border-radius:12px 12px 0 0"><strong class="sans">${title}</strong> <span class="hint">${arr.length}</span></div><div class="trello-body">${arr.map(card).join('')||'<div class="hint" style="padding:8px">Nothing waiting.</div>'}</div></div>`;
   b.innerHTML=`<div style="margin-top:10px">
     <div class="cmd-hero-row"><div><h3 style="margin:0">📧 ${esc(st.user||'Inbox')}</h3>
-      <p class="sub sans" style="margin:0">Read &amp; ignored today: <strong>${d.ignoredToday}</strong> · handled today: <strong>${d.doneToday}</strong>${st.lastRun?' · last check '+esc(st.lastRun.slice(11,16)):''} · checks every 10 min</p></div>
+      <p class="sub sans" style="margin:0">Read &amp; ignored today: <strong>${d.ignoredToday}</strong> · handled today: <strong>${d.doneToday}</strong>${st.lastRun?' · last check '+esc(st.lastRun.slice(11,16)):''} · checks every 10 min${st.running?' · <strong>sorting now…</strong>':''}</p></div>
       <div class="toolbar" style="gap:6px"><button class="btn btn-ghost btn-sm sans" onclick="mailPoll(this)">↻ Check now</button><button class="btn btn-ghost btn-sm sans" onclick="mailDisconnect()" title="Sign this mailbox out">Sign out</button></div></div>
     <div class="trello" style="margin-top:8px">
       ${col('🔴 Decision needed', d.decision, '#c0392b')}
@@ -6513,6 +6513,9 @@ async function mailPoll(btn){
   if(btn){ btn.disabled=true; btn.textContent='Checking…'; }
   try{ await api('/mail/poll',{method:'POST'}); }catch(e){ if(btn) alert(e.message); }
   if(btn){ btn.disabled=false; btn.textContent='↻ Check now'; }
+  // The check runs in the background (a big backlog is paced over minutes) —
+  // refresh the board a few times so results appear as they land.
+  let n=0; const iv=setInterval(()=>{ n++; if(n>8||DESK_TAB!=='mail'){ clearInterval(iv); return; } renderDeskTab(); },15000);
   renderDeskTab();
 }
 async function mailAct(id,status){

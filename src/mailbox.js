@@ -133,6 +133,7 @@ async function graphGet(path) {
 
 // ── The poll: read new mail, triage, file ─────────────────────────────────────
 let _polling = false;
+export function mailPolling() { return _polling; }
 export async function pollMailbox({ max = 25 } = {}) {
   if (!mailConnected()) return { error: 'Mailbox is not connected.' };
   if (!claudeConfigured()) return { error: 'AI is not configured — triage needs it.' };

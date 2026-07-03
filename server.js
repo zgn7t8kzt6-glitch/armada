@@ -22,7 +22,7 @@ import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ens
 import { classifyDeskItem, draftDeskEmail } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
-import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard, muteSender, unmuteSender, mutedSenders, noteDismissal } from './src/mailbox.js';
+import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard, muteSender, unmuteSender, mutedSenders, noteDismissal, mailPolling } from './src/mailbox.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
 import { ARMADA_PRINCIPLES, ARMADA_STANDARD, ALL_BEHIND_YOU, HANDBOOK, HANDBOOK_INTRO, todaysPrinciple, todaysSafety, chapterForRole } from './src/handbook.js';
 
@@ -1483,6 +1483,7 @@ app.get('/api/mail/status', requireAuth, requireAdmin, (req, res) => {
     enabled: getState('mail_enabled') !== 'off',
     lastRun: getState('mail_last_run') || null,
     lastError: getState('mail_last_error') || null,
+    running: mailPolling(),
     ai: claudeConfigured(),
   });
 });
@@ -1499,10 +1500,12 @@ app.post('/api/mail/connect', requireAuth, requireAdmin, async (req, res) => {
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/mail/disconnect', requireAuth, requireAdmin, (req, res) => { disconnectMailbox(); audit({ user: req.user, action: 'MAIL_DISCONNECT', ip: req.ip }); res.json({ ok: true }); });
-app.post('/api/mail/poll', requireAuth, requireAdmin, async (req, res) => {
-  const r = await pollMailbox({ max: 25 });
-  if (r.error) return res.status(502).json(r);
-  res.json(r);
+app.post('/api/mail/poll', requireAuth, requireAdmin, (req, res) => {
+  // Fire-and-forget: a big backlog can take minutes (the calls are deliberately
+  // paced) — never make the browser wait on it. The board refreshes itself.
+  if (mailPolling()) return res.json({ ok: true, running: true });
+  pollMailbox({ max: 25 }).then((r) => { if (r && r.error) console.error('[mail] poll:', r.error); else console.log('[mail] poll:', JSON.stringify(r)); }).catch((e) => console.error('[mail] poll:', e.message));
+  res.json({ ok: true, started: true });
 });
 app.get('/api/mail/board', requireAuth, requireAdmin, (req, res) => res.json(mailBoard()));
 app.post('/api/mail/mute', requireAuth, requireAdmin, (req, res) => {

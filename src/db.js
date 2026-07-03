@@ -2250,6 +2250,30 @@ CREATE TABLE IF NOT EXISTS staff_blocks (
   label TEXT                         -- e.g. "Men's Process Group"
 );`);
 
+// ── The owner's Desk — one capture inbox for everything he's working on.
+// Items arrive from the app, a text (Twilio webhook), or an iPhone shortcut;
+// dates parse out of the sentence; "waiting on" items nudge the person through
+// their Today inbox. ADHD-first: the system does the remembering.
+db.exec(`CREATE TABLE IF NOT EXISTS desk_items (
+  id INTEGER PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  detail TEXT,
+  kind TEXT NOT NULL DEFAULT 'task',          -- task | followup | idea | appt
+  with_who TEXT,                              -- who has to help close it
+  with_user_id INTEGER REFERENCES users(id),  -- matched staff → lands in their Today
+  due_date TEXT,
+  due_time TEXT,
+  status TEXT NOT NULL DEFAULT 'open',        -- open | waiting | done
+  priority TEXT DEFAULT 'Normal',
+  source TEXT DEFAULT 'app',                  -- app | sms | shortcut
+  snooze_until TEXT,
+  nudged_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  done_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_desk_owner ON desk_items(owner_id, status);`);
+
 // Insurance brokers / agents — who to call per policy.
 db.exec(`CREATE TABLE IF NOT EXISTS insurance_brokers (
   id INTEGER PRIMARY KEY,

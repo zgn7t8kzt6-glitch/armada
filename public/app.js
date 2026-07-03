@@ -186,7 +186,7 @@ const GROUPS=[
 ];
 const GROUP_OF={
   // Home — where every day starts: my shift, the live board, the facility command
-  dashboard:'today',today:'today',opscenter:'today',command:'today',
+  dashboard:'today',today:'today',opscenter:'today',command:'today',mydesk:'today',
   // Arrival — the warm welcome (front door + intake)
   arrivals:'arrival',arrivalcheck:'arrival',admissions:'arrival',referrals:'arrival',partners:'arrival',
   // Care — anticipate every need (the daily care)
@@ -377,6 +377,8 @@ function canSeeView(v){
   if(v==='outpatient'||v==='ownership') return !!(ME.role==='admin' || ME.outpatientAccess);
   // Operations Center: leadership's live board (admin/ED/DoO/Clinical Director/HR/EA).
   if(v==='opscenter') return !!(ME.role==='admin' || ME.opsAccess);
+  // My Desk: the owner's private capture inbox.
+  if(v==='mydesk') return ME.role==='admin';
   // Authorization register (Revenue OS): UR-permitted roles + clinical leadership.
   if(v==='authreg') return !!(ME.role==='admin' || ME.authAccess);
   // Billing readiness: leadership + clinical staff (rows scoped server-side).
@@ -498,12 +500,13 @@ function show(v){
   renderHubTabs(v);
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   const activeBtn=document.querySelector(`#nav button[data-view="${v}"]`);
-  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',billingready:'Billing Readiness',appts:'Scheduling & Queue',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
+  const noNavTitles={journey:'Client 360',editor:'Care Card',analytics:'Risk Analytics',scorecard:'Scorecard',accountability:'Accountability','report-view':'Reports',surveys:'Surveys',incidents:'Incidents',partners:'Partners',coverage:'Coverage',assign:'Assign Staff',standard:'The Standard',lineup:'Daily Lineup',dignity:'Dignity Kits',family:'Family',askai:'Ask AI',authreg:'Authorization Register',billingready:'Billing Readiness',mydesk:'My Desk',appts:'Scheduling & Queue',housing:'Hilltop Recovery Home — HQ',staffhub:'Staff Hub',hstaffdev:'Staff Growth',hfarewell:'Farewell & Alumni',fleet:'Vehicles & Transportation',houses:'Houses & Beds',residents:'Residents',resident:'Resident 360',screens:'Drug Screening',houselife:'House Life',coordination:'Clinical Coordination',ledger:'Rent & Funding',orh:'ORH Compliance',housingoutcomes:'Housing Outcomes',intake:'Intake & Forms',rentrun:'Rent Run',employment:'Employment & Job Search',housingstaff:'Staffing',shiftreports:'Shift Reports',hincidents:'Incident Reports',voice:'Resident Voice & Kiosk',hmaint:'Maintenance & Supplies',activities:'Activities & Engagement',movement:'Daily Movement'};
   if($('topbarTitle')) $('topbarTitle').textContent = (noNavTitles[v]) || (activeBtn ? activeBtn.textContent : $('topbarTitle').textContent);
   document.getElementById('shell')?.classList.remove('nav-open');
   if(v==='dashboard') loadDashboard();
   if(v==='today') loadToday();
   if(v==='opscenter') loadOpsCenter();
+  if(v==='mydesk') loadMyDesk();
   if(v==='authreg') loadAuthReg();
   if(v==='billingready') loadBillingReady();
   if(v==='appts') loadAppts();
@@ -5877,6 +5880,63 @@ async function authDel(id){
   if(!confirm('Delete this authorization row entirely? (Closing is usually right.)')) return;
   try{ await api('/auth-register/'+id,{method:'DELETE'}); loadAuthReg(); }catch(e){ alert(e.message); }
 }
+/* ── MY DESK — the owner's one capture inbox. Type it like a text; dates parse;
+   waiting-on items nudge people; the morning digest does the remembering. ── */
+let DESK_DATA=null;
+async function loadMyDesk(){
+  const host=$('mydesk'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="skel" style="width:240px;height:22px;margin-bottom:14px"></div><div class="skel" style="height:60px"></div></div>';
+  let d; try{ d=await api('/desk'); }catch(e){ host.innerHTML='<div class="card"><div class="empty"><div class="e-ico">⚠️</div>'+esc(e.message)+'</div></div>'; return; }
+  DESK_DATA=d;
+  const items=(d.items||[]).filter(x=>!x.snoozed||x.status==='done');
+  const today=d.today;
+  const overdue=items.filter(x=>x.overdue&&x.status!=='done');
+  const todays=items.filter(x=>x.due_date===today&&x.status!=='done');
+  const waiting=items.filter(x=>x.status==='waiting'&&!x.overdue&&x.due_date!==today);
+  const upcoming=items.filter(x=>x.status==='open'&&x.due_date&&x.due_date>today);
+  const someday=items.filter(x=>x.status==='open'&&!x.due_date);
+  const done=items.filter(x=>x.status==='done');
+  const daysAgo=(ts)=>{ if(!ts) return null; const n=Math.round((Date.now()-Date.parse(ts+'Z'))/864e5); return n<=0?'today':n+'d ago'; };
+  const row=(x)=>`<div class="q-row ${x.overdue?'q-overdue':''}" style="cursor:default">
+    <div class="q-main"><div class="q-title">${esc(x.title)}</div>
+      <div class="q-sub">${x.due_date?esc(x.due_date)+(x.due_time?' '+esc(x.due_time):''):''}${x.with_who?' · w/ <strong>'+esc(x.with_who)+'</strong>'+(x.matched_name?'':' <span class="badge-idle">no app match</span>'):''}${x.nudged_at?' · nudged '+daysAgo(x.nudged_at):''}${x.source!=='app'?' · 📱':''}</div></div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap">
+      ${x.status!=='done'?`<button class="btn btn-gold btn-sm sans" onclick="deskDo(${x.id},{status:'done'})">✓</button>
+      <button class="btn btn-ghost btn-sm sans" title="Snooze to tomorrow" onclick="deskDo(${x.id},{snooze_days:1})">😴</button>
+      <button class="btn btn-ghost btn-sm sans" title="Pick a date" onclick="deskDate(${x.id})">🗓</button>
+      <button class="btn btn-ghost btn-sm sans" title="Who has to help close this?" onclick="deskWho(${x.id})">👤</button>
+      ${x.with_who?`<button class="btn btn-ghost btn-sm sans" title="Nudge them — lands in their Today inbox" onclick="deskNudge(${x.id})">📣</button>`:''}`
+      :`<button class="btn btn-ghost btn-sm sans" onclick="deskDo(${x.id},{status:'open'})">↩︎</button>`}
+      <button class="btn btn-ghost btn-sm sans" onclick="deskDel(${x.id})">🗑</button></div></div>`;
+  const sec=(label,list,sev)=>list.length?`<h3 style="margin:14px 0 4px;${sev?'color:var(--crit)':''}">${label} (${list.length})</h3>${list.map(row).join('')}`:'';
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">My Desk</h3><p class="sub sans" style="margin:0">One inbox for everything on your plate. Type it like a text — dates and people parse themselves ("call landlord friday 3pm with Josh").</p></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="deskDigestNow(this)">☀️ Send digest now</button></div>
+    <div class="toolbar" style="gap:8px;margin-top:10px"><input id="deskCap" placeholder="What do you need to remember?" style="flex:1;min-width:200px;font-size:16px;padding:12px" onkeydown="if(event.key==='Enter')deskAdd()"/><button class="btn btn-gold sans" onclick="deskAdd()">Save</button></div>
+    ${sec('🔥 Overdue',overdue,true)}${sec('📅 Today',todays)}${sec('⏳ Waiting on people',waiting)}${sec('🗓 Coming up',upcoming)}${sec('💡 No date yet',someday)}
+    ${(!items.length)?'<div class="empty"><div class="e-ico">🌤</div>Desk is clear. Text yourself the next thing that pops into your head.</div>':''}
+    ${done.length?`<details style="margin-top:12px"><summary class="hint" style="cursor:pointer">✅ Done recently (${done.length})</summary>${done.map(row).join('')}</details>`:''}</div>
+    <div class="card"><details><summary style="cursor:pointer"><strong>📱 Capture by text / Siri</strong> <span class="hint">· set up once, then just send</span></summary>
+      <div class="hint" style="margin:8px 0 4px"><strong>Fastest (works today, feels like texting):</strong> iPhone Shortcuts → ＋ → add action <em>“Get Contents of URL”</em> → URL below → Method POST → Request Body JSON with field <code>text</code> = <em>Ask Each Time</em> (or <em>Shortcut Input</em>) → name it <strong>“Remember”</strong>. Then: “Hey Siri, Remember” → speak → it lands here, dates parsed. Add it to your home screen too.</div>
+      <div class="hint" style="margin:6px 0 4px"><strong>True texting number:</strong> a Twilio number (~$2/mo) pointed at the same URL (Messaging webhook, HTTP POST). You text it; it replies "✓ Saved · friday 15:00". I'll walk your IT through it when you want it.</div>
+      <div class="pc-note" style="word-break:break-all;font-family:monospace;font-size:12px">${esc((DESK_DATA.settings||{}).noteUrl||'')}</div>
+      <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <label class="hint">Morning digest at <input type="number" id="deskHour" min="0" max="23" value="${(d.settings||{}).digestHour??7}" style="width:60px"/>:00</label>
+        <label class="hint">to <input id="deskEmail" value="${esc((d.settings||{}).email||'')}" placeholder="you@armadarecovery.com" style="min-width:210px"/></label>
+        <button class="btn btn-ghost btn-sm sans" onclick="deskSaveSettings()">Save</button></div></details></div>`;
+  const cap=$('deskCap'); if(cap) cap.focus();
+}
+async function deskAdd(){
+  const cap=$('deskCap'); const text=(cap&&cap.value||'').trim(); if(!text) return;
+  try{ const r=await api('/desk',{method:'POST',body:JSON.stringify({text})}); cap.value=''; loadMyDesk(); }catch(e){ alert(e.message); }
+}
+async function deskDo(id,body){ try{ await api('/desk/'+id,{method:'PATCH',body:JSON.stringify(body)}); }catch(e){ alert(e.message);} loadMyDesk(); }
+async function deskDate(id){ const dt=prompt('Due date (YYYY-MM-DD), blank to clear:'); if(dt==null) return; const tm=dt?prompt('Time (HH:MM, optional):','')||'':''; deskDo(id,{due_date:dt,due_time:tm}); }
+async function deskWho(id){ const w=prompt('Who has to help close this? (name — matches app users automatically)'); if(w==null) return; deskDo(id,{with_who:w}); }
+async function deskNudge(id){ try{ const r=await api('/desk/'+id+'/nudge',{method:'POST'}); const m=r.how||'nudged'; alert('📣 '+m); }catch(e){ alert(e.message);} loadMyDesk(); }
+async function deskDel(id){ if(!confirm('Delete this item?')) return; try{ await api('/desk/'+id,{method:'DELETE'}); }catch(e){ alert(e.message);} loadMyDesk(); }
+async function deskSaveSettings(){ try{ await api('/desk/settings',{method:'POST',body:JSON.stringify({digestHour:+(($('deskHour')||{}).value||7),email:($('deskEmail')||{}).value||''})}); loadMyDesk(); }catch(e){ alert(e.message); } }
+async function deskDigestNow(btn){ btn.disabled=true; try{ const r=await api('/desk/digest-now',{method:'POST'}); alert(r.sent?'☀️ Digest sent.':'Not sent: '+(r.reason||'')); }catch(e){ alert(e.message);} btn.disabled=false; }
+
 /* ── SCHEDULING & THE SERVICE PROMISE — queue + calendar + one-minute notes.
    Excellence Wins: consistency (same flow every time), reliability (promises
    visible + enforced), accountability (supervisor lens), respect (honest waits,

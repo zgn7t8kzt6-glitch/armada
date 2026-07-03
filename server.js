@@ -451,6 +451,19 @@ app.get('/api/today', requireAuth, (req, res) => {
       items.push({ label: f.text, sub: f.due_date ? 'due ' + f.due_date : 'assigned to you', overdue: !!(f.due_date && f.due_date < today), view: 'mytasks' });
     }
   });
+  // My Desk: the owner's own due/overdue items…
+  add(() => {
+    if (me.role !== 'admin') return;
+    for (const d of db.prepare(`SELECT id, title, due_date, due_time, with_who FROM desk_items WHERE owner_id=? AND status != 'done' AND due_date IS NOT NULL AND due_date <= ? AND (snooze_until IS NULL OR snooze_until <= ?) ORDER BY due_date, due_time LIMIT 10`).all(me.id, today, today)) {
+      items.push({ label: d.title, sub: `My Desk${d.due_time ? ' · ' + d.due_time : ''}${d.with_who ? ' · w/ ' + d.with_who : ''}`, overdue: d.due_date < today, view: 'mydesk' });
+    }
+  });
+  // …and for everyone else: what the owner is waiting on YOU for.
+  add(() => {
+    for (const d of db.prepare(`SELECT d.title, d.due_date, u.name AS owner_name FROM desk_items d JOIN users u ON u.id=d.owner_id WHERE d.with_user_id=? AND d.status='waiting' ORDER BY d.id DESC LIMIT 5`).all(me.id)) {
+      items.push({ label: `${d.owner_name} is waiting on: ${d.title}`, sub: d.due_date ? 'by ' + d.due_date : 'when you can', overdue: !!(d.due_date && d.due_date < today), view: 'mytasks' });
+    }
+  });
   // Leadership: anything burning on the Ops Center lands in Today too.
   add(() => {
     if (!canSeeOps(me)) return;
@@ -1153,6 +1166,159 @@ app.get('/api/kiosk/queue', requireKiosk, (req, res) => {
       promise: r.promise_at ? ('by ' + r.promise_at.slice(11, 16)) : null, with: r.claimed_by || null,
     })),
   });
+});
+
+/* ═══ MY DESK — the owner's one capture inbox (tasks · follow-ups · ideas ·
+   appointments). Capture from the app, a text, or Siri; dates parse out of the
+   sentence; waiting-on items nudge people through their Today inbox; a morning
+   digest email does the remembering. Admin-only. ═══ */
+function parseWhen(text, today) {
+  let t = ' ' + String(text || '') + ' ';
+  let date = null, time = null;
+  const timeM = t.match(/\b(?:at )?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (timeM) { let h = +timeM[1] % 12; if (/pm/i.test(timeM[3])) h += 12; time = String(h).padStart(2, '0') + ':' + (timeM[2] || '00'); t = t.replace(timeM[0], ' '); }
+  if (/\btoday\b/i.test(t)) { date = today; t = t.replace(/\btoday\b/i, ' '); }
+  else if (/\btomorrow\b/i.test(t)) { date = addDays(today, 1); t = t.replace(/\btomorrow\b/i, ' '); }
+  else if (/\bnext week\b/i.test(t)) { date = addDays(today, 7); t = t.replace(/\bnext week\b/i, ' '); }
+  else {
+    const dows = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    for (let i = 0; i < 7; i++) {
+      const re = new RegExp('\\b(?:on |next )?' + dows[i] + '\\b', 'i');
+      if (re.test(t)) { const diff = ((i - dowOf(today)) + 7) % 7 || 7; date = addDays(today, diff); t = t.replace(re, ' '); break; }
+    }
+  }
+  const md = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (!date && md) {
+    const y = md[3] ? (md[3].length === 2 ? '20' + md[3] : md[3]) : today.slice(0, 4);
+    date = `${y}-${String(md[1]).padStart(2, '0')}-${String(md[2]).padStart(2, '0')}`;
+    if (!md[3] && date < today) date = String(+y + 1) + date.slice(4);
+    t = t.replace(md[0], ' ');
+  }
+  if (time && !date) date = today;
+  const clean = t.replace(/\s+/g, ' ').trim().replace(/^(remind me to |remind me |remember to |remember |todo:? |task:? )/i, '');
+  return { clean: clean || String(text || '').trim(), date, time };
+}
+function deskMatchUser(name) {
+  if (!String(name || '').trim()) return null;
+  return db.prepare(`SELECT id, name, username FROM users WHERE active=1 AND lower(name) LIKE ? ORDER BY id LIMIT 1`).get('%' + String(name).toLowerCase().trim() + '%') || null;
+}
+function deskCapture(ownerId, rawText, source) {
+  const today = appToday();
+  const { clean, date, time } = parseWhen(rawText, today);
+  // "… with Josh" / "@Josh" → the person who has to help close it
+  let withWho = null, title = clean;
+  const wm = clean.match(/(?:\bwith |\bw\/ ?|@)([A-Z][a-zA-Z]+(?: [A-Z][a-zA-Z]+)?)/);
+  if (wm) withWho = wm[1];
+  const kind = /\bidea\b/i.test(clean) ? 'idea' : (time ? 'appt' : withWho ? 'followup' : 'task');
+  const u = withWho ? deskMatchUser(withWho) : null;
+  const info = db.prepare(`INSERT INTO desk_items (owner_id, title, kind, with_who, with_user_id, due_date, due_time, source, status) VALUES (?,?,?,?,?,?,?,?, ?)`)
+    .run(ownerId, String(title).slice(0, 300), kind, withWho, u ? u.id : null, date, time, source, withWho ? 'waiting' : 'open');
+  return { id: info.lastInsertRowid, title, date, time, withWho, matched: u ? u.name : null, kind };
+}
+function noteToken() { let t = getState('desk_note_token'); if (!t) { t = crypto.randomBytes(14).toString('base64url'); setState('desk_note_token', t); } return t; }
+app.get('/api/desk', requireAuth, requireAdmin, (req, res) => {
+  const today = appToday();
+  const items = db.prepare(`SELECT d.*, u.name AS matched_name FROM desk_items d LEFT JOIN users u ON u.id=d.with_user_id WHERE d.owner_id=? AND (d.status != 'done' OR d.done_at >= datetime('now','-14 day')) ORDER BY d.status='done', (d.due_date IS NULL), d.due_date, d.due_time, d.id DESC`).all(req.user.id)
+    .map((d) => ({ ...d, overdue: !!(d.due_date && d.due_date < today && d.status !== 'done'), snoozed: !!(d.snooze_until && d.snooze_until > today) }));
+  const base = (getState('public_base_url') || process.env.PUBLIC_BASE_URL || appBaseUrl(req)).replace(/\/$/, '');
+  res.json({
+    today, items,
+    settings: { digestHour: +(getState('desk_digest_hour') || 7), email: getState('desk_email') || '', noteUrl: `${base}/api/inbound/note?t=${noteToken()}` },
+  });
+});
+app.post('/api/desk', requireAuth, requireAdmin, (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Say the thing — dates parse themselves.' });
+  res.json({ ok: true, ...deskCapture(req.user.id, text, 'app') });
+});
+app.patch('/api/desk/:id', requireAuth, requireAdmin, (req, res) => {
+  const d = db.prepare(`SELECT * FROM desk_items WHERE id=? AND owner_id=?`).get(req.params.id, req.user.id);
+  if (!d) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  if (b.status === 'done') db.prepare(`UPDATE desk_items SET status='done', done_at=datetime('now') WHERE id=?`).run(d.id);
+  else if (b.status && ['open', 'waiting'].includes(b.status)) db.prepare(`UPDATE desk_items SET status=?, done_at=NULL WHERE id=?`).run(b.status, d.id);
+  if (b.snooze_days) db.prepare(`UPDATE desk_items SET snooze_until=? WHERE id=?`).run(addDays(appToday(), +b.snooze_days), d.id);
+  if (b.due_date !== undefined) db.prepare(`UPDATE desk_items SET due_date=?, due_time=COALESCE(?, due_time) WHERE id=?`).run(/^\d{4}-\d{2}-\d{2}$/.test(b.due_date || '') ? b.due_date : null, /^\d{2}:\d{2}$/.test(b.due_time || '') ? b.due_time : null, d.id);
+  if (b.title) db.prepare(`UPDATE desk_items SET title=? WHERE id=?`).run(String(b.title).slice(0, 300), d.id);
+  if (b.with_who !== undefined) {
+    const u = deskMatchUser(b.with_who);
+    db.prepare(`UPDATE desk_items SET with_who=?, with_user_id=?, status=CASE WHEN ? != '' AND status='open' THEN 'waiting' ELSE status END WHERE id=?`).run(String(b.with_who || '').slice(0, 80) || null, u ? u.id : null, String(b.with_who || ''), d.id);
+  }
+  res.json({ ok: true });
+});
+app.post('/api/desk/:id/nudge', requireAuth, requireAdmin, async (req, res) => {
+  const d = db.prepare(`SELECT d.*, u.name AS uname, u.username FROM desk_items d LEFT JOIN users u ON u.id=d.with_user_id WHERE d.id=? AND d.owner_id=?`).get(req.params.id, req.user.id);
+  if (!d) return res.status(404).json({ error: 'Not found.' });
+  db.prepare(`UPDATE desk_items SET nudged_at=datetime('now'), status='waiting' WHERE id=?`).run(d.id);
+  let how = [];
+  if (d.with_user_id) how.push(`it's now in ${d.uname}'s Today inbox`);
+  if (d.username && /@/.test(d.username) && emailConfigured()) {
+    sendEmail({ to: d.username, suppressCc: true, subject: `Quick one from ${req.user.name}: ${d.title.slice(0, 60)}`, html: `<div style="font-family:Georgia,serif;max-width:520px"><p><strong>${htmlEsc(req.user.name)}</strong> is waiting on this:</p><p style="font-size:16px">“${htmlEsc(d.title)}”${d.due_date ? ' — by ' + htmlEsc(d.due_date) : ''}</p><p style="color:#555">Reply to them directly or knock it out — it stays on their list until it's closed.</p></div>` }).catch(() => {});
+    how.push('emailed them');
+  }
+  res.json({ ok: true, how: how.join(' and ') || 'nudge recorded (no matched user — assign a person first)' });
+});
+app.delete('/api/desk/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare(`DELETE FROM desk_items WHERE id=? AND owner_id=?`).run(req.params.id, req.user.id);
+  res.json({ ok: true });
+});
+app.post('/api/desk/settings', requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.digestHour != null && +b.digestHour >= 0 && +b.digestHour <= 23) setState('desk_digest_hour', String(+b.digestHour));
+  if (b.email != null) setState('desk_email', String(b.email).slice(0, 200));
+  res.json({ ok: true });
+});
+// Text-in capture: Twilio SMS (form-encoded Body/From) or an iPhone Shortcut
+// (JSON {text}). Token-gated like the orders webhook. Twilio gets TwiML back so
+// the sender receives an instant "✓ saved" text.
+app.post('/api/inbound/note', express.urlencoded({ extended: true, limit: '1mb' }), (req, res) => {
+  if ((req.query.t || '') !== noteToken()) return res.status(401).json({ error: 'bad token' });
+  const text = String(req.body?.Body || req.body?.body || req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'no text' });
+  const owner = db.prepare(`SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1`).get();
+  if (!owner) return res.status(500).json({ error: 'no admin' });
+  const r = deskCapture(owner.id, text, req.body?.Body ? 'sms' : 'shortcut');
+  const line = `✓ Saved${r.date ? ' · ' + r.date + (r.time ? ' ' + r.time : '') : ''}${r.matched ? ' · waiting on ' + r.matched : ''}`;
+  if (req.body?.Body) { res.type('text/xml').send(`<Response><Message>${htmlEsc(line)} — "${htmlEsc(r.title.slice(0, 80))}"</Message></Response>`); }
+  else res.json({ ok: true, saved: r.title, when: r.date, time: r.time, waitingOn: r.matched, line });
+});
+// Morning digest — the ADHD contract: you capture, the system remembers.
+async function sendDeskDigest() {
+  const to = (getState('desk_email') || '').trim();
+  if (!to || !emailConfigured()) return { sent: false, reason: 'no digest email set' };
+  const owner = db.prepare(`SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1`).get();
+  if (!owner) return { sent: false };
+  const today = appToday();
+  const items = db.prepare(`SELECT * FROM desk_items WHERE owner_id=? AND status != 'done' AND (snooze_until IS NULL OR snooze_until <= ?) ORDER BY (due_date IS NULL), due_date, due_time`).all(owner.id, today);
+  if (!items.length) return { sent: false, reason: 'desk clear' };
+  const e = htmlEsc;
+  const line = (d) => `<div style="margin:3px 0">• ${e(d.title)}${d.due_time ? ' <strong>' + e(d.due_time) + '</strong>' : ''}${d.with_who ? ' <span style="color:#3d6f8e">(w/ ' + e(d.with_who) + ')</span>' : ''}</div>`;
+  const overdue = items.filter((d) => d.due_date && d.due_date < today);
+  const todayItems = items.filter((d) => d.due_date === today);
+  const waiting = items.filter((d) => d.status === 'waiting' && (!d.due_date || d.due_date > today));
+  const later = items.filter((d) => !d.due_date && d.status !== 'waiting');
+  const html = `<div style="font-family:Georgia,serif;color:#1a1a1a;max-width:560px">
+    <h2 style="margin:0 0 2px">Your desk this morning</h2><p style="color:#666;margin:0 0 12px">${e(today)} · ${items.length} open</p>
+    ${overdue.length ? `<h3 style="color:#b00;margin:10px 0 4px">🔥 Overdue (${overdue.length})</h3>${overdue.map(line).join('')}` : ''}
+    ${todayItems.length ? `<h3 style="margin:12px 0 4px">📅 Today (${todayItems.length})</h3>${todayItems.map(line).join('')}` : ''}
+    ${waiting.length ? `<h3 style="margin:12px 0 4px">⏳ Waiting on people (${waiting.length})</h3>${waiting.map(line).join('')}` : ''}
+    ${later.length ? `<h3 style="color:#888;margin:12px 0 4px">💡 Undated (${later.length}) — give three of these a date today</h3>${later.slice(0, 6).map(line).join('')}` : ''}
+    <p style="color:#555;margin-top:14px;font-size:13px">Open the app → My Desk to check things off, snooze, or nudge.</p></div>`;
+  try { await sendEmail({ to, subject: `☀️ Your desk: ${overdue.length ? overdue.length + ' overdue, ' : ''}${todayItems.length} today, ${waiting.length} waiting`, html, suppressCc: true }); return { sent: true }; }
+  catch (err) { return { sent: false, reason: err.message }; }
+}
+setInterval(() => {
+  try {
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ }));
+    const today = appToday();
+    if (now.getHours() >= +(getState('desk_digest_hour') || 7) && getState('desk_digest_sent') !== today) {
+      setState('desk_digest_sent', today);
+      sendDeskDigest().then((r) => { if (r.sent) console.log('[desk] morning digest sent'); }).catch(() => {});
+    }
+  } catch { /* next tick */ }
+}, 5 * 60 * 1000);
+app.post('/api/desk/digest-now', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await sendDeskDigest()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 app.get('/api/org/facilities', requireAuth, (req, res) => {

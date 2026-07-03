@@ -2936,3 +2936,22 @@ if (getState('phase2_requests_backfill') !== 'done') {
     setState('phase2_requests_backfill', 'done');
   } catch { /* next boot */ }
 }
+
+// ── REBUILD PHASE 2 (review fixes) — legacy rows must not vanish under scoping ─
+// The IN(...) scope frag excludes NULLs, so every pre-existing operational row
+// without a facility must be adopted (once) or it disappears from scoped views.
+// Legacy data predates multi-facility → it belongs to detox-akron. One-time,
+// latched; new writes stamp their own facility, so this never re-grabs later.
+if (getState('phase2_legacy_facility_backfill') !== 'done') {
+  try {
+    const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id;
+    if (dfid) {
+      for (const t of ['maintenance_requests', 'inventory_items', 'appointments', 'billing_ready_status',
+                       'authorizations', 'requests', 'shifts', 'desk_items', 'org_events',
+                       'clients', 'incidents', 'expected_arrivals', 'admissions']) {
+        try { db.prepare(`UPDATE ${t} SET facility_id=? WHERE facility_id IS NULL`).run(dfid); } catch { /* table/col optional */ }
+      }
+      setState('phase2_legacy_facility_backfill', 'done');
+    }
+  } catch (e) { console.error('[phase2 backfill]', e.message); }
+}

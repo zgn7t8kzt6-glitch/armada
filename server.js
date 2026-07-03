@@ -39,6 +39,10 @@ try { const n = ensureShiftTemplates(); if (n) console.log(`[staffing] seeded ${
 try { const a = ensureArrivalItems(); if (a) console.log(`[arrival] added ${a} checklist item(s)`); } catch (e) { console.error('[arrival] ensureItems:', e.message); }
 try { ensureOpsRoutines(); } catch (e) { console.error('[ops] ensureRoutines:', e.message); }
 try { const nn = ensureNourishment(); if (nn) console.log(`[inventory] added ${nn} nourishment item(s)`); } catch (e) { console.error('[inventory] ensureNourishment:', e.message); }
+// Seed inventory is the Akron detox building's par list — stamp any unstamped
+// item to detox so it survives facility scoping (idempotent; API creates now
+// stamp explicitly, so this only ever touches seed-created NULLs).
+try { const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id; if (dfid) db.prepare(`UPDATE inventory_items SET facility_id=? WHERE facility_id IS NULL`).run(dfid); } catch (e) { console.error('[inventory] facility stamp:', e.message); }
 // One-time: provision the detox staff roster (per leadership). Usernames are
 // first-initial + last name; titles map to the app's roles. Skips any username
 // that already exists; everyone gets a temp password to change on first login.
@@ -1124,10 +1128,10 @@ app.get('/api/appts', requireAuth, requireAppts, (req, res) => {
       needsNote: true }));
   // Pending documentation: quick notes flagged for expansion + my missed-without-reschedule.
   const mine = (v) => String(v || '').toLowerCase() === String(req.user.name || '').toLowerCase();
-  let pending = db.prepare(`SELECT q.id, q.client_id, q.by_name, q.kind, q.created_at, c.pref, c.name AS client_name FROM quick_notes q JOIN clients c ON c.id=q.client_id WHERE q.needs_expansion=1 AND q.expanded_at IS NULL ORDER BY q.id DESC LIMIT 40`).all()
+  let pending = db.prepare(`SELECT q.id, q.client_id, q.by_name, q.kind, q.created_at, c.pref, c.name AS client_name FROM quick_notes q JOIN clients c ON c.id=q.client_id WHERE q.needs_expansion=1 AND q.expanded_at IS NULL${fc.frag('c.facility_id')} ORDER BY q.id DESC LIMIT 40`).all()
     .map((q) => ({ id: q.id, client: q.pref || q.client_name, by: q.by_name, kind: q.kind, at: q.created_at }));
   let missed = db.prepare(`SELECT a.id, a.date, a.time, a.kind, a.staff_name, a.missed_reason, c.pref, c.name AS client_name FROM appointments a JOIN clients c ON c.id=a.client_id
-    WHERE a.status='missed' AND a.missed_reason IS NULL AND NOT EXISTS (SELECT 1 FROM appointments r WHERE r.reschedule_of=a.id) ORDER BY a.date DESC LIMIT 40`).all()
+    WHERE a.status='missed' AND a.missed_reason IS NULL AND NOT EXISTS (SELECT 1 FROM appointments r WHERE r.reschedule_of=a.id)${fc.frag('a.facility_id')} ORDER BY a.date DESC LIMIT 40`).all()
     .map((a) => ({ ...a, client: a.pref || a.client_name }));
   if (!apptsLeadership(req.user)) { pending = pending.filter((p) => mine(p.by)); missed = missed.filter((m) => mine(m.staff_name)); }
   const out = { cmPush, cmPushUnavailable: getState('kipu_push_unavailable') || null, date: day, appts, queue, estWaitMin: estWaitMinutes(), kinds: APPT_KINDS, pending, missed, leadership: apptsLeadership(req.user),
@@ -1586,19 +1590,37 @@ function facCtx(req) {
   const q = req.query.facility;
   if (q !== undefined && q !== '') {
     const fid = +q;
-    if (!fid || !facilityAllowed(req.user, fid)) return { one: null, deny: true, frag: () => ' AND 1=0' };
-    return { one: fid, deny: false, frag: (col) => ` AND ${col} = ${fid}` };
+    // Must be a real positive integer id (blocks NaN, floats, Infinity from ?facility=1e999).
+    if (!Number.isInteger(fid) || fid <= 0 || !facilityAllowed(req.user, fid)) return { one: null, deny: true, frag: () => ' AND 1=0' };
+    return { one: fid, deny: false, frag: (col) => ` AND ${col} = ${fid}` };   // explicit pick: strict
   }
   if (req.user.role === 'admin' || req.user.job_role === 'Executive Director') return { one: null, deny: false, frag: () => '' };
   const ids = db.prepare(`SELECT facility_id FROM user_facility_access WHERE user_id=?`).all(req.user.id).map((r) => +r.facility_id).filter(Boolean);
   if (!ids.length) return { one: null, deny: false, frag: () => '' };   // legacy user with no access rows — unscoped, as today
-  return { one: ids.length === 1 ? ids[0] : null, deny: false, frag: (col) => ` AND ${col} IN (${ids.join(',')})` };
+  // "All my facilities" (no explicit pick): NULL-tolerant so an unstamped row is
+  // fail-VISIBLE (surfaces to the operator) instead of silently vanishing.
+  return { one: ids.length === 1 ? ids[0] : null, deny: false, frag: (col) => ` AND (${col} IS NULL OR ${col} IN (${ids.join(',')}))` };
 }
 const denyFac = (fc, res) => { if (fc.deny) { res.status(403).json({ error: 'No access to that facility.' }); return true; } return false; };
 function facilityAllowed(user, fid) {
   if (!fid) return true;   // "all my facilities" — resolved per-user elsewhere
   if (user.role === 'admin' || ['Executive Director'].includes(user.job_role)) return true;
+  // A user with NO access rows is legacy/unscoped (sees everything, as pre-Phase-2) —
+  // never lock them out. Once they HAVE rows, only those facilities are allowed.
+  const rows = db.prepare(`SELECT 1 FROM user_facility_access WHERE user_id=? LIMIT 1`).get(user.id);
+  if (!rows) return true;
   return !!db.prepare(`SELECT 1 FROM user_facility_access WHERE user_id=? AND facility_id=?`).get(user.id, +fid);
+}
+// Resolve the facility to STAMP on a write, and refuse a facility the caller can't
+// see (closes the write-side IDOR the read guard already closes). Returns a number,
+// or null with res already 403'd.
+function stampFac(req, res, bodyFid) {
+  const asked = (bodyFid != null && bodyFid !== '' && +bodyFid) || (req.query.facility ? +req.query.facility : 0);
+  if (asked) {
+    if (!Number.isInteger(asked) || asked <= 0 || !facilityAllowed(req.user, asked)) { res.status(403).json({ error: 'No access to that facility.' }); return null; }
+    return asked;
+  }
+  return facCtx(req).one || defaultFacilityId();
 }
 
 // Insurance: the coverage lines we track, and which are REQUIRED so the matrix can
@@ -2153,7 +2175,8 @@ app.post('/api/inventory/items', requireAuth, requireAdmin, (req, res) => {
     db.prepare(`UPDATE inventory_items SET name=?, department=?, category=?, unit=?, par_level=?, reorder_point=?, critical=?, track_expiry=?, shift_check=?, active=? WHERE id=?`).run(...fields, b.id);
     res.json({ ok: true, id: b.id });
   } else {
-    const id = db.prepare(`INSERT INTO inventory_items (name, department, category, unit, par_level, reorder_point, critical, track_expiry, shift_check, active) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(...fields).lastInsertRowid;
+    const invFac = stampFac(req, res, req.body && req.body.facility_id); if (invFac === null) return;
+    const id = db.prepare(`INSERT INTO inventory_items (name, department, category, unit, par_level, reorder_point, critical, track_expiry, shift_check, active, facility_id) VALUES (?,?,?,?,?,?,?,?,?,?,${invFac})`).run(...fields).lastInsertRowid;
     res.json({ ok: true, id });
   }
 });
@@ -2241,8 +2264,8 @@ app.post('/api/maintenance', requireAuth, async (req, res) => {
   // Accept one (legacy `photo`) or many (`photos[]`), capped at 6.
   const photos = (Array.isArray(b.photos) ? b.photos : (b.photo ? [b.photo] : [])).slice(0, 6);
   try { photos.forEach(validPhoto); } catch (e) { return res.status(400).json({ error: e.message }); }
-  const mFac = +req.query.facility || (req.body && +req.body.facility_id) || facCtx(req).one || defaultFacilityId();
-  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, reported_by_id, reported_by, facility_id) VALUES (?,?,?,?,?,?,?,${mFac || 'NULL'})`)
+  const mFac = stampFac(req, res, req.body && req.body.facility_id); if (mFac === null) return;
+  const id = db.prepare(`INSERT INTO maintenance_requests (title, location, category, priority, description, reported_by_id, reported_by, facility_id) VALUES (?,?,?,?,?,?,?,${mFac})`)
     .run(title, (b.location || '').trim() || null, category, priority, (b.description || '').trim() || null, req.user.id, req.user.name).lastInsertRowid;
   const insPhoto = db.prepare(`INSERT INTO maintenance_photos (request_id, photo, by_id, by_name) VALUES (?,?,?,?)`);
   for (const p of photos) insPhoto.run(id, p, req.user.id, req.user.name);
@@ -3178,10 +3201,11 @@ app.post('/api/clients', requireAuth, (req, res) => {
   // chart. No manually-created clients (that would be a second source of truth).
   if (kipuConfigured()) return res.status(400).json({ error: 'Clients are pulled from Kipu — create the admission in Kipu, then fill the Care Card here.' });
   if (!b.name?.trim() && !b.pref?.trim()) return res.status(400).json({ error: 'Name required' });
+  const clientFac = stampFac(req, res, b.facility_id); if (clientFac === null) return;
   const vals = CLIENT_FIELDS.map(f => b[f] ?? null);
   const info = db.prepare(
     `INSERT INTO clients (${CLIENT_FIELDS.join(',')}, facility_id) VALUES (${CLIENT_FIELDS.map(() => '?').join(',')}, ?)`
-  ).run(...vals, (b.facility_id && +b.facility_id) || +req.query.facility || facCtx(req).one || defaultFacilityId());
+  ).run(...vals, clientFac);
   saveTasks(info.lastInsertRowid, b.tasks);
   audit({ user: req.user, action: 'CREATE', entity: 'client', entity_id: info.lastInsertRowid, detail: b.name, ip: req.ip });
   publishEvent({ event: 'admission.created', entity: 'client', entity_id: info.lastInsertRowid, actor: req.user.username, summary: `${nameInitials(b.name || b.pref)} admitted` });
@@ -3773,8 +3797,8 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
     for (const c of rows) { const k = personKey(c) + '|' + keyExtra(c); if (seen.has(k)) continue; seen.add(k); out.push(c); }
     return out;
   };
-  const dtRaw = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients
-    WHERE merged_into IS NULL AND substr(discharge_date,1,10) = ?
+  const dtRaw = db.prepare(`SELECT id, pref, name, kipu_id, admit, discharge_date, discharge_status, discharge_reason, therapist, diagnosis, facility_id FROM clients
+    WHERE merged_into IS NULL AND substr(discharge_date,1,10) = ?${fc.frag('facility_id')}
     ORDER BY (discharge_reason IS NOT NULL AND discharge_reason != '') DESC, id`).all(today);
   const dtDeduped = dedupeByPerson(dtRaw);
   // People currently here — a "discharge" for one of them is a phantom (still active).
@@ -3786,7 +3810,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const referredOutToday = referredOutTodayList.length;
   // Recent discharges (3 days) so a just-after-midnight view still shows them.
   const drRaw = db.prepare(`SELECT id, pref, name, kipu_id, discharge_status, discharge_reason, substr(discharge_date,1,10) d
-    FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-3 day') ORDER BY discharge_date DESC`).all();
+    FROM clients WHERE discharge_status IS NOT NULL AND discharge_date >= date('now','-3 day')${fc.frag('facility_id')} ORDER BY discharge_date DESC`).all();
   const dischargesRecentList = dedupeByPerson(drRaw, (c) => c.d).map((c) => ({ id: c.id, name: c.pref || c.name, status: c.discharge_status || '', reason: c.discharge_reason || '', date: c.d }));
   const sendoutsActive = db.prepare(`SELECT client_name, destination, reason FROM medical_sendouts WHERE status = 'out' ORDER BY sent_at DESC`).all();
 
@@ -3874,7 +3898,7 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   const trend = db.prepare(`SELECT date, intakes, discharges, loc_changes, ama, census FROM daily_metrics WHERE date >= date('now','-13 day') ORDER BY date`).all();
 
   // Care Card completion (hospitality layer) — within the first hour of admit.
-  const ccRows = db.prepare(`SELECT touch, prefs, anchor_why, admit, admit_time FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const ccRows = db.prepare(`SELECT touch, prefs, anchor_why, admit, admit_time FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')}`).all();
   let ccComplete = 0, ccOverdue = 0;
   for (const c of ccRows) { const st = careCardStatus(c); if (st.complete) ccComplete++; else { const m = careCardMinsSinceAdmit(c); if (m != null && m > CARECARD_DUE_MIN) ccOverdue++; } }
   const careCards = { total: ccRows.length, complete: ccComplete, incomplete: ccRows.length - ccComplete, overdue: ccOverdue, dueMin: CARECARD_DUE_MIN };
@@ -8310,7 +8334,7 @@ app.get('/api/requests', requireAuth, (req, res) => {
   sql += ` ORDER BY (r.status = 'Done'), (r.priority = 'High') DESC, r.id DESC LIMIT 200`;
   res.json({ requests: db.prepare(sql).all(...args) });
 });
-app.get('/api/requests/count', requireAuth, (req, res) => res.json({ open: db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`).get().n }));
+app.get('/api/requests/count', requireAuth, (req, res) => { const fc = facCtx(req); if (denyFac(fc, res)) return; res.json({ open: db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'${fc.frag('facility_id')}`).get().n }); });
 // Concierge performance: team averages + a fastest-responder leaderboard.
 app.get('/api/requests/stats', requireAuth, (req, res) => {
   const days = Math.min(90, Math.max(1, +(req.query.days || 7)));
@@ -8362,8 +8386,11 @@ app.post('/api/requests', requireAuth, async (req, res) => {
   const { client_id, department, text, priority } = req.body || {};
   if (!department || !text?.trim()) return res.status(400).json({ error: 'Missing department or text' });
   const hi = priority === 'High';
-  const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(client_id || null, department, text.trim(), hi ? 'High' : 'Normal', req.user.id, req.user.name);
+  // Facility: the client's if named (trigger would do this too), else the caller's
+  // scope, else default — so a house request (no client) never lands NULL/invisible.
+  const rFac = (client_id ? db.prepare(`SELECT facility_id FROM clients WHERE id=?`).get(+client_id)?.facility_id : null) || facCtx(req).one || defaultFacilityId();
+  const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by, created_by_name, facility_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(client_id || null, department, text.trim(), hi ? 'High' : 'Normal', req.user.id, req.user.name, rFac);
   const r = await announceRequest(info.lastInsertRowid, { client_id, department, text: text.trim(), priority: hi ? 'High' : 'Normal', by: 'logged by ' + req.user.name });
   audit({ user: req.user, action: 'REQUEST', entity: 'client', entity_id: client_id ? +client_id : null, detail: department, ip: req.ip });
   res.json({ ok: true, id: info.lastInsertRowid, emailed: r.emailed, to: r.to || null, emailReason: r.reason || null });
@@ -8702,13 +8729,13 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     for (const c of dRawLd) { const k = dupKeyOf(c); if (k && seenLd.has(k)) continue; if (k) seenLd.add(k); (isReferredOut(c) ? dReferred : dToday).push(c); }
     const amaToday = dToday.filter((d) => /ama|against medical/i.test(d.discharge_status || '')).length;
     const openIncidents = db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'`).get().n;
-    const incidentsRecent = db.prepare(`SELECT i.type, i.severity, i.description, c.pref, c.name FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE i.status = 'Open' ORDER BY (i.severity IN ('High','Critical')) DESC, i.id DESC LIMIT 8`).all();
+    const incidentsRecent = db.prepare(`SELECT i.type, i.severity, i.description, c.pref, c.name FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE i.status = 'Open'${fc.frag('i.facility_id')} ORDER BY (i.severity IN ('High','Critical')) DESC, i.id DESC LIMIT 8`).all();
     // Service: warm welcome (care card) + anticipation (a delight) delivered.
     const delightSet = new Set(db.prepare(`SELECT DISTINCT client_id FROM delights WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
     let welcomed = 0, anticipated = 0;
     for (const c of active) { if (careCardStatus(c).complete) welcomed++; if (delightSet.has(c.id)) anticipated++; }
     const served = active.length ? Math.round((welcomed + anticipated) / (active.length * 2) * 100) : 100;
-    const dcOpen = db.prepare(`SELECT departure_steps, aftercare_dest, discharge_reason, discharge_improve FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-7 day')`).all().filter((c) => dischargeMissing(c).length).length;
+    const dcOpen = db.prepare(`SELECT departure_steps, aftercare_dest, discharge_reason, discharge_improve FROM clients WHERE source = 'kipu' AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= date('now','-7 day')${fc.frag('facility_id')}`).all().filter((c) => dischargeMissing(c).length).length;
     northStar = { label: 'Three Steps of Service delivered', value: served + '%', sev: served >= 80 ? 'ok' : served >= 60 ? 'warn' : 'high' };
     tiles = [
       { key: 'census', label: 'Census', n: active.length, sev: 'ok' },
@@ -9147,7 +9174,7 @@ app.get('/api/incidents', requireAuth, (req, res) => {
 app.post('/api/incidents', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.type || !b.description?.trim()) return res.status(400).json({ error: 'Missing' });
   const needsContract = b.needs_contract ? 1 : 0;
-  const iFac = (b.facility_id && +b.facility_id) || +req.query.facility || facCtx(req).one || defaultFacilityId();
+  const iFac = stampFac(req, res, b.facility_id); if (iFac === null) return;
   db.prepare(`INSERT INTO incidents (client_id, type, severity, description, action_taken, needs_contract, reported_by, reported_by_name, facility_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(b.client_id || null, b.type, b.severity || 'Low', b.description.trim(), b.action_taken || null, needsContract, req.user.id, req.user.name, iFac);
   if (b.severity === 'High' || b.severity === 'Critical') createAlert(b.client_id || null, 'incident', b.severity, `${b.severity} incident (${b.type}): ${b.description.trim().slice(0, 80)}`);
@@ -9774,7 +9801,7 @@ app.get('/api/arrivals', requireAuth, (req, res) => {
   const counts = { expected: 0, arrived: 0, no_show: 0, cancelled: 0 };
   for (const a of day) counts[a.status] = (counts[a.status] || 0) + 1;
   // Admitted in Kipu on this date but never on the schedule — a front-door gap.
-  const admitsToday = db.prepare(`SELECT id, pref, name, room, program, loc, referral_source FROM clients WHERE substr(admit,1,10) = ? ORDER BY name`).all(date);
+  const admitsToday = db.prepare(`SELECT id, pref, name, room, program, loc, referral_source FROM clients WHERE substr(admit,1,10) = ?${fc.frag('facility_id')} ORDER BY name`).all(date);
   const matchedIds = new Set(db.prepare(`SELECT client_id FROM expected_arrivals WHERE client_id IS NOT NULL`).all().map((r) => r.client_id));
   const schedNames = new Set(db.prepare(`SELECT first_name, last_name FROM expected_arrivals WHERE scheduled_date >= date(?, '-3 day')`).all(date).map((a) => normName(`${a.first_name || ''} ${a.last_name || ''}`)));
   const unscheduled = admitsToday.filter((c) => !matchedIds.has(c.id) && !schedNames.has(normName(c.name)))
@@ -11882,8 +11909,9 @@ app.post('/api/kiosk/meal', requireKiosk, (req, res) => {
 app.post('/api/kiosk/suggestion', requireKiosk, (req, res) => {
   const text = (req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Tell us your idea' });
-  const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name) VALUES (?, ?, ?, 'Normal', 'Client (kiosk)')`)
-    .run(req.body?.client_id || null, 'Suggestion box', text.slice(0, 1000));
+  const sFac = (req.body?.client_id ? db.prepare(`SELECT facility_id FROM clients WHERE id=?`).get(+req.body.client_id)?.facility_id : null) || defaultFacilityId();
+  const info = db.prepare(`INSERT INTO requests (client_id, department, text, priority, created_by_name, facility_id) VALUES (?, ?, ?, 'Normal', 'Client (kiosk)', ?)`)
+    .run(req.body?.client_id || null, 'Suggestion box', text.slice(0, 1000), sFac);
   announceRequest(info.lastInsertRowid, { client_id: req.body?.client_id, department: 'Suggestion box', text: text.slice(0, 1000), priority: 'Normal', by: 'idea from the client kiosk' }).catch(() => {});
   res.json({ ok: true });
 });

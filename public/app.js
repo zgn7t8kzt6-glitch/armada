@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals|incidents($|\?)|billingready($|\?)|appts($|\?)|inventory($|\?)|maintenance($|\?)|requests($|\?)|command\/overview|retention|opscenter|diag\/admits)/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals|incidents($|\?)|billingready($|\?)|appts($|\?)|inventory($|\?)|maintenance($|\?)|requests($|\?|\/count)|command\/overview|retention|opscenter|diag\/admits)/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -140,8 +140,9 @@ async function boot(){
   // Role-based landing: everyone opens already where they work. Leadership lands
   // on the Operations Center — the "what's happening right now" board.
   const landing = isHousingRole() ? 'housing' : isCorporateRole() ? 'corphub' : (ME.role==='admin' || ME.opsAccess) ? 'opscenter' : 'dashboard';
-  show(landing);
-  renderShellContext();   // facility chip · role pill · Today inbox · ops alerts (D2 shell)
+  facScopeInit();          // give FAC_SCOPE its value BEFORE the first view loads,
+  renderShellContext();    // so the landing loader is already facility-scoped (not
+  show(landing);           // an unscoped first paint under a chip that claims a facility)
   pollMsgUnread(); setInterval(pollMsgUnread, 30000);   // unread message badge
   if(isLeadershipUser()){ pollWpBadge(); setInterval(pollWpBadge, 60000); }   // Best Place to Work attention badge
   if(canSeeView('concierge')){ if($('reqBell'))$('reqBell').style.display=''; pollReqBadge(); setInterval(pollReqBadge, 45000); }   // concierge request bell

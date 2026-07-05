@@ -389,9 +389,14 @@ function getFacilities() {
   if (s) { try { const a = JSON.parse(s); if (Array.isArray(a) && a.length) return a; } catch { /* fall through */ } }
   return FACILITY_SEED;
 }
-// The Spark Kipu connection isn't wired yet — credentials come later. Until then its
-// facilities show as "pending" in the ownership view rather than erroring.
-function sparkConfigured() { return false; }
+// Spark is "configured" when any Spark-brand building has a working per-facility
+// Kipu connection in the registry (🔌) — the legacy env-style config never existed.
+function sparkConfigured() {
+  try {
+    return db.prepare(`SELECT fi.facility_id FROM facility_integrations fi JOIN org_facilities f ON f.id = fi.facility_id
+      WHERE fi.kind = 'kipu' AND fi.active = 1 AND f.brand = 'Spark'`).all().some((r) => !!resolveKipuConn(r.facility_id));
+  } catch { return false; }
+}
 function connectionReachable(conn) { return conn === 'spark' ? sparkConfigured() : kipuConfigured(); }
 // The 8 legal entities / locations that request orders. Derived from the HR roster
 // (falls back to a fixed list). Used to tag order requests by where they came from.
@@ -5050,12 +5055,14 @@ app.post('/api/outpatient/settings', requireAuth, requireAdmin, (req, res) => {
 // Detox comes from the local clients table. Spark facilities show "pending" until
 // their Kipu connection is added.
 const _facAdmCache = new Map();   // locationName(lower) → { at, data:[admissions] }
-async function facilityAdmissions(locName) {
-  const key = String(locName || '').toLowerCase();
+async function facilityAdmissions(locName, conn = null) {
+  // Cache per CONNECTION as well as location — Spark's "Indianapolis" and an
+  // Akron-instance lookup of the same string must never share an entry.
+  const key = (conn ? String(conn.accessId || '').slice(0, 8) : 'env') + '|' + String(locName || '').toLowerCase();
   const hit = _facAdmCache.get(key);
   if (hit && (Date.now() - hit.at) < 5 * 60 * 1000) return hit.data;
-  if (!kipuConfigured()) return hit ? hit.data : null;
-  let r; try { r = await kipuOutpatientAdmissions(locName, addDays(appToday(), -400), appToday()); } catch { return hit ? hit.data : null; }
+  if (!conn && !kipuConfigured()) return hit ? hit.data : null;
+  let r; try { r = await kipuOutpatientAdmissions(locName, addDays(appToday(), -400), appToday(), conn); } catch { return hit ? hit.data : null; }
   if (!r || r.error || !Array.isArray(r.admissions)) return hit ? hit.data : null;
   _facAdmCache.set(key, { at: Date.now(), data: r.admissions });
   return r.admissions;
@@ -5075,16 +5082,24 @@ app.get('/api/ownership', requireAuth, requireOutpatient, async (req, res) => {
   const inR = (d, s, e) => { const x = d ? String(d).slice(0, 10) : ''; return x && x >= s && x <= e; };
   const facilities = getFacilities();
   const beds = await locationBeds();
+  // Legacy row → org-registry building: that's where the per-facility Kipu
+  // connection (🔌) and the verified Kipu location name live.
+  const KEY2FKEY = { 'akron-detox': 'detox-akron', 'akron-house': 'akron-house', 'dayton': 'dayton', 'indianapolis': 'spark-indy', 'greenwood': 'spark-greenwood', 'wheatfield': 'wheatfield' };
   const out = [];
   for (const f of facilities) {
     const base = { key: f.key, label: f.label, brand: f.brand, connection: f.connection, type: f.type, locationName: f.locationName };
-    if (!connectionReachable(f.connection)) { out.push({ ...base, pending: true, note: f.connection === 'spark' ? 'Connect Spark Kipu to include' : 'Kipu not connected' }); continue; }
+    let org = null; try { org = db.prepare(`SELECT id, kipu_location_name FROM org_facilities WHERE fkey = ?`).get(KEY2FKEY[f.key] || ''); } catch { /* registry optional */ }
+    const conn = org ? resolveKipuConn(org.id) : null;
+    // Spark rows are reachable ONLY through their own building's connection —
+    // the env connection is the Akron instance and would answer for the wrong company.
+    const reachable = f.connection === 'spark' ? !!conn : (conn ? true : kipuConfigured());
+    if (!reachable) { out.push({ ...base, pending: true, note: f.connection === 'spark' ? 'Connect this building\'s Kipu (registry → 🔌) to include' : 'Kipu not connected' }); continue; }
     if (f.type === 'detox') {
       const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL`).get().n;
       const admitRows = db.prepare(`SELECT DISTINCT kipu_id, name FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?`).all(since, end);
       out.push({ ...base, census: { total: census }, admits: admitRows.length, discharges: realDischargeCount(since, end), beds: beds[(f.locationName || '').toLowerCase()] || null });
     } else {
-      const adm = await facilityAdmissions(f.locationName);
+      const adm = await facilityAdmissions((conn && org?.kipu_location_name) || f.locationName, conn);
       if (!adm) { out.push({ ...base, pending: true, note: 'No data from Kipu — check the location name' }); continue; }
       const census = adm.filter((a) => !a.discharge).length;
       out.push({ ...base, census: { total: census }, admits: adm.filter((a) => inR(a.admit, since, end)).length, discharges: adm.filter((a) => inR(a.discharge, since, end)).length, beds: beds[(f.locationName || '').toLowerCase()] || null });

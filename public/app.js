@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/\d)|auth-register($|\?)|finance\/revenue|analytics($|\?)|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged)/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/\d)|auth-register($|\?)|finance\/revenue|analytics($|\?)|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -572,6 +572,7 @@ function renderGroups(){
       ['navPinned','navRecent','navFilterWrap'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
       flat.forEach(v=>{ const b=nav.querySelector(`button[data-view="${v}"]`); if(b) nav.appendChild(b); });
     }
+    renderBottomNav();
     return;
   }
   if($('groupbar')) $('groupbar').style.display='none';   // v3: sections replace the group tabs
@@ -615,6 +616,7 @@ function renderGroups(){
     const st=b.querySelector('.pinbtn'); st.textContent=on?'★':'☆'; st.classList.toggle('on',on); st.title=on?'Unpin':'Pin to top';
   });
   applyNavVisibility();
+  renderBottomNav();
   // Build stamp — so "did it deploy?" is answered by looking at the sidebar.
   const bs=$('navBuild');
   if(bs&&!bs.textContent){ fetch('/sw.js').then(r=>r.text()).then(t=>{ const m=t.match(/armada-v(\d+)/); if(m) bs.textContent='build '+m[1]; }).catch(()=>{}); }
@@ -649,12 +651,46 @@ function renderHubTabs(v){
   const hb=document.querySelector(`#nav button[data-view="${hostView}"]`); if(hb) hb.classList.add('active');
 }
 function toggleNav(){ document.getElementById('shell').classList.toggle('nav-open'); }
+/* ── Mobile bottom bar: the phone gets FOUR tabs + Menu, nothing else.
+   Star (★) pages in the menu to choose your own four; otherwise the bar is
+   your role's daily essentials. Everything else lives behind ☰ Menu. ── */
+const BN_ICON={today:'☀️',dashboard:'🕐',clients:'👥',mydesk:'🗂️',ownership:'🏢',staffhub:'🏠',residents:'🧑‍🤝‍🧑',houses:'🛏️',movement:'🚐',command:'🎛️',opscenter:'⚙️',arrivals:'🚪',schedule:'📅',outpatient:'🧠',housing:'🏘️',records:'📁',rounds:'🔄',roundscan:'📷',corphub:'🗂️',hcos:'👥',appts:'📅',incidents:'⚠️'};
+const BN_LABEL={today:'Today',dashboard:'My Shift',clients:'Clients',mydesk:'Desk',ownership:'Exec',staffhub:'Hub',residents:'Residents',movement:'Movement',command:'Command',opscenter:'Ops',arrivals:'Front Desk',corphub:'Corp',hcos:'HR',appts:'Schedule',records:'Records',outpatient:'Outpatient'};
+function bnLabelOf(v){
+  if(BN_LABEL[v]) return BN_LABEL[v];
+  const b=document.querySelector(`#navSecs button[data-view="${v}"]`)||document.querySelector(`#nav button[data-view="${v}"]`);
+  const t=b?(b.childNodes[0]?b.childNodes[0].textContent.trim():b.textContent.trim()):v;
+  return t.length>11?t.split(/[\s—·]+/)[0]:t;
+}
+function bottomNavItems(){
+  if(!ME) return [];
+  const pins=navPins().filter(canSeeView);
+  if(pins.length>=2) return pins.slice(0,4);
+  const flat=flatMenu();
+  if(flat&&flat.length) return flat.slice(0,4);
+  let items;
+  if(ME.role==='admin') items=['today','clients','mydesk','ownership'];
+  else if(ME.job_role==='Executive Director') items=['today','clients','ownership','opscenter'];
+  else items=['today','clients','dashboard','opscenter'];
+  return items.filter(canSeeView).slice(0,4);
+}
+function renderBottomNav(){
+  const host=$('bottomNav'); if(!host) return;
+  const items=bottomNavItems();
+  if(!items.length){ host.style.display='none'; return; }
+  host.style.display='';
+  host.innerHTML=items.map(v=>`<button data-bn="${v}" onclick="show('${v}')"><span class="bn-ico">${BN_ICON[v]||'📄'}</span><span class="bn-lbl">${esc(bnLabelOf(v))}</span></button>`).join('')
+    +`<button data-bn="__menu" onclick="toggleNav()"><span class="bn-ico">☰</span><span class="bn-lbl">Menu</span></button>`;
+  const cur=document.querySelector('.view.active');
+  if(cur) host.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.bn===cur.id));
+}
 function show(v){
   if(!canSeeView(v)) v = isHousingRole() ? 'staffhub' : 'dashboard';   // can't see it → send home (Hilltop staff never to detox)
   selectGroup(GROUP_OF[v]||'stay');
   document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active', s.id===v));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
   document.querySelectorAll('#toolsbar button').forEach(b=>b.classList.toggle('active', b.dataset.tv===v));
+  document.querySelectorAll('#bottomNav button').forEach(b=>b.classList.toggle('active', b.dataset.bn===v));
   renderHubTabs(v);
   document.querySelectorAll('.itab').forEach(b=>b.classList.toggle('active', b.dataset.tab===v));   // Insights tabs
   try{ navRecordRecent(v); }catch(_e){ /* shortcuts optional */ }
@@ -6034,18 +6070,18 @@ async function loadPortfolio(){
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">${(d.facilities||[]).map(card).join('')}</div>
     ${(d.byRegion||[]).length>1?`<div class="hint" style="margin-top:8px">${d.byRegion.map(r=>`<strong>${esc(r.region)}</strong>: ${r.census} census · ${r.ins7} in · ${r.outs7} out`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>
   <div id="ownContinuum"></div>`;
-  loadContinuum();
+  loadStepdown();
 }
 /* Continuum — the step-down capture read: does the journey continue with us? */
 let CONT_RANGE=90;
-async function loadContinuum(){
+async function loadStepdown(){
   const host=$('ownContinuum'); if(!host) return;
   let d; try{ d=await api('/org/continuum?range='+CONT_RANGE); }catch(_e){ return; }
   const r=d.residential||{}, o=d.outpatient||{};
   const pctChip=(p)=>p==null?'<span class="hint">n/a</span>':`<strong style="font-size:22px;color:${p>=50?'#2f7a4f':p>=25?'#9a6a1f':'#b3382f'}">${p}%</strong>`;
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🔗 Continuum — does the journey continue?</h3>
       <p class="sub sans" style="margin:0">Of everyone discharged from detox/residential, who reached PHP/IOP or sober living <strong>with us</strong> within ${d.captureWindowDays} days. Powered by One Journey identity matching.</p></div>
-      <div class="itabs">${[30,90,180,365].map(n=>`<button class="itab ${CONT_RANGE===n?'active':''}" onclick="CONT_RANGE=${n};loadContinuum()">${n}d</button>`).join('')}</div></div>
+      <div class="itabs">${[30,90,180,365].map(n=>`<button class="itab ${CONT_RANGE===n?'active':''}" onclick="CONT_RANGE=${n};loadStepdown()">${n}d</button>`).join('')}</div></div>
     <div class="ret-cards" style="margin-top:8px">
       <div class="ret-card"><div class="n">${r.discharges||0}</div><div class="l">Residential discharges</div></div>
       <div class="ret-card"><div class="n">${pctChip(r.capturePct)}</div><div class="l">Stepped down with us</div></div>
@@ -7324,7 +7360,7 @@ function facScopeChange(v){
 function facQ(prefix){ return FAC_SCOPE ? prefix+'facility='+encodeURIComponent(FAC_SCOPE) : ''; }
 let TODAY_ITEMS=[];
 async function refreshTodayBadge(){
-  try{ const d=await api('/today'); TODAY_ITEMS=d.items||[]; const b=$('todayBadge'); if(b){ const n=TODAY_ITEMS.length; b.textContent=n; b.style.display=n?'':'none'; } }catch(_e){}
+  try{ const d=await api('/my/today'); TODAY_ITEMS=d.items||[]; const b=$('todayBadge'); if(b){ const n=TODAY_ITEMS.length; b.textContent=n; b.style.display=n?'':'none'; } }catch(_e){}
 }
 async function refreshOpsBadge(){
   try{ const d=await api('/opscenter'); const n=(d.tiles||[]).filter(t=>t.alert).length; const b=$('opsBadge'); if(b){ b.textContent=n; b.style.display=n?'':'none'; } }catch(_e){}

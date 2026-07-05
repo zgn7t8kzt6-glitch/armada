@@ -480,8 +480,10 @@ app.get('/api/opscenter', requireAuth, (req, res) => {
   res.json({ today, tiles: t, events });
 });
 
-// ── TODAY: the personal task inbox — everything waiting on ME, due-ordered ─────
-app.get('/api/today', requireAuth, (req, res) => {
+// ── MY TODAY: the personal task inbox — everything waiting on ME, due-ordered.
+// (Lives at /api/my/today: registering it at /api/today shadowed the Today-page
+// dashboard route below and blanked that page — Express first-match wins.)
+app.get('/api/my/today', requireAuth, (req, res) => {
   const today = appToday();
   const items = [];
   const add = (fn) => { try { fn(); } catch { /* source skipped */ } };
@@ -9694,7 +9696,7 @@ app.get('/api/moments', requireAuth, requireAdmin, (req, res) => {
 app.get('/api/today', requireAuth, (req, res) => {
   const today = appToday();
   const fc = facCtx(req); if (denyFac(fc, res)) return;
-  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+  const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')}`).all();
   const attention = [];
   for (const c of clients) {
     const ama = latestAmaRead(c.id);
@@ -9704,9 +9706,9 @@ app.get('/api/today', requireAuth, (req, res) => {
       else attention.push({ kind: 'welcome', client_id: c.id, text: `${c.pref || c.name} — in the first 72 hours. Deliver the welcome — and capture their ⚓ Intake Anchor (why they came, in their words).` });
     }
   }
-  const callsDue = db.prepare(`SELECT f.type, f.due_date, c.pref, c.name, c.id cid FROM followups f JOIN clients c ON c.id=f.client_id WHERE f.status='Pending' AND f.due_date <= ? ORDER BY f.due_date`).all(today);
+  const callsDue = db.prepare(`SELECT f.type, f.due_date, c.pref, c.name, c.id cid FROM followups f JOIN clients c ON c.id=f.client_id WHERE f.status='Pending' AND f.due_date <= ?${fc.frag('c.facility_id')} ORDER BY f.due_date`).all(today);
   callsDue.forEach((f) => attention.push({ kind: 'call', client_id: f.cid, text: `${f.pref || f.name} — ${f.type} aftercare call due ${f.due_date}` }));
-  const hiReq = db.prepare(`SELECT r.text, r.department, c.pref FROM requests r LEFT JOIN clients c ON c.id=r.client_id WHERE r.status!='Done' AND r.priority='High' ORDER BY r.id DESC`).all();
+  const hiReq = db.prepare(`SELECT r.text, r.department, c.pref FROM requests r LEFT JOIN clients c ON c.id=r.client_id WHERE r.status!='Done' AND r.priority='High'${shiftFrag(fc, 'r.facility_id')} ORDER BY r.id DESC`).all();
   hiReq.forEach((r) => attention.push({ kind: 'request', text: `${r.department}: ${r.text}${r.pref ? ' (' + r.pref + ')' : ''}` }));
   const order = { risk: 0, welcome: 1, call: 2, request: 3 };
   attention.sort((a, b) => (order[a.kind] - order[b.kind]) || ((b.level === 'High') - (a.level === 'High')));
@@ -9714,13 +9716,13 @@ app.get('/api/today', requireAuth, (req, res) => {
   const metrics = {
     active: clients.length,
     highRisk: attention.filter((a) => a.kind === 'risk').length,
-    openRequests: db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`).get().n,
+    openRequests: db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'${shiftFrag(fc, 'facility_id')}`).get().n,
     surveysDue: surveysDueCount(),
     bedsOpen: db.prepare(`SELECT COUNT(*) n FROM beds WHERE status = 'Open'${shiftFrag(fc, 'facility_id')}`).get().n,
-    pipeline: db.prepare(`SELECT COUNT(*) n FROM admissions WHERE status NOT IN ('Admitted','Declined')`).get().n,
+    pipeline: db.prepare(`SELECT COUNT(*) n FROM admissions WHERE status NOT IN ('Admitted','Declined')${fc.frag('facility_id')}`).get().n,
     callsDue: callsDue.length,
     openConcerns: db.prepare(`SELECT COUNT(*) n FROM concerns WHERE status='Open'`).get().n,
-    openIncidents: db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status='Open'`).get().n,
+    openIncidents: db.prepare(`SELECT COUNT(*) n FROM incidents WHERE status='Open'${fc.frag('facility_id')}`).get().n,
     visitsToday: db.prepare(`SELECT COUNT(*) n FROM visits WHERE date = ? AND status='Scheduled'`).get(today).n,
     refreshersDue: (() => {
       const cs = db.prepare(`SELECT id, recert_days FROM courses WHERE active = 1`).all();

@@ -975,3 +975,24 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 .nav-filtering .side-sec:not(.open)>.side-secbody{display:flex}
 .side-build{margin-top:auto;padding:10px 14px 8px;font-size:10.5px;color:var(--muted);opacity:.65;font-family:var(--sans)}
 [data-theme="dark"] .side-filter input{background:#16202a;border-color:#28323c}
+
+/* ── Mobile bottom bar: four tabs + Menu — the phone's whole nav ─────────── */
+.bottomnav{display:none}
+@media(max-width:880px){
+  .hamb{display:none}   /* ☰ lives in the bottom bar now */
+  .bottomnav{position:fixed;bottom:0;left:0;right:0;z-index:38;display:flex;background:var(--paper);
+    border-top:1px solid var(--line);box-shadow:0 -4px 18px rgba(20,40,42,.10);
+    padding:5px 4px calc(5px + env(safe-area-inset-bottom))}
+  .bottomnav button{flex:1;min-width:0;background:none;border:none;font-family:var(--sans);cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px 4px;border-radius:12px;
+    color:var(--muted);font-size:10px;font-weight:600;letter-spacing:.2px}
+  .bottomnav .bn-ico{font-size:21px;line-height:1;transition:transform .15s ease}
+  .bottomnav .bn-lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bottomnav button.active{color:var(--navy);background:rgba(95,176,194,.10)}
+  .bottomnav button.active .bn-ico{transform:translateY(-1px) scale(1.12)}
+  main{padding-bottom:104px !important}
+  /* the drawer opens ABOVE the bar; give its last items clearance too */
+  .sidebar{padding-bottom:84px;z-index:40}
+}
+[data-theme="dark"] .bottomnav{background:#131c26;border-top-color:#28323c;box-shadow:0 -4px 18px rgba(0,0,0,.35)}
+[data-theme="dark"] .bottomnav button.active{background:rgba(95,176,194,.14)}

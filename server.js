@@ -22,7 +22,7 @@ import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ens
 import { classifyDeskItem, draftDeskEmail } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
-import { mountPeople, linkPeople, journeyFor, personIdFor } from './src/people.js';
+import { mountPeople, linkPeople, journeyFor, personIdFor, normName as personNameKey } from './src/people.js';
 import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard, muteSender, unmuteSender, mutedSenders, noteDismissal, mailPolling } from './src/mailbox.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
 import { ARMADA_PRINCIPLES, ARMADA_STANDARD, ALL_BEHIND_YOU, HANDBOOK, HANDBOOK_INTRO, todaysPrinciple, todaysSafety, chapterForRole } from './src/handbook.js';
@@ -329,7 +329,7 @@ app.post('/api/logout', (req, res) => { logout(req, res); res.json({ ok: true })
 // Outpatient (Akron House Recovery) is owner-only: the admin, plus any user ids the
 // owner explicitly grants. Walled off from everyone else.
 function outpatientAllowlist() { try { const a = JSON.parse(getState('outpatient_access') || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
-function canSeeOutpatient(user) { return !!user && (user.role === 'admin' || user.job_role === 'Director of Revenue Cycle Management' || outpatientAllowlist().includes(user.id)); }
+function canSeeOutpatient(user) { return !!user && (user.role === 'admin' || user.job_role === 'Director of Revenue Cycle Management' || hasPerm(user, 'corporate') || outpatientAllowlist().includes(user.id)); }
 function requireOutpatient(req, res, next) { if (!canSeeOutpatient(req.user)) return res.status(403).json({ error: 'Owner only.' }); next(); }
 // One-time: everyone on the outpatient allowlist works the outpatient program,
 // but the foundation access seed only gave them detox — so their facility chip
@@ -1690,8 +1690,7 @@ app.post('/api/desk/digest-now', requireAuth, requireAdmin, async (req, res) => 
    registry and the local program tables (no Kipu round-trips). Each world's
    legacy NULL rows belong to its default building, same rules as everywhere. */
 app.get('/api/org/portfolio', requireAuth, (req, res) => {
-  const lead = req.user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(req.user.job_role);
-  if (!lead) return res.status(403).json({ error: 'Leadership only.' });
+  if (!canSeeOutpatient(req.user) && !['Executive Director', 'Executive Assistant'].includes(req.user.job_role)) return res.status(403).json({ error: 'Leadership only.' });
   const today = appToday(), since7 = addDays(today, -7);
   const dfid = defaultFacilityId();
   const fkeyId = (k) => { try { return db.prepare(`SELECT id FROM org_facilities WHERE fkey = ?`).get(k)?.id ?? null; } catch { return null; } };
@@ -1734,6 +1733,61 @@ app.get('/api/org/portfolio', requireAuth, (req, res) => {
     totals: { census: rows.reduce((a, r) => a + r.census, 0), ins7: rows.reduce((a, r) => a + r.ins7, 0), outs7: rows.reduce((a, r) => a + r.outs7, 0) },
     byBrand: roll('brand'), byRegion: roll('region'),
   });
+});
+
+/* Continuum — does the journey continue? Step-down capture via the person
+   layer: of residential discharges, who reached PHP/IOP or sober living
+   within 30 days; of outpatient discharges, who reached sober living. */
+app.get('/api/org/continuum', requireAuth, (req, res) => {
+  if (!canSeeOutpatient(req.user) && !['Executive Director', 'Executive Assistant'].includes(req.user.job_role)) return res.status(403).json({ error: 'Leadership only.' });
+  try { linkPeople(); } catch { /* best effort */ }
+  const days = ({ '30': 30, '90': 90, '180': 180, '365': 365 })[String(req.query.range)] || 90;
+  const today = appToday(), since = addDays(today, -days), W = 30;
+  // Residential discharges in the window, one per PERSON (latest casefile wins).
+  const byPerson = new Map();
+  try {
+    for (const c of db.prepare(`SELECT person_id, pref, name, substr(discharge_date,1,10) dd, discharge_status FROM clients
+      WHERE merged_into IS NULL AND person_id IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ?
+      ORDER BY discharge_date`).all(since, today)) {
+      if (isReferredOut(c)) continue;   // never completed intake — not a step-down candidate
+      byPerson.set(c.person_id, c);
+    }
+  } catch { /* clients optional */ }
+  const opHit = db.prepare(`SELECT 1 n FROM outpatient_clients WHERE person_id = ? AND substr(COALESCE(php_start, admit, first_seen),1,10) BETWEEN ? AND ? LIMIT 1`);
+  const hsHit = db.prepare(`SELECT 1 n FROM housing_residents WHERE person_id = ? AND substr(move_in,1,10) BETWEEN ? AND ? LIMIT 1`);
+  let toOp = 0, toHs = 0, toEither = 0; const continued = [], lost = [];
+  for (const [pid, c] of byPerson) {
+    const end = addDays(c.dd, W);
+    const op = !!opHit.get(pid, c.dd, end), hs = !!hsHit.get(pid, c.dd, end);
+    if (op) toOp++; if (hs) toHs++;
+    if (op || hs) { toEither++; if (continued.length < 25) continued.push({ name: c.pref || c.name, dd: c.dd, to: [op ? 'PHP/IOP' : null, hs ? 'sober living' : null].filter(Boolean).join(' + ') }); }
+    else if (lost.length < 25) lost.push({ name: c.pref || c.name, dd: c.dd, status: c.discharge_status || '' });
+  }
+  // Outpatient completions → sober living within the window.
+  let opDc = 0, opToHs = 0;
+  try {
+    for (const o of db.prepare(`SELECT person_id, substr(discharged_at,1,10) dd FROM outpatient_clients
+      WHERE person_id IS NOT NULL AND substr(discharged_at,1,10) >= ? AND substr(discharged_at,1,10) <= ?`).all(since, today)) {
+      opDc++;
+      if (hsHit.get(o.person_id, o.dd, addDays(o.dd, W))) opToHs++;
+    }
+  } catch { /* outpatient optional */ }
+  const pct = (a, b) => b ? Math.round(100 * a / b) : null;
+  res.json({
+    rangeDays: days, captureWindowDays: W,
+    residential: { discharges: byPerson.size, toOutpatient: toOp, toHousing: toHs, toEither, capturePct: pct(toEither, byPerson.size), continued, lostSample: lost },
+    outpatient: { discharges: opDc, toHousing: opToHs, capturePct: pct(opToHs, opDc) },
+  });
+});
+
+/* Find one person anywhere in the company — every program, every building. */
+app.get('/api/people/search', requireAuth, (req, res) => {
+  if (!canSeeOutpatient(req.user) && !['Executive Director', 'Executive Assistant'].includes(req.user.job_role)) return res.status(403).json({ error: 'Leadership only.' });
+  const q = personNameKey(req.query.q || '');
+  if (q.length < 2) return res.json({ people: [] });
+  try { linkPeople(); } catch { /* best effort */ }
+  const rows = db.prepare(`SELECT id FROM people WHERE name_key LIKE ? ORDER BY name LIMIT 10`).all('%' + q + '%');
+  res.json({ people: rows.map((r) => journeyFor(r.id)).filter((j) => j.person) });
 });
 
 app.get('/api/org/facilities', requireAuth, (req, res) => {
@@ -1880,6 +1934,7 @@ app.post('/api/org/facilities/:id/kipu-sync', requireAuth, requireAdmin, async (
       : await kipuSyncRoster({ conn, facilityId: fac.id, locationId: locId, locationName: fac.kipu_location_name || '' });
     if (r && r.error) return res.status(502).json({ error: r.error });
     audit({ user: req.user, action: 'KIPU_FACILITY_SYNC', entity: 'org_facility', entity_id: fac.id, detail: `${fac.name}: ${JSON.stringify(r).slice(0, 120)}`, ip: req.ip });
+    try { linkPeople(); } catch { /* hourly sweep will catch up */ }
     res.json({ ok: true, result: r });
   } catch (e) { res.status(502).json({ error: e.message }); }
   finally { _facSyncRunning = false; }
@@ -7072,7 +7127,7 @@ app.get('/api/my-stats', requireAuth, (req, res) => {
   } catch (e) { return null; } })();
   res.json({ ...s, prevOverall: prev, trend: (s.overall != null && prev != null) ? s.overall - prev : null, wowsForMe, canManage, excellence });
 });
-const canSeeTeamStats = (u) => u.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(u.job_role || '');
+const canSeeTeamStats = (u) => u.role === 'admin' || ['Director of Operations', 'Clinical Director', 'Executive Director'].includes(u.job_role || '') || hasPerm(u, 'reports');
 // Leadership: drill into one person's full breakdown.
 app.get('/api/user-stats/:id', requireAuth, (req, res) => {
   if (!canSeeTeamStats(req.user)) return res.status(403).json({ error: 'Leadership only.' });
@@ -7840,7 +7895,7 @@ app.post('/api/kipu/test', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await kipuTest()); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/kipu/sync', requireAuth, requireAdmin, async (req, res) => {
-  try { const r = await kipuSyncRoster(); audit({ user: req.user, action: 'KIPU_SYNC', detail: `${r.created} new`, ip: req.ip }); afterSyncAssess(req.user); res.json(r); }
+  try { const r = await kipuSyncRoster(); audit({ user: req.user, action: 'KIPU_SYNC', detail: `${r.created} new`, ip: req.ip }); afterSyncAssess(req.user); try { linkPeople(); } catch { /* sweep */ } res.json(r); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post('/api/kipu/inspect', requireAuth, requireAdmin, async (req, res) => {
@@ -11514,7 +11569,9 @@ function revenueSnapshot(fc = null) {
     todayBilled: todayL.v, mtd: mtdL.v, mtdDays: mtdL.n, cumulative: allL.v, cumulativeDays: allL.n, ledgerStart,
     mtdByLoc, daysInMonth, monthLabel: today.slice(0, 7), asOf: today };
 }
-app.get('/api/finance/revenue', requireAuth, requireAdmin, (req, res) => {
+// Finance READS honor the matrix ('finance' checkbox); writes stay admin-only.
+const requireFinanceRead = (req, res, next) => (req.user.role === 'admin' || hasPerm(req.user, 'finance')) ? next() : res.status(403).json({ error: 'Finance access only.' });
+app.get('/api/finance/revenue', requireAuth, requireFinanceRead, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
   res.json(revenueSnapshot(fc));
 });
@@ -11697,7 +11754,7 @@ function expenseSnapshot(reqMonth) {
     payroll: payrollActual(monthStart, month === curMonth ? today : monthEnd), payrollBudget: payBudget, census, breakeven, ppdLines, budget, actuals,
     shiftHours: jsonState('shift_hours', {}), roleRates: jsonState('role_rates', {}), roles: JOB_ROLES, staff };
 }
-app.get('/api/finance/expenses', requireAuth, requireAdmin, (req, res) => res.json(expenseSnapshot(req.query.month)));
+app.get('/api/finance/expenses', requireAuth, requireFinanceRead, (req, res) => res.json(expenseSnapshot(req.query.month)));
 // Unified save: categories, budgets (per category incl. Payroll), and this
 // month's manual actuals (Payroll actual is always computed, never stored).
 app.post('/api/finance/expenses-save', requireAuth, requireAdmin, (req, res) => {
@@ -13039,6 +13096,7 @@ if (kipuConfigured()) {
         }
         // Anyone newly discharged gets an automatic "what could we do better" debrief.
         if (claudeConfigured() && !debriefJob.running) runDischargeDebriefs({ id: null, name: 'Auto-sync' }).catch((e) => { debriefJob.running = false; console.error('[debrief]', e.message); });
+        try { linkPeople(); } catch { /* hourly sweep */ }
       } catch (e) { console.error('[kipu] auto-sync failed:', e.message); }
     };
     setTimeout(autoSync, 30000);                 // first run shortly after boot
@@ -13071,6 +13129,7 @@ if (kipuConfigured()) {
           }
         } catch (e) { console.error('[kipu] facility auto-sync (' + row.name + '):', e.message); }
       }
+      try { linkPeople(); } catch { /* hourly sweep */ }
     };
     setTimeout(facAutoSync, 90000);              // after the primary's first pass
     setInterval(facAutoSync, hrs * 3600 * 1000);

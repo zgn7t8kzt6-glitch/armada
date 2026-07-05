@@ -6029,8 +6029,46 @@ async function loadPortfolio(){
       ${f.census===0&&f.ins7===0&&f.outs7===0?'<div class="hint" style="margin-top:6px">No data yet — honest empty until this building goes live.</div>':''}
     </div>`;
   host.innerHTML=`<div class="card"><h3 style="margin-top:0">🗺️ Portfolio — every building <span class="hint" style="font-weight:400">· last 7 days · local records</span></h3>
+    <div class="toolbar no-print" style="justify-content:flex-start;margin:0 0 8px"><input id="ppl_q" placeholder="🧭 Find a person across all programs… (Enter)" style="min-width:260px" onkeydown="if(event.key==='Enter')pplSearch()"/><button class="btn btn-ghost btn-sm sans" onclick="pplSearch()">Search</button></div>
+    <div id="pplOut"></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">${(d.facilities||[]).map(card).join('')}</div>
-    ${(d.byRegion||[]).length>1?`<div class="hint" style="margin-top:8px">${d.byRegion.map(r=>`<strong>${esc(r.region)}</strong>: ${r.census} census · ${r.ins7} in · ${r.outs7} out`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>`;
+    ${(d.byRegion||[]).length>1?`<div class="hint" style="margin-top:8px">${d.byRegion.map(r=>`<strong>${esc(r.region)}</strong>: ${r.census} census · ${r.ins7} in · ${r.outs7} out`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>
+  <div id="ownContinuum"></div>`;
+  loadContinuum();
+}
+/* Continuum — the step-down capture read: does the journey continue with us? */
+let CONT_RANGE=90;
+async function loadContinuum(){
+  const host=$('ownContinuum'); if(!host) return;
+  let d; try{ d=await api('/org/continuum?range='+CONT_RANGE); }catch(_e){ return; }
+  const r=d.residential||{}, o=d.outpatient||{};
+  const pctChip=(p)=>p==null?'<span class="hint">n/a</span>':`<strong style="font-size:22px;color:${p>=50?'#2f7a4f':p>=25?'#9a6a1f':'#b3382f'}">${p}%</strong>`;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🔗 Continuum — does the journey continue?</h3>
+      <p class="sub sans" style="margin:0">Of everyone discharged from detox/residential, who reached PHP/IOP or sober living <strong>with us</strong> within ${d.captureWindowDays} days. Powered by One Journey identity matching.</p></div>
+      <div class="itabs">${[30,90,180,365].map(n=>`<button class="itab ${CONT_RANGE===n?'active':''}" onclick="CONT_RANGE=${n};loadContinuum()">${n}d</button>`).join('')}</div></div>
+    <div class="ret-cards" style="margin-top:8px">
+      <div class="ret-card"><div class="n">${r.discharges||0}</div><div class="l">Residential discharges</div></div>
+      <div class="ret-card"><div class="n">${pctChip(r.capturePct)}</div><div class="l">Stepped down with us</div></div>
+      <div class="ret-card"><div class="n">${r.toOutpatient||0}</div><div class="l">→ PHP/IOP</div></div>
+      <div class="ret-card"><div class="n">${r.toHousing||0}</div><div class="l">→ Sober living</div></div>
+      <div class="ret-card"><div class="n">${o.discharges||0} → ${o.toHousing||0}</div><div class="l">Outpatient → housing</div></div></div>
+    ${(r.continued||[]).length?`<details style="margin-top:8px"><summary style="cursor:pointer"><strong>Continued with us</strong> <span class="hint">· ${r.toEither}</span></summary>${r.continued.map(x=>`<div class="pc-note">✓ ${esc(x.name)} <span class="hint">· discharged ${esc(x.dd)} → ${esc(x.to)}</span></div>`).join('')}</details>`:''}
+    ${(r.lostSample||[]).length?`<details style="margin-top:4px"><summary style="cursor:pointer"><strong>Left the continuum</strong> <span class="hint">· sample of ${(r.discharges||0)-(r.toEither||0)}</span></summary>${r.lostSample.map(x=>`<div class="pc-note">○ ${esc(x.name)} <span class="hint">· ${esc(x.dd)}${x.status?' · '+esc(x.status):''}</span></div>`).join('')}<div class="hint" style="margin-top:4px">Every one of these is a warm-handoff opportunity for the aftercare call list.</div></details>`:''}
+    ${!(r.discharges||o.discharges)?'<div class="hint" style="margin-top:6px">No discharges in this window yet — the read fills in as programs sync.</div>':''}</div>`;
+}
+async function pplSearch(){
+  const q=($('ppl_q')||{}).value||'', out=$('pplOut'); if(!out) return;
+  if(q.trim().length<2){ out.innerHTML=''; return; }
+  out.innerHTML='<div class="hint">Searching…</div>';
+  let d; try{ d=await api('/people/search?q='+encodeURIComponent(q)); }catch(e){ out.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; return; }
+  const ICON={residential:'🏥',outpatient:'🧠',housing:'🏠'};
+  if(!(d.people||[]).length){ out.innerHTML='<div class="hint" style="margin-bottom:8px">No one found by that name in any program.</div>'; return; }
+  out.innerHTML=d.people.map(j=>`<div class="pc-note" style="padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px">
+      <strong>${esc(j.person.name)}</strong>${j.person.dob?` <span class="hint">· DOB ${esc(j.person.dob)}</span>`:''}
+      ${j.episodes.map(e=>`<div style="margin-top:3px">${ICON[e.world]||'•'} ${esc(e.start||'?')}${e.end?' → '+esc(e.end):(e.active?' → now':'')} · ${esc(e.facility)} <span class="hint">${esc(e.status)}</span>
+        ${e.ref&&e.ref.kind==='client'?`<button class="btn btn-ghost btn-sm sans" style="padding:0 8px" onclick="openJourney(${e.ref.id})">open</button>`:''}
+        ${e.ref&&e.ref.kind==='resident'&&typeof openResident==='function'?`<button class="btn btn-ghost btn-sm sans" style="padding:0 8px" onclick="openResident(${e.ref.id})">open</button>`:''}</div>`).join('')}
+    </div>`).join('');
 }
 let HR_SHOW_SAL=false;
 async function loadHrRoster(){
@@ -6235,7 +6273,7 @@ async function loadOrgPerms(){
   const roles=(d.roles||[]).filter(r=>r!=='admin');
   host.innerHTML=`<div style="overflow-x:auto"><table class="tbl nomcard" style="min-width:900px"><tr><th style="position:sticky;left:0;background:var(--paper)">Role</th>${d.modules.map(m=>`<th style="font-size:10px">${esc(MOD_LABEL[m]||m)}</th>`).join('')}</tr>
     ${roles.map(r=>`<tr><td style="position:sticky;left:0;background:var(--paper)"><strong style="font-size:12px">${esc(r)}</strong></td>${d.modules.map(m=>`<td style="text-align:center"><input type="checkbox" ${has(r,m)?'checked':''} onchange="setPerm('${r.replace(/'/g,"\\'")}','${m}',this.checked)"/></td>`).join('')}</tr>`).join('')}</table></div>
-  <div class="hint" style="margin-top:4px">The owner (admin) always has everything. Enforced today: <strong>Corp Hub</strong>, <strong>HR</strong>, <strong>UR/Auth</strong>; the rest are staged for Phase 2 rollout.</div>`;
+  <div class="hint" style="margin-top:4px">The owner (admin) always has everything. Enforced today: <strong>Corp Hub</strong> (incl. Executive view), <strong>HR</strong>, <strong>UR/Auth</strong>, <strong>Billing</strong>, <strong>Finance</strong> (read), <strong>Reports</strong> (team stats). Clinical switches last, per the rebuild order.</div>`;
 }
 async function setPerm(role,module,allowed){
   try{ await api('/org/permissions',{method:'POST',body:JSON.stringify({role,module,allowed})}); }catch(e){ alert(e.message); loadOrgPerms(); }

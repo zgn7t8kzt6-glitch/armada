@@ -22,6 +22,7 @@ import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ens
 import { classifyDeskItem, draftDeskEmail } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
+import { mountPeople, linkPeople, journeyFor, personIdFor } from './src/people.js';
 import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard, muteSender, unmuteSender, mutedSenders, noteDismissal, mailPolling } from './src/mailbox.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
 import { ARMADA_PRINCIPLES, ARMADA_STANDARD, ALL_BEHIND_YOU, HANDBOOK, HANDBOOK_INTRO, todaysPrinciple, todaysSafety, chapterForRole } from './src/handbook.js';
@@ -1683,6 +1684,56 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 app.post('/api/desk/digest-now', requireAuth, requireAdmin, async (req, res) => {
   try { res.json(await sendDeskDigest()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* Corporate roll-up: every building side by side, straight from the org
+   registry and the local program tables (no Kipu round-trips). Each world's
+   legacy NULL rows belong to its default building, same rules as everywhere. */
+app.get('/api/org/portfolio', requireAuth, (req, res) => {
+  const lead = req.user.role === 'admin' || ['Executive Director', 'Executive Assistant'].includes(req.user.job_role);
+  if (!lead) return res.status(403).json({ error: 'Leadership only.' });
+  const today = appToday(), since7 = addDays(today, -7);
+  const dfid = defaultFacilityId();
+  const fkeyId = (k) => { try { return db.prepare(`SELECT id FROM org_facilities WHERE fkey = ?`).get(k)?.id ?? null; } catch { return null; } };
+  const opHome = fkeyId('akron-house'), slHome = fkeyId('hilltop-akron');
+  const cnt = (sql, ...a) => { try { return db.prepare(sql).get(...a)?.n ?? 0; } catch { return 0; } };
+  const frag = (col, fid, home) => ` AND (${col} = ${fid}${fid === home ? ` OR ${col} IS NULL` : ''})`;
+  const rows = orgFacilities().filter((f) => f.type !== 'corporate').map((f) => {
+    const row = { id: f.id, fkey: f.fkey, name: f.name, brand: f.brand, region: f.region, type: f.type, census: 0, capacity: f.beds || null, ins7: 0, outs7: 0, incidents: 0, alerts: 0 };
+    if (f.type === 'outpatient') {
+      const F = frag('facility_id', f.id, opHome);
+      row.census = cnt(`SELECT COUNT(*) n FROM outpatient_clients WHERE active = 1${F}`);
+      row.ins7 = cnt(`SELECT COUNT(*) n FROM outpatient_clients WHERE substr(COALESCE(php_start, admit, first_seen),1,10) >= ?${F}`, since7);
+      row.outs7 = cnt(`SELECT COUNT(*) n FROM outpatient_clients WHERE substr(discharged_at,1,10) >= ?${F}`, since7);
+    } else if (f.type === 'sober-living') {
+      const F = frag('r.facility_id', f.id, slHome);
+      row.census = cnt(`SELECT COUNT(*) n FROM housing_residents r WHERE r.status = 'active'${F}`);
+      row.ins7 = cnt(`SELECT COUNT(*) n FROM housing_residents r WHERE substr(r.move_in,1,10) >= ?${F}`, since7);
+      row.outs7 = cnt(`SELECT COUNT(*) n FROM housing_residents r WHERE substr(r.discharge_date,1,10) >= ?${F}`, since7);
+      if (!row.capacity) row.capacity = cnt(`SELECT COUNT(*) n FROM housing_beds b JOIN housing_houses h ON h.id = b.house_id WHERE h.active = 1${frag('h.facility_id', f.id, slHome)}`) || null;
+    } else {   // detox / residential — the clients world
+      const F = frag('facility_id', f.id, dfid);
+      row.census = cnt(`SELECT COUNT(*) n FROM clients WHERE active = 1 AND discharge_status IS NULL AND merged_into IS NULL${F}`);
+      row.ins7 = cnt(`SELECT COUNT(DISTINCT COALESCE(kipu_id, name)) n FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ?${F}`, since7);
+      row.outs7 = cnt(`SELECT COUNT(*) n FROM clients WHERE substr(discharge_date,1,10) >= ?${F}`, since7);
+      if (f.id === dfid) row.capacity = +(getState('detox_bed_count') || 40);
+      row.incidents = cnt(`SELECT COUNT(*) n FROM incidents WHERE status = 'Open'${F}`);
+      row.alerts = cnt(`SELECT COUNT(*) n FROM alerts WHERE status = 'New'${F}`);
+    }
+    row.occupancy = row.capacity ? Math.round(100 * row.census / row.capacity) : null;
+    return row;
+  });
+  const roll = (key) => {
+    const m = {};
+    for (const r of rows) { const g = m[r[key] || '—'] = m[r[key] || '—'] || { [key]: r[key] || '—', census: 0, ins7: 0, outs7: 0 }; g.census += r.census; g.ins7 += r.ins7; g.outs7 += r.outs7; }
+    return Object.values(m);
+  };
+  res.json({
+    window: { since: since7, end: today },
+    facilities: rows,
+    totals: { census: rows.reduce((a, r) => a + r.census, 0), ins7: rows.reduce((a, r) => a + r.ins7, 0), outs7: rows.reduce((a, r) => a + r.outs7, 0) },
+    byBrand: roll('brand'), byRegion: roll('region'),
+  });
 });
 
 app.get('/api/org/facilities', requireAuth, (req, res) => {
@@ -8919,6 +8970,24 @@ app.post('/api/goals/:id/status', requireAuth, (req, res) => {
 });
 
 // Client 360 journey — everything about one client, in one place
+/* One Journey — the same human across detox, outpatient and sober living.
+   Entry is guarded by the row the caller can already see; the cross-program
+   history is the point of the view, so episodes are not facility-filtered. */
+app.get('/api/person/journey', requireAuth, (req, res) => {
+  let pid = null;
+  if (req.query.client_id) {
+    const c = clientFacGuard(req, res, +req.query.client_id, 'id'); if (!c) return;
+    pid = personIdFor('clients', 'id', +req.query.client_id);
+  } else if (req.query.resident_id) {
+    const r = db.prepare(`SELECT id, facility_id FROM housing_residents WHERE id = ?`).get(+req.query.resident_id);
+    if (!r) return res.status(404).json({ error: 'Not found' });
+    if (r.facility_id != null && !facilityAllowed(req.user, r.facility_id)) return res.status(404).json({ error: 'Not found' });
+    pid = personIdFor('housing_residents', 'id', r.id);
+  } else return res.status(400).json({ error: 'client_id or resident_id required' });
+  if (!pid) return res.json({ person: null, episodes: [] });
+  res.json(journeyFor(pid));
+});
+
 app.get('/api/clients/:id/journey', requireAuth, (req, res) => {
   const c = clientFacGuard(req, res, req.params.id); if (!c) return;
   audit({ user: req.user, action: 'VIEW', entity: 'client', entity_id: +req.params.id, detail: 'journey', ip: req.ip });
@@ -12939,6 +13008,12 @@ app.post('/api/crisis-owner', requireAuth, (req, res) => {
 
 /* ---------------- recovery housing (sober-living suite) ---------------- */
 mountHousing(app);
+// One person, one journey: link roster rows to people at boot (off the boot
+// path), then hourly — new sync rows get picked up by the sweep or lazily
+// when a journey is opened.
+mountPeople();
+setTimeout(() => { try { const s = linkPeople(); if (s.linked || s.created) console.log('[people]', JSON.stringify(s)); } catch (e) { console.error('[people]', e.message); } }, 5000);
+setInterval(() => { try { linkPeople(); } catch { /* next sweep */ } }, 3600e3);
 
 /* ---------------- static ---------------- */
 app.use(express.static(path.join(__dirname, 'public')));

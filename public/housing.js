@@ -498,6 +498,7 @@ async function openResident(id){
         <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="openJobSearchForm(${r.id})">+ Log step</button><button class="btn btn-ghost btn-sm sans" onclick="openEmploymentForm(${r.id})">Edit status</button></div>
       </div>
     </div>`;
+  if (typeof loadOneJourney === 'function') loadOneJourney({resident_id:r.id}, 'residentBody');
 }
 function screenResultBadge(r){ const m={negative:'#2f7a4f',positive:'#c06a52',refused:'#c06a52',diluted:'#9a6a1f',pending:'#6f7a75'}; return `<span class="loc-pill" style="background:${m[r]||'#6f7a75'}">${esc(r)}</span>`; }
 

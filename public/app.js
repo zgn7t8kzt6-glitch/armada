@@ -4684,6 +4684,27 @@ async function loadJourney(){
     </div>`;
   JOURNEY_C = c; JTASK_ALL = false; renderJourneyTasks();
   loadClientNotes(c.id);
+  loadOneJourney({client_id:c.id}, 'journeyBody');
+}
+/* ---- One Journey: the same person across detox, outpatient & sober living ---- */
+async function loadOneJourney(params, hostId){
+  try{
+    const qs = Object.entries(params).map(([k,v])=>k+'='+encodeURIComponent(v)).join('&');
+    const j = await api('/person/journey?'+qs);
+    if(!j.person || (j.episodes||[]).length < 2) return;   // one episode = no story to tell yet
+    const host = $(hostId); if(!host) return;
+    const ICON = {residential:'🏥', outpatient:'🧠', housing:'🏠'};
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `<h3 style="margin:0 0 2px">🧭 One Journey — across Armada</h3>
+      <div class="hint" style="margin-bottom:8px">${esc(j.person.name)}${j.person.dob?' · DOB '+esc(j.person.dob):''} · ${j.episodes.length} episodes</div>
+      ${j.episodes.map(e=>`<div class="pc-note" style="display:flex;gap:8px;align-items:baseline${e.active?';font-weight:600':''}">
+        <span>${ICON[e.world]||'•'}</span>
+        <span style="min-width:150px;white-space:nowrap">${esc(e.start||'?')}${e.end?' → '+esc(e.end):(e.active?' → now':'')}</span>
+        <span>${esc(e.label)} · ${esc(e.facility)}${e.detail?` <span class="hint">(${esc(e.detail)})</span>`:''} — ${esc(e.status)}</span>
+      </div>`).join('')}`;
+    host.appendChild(div);
+  }catch(_e){ /* the journey card is a bonus — never block the page */ }
 }
 // This client's shift tasks, defaulting to the viewer's role; full plan on a toggle.
 let JOURNEY_C = null, JTASK_ALL = false;
@@ -5979,6 +6000,7 @@ async function loadOwnership(){
       <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="hint">From <input type="date" id="own_since" value="${esc(OWN_PERIOD.since)}" onchange="ownPeriodChange()"/></label><label class="hint">To <input type="date" id="own_end" value="${esc(OWN_PERIOD.end)}" onchange="ownPeriodChange()"/></label></div>
       <div class="ret-cards" style="margin-top:8px">${box(t.census||0,'Total census',(t.census?'rc-elev':''))}${box(t.admits||0,'Admits in window')}${box(t.discharges||0,'Discharges')}${box(t.facilities||0,'Live facilities')}</div>
       ${(d.byBrand||[]).length>1?`<div class="hint" style="margin-top:6px">${(d.byBrand||[]).map(b=>`<strong>${esc(b.brand)}</strong>: ${b.census} census · ${b.admits} admits · ${b.discharges} disch.`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>
+    <div id="ownPortfolio"></div>
     <div class="corp-tabs" style="margin:2px 0 0">${mods.map(m=>`<button ${m[1]==='ownership'?'class="active"':''} onclick="${m[2]||'void(0)'}">${m[0]}</button>`).join('')}</div>
     <div class="card"><h3 style="margin-top:0">Armada — Kipu <span class="hint" style="font-weight:400">· live</span></h3>${tbl(armada)}</div>
     <div class="card"><h3 style="margin-top:0">Spark${d.sparkPending?' <span class="hint" style="font-weight:400;color:#a60">· connection pending</span>':''}</h3>${d.sparkPending?'<div class="pc-note" style="color:#a60;margin-bottom:6px">These come online the moment you give me the Spark Kipu credentials — the rows are already wired.</div>':''}${tbl(spark)}</div>
@@ -5987,6 +6009,28 @@ async function loadOwnership(){
     ${ME.role==='admin'?`<div class="card"><h3 style="margin-top:0">🔐 Permission matrix <span class="hint" style="font-weight:400">— live: a check here opens that module for the role, instantly</span></h3><p class="sub sans" style="margin:0 0 6px">Roles × modules. Corporate &amp; HR enforce from this matrix today; other modules light up as Phase 2 rolls on (clinical last). Every change is audited.</p><div id="orgPerms"><div class="hint">Loading…</div></div></div>`:''}
     ${ME.role==='admin'?`<div class="card" style="background:#faf6ee;border-left:4px solid var(--gold)"><h3 style="margin-top:0">⚙️ Kipu facility mapping <span class="hint" style="font-weight:400">— owner only (legacy; converges into the registry)</span></h3><p class="sub sans">If a facility shows no data, its Kipu location name here may not match Kipu. Use “List locations” in Akron Outpatient settings to see exact names, then fix them here.</p><div id="ownFacilities" class="hint">Loading…</div></div>`:''}`;
   if(ME.role==='admin'){ loadFacilityEditor(); loadHrRoster(); loadOrgFacs('orgFacs'); loadOrgPerms(); }
+  loadPortfolio();
+}
+/* Portfolio — every building side by side, straight from the org registry
+   (local data, no Kipu round-trips; complements the live-Kipu tables below). */
+async function loadPortfolio(){
+  const host=$('ownPortfolio'); if(!host) return;
+  let d; try{ d=await api('/org/portfolio'); }catch(_e){ return; }   // leadership-only — hide quietly otherwise
+  const TICON={'detox':'🏥','outpatient':'🧠','sober-living':'🏠'};
+  const card=(f)=>`<div class="facpick-card" style="cursor:default">
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-size:20px">${TICON[f.type]||'🏢'}</span>
+        <div><div style="font-weight:600">${esc(f.name)}</div><div class="hint">${esc(f.brand||'')}${f.region?' · '+esc(f.region):''}</div></div></div>
+      <div style="display:flex;gap:14px;margin-top:8px;flex-wrap:wrap">
+        <div><div style="font-size:20px;font-weight:700">${f.census}${f.capacity?`<span class="hint" style="font-size:12px">/${f.capacity}</span>`:''}</div><div class="hint">census${f.occupancy!=null?' · '+f.occupancy+'%':''}</div></div>
+        <div><div style="font-size:20px;font-weight:700">${f.ins7}</div><div class="hint">in · 7d</div></div>
+        <div><div style="font-size:20px;font-weight:700">${f.outs7}</div><div class="hint">out · 7d</div></div>
+        ${f.incidents?`<div><div style="font-size:20px;font-weight:700;color:#b3382f">${f.incidents}</div><div class="hint">open incidents</div></div>`:''}
+      </div>
+      ${f.census===0&&f.ins7===0&&f.outs7===0?'<div class="hint" style="margin-top:6px">No data yet — honest empty until this building goes live.</div>':''}
+    </div>`;
+  host.innerHTML=`<div class="card"><h3 style="margin-top:0">🗺️ Portfolio — every building <span class="hint" style="font-weight:400">· last 7 days · local records</span></h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">${(d.facilities||[]).map(card).join('')}</div>
+    ${(d.byRegion||[]).length>1?`<div class="hint" style="margin-top:8px">${d.byRegion.map(r=>`<strong>${esc(r.region)}</strong>: ${r.census} census · ${r.ins7} in · ${r.outs7} out`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>`;
 }
 let HR_SHOW_SAL=false;
 async function loadHrRoster(){

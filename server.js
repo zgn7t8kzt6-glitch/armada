@@ -430,7 +430,7 @@ app.get('/api/opscenter', requireAuth, (req, res) => {
   const F = fid ? ` AND facility_id=${fid}` : '';
   // RIGHT NOW — facility pulse
   add(() => ({ group: 'now', key: 'census', label: 'Census now', n: one(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND merged_into IS NULL${F}`), view: 'command' }));
-  add(() => { const beds = one(`SELECT COUNT(*) n FROM beds`); if (!beds) return null; const occ = one(`SELECT COUNT(*) n FROM beds WHERE status='Occupied'`); return { group: 'now', key: 'beds', label: 'Beds available', n: beds - occ, sub: `${occ}/${beds} occupied${fid ? ' · org-wide' : ''}`, view: 'bedboard' }; });
+  add(() => { const beds = one(`SELECT COUNT(*) n FROM beds WHERE 1=1${F}`); if (!beds) return null; const occ = one(`SELECT COUNT(*) n FROM beds WHERE status='Occupied'${F}`); return { group: 'now', key: 'beds', label: 'Beds available', n: beds - occ, sub: `${occ}/${beds} occupied`, view: 'bedboard' }; });
   add(() => ({ group: 'now', key: 'admits', label: 'Admissions today', n: one(`SELECT COUNT(DISTINCT COALESCE(kipu_id,name)) n FROM clients WHERE merged_into IS NULL AND substr(admit,1,10)=?${F}`, today), view: 'admitcheck' }));
   add(() => ({ group: 'now', key: 'arrivals', label: 'Expected arrivals', n: one(`SELECT COUNT(*) n FROM expected_arrivals WHERE scheduled_date=? AND status='expected'${F}`, today), view: 'arrivals' }));
   add(() => ({ group: 'now', key: 'penddc', label: 'Pending discharges', n: one(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= ?${F}`, addDays(today, 1)), view: 'dischargepage' }));
@@ -3295,8 +3295,11 @@ function isReferredOut(c) {
 // keyed to it. Defaults to today (manual mid-day sends); the midnight cutoff
 // passes YESTERDAY so the email reflects the day that just finished, not the new
 // empty one. The census/LOC breakdown is the current point-in-time snapshot.
-function buildCensusReport(reportDate = appToday()) {
-  const active = db.prepare(`SELECT id, pref, name, program, loc, admit FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
+function buildCensusReport(reportDate = appToday(), fid = null, facName = '') {
+  // Per-building report: rows with no facility stamp are legacy Akron detox
+  // (owner's standing rule), so the default building tolerates NULL.
+  const cf = fid ? ` AND (facility_id = ${+fid}${+fid === defaultFacilityId() ? ' OR facility_id IS NULL' : ''})` : '';
+  const active = db.prepare(`SELECT id, pref, name, program, loc, admit FROM clients WHERE active = 1 AND discharge_status IS NULL${cf}`).all();
   const byLoc = {};
   for (const c of active) { const k = (c.loc && c.loc !== 'Unspecified') ? c.loc : (parseLoc(c.program) || 'Unspecified'); byLoc[k] = (byLoc[k] || 0) + 1; }
   const rows = Object.entries(byLoc).map(([code, n]) => ({ code, label: LOC_LABEL[code] || code, n })).sort((a, b) => (LOC_RANK[b.code] ?? -1) - (LOC_RANK[a.code] ?? -1));
@@ -3307,21 +3310,21 @@ function buildCensusReport(reportDate = appToday()) {
   const cDedupe = (rows) => { const seen = new Set(); const out = []; for (const c of rows) { const k = cKey(c); if (k && seen.has(k)) continue; if (k) seen.add(k); out.push(c); } return out; };
   // Split out referral-outs / incomplete intakes so they don't inflate Intakes/Discharges.
   const refKeys = new Set(); const referredOut = [];
-  const intakeRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, admit_time, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(admit,1,10) = ?`).all(reportDate));
+  const intakeRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, admit_time, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(admit,1,10) = ?${cf}`).all(reportDate));
   const intakes = [];
   for (const c of intakeRows) { if (isReferredOut(c)) { const k = cKey(c); if (!refKeys.has(k)) { refKeys.add(k); referredOut.push(c); } } else intakes.push(c.pref || c.name); }
-  const dcRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, admit_time, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?
+  const dcRows = cDedupe(db.prepare(`SELECT pref, name, kipu_id, admit, admit_time, discharge_date, discharge_status, discharge_reason, therapist, diagnosis FROM clients WHERE substr(discharge_date,1,10) = ?${cf}
     ORDER BY (discharge_reason IS NOT NULL AND discharge_reason != '') DESC, id`).all(reportDate));
   const dcs = [];
   for (const c of dcRows) { if (isReferredOut(c)) { const k = cKey(c); if (!refKeys.has(k)) { refKeys.add(k); referredOut.push(c); } } else dcs.push(c); }
   // Discharges in the last 7 days that were debriefed but had NO in-stay
   // documentation — a standing compliance nudge to chase progress/discharge notes.
   const docGapWeek = cDedupe(db.prepare(`SELECT pref, name, kipu_id, discharge_date FROM clients
-    WHERE discharge_doc_gap = 1 AND substr(discharge_date,1,10) >= date(?, '-6 day') AND substr(discharge_date,1,10) <= ?
+    WHERE discharge_doc_gap = 1 AND substr(discharge_date,1,10) >= date(?, '-6 day') AND substr(discharge_date,1,10) <= ?${cf}
     ORDER BY discharge_date DESC`).all(reportDate, reportDate));
   const locChanges = db.prepare(`SELECT c.pref, c.name, e.from_loc, e.to_loc FROM flow_events e LEFT JOIN clients c ON c.id = e.client_id
-    WHERE e.kind = 'loc_change' AND e.date = ? ORDER BY e.id`).all(reportDate);
-  const sendouts = db.prepare(`SELECT client_name, destination, reason FROM medical_sendouts WHERE status = 'out'`).all();
+    WHERE e.kind = 'loc_change' AND e.date = ?${cf.replace(/facility_id/g, 'c.facility_id')} ORDER BY e.id`).all(reportDate);
+  const sendouts = db.prepare(`SELECT client_name, destination, reason FROM medical_sendouts WHERE status = 'out'${cf}`).all();
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
   const dt = new Date(reportDate + 'T12:00:00').toLocaleDateString('en-US', { timeZone: APP_TZ, weekday: 'long', month: 'long', day: 'numeric' });
   const locLine = (x) => `${esc(x.pref || x.name || 'A client')} — ${esc(x.from_loc || '?')} → ${esc(x.to_loc || '?')}`;
@@ -3331,7 +3334,7 @@ function buildCensusReport(reportDate = appToday()) {
   const inOut = (c) => { const t = t12(c.admit_time), l = losDays(c.admit, c.discharge_date); const parts = []; if (t) parts.push(`in ${t}`); if (l != null) parts.push(l === 0 ? 'out same day' : `${l} day${l === 1 ? '' : 's'}`); return parts.join(' · '); };
   const html = `<div style="font-family:Georgia,serif;color:#1b2825;max-width:560px">
     <h2 style="font-family:Georgia,serif">Daily Census &amp; Activity</h2>
-    <p style="color:#666;margin:0 0 10px">End-of-day summary for <strong>${dt}</strong></p>
+    <p style="color:#666;margin:0 0 10px">End-of-day summary for <strong>${dt}</strong>${facName ? ` — ${esc(facName)}` : ''}</p>
     ${rows.map((r) => `<div><strong>${esc(r.code)}</strong> ${esc(r.label.replace(r.code + ' · ', ''))} — <strong>${r.n}</strong></div>`).join('')}
     <div style="border-top:2px solid #ccc;margin-top:6px;padding-top:6px"><strong>TOTAL CENSUS — ${active.length}</strong></div>
     <h3>Intakes</h3>${intakes.length ? intakes.map((n) => `<div>• ${esc(n)}</div>`).join('') : '<div>ZERO</div>'}
@@ -3347,15 +3350,36 @@ function buildCensusReport(reportDate = appToday()) {
     + (referredOut.length ? `\nReferred out / didn't complete intake: ${referredOut.map((c) => { const io = inOut(c); return (c.pref || c.name) + (io ? ` (${io})` : ''); }).join('; ')}` : '')
     + `\nLOC changes: ${locChanges.map((x) => (x.pref || x.name || 'A client') + ' ' + (x.from_loc || '?') + '→' + (x.to_loc || '?')).join('; ') || 'ZERO'}`
     + (docGapWeek.length ? `\n⚠ Documentation gap (7d, chase before month-end): ${docGapWeek.map((c) => (c.pref || c.name) + ' (disch ' + (c.discharge_date || '').slice(0, 10) + ')').join('; ')}` : '');
-  return { subject: `Daily Census — ${dt} (${active.length})`, html, text, total: active.length };
+  return { subject: `Daily Census — ${facName ? facName + ' — ' : ''}${dt} (${active.length})`, html, text, total: active.length };
 }
-async function sendCensusEmail(reportDate = appToday()) {
-  const to = (getState('census_email_to') || process.env.CENSUS_EMAIL_TO || process.env.REPORT_TO || '').trim();
+async function sendCensusEmail(reportDate = appToday(), fid = null) {
+  // Per-facility recipients come from the building's ⚙️ report_email setting;
+  // the org-wide report (and the default building) falls back to the global list.
+  const fac = fid ? orgFacilities().find((f) => f.id === +fid) : null;
+  const to = ((fid && facSetting(+fid, 'report_email')) || getState('census_email_to') || process.env.CENSUS_EMAIL_TO || process.env.REPORT_TO || '').trim();
   if (!emailConfigured()) return { sent: false, reason: 'email not connected — Settings → Email' };
   if (!to) return { sent: false, reason: 'no recipients set — add them under Recipients…' };
-  const r = buildCensusReport(reportDate);
+  const r = buildCensusReport(reportDate, fid ? +fid : null, fac?.name || '');
   await sendEmail({ to, subject: r.subject, html: r.html });
-  return { sent: true, to };
+  return { sent: true, to, facility: fac?.name };
+}
+// Midnight fan-out: one report per building that had people or activity that
+// day. A building only mails if it has its own report_email set — except the
+// default (Akron detox) building, which keeps the legacy global recipient list
+// so the owner's nightly email never silently stops.
+async function sendCensusEmailsAll(reportDate) {
+  const dfid = defaultFacilityId();
+  const fids = db.prepare(`SELECT DISTINCT COALESCE(facility_id, ?) AS fid FROM clients
+    WHERE (active = 1 AND discharge_status IS NULL) OR substr(admit,1,10) = ? OR substr(discharge_date,1,10) = ?`)
+    .all(dfid || 0, reportDate, reportDate).map((r) => r.fid).filter(Boolean);
+  const out = [];
+  for (const fid of fids) {
+    const to = (facSetting(fid, 'report_email') || (fid === dfid ? (getState('census_email_to') || process.env.CENSUS_EMAIL_TO || '') : '')).trim();
+    if (!to) continue;
+    try { out.push(await sendCensusEmail(reportDate, fid)); }
+    catch (e) { console.error('[census fan-out]', fid, e.message); out.push({ sent: false, reason: e.message }); }
+  }
+  return out;
 }
 app.post('/api/command/census/email', requireAuth, requireAdmin, async (req, res) => {
   // Optional scope: 'yesterday' (the end-of-day summary, same as the midnight run)
@@ -3364,7 +3388,10 @@ app.post('/api/command/census/email', requireAuth, requireAdmin, async (req, res
   const b = req.body || {};
   if (b.scope === 'yesterday') reportDate = addDays(appToday(), -1);
   else if (typeof b.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) reportDate = b.date;
-  try { const r = await sendCensusEmail(reportDate); res.json({ ...r, date: reportDate }); } catch (e) { res.status(502).json({ error: e.message }); }
+  // The chip scopes the manual send: pick a building → that building's report
+  // (to its report_email if set, else the global list). No pick → org-wide.
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  try { const r = await sendCensusEmail(reportDate, fc.one); res.json({ ...r, date: reportDate }); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => res.json({ to: getState('census_email_to') || '', emailReady: emailConfigured() }));
 app.post('/api/command/census/recipients', requireAuth, requireAdmin, (req, res) => { setState('census_email_to', (req.body?.to || '').trim()); res.json({ ok: true }); });
@@ -8850,19 +8877,28 @@ app.post('/api/requests/:id/status', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// Program / schedule
+// Program / schedule — per building (whole-house items carry their own stamp;
+// legacy NULL rows belong to the default building, same as the shift world).
 app.get('/api/schedule', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const date = req.query.date || new Date().toISOString().slice(0, 10);
-  res.json({ date, items: db.prepare(`SELECT s.*, c.pref FROM schedule_items s LEFT JOIN clients c ON c.id = s.client_id WHERE s.date = ? ORDER BY (s.time IS NULL), s.time, s.id`).all(date) });
+  res.json({ date, items: db.prepare(`SELECT s.*, c.pref FROM schedule_items s LEFT JOIN clients c ON c.id = s.client_id WHERE s.date = ?${shiftFrag(fc, 's.facility_id')} ORDER BY (s.time IS NULL), s.time, s.id`).all(date) });
 });
 app.post('/api/schedule', requireAuth, (req, res) => {
   const { date, time, title, type, location, client_id } = req.body || {};
   if (!date || !title?.trim()) return res.status(400).json({ error: 'Missing date or title' });
-  db.prepare(`INSERT INTO schedule_items (date, time, title, type, location, client_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(date, time || null, title.trim(), SCHEDULE_TYPES.includes(type) ? type : 'Group', location || null, client_id || null, req.user.id);
+  let fid = client_id ? db.prepare(`SELECT facility_id FROM clients WHERE id = ?`).get(+client_id)?.facility_id || null : null;
+  if (!fid) { fid = stampFac(req, res); if (fid === null && res.headersSent) return; }
+  db.prepare(`INSERT INTO schedule_items (date, time, title, type, location, client_id, created_by, facility_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(date, time || null, title.trim(), SCHEDULE_TYPES.includes(type) ? type : 'Group', location || null, client_id || null, req.user.id, fid || null);
   res.json({ ok: true });
 });
-app.delete('/api/schedule/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM schedule_items WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+app.delete('/api/schedule/:id', requireAuth, (req, res) => {
+  const row = db.prepare(`SELECT facility_id FROM schedule_items WHERE id = ?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  if (!staffRowFacGuard(req, res, row.facility_id)) return;
+  db.prepare(`DELETE FROM schedule_items WHERE id = ?`).run(req.params.id); res.json({ ok: true });
+});
 
 // Treatment goals
 app.get('/api/goals', requireAuth, (req, res) => {
@@ -9308,7 +9344,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     sections.push({ key: 'board', title: 'Already arrived', items: arrived.map(arrItem) });
   } else if (jr === 'Housekeeping') {
     subtitle = 'The Environment Standard — the physical stage is spotless, calm, and ready for the next client.';
-    const beds = db.prepare(`SELECT room, label, unit, status FROM beds`).all();
+    const beds = db.prepare(`SELECT room, label, unit, status FROM beds WHERE 1=1${shiftFrag(fc, 'facility_id')}`).all();
     const cleaning = beds.filter((b) => /clean/i.test(b.status || ''));
     const hold = beds.filter((b) => /hold/i.test(b.status || ''));
     const openB = beds.filter((b) => /open/i.test(b.status || ''));
@@ -9533,6 +9569,7 @@ app.get('/api/moments', requireAuth, requireAdmin, (req, res) => {
 });
 app.get('/api/today', requireAuth, (req, res) => {
   const today = appToday();
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const clients = db.prepare(`SELECT * FROM clients WHERE active = 1 AND discharge_status IS NULL`).all();
   const attention = [];
   for (const c of clients) {
@@ -9555,7 +9592,7 @@ app.get('/api/today', requireAuth, (req, res) => {
     highRisk: attention.filter((a) => a.kind === 'risk').length,
     openRequests: db.prepare(`SELECT COUNT(*) n FROM requests WHERE status != 'Done'`).get().n,
     surveysDue: surveysDueCount(),
-    bedsOpen: db.prepare(`SELECT COUNT(*) n FROM beds WHERE status = 'Open'`).get().n,
+    bedsOpen: db.prepare(`SELECT COUNT(*) n FROM beds WHERE status = 'Open'${shiftFrag(fc, 'facility_id')}`).get().n,
     pipeline: db.prepare(`SELECT COUNT(*) n FROM admissions WHERE status NOT IN ('Admitted','Declined')`).get().n,
     callsDue: callsDue.length,
     openConcerns: db.prepare(`SELECT COUNT(*) n FROM concerns WHERE status='Open'`).get().n,
@@ -9567,7 +9604,7 @@ app.get('/api/today', requireAuth, (req, res) => {
       let n = 0; us.forEach((u) => cs.forEach((c) => { if (courseStatus(c, u.id).due) n++; })); return n;
     })(),
   };
-  const schedule = db.prepare(`SELECT s.*, c.pref FROM schedule_items s LEFT JOIN clients c ON c.id=s.client_id WHERE s.date = ? ORDER BY (s.time IS NULL), s.time LIMIT 12`).all(today);
+  const schedule = db.prepare(`SELECT s.*, c.pref FROM schedule_items s LEFT JOIN clients c ON c.id=s.client_id WHERE s.date = ?${shiftFrag(fc, 's.facility_id')} ORDER BY (s.time IS NULL), s.time LIMIT 12`).all(today);
   const wins = {
     wows: db.prepare(`SELECT w.text, w.by_name, c.pref FROM wows w LEFT JOIN clients c ON c.id=w.client_id ORDER BY w.id DESC LIMIT 3`).all(),
     delights: db.prepare(`SELECT d.text, c.pref FROM delights d LEFT JOIN clients c ON c.id=d.client_id ORDER BY d.id DESC LIMIT 3`).all(),
@@ -9722,6 +9759,9 @@ app.post('/api/facilities', requireAuth, (req, res) => {
 });
 
 app.get('/api/referrals', requireAuth, (req, res) => {
+  // ?facility= (the chip) scopes by ORIGIN building; ?facility_id= stays the
+  // destination-PARTNER filter — two different tables, two different params.
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
   const where = [], args = [];
   if (req.query.category) { where.push('o.category = ?'); args.push(req.query.category); }
   if (req.query.department) { where.push('o.department = ?'); args.push(req.query.department); }
@@ -9731,7 +9771,7 @@ app.get('/api/referrals', requireAuth, (req, res) => {
   if (req.query.to) { where.push('o.ref_date <= ?'); args.push(req.query.to); }
   const sql = `SELECT o.*, c.pref AS client_pref FROM outbound_referrals o
     LEFT JOIN clients c ON c.id = o.client_id
-    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    WHERE 1=1${where.map((w) => ' AND ' + w).join('')}${fc.frag('o.origin_facility_id')}
     ORDER BY o.ref_date DESC, o.id DESC LIMIT 200`;
   res.json({ referrals: db.prepare(sql).all(...args) });
 });
@@ -9756,20 +9796,30 @@ app.post('/api/referrals', requireAuth, (req, res) => {
   const byId = b.referred_by ? +b.referred_by : req.user.id;
   const byName = b.referred_by_name || db.prepare(`SELECT name FROM users WHERE id = ?`).get(byId)?.name || req.user.name;
 
+  // Origin = which of OUR buildings is sending: the client's building when
+  // linked, else the chip pick / caller's building (stampFac enforces access).
+  let originFid = b.client_id ? db.prepare(`SELECT facility_id FROM clients WHERE id = ?`).get(+b.client_id)?.facility_id || null : null;
+  if (!originFid) { originFid = stampFac(req, res); if (originFid === null && res.headersSent) return; }
+
   const info = db.prepare(`INSERT INTO outbound_referrals
-    (ref_date, category, department, referred_by, referred_by_name, client_id, person_ref, facility_id, facility_name, loc_needed, reason, reason_detail, insurance, created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    (ref_date, category, department, referred_by, referred_by_name, client_id, person_ref, facility_id, facility_name, loc_needed, reason, reason_detail, insurance, created_by, origin_facility_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     (b.ref_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
     category, department, byId, byName,
     b.client_id ? +b.client_id : null, (b.person_ref || '').trim() || null,
     facilityId, facilityName || null, (b.loc_needed || '').trim() || null,
     b.reason.trim(), (b.reason_detail || '').trim() || null, (b.insurance || '').trim() || null,
-    req.user.id);
+    req.user.id, originFid || null);
   audit({ user: req.user, action: 'REFERRAL', entity: 'referral', entity_id: info.lastInsertRowid, detail: `${category} → ${facilityName} (${b.reason.trim()})`, ip: req.ip });
   res.json({ id: info.lastInsertRowid });
 });
 
 app.delete('/api/referrals/:id', requireAuth, (req, res) => {
+  const row = db.prepare(`SELECT origin_facility_id FROM outbound_referrals WHERE id = ?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const fc = facCtx(req);
+  if (fc.deny || (fc.one && row.origin_facility_id != null && row.origin_facility_id !== fc.one) ||
+      (row.origin_facility_id != null && !facilityAllowed(req.user, row.origin_facility_id))) return res.status(404).json({ error: 'Not found' });
   db.prepare(`DELETE FROM outbound_referrals WHERE id = ?`).run(req.params.id);
   audit({ user: req.user, action: 'DELETE', entity: 'referral', entity_id: +req.params.id, ip: req.ip });
   res.json({ ok: true });
@@ -9785,13 +9835,16 @@ app.post('/api/inbound-referrals', requireAuth, (req, res) => {
     facilityId = f ? f.id : db.prepare(`INSERT INTO facilities (name) VALUES (?)`).run(name).lastInsertRowid;
   }
   if (facilityId && !facilityName) facilityName = db.prepare(`SELECT name FROM facilities WHERE id = ?`).get(facilityId)?.name || '';
-  db.prepare(`INSERT INTO inbound_referrals (ref_date, facility_id, facility_name, outcome) VALUES (?,?,?,?)`)
-    .run((b.ref_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10), facilityId, facilityName || null, (b.outcome || 'pending'));
+  const orgFid = stampFac(req, res); if (orgFid === null && res.headersSent) return;
+  db.prepare(`INSERT INTO inbound_referrals (ref_date, facility_id, facility_name, outcome, org_facility_id) VALUES (?,?,?,?,?)`)
+    .run((b.ref_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10), facilityId, facilityName || null, (b.outcome || 'pending'), orgFid || null);
   res.json({ ok: true });
 });
 
 // Roll-up analytics: counters + breakdowns + weekly trend + reciprocity.
 app.get('/api/referrals/summary', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const of = fc.frag('origin_facility_id');
   const days = ({ '7': 7, '30': 30, '90': 90, '365': 365 })[String(req.query.range)] || 30;
   const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
   const cnt = (sql, ...a) => db.prepare(sql).get(...a)?.n ?? 0;
@@ -9800,12 +9853,12 @@ app.get('/api/referrals/summary', requireAuth, (req, res) => {
   const month = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
 
   const counters = {
-    today: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date = ?`, today),
-    week: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?`, week),
-    month: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?`, month),
-    range: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?`, since),
+    today: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date = ?${of}`, today),
+    week: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?${of}`, week),
+    month: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?${of}`, month),
+    range: cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?${of}`, since),
   };
-  const grp = (col) => db.prepare(`SELECT ${col} AS k, COUNT(*) AS n FROM outbound_referrals WHERE ref_date >= ? AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY n DESC`).all(since);
+  const grp = (col) => db.prepare(`SELECT ${col} AS k, COUNT(*) AS n FROM outbound_referrals WHERE ref_date >= ? AND ${col} IS NOT NULL${of} GROUP BY ${col} ORDER BY n DESC`).all(since);
   const byReason = grp('reason');
   const byDestination = grp('facility_name');
   const byReferrer = grp('referred_by_name');
@@ -9817,14 +9870,14 @@ app.get('/api/referrals/summary', requireAuth, (req, res) => {
   for (let w = 7; w >= 0; w--) {
     const a = new Date(Date.now() - (w * 7 + 6) * 864e5).toISOString().slice(0, 10);
     const b = new Date(Date.now() - w * 7 * 864e5).toISOString().slice(0, 10);
-    trend.push(cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ? AND ref_date <= ?`, a, b));
+    trend.push(cnt(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ? AND ref_date <= ?${of}`, a, b));
   }
 
   // Reciprocity: per partner, sent vs received (within range), with net + flag.
   const reciprocity = db.prepare(`
     SELECT f.id, f.name,
-      (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id AND o.ref_date >= ?) AS sent,
-      (SELECT COUNT(*) FROM inbound_referrals i WHERE i.facility_id = f.id AND i.ref_date >= ?) AS received
+      (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id AND o.ref_date >= ?${fc.frag('o.origin_facility_id')}) AS sent,
+      (SELECT COUNT(*) FROM inbound_referrals i WHERE i.facility_id = f.id AND i.ref_date >= ?${fc.frag('i.org_facility_id')}) AS received
     FROM facilities f WHERE f.active = 1`).all(since, since)
     .filter((r) => r.sent || r.received)
     .map((r) => ({ ...r, net: r.sent - r.received }))
@@ -9836,18 +9889,20 @@ app.get('/api/referrals/summary', requireAuth, (req, res) => {
 // AI: why people are leaving + BD relationship read. De-identified aggregates only.
 app.get('/api/referrals/insights', requireAuth, async (req, res) => {
   if (!claudeConfigured()) return res.status(503).json({ error: 'Claude is not configured.' });
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const of = fc.frag('origin_facility_id');
   const days = ({ '7': 7, '30': 30, '90': 90, '365': 365 })[String(req.query.range)] || 90;
   const since = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
   const list = (col, label) => {
-    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS n FROM outbound_referrals WHERE ref_date >= ? AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY n DESC`).all(since);
+    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS n FROM outbound_referrals WHERE ref_date >= ? AND ${col} IS NOT NULL${of} GROUP BY ${col} ORDER BY n DESC`).all(since);
     return `${label}:\n` + (rows.length ? rows.map((r) => `  - ${r.k}: ${r.n}`).join('\n') : '  (none)') + '\n';
   };
   const recip = db.prepare(`
     SELECT f.name,
-      (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id AND o.ref_date >= ?) AS sent,
-      (SELECT COUNT(*) FROM inbound_referrals i WHERE i.facility_id = f.id AND i.ref_date >= ?) AS received
+      (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id AND o.ref_date >= ?${fc.frag('o.origin_facility_id')}) AS sent,
+      (SELECT COUNT(*) FROM inbound_referrals i WHERE i.facility_id = f.id AND i.ref_date >= ?${fc.frag('i.org_facility_id')}) AS received
     FROM facilities f WHERE f.active = 1`).all(since, since).filter((r) => r.sent || r.received);
-  const total = db.prepare(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?`).get(since).n;
+  const total = db.prepare(`SELECT COUNT(*) n FROM outbound_referrals WHERE ref_date >= ?${of}`).get(since).n;
   const ctx = `Outbound-referral data for the last ${days} days. Total outbound: ${total}.\n\n` +
     list('reason', 'By reason') + '\n' + list('category', 'By type (discharge/transfer/declined)') + '\n' +
     list('facility_name', 'By destination facility') + '\n' + list('department', 'By department') + '\n' +
@@ -10682,21 +10737,42 @@ app.post('/api/staffing/slots', requireAuth, requireStaffingManager, (req, res) 
     .run(b.date.slice(0, 10), b.part, b.role, Math.max(1, +b.needed || 1), b.notes || null, req.user.id, sfid || null);
   res.json({ id: info.lastInsertRowid });
 });
+// A staffing row's building comes from its slot; a cross-facility id must look
+// nonexistent (same contract as clientFacGuard). NULL slot rows are legacy detox.
+function staffRowFacGuard(req, res, slotFid) {
+  const fc = facCtx(req);
+  if (fc.deny || (fc.one && slotFid != null && slotFid !== fc.one) ||
+      (slotFid != null && !facilityAllowed(req.user, slotFid))) {
+    res.status(404).json({ error: 'Not found' }); return false;
+  }
+  return true;
+}
+const assignmentSlotFac = (id) => db.prepare(`SELECT s.facility_id FROM schedule_assignments a JOIN schedule_slots s ON s.id = a.slot_id WHERE a.id = ?`).get(id);
 app.delete('/api/staffing/slots/:id', requireAuth, requireStaffingManager, (req, res) => {
+  const s = db.prepare(`SELECT facility_id FROM schedule_slots WHERE id = ?`).get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Not found' });
+  if (!staffRowFacGuard(req, res, s.facility_id)) return;
   db.prepare(`DELETE FROM schedule_slots WHERE id = ?`).run(req.params.id); res.json({ ok: true });
 });
 app.post('/api/staffing/slots/:id/assign', requireAuth, requireStaffingManager, (req, res) => {
+  const s = db.prepare(`SELECT facility_id FROM schedule_slots WHERE id = ?`).get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Not found' });
+  if (!staffRowFacGuard(req, res, s.facility_id)) return;
   const u = db.prepare(`SELECT id, name FROM users WHERE id = ?`).get(+req.body?.user_id);
   if (!u) return res.status(400).json({ error: 'Unknown staff member' });
   db.prepare(`INSERT INTO schedule_assignments (slot_id, user_id, user_name) VALUES (?,?,?)`).run(req.params.id, u.id, u.name);
   res.json({ ok: true });
 });
 app.delete('/api/staffing/assignments/:id', requireAuth, requireStaffingManager, (req, res) => {
+  const owner = assignmentSlotFac(req.params.id);
+  if (!owner) return res.status(404).json({ error: 'Not found' });
+  if (!staffRowFacGuard(req, res, owner.facility_id)) return;
   db.prepare(`DELETE FROM schedule_assignments WHERE id = ?`).run(req.params.id); res.json({ ok: true });
 });
 app.post('/api/staffing/assignments/:id/calloff', requireAuth, (req, res) => {
-  const a = db.prepare(`SELECT a.*, s.date, s.part, s.role FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.id = ?`).get(req.params.id);
+  const a = db.prepare(`SELECT a.*, s.date, s.part, s.role, s.facility_id AS slot_fac FROM schedule_assignments a JOIN schedule_slots s ON s.id=a.slot_id WHERE a.id = ?`).get(req.params.id);
   if (!a) return res.status(404).json({ error: 'Not found' });
+  if (!staffRowFacGuard(req, res, a.slot_fac)) return;
   // Optionally capture who stepped in to cover the call-off (may be a non-user name).
   const cover = (req.body?.covered_by_name || '').trim() || null;
   const coverId = req.body?.covered_by_id ? +req.body.covered_by_id : null;
@@ -10710,6 +10786,9 @@ app.post('/api/staffing/assignments/:id/calloff', requireAuth, (req, res) => {
 });
 // Record (or change) who covered a call-off, without re-entering the reason.
 app.post('/api/staffing/assignments/:id/cover', requireAuth, requireStaffingManager, (req, res) => {
+  const owner = assignmentSlotFac(req.params.id);
+  if (!owner) return res.status(404).json({ error: 'Not found' });
+  if (!staffRowFacGuard(req, res, owner.facility_id)) return;
   const cover = (req.body?.covered_by_name || '').trim() || null;
   db.prepare(`UPDATE schedule_assignments SET covered_by_name=?, covered_by_id=? WHERE id = ?`)
     .run(cover, req.body?.covered_by_id ? +req.body.covered_by_id : null, req.params.id);
@@ -10861,6 +10940,9 @@ app.get('/api/roster', requireAuth, (req, res) => {
     scheduled: shifts.reduce((n, s) => n + s.people.filter((p) => p.status !== 'called_off').length, 0) } });
 });
 app.post('/api/roster/attendance/:id', requireAuth, requireStaffingManager, (req, res) => {
+  const owner = assignmentSlotFac(req.params.id);
+  if (!owner) return res.status(404).json({ error: 'Not found' });
+  if (!staffRowFacGuard(req, res, owner.facility_id)) return;
   const att = ['present', 'absent'].includes(req.body?.attendance) ? req.body.attendance : null;
   db.prepare(`UPDATE schedule_assignments SET attendance=?, attendance_by=?, attendance_at=datetime('now') WHERE id = ?`)
     .run(att, req.user.name, req.params.id);
@@ -11196,42 +11278,60 @@ app.post('/api/admissions/:id/admit', requireAuth, (req, res) => {
   const info = db.prepare(`INSERT INTO clients (name, room, admit, facility_id) VALUES (?, ?, ?, ?)`).run(a.name, room, new Date().toISOString().slice(0, 10), cvFid || null);
   const cid = info.lastInsertRowid;
   db.prepare(`UPDATE admissions SET status = 'Admitted', client_id = ? WHERE id = ?`).run(cid, a.id);
-  if (req.body?.bed_id) db.prepare(`UPDATE beds SET status = 'Occupied', client_id = ? WHERE id = ?`).run(cid, req.body.bed_id);
+  if (req.body?.bed_id) {
+    const bf = db.prepare(`SELECT facility_id FROM beds WHERE id = ?`).get(req.body.bed_id);
+    if (bf && (bf.facility_id == null || facilityAllowed(req.user, bf.facility_id))) db.prepare(`UPDATE beds SET status = 'Occupied', client_id = ? WHERE id = ?`).run(cid, req.body.bed_id);
+  }
   audit({ user: req.user, action: 'ADMIT', entity: 'client', entity_id: cid, detail: a.name, ip: req.ip });
   res.json({ ok: true, client_id: cid });
 });
+// Bed inventory is per building; legacy NULL rows belong to the default (detox).
+function bedFacGuard(req, res, id) {
+  const b = db.prepare(`SELECT facility_id FROM beds WHERE id = ?`).get(id);
+  if (!b) { res.status(404).json({ error: 'Not found' }); return false; }
+  return staffRowFacGuard(req, res, b.facility_id);
+}
 app.get('/api/beds', requireAuth, (req, res) => {
-  res.json({ beds: db.prepare(`SELECT b.*, c.pref, c.name FROM beds b LEFT JOIN clients c ON c.id = b.client_id ORDER BY b.unit, b.room, b.label`).all() });
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  res.json({ beds: db.prepare(`SELECT b.*, c.pref, c.name FROM beds b LEFT JOIN clients c ON c.id = b.client_id WHERE 1=1${shiftFrag(fc, 'b.facility_id')} ORDER BY b.unit, b.room, b.label`).all() });
 });
 app.post('/api/beds', requireAuth, (req, res) => {
   const b = req.body || {}; if (!b.room?.trim()) return res.status(400).json({ error: 'Missing room' });
+  const fid = stampFac(req, res); if (fid === null && res.headersSent) return;
   const gender = ['Male', 'Female', 'Any'].includes(b.gender) ? b.gender : 'Any';
-  db.prepare(`INSERT INTO beds (room, label, unit, gender) VALUES (?, ?, ?, ?)`).run(b.room.trim(), b.label || null, b.unit || null, gender);
+  db.prepare(`INSERT INTO beds (room, label, unit, gender, facility_id) VALUES (?, ?, ?, ?, ?)`).run(b.room.trim(), b.label || null, b.unit || null, gender, fid || null);
   res.json({ ok: true });
 });
 // Designate a bed as Male / Female / Any.
 app.post('/api/beds/:id/gender', requireAuth, (req, res) => {
+  if (!bedFacGuard(req, res, req.params.id)) return;
   const gender = ['Male', 'Female', 'Any'].includes(req.body?.gender) ? req.body.gender : 'Any';
   db.prepare(`UPDATE beds SET gender = ? WHERE id = ?`).run(gender, req.params.id);
   res.json({ ok: true });
 });
 app.post('/api/beds/:id', requireAuth, (req, res) => {
+  if (!bedFacGuard(req, res, req.params.id)) return;
   const st = ['Open', 'Occupied', 'Hold', 'Cleaning'].includes(req.body?.status) ? req.body.status : 'Open';
   const cid = req.body?.client_id || null;
   db.prepare(`UPDATE beds SET status = ?, client_id = ? WHERE id = ?`).run(st, st === 'Occupied' ? cid : null, req.params.id);
   res.json({ ok: true });
 });
-app.delete('/api/beds/:id', requireAuth, (req, res) => { db.prepare(`DELETE FROM beds WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
+app.delete('/api/beds/:id', requireAuth, (req, res) => {
+  if (!bedFacGuard(req, res, req.params.id)) return;
+  db.prepare(`DELETE FROM beds WHERE id = ?`).run(req.params.id); res.json({ ok: true });
+});
 // Bed Board: who's in which room/bed (live from Kipu's clients.room) mapped onto
 // the bed inventory, with open beds. Total is configurable (40 detox beds).
 function bedKey(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 app.get('/api/bedboard', requireAuth, (req, res) => {
-  const total = +(getState('detox_bed_count') || 40);
-  // The physical bed inventory is the DEFAULT (detox) building's today; scope
-  // the client overlay so another chip pick doesn't paint its people "unplaced".
   const fc = facCtx(req); if (denyFac(fc, res)) return;
+  // Capacity: the default building keeps the legacy global knob; any other
+  // building reads its registry bed count (falls back to its inventory size).
+  let total = +(getState('detox_bed_count') || 40);
+  if (fc.one && fc.one !== defaultFacilityId()) total = +(db.prepare(`SELECT beds FROM org_facilities WHERE id = ?`).get(fc.one)?.beds) || 0;
   const active = db.prepare(`SELECT id, pref, name, room, loc, program, admit FROM clients WHERE active = 1 AND discharge_status IS NULL${fc.frag('facility_id')} ORDER BY room, name`).all();
-  const beds = db.prepare(`SELECT id, room, label, unit, gender FROM beds ORDER BY unit, room, label`).all();
+  const beds = db.prepare(`SELECT id, room, label, unit, gender FROM beds WHERE 1=1${shiftFrag(fc, 'facility_id')} ORDER BY unit, room, label`).all();
+  if (!total) total = beds.length;
   // index clients by their Kipu bed string
   const byKey = {}; active.forEach((c) => { if (c.room) (byKey[bedKey(c.room)] = byKey[bedKey(c.room)] || []).push(c); });
   const used = new Set();
@@ -11250,15 +11350,21 @@ app.get('/api/bedboard', requireAuth, (req, res) => {
 // One click: create a bed-inventory row for every distinct room/bed Kipu shows occupied.
 app.post('/api/bedboard/sync', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
-  const rooms = db.prepare(`SELECT DISTINCT room FROM clients WHERE active = 1 AND discharge_status IS NULL AND room IS NOT NULL AND room != ''${facCtx(req).frag('facility_id')}`).all().map((r) => r.room);
-  const existing = new Set(db.prepare(`SELECT room, label FROM beds`).all().map((b) => bedKey((b.room || '') + (b.label || ''))));
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const fid = fc.one || defaultFacilityId();
+  const rooms = db.prepare(`SELECT DISTINCT room FROM clients WHERE active = 1 AND discharge_status IS NULL AND room IS NOT NULL AND room != ''${fc.frag('facility_id')}`).all().map((r) => r.room);
+  const existing = new Set(db.prepare(`SELECT room, label FROM beds WHERE 1=1${shiftFrag(fc, 'facility_id')}`).all().map((b) => bedKey((b.room || '') + (b.label || ''))));
   let added = 0;
-  for (const r of rooms) { if (!existing.has(bedKey(r))) { db.prepare(`INSERT INTO beds (room, unit) VALUES (?, 'Detox')`).run(r); existing.add(bedKey(r)); added++; } }
+  for (const r of rooms) { if (!existing.has(bedKey(r))) { db.prepare(`INSERT INTO beds (room, unit, facility_id) VALUES (?, 'Detox', ?)`).run(r, fid || null); existing.add(bedKey(r)); added++; } }
   res.json({ ok: true, added });
 });
 app.post('/api/bedboard/total', requireAuth, (req, res) => {
   if (!isLeadership(req)) return res.status(403).json({ error: 'Leadership only.' });
-  setState('detox_bed_count', String(Math.max(1, Math.min(500, parseInt(req.body?.total, 10) || 40))));
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const n = Math.max(1, Math.min(500, parseInt(req.body?.total, 10) || 40));
+  // Default building keeps the legacy global knob; others write their registry row.
+  if (fc.one && fc.one !== defaultFacilityId()) db.prepare(`UPDATE org_facilities SET beds = ? WHERE id = ?`).run(n, fc.one);
+  else setState('detox_bed_count', String(n));
   res.json({ ok: true });
 });
 
@@ -12937,7 +13043,7 @@ function runDailyCutoff() {
     console.log(`[cutoff] daily report finalized for ${yesterday} (${APP_TZ})`);
     // Email the end-of-day census/activity for the day that JUST ENDED (yesterday),
     // not the fresh empty day — so intakes/discharges/LOC changes are real.
-    sendCensusEmail(yesterday).then((r) => { if (r.sent) console.log('[cutoff] census emailed to', r.to); }).catch((e) => console.error('[cutoff] census email:', e.message));
+    sendCensusEmailsAll(yesterday).then((rs) => { for (const r of rs) if (r.sent) console.log('[cutoff] census emailed to', r.to, r.facility || ''); }).catch((e) => console.error('[cutoff] census email:', e.message));
     // Monthly survey scorecard — on the configured day of the month, once.
     if (autoCfg('scorecard_on', 'on') !== 'off') {
       const dom = new Date().toLocaleString('en-US', { timeZone: APP_TZ, day: 'numeric' });

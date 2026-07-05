@@ -6,21 +6,31 @@ still LACKS FACILITY LINKAGE (schema work queued), and what was DEFERRED
 from the first batch fix with the reason.
 
 ## Deferred from the first batch (do next)
-- /api/referrals family — the endpoint already uses a `facility` query param
-  for PARTNER facilities (different table); scoping via the chip param would
-  collide. Needs a param rename or origin_facility_id column first.
-- Census email fan-out (/api/command/census/email + auto-send) — it is the
-  Akron detox daily report today; fan out per facility (like billing
-  readiness) when Wheatfield goes live.
 - sl-kiosk (housing resident kiosk) — lists all sober-living residents; only
   Hilltop Akron has residents today. Scope when per-facility housing kiosk
   codes ship.
-- Staffing by-id write guards (delete slot/assign/calloff/cover/attendance) —
-  resolve the row's facility through slot_id and require facilityAllowed.
 - getOrCreateShift UNIQUE(date,name) → UNIQUE(date,name,facility_id) migration
   (legacy lineup world).
-- schedule_items.facility_id (program schedule), beds.facility_id (bed board
-  inventory), shift_lead per facility.
+- shift_lead per facility (org-global app_state key today).
+
+## Done in the second batch (2026-07-05)
+- /api/referrals family — outbound_referrals.origin_facility_id +
+  inbound_referrals.org_facility_id added (legacy → client's building, else
+  Akron detox). List/summary/insights scope by ORIGIN; ?facility_id= remains
+  the destination-PARTNER filter (no param collision — chip uses ?facility=).
+  POST stamps origin from the client or stampFac; DELETE guards by origin.
+- Census email fan-out — buildCensusReport/sendCensusEmail take a facility;
+  midnight run mails one report per building with activity (recipients from
+  the building's ⚙️ report_email; default building keeps the global list).
+  Manual send honors the chip.
+- Staffing by-id write guards — slot delete/assign, assignment delete/
+  calloff/cover, roster attendance now resolve the slot's facility and 404
+  cross-facility ids (staffRowFacGuard).
+- beds.facility_id + schedule_items.facility_id — added + backfilled to
+  Akron detox (schedule items adopt a linked client's building first). Reads
+  scoped with shiftFrag, writes stamped, row ops guarded. Bed-board capacity
+  is per building (default keeps detox_bed_count; others use
+  org_facilities.beds, falling back to inventory size).
 
 ## Company-wide by design (no action)
 - POST /api/arrivals/sync — Recorded as a deliberate design: the Salesforce pipeline is treated as the detox front door, so every synced arrival is stamped with defaultFacilityId(). Correc

@@ -3062,6 +3062,35 @@ if (getState('phase5_shift_backfill') !== 'done') {
   } catch (e) { console.error('[phase5 shifts]', e.message); }
 }
 
+// ── Deferred-ledger batch: referrals origin, beds + program schedule ─────────
+// outbound_referrals.facility_id is the DESTINATION partner (facilities table);
+// the ORIGIN — which of OUR buildings sent the person out — gets its own column.
+// inbound_referrals likewise learns which org building received the referral.
+// Legacy rows adopt the linked client's building, else Akron detox (owner's
+// standing rule for pre-facility data). Beds and the program schedule are the
+// same story: the physical inventory and whole-house schedule were detox-only.
+addColumn('outbound_referrals', 'origin_facility_id', 'INTEGER');
+addColumn('inbound_referrals', 'org_facility_id', 'INTEGER');
+addColumn('beds', 'facility_id', 'INTEGER');
+addColumn('schedule_items', 'facility_id', 'INTEGER');
+for (const [t, c] of [['outbound_referrals', 'origin_facility_id'], ['inbound_referrals', 'org_facility_id'], ['beds', 'facility_id'], ['schedule_items', 'facility_id']]) {
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_fac ON ${t}(${c})`); } catch { /* optional */ }
+}
+if (getState('ledger2_fac_backfill') !== 'done') {
+  try {
+    const dfid = db.prepare(`SELECT id FROM org_facilities WHERE fkey='detox-akron'`).get()?.id;
+    if (dfid) {
+      db.prepare(`UPDATE outbound_referrals SET origin_facility_id = (SELECT c.facility_id FROM clients c WHERE c.id = outbound_referrals.client_id) WHERE origin_facility_id IS NULL AND client_id IS NOT NULL`).run();
+      db.prepare(`UPDATE outbound_referrals SET origin_facility_id = ? WHERE origin_facility_id IS NULL`).run(dfid);
+      db.prepare(`UPDATE inbound_referrals SET org_facility_id = ? WHERE org_facility_id IS NULL`).run(dfid);
+      db.prepare(`UPDATE schedule_items SET facility_id = (SELECT c.facility_id FROM clients c WHERE c.id = schedule_items.client_id) WHERE facility_id IS NULL AND client_id IS NOT NULL`).run();
+      db.prepare(`UPDATE schedule_items SET facility_id = ? WHERE facility_id IS NULL`).run(dfid);
+      db.prepare(`UPDATE beds SET facility_id = ? WHERE facility_id IS NULL`).run(dfid);
+      setState('ledger2_fac_backfill', 'done');
+    }
+  } catch (e) { console.error('[ledger2 backfill]', e.message); }
+}
+
 // Registry v2 added Spark/Reverie Greenwood AFTER the foundation access seed ran,
 // so users in the "all facilities" group (marked by holding a corporate row) never
 // got rows for them and the facility chip hid both buildings. One-time repair.

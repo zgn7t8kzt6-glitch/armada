@@ -788,6 +788,10 @@ async function openFormModal(rid,type){
   try{ const r=HOUSING.current&&HOUSING.current.id===rid?HOUSING.current:await api('/housing/residents/'+rid); const f=(r.forms||[]).find(x=>x.type===type); if(f){ existing=f.data||{}; signedBy=f.signed_by||''; } }catch(e){}
   const field=(fl)=>{
     const v=existing[fl.k]; const id='ff_'+fl.k;
+    if(fl.t==='p') return `<p class="sans" style="font-size:13.5px;line-height:1.6;color:var(--muted);text-transform:none;letter-spacing:0;white-space:pre-line;margin:12px 0 2px">${esc(fl.l)}</p>`;
+    if(fl.t==='initials') return `<div style="display:flex;gap:10px;align-items:flex-start;margin-top:12px">
+      <input id="${id}" value="${esc(v||'')}" placeholder="initials" maxlength="5" style="width:76px;flex:0 0 auto;text-align:center;font-weight:700;text-transform:uppercase"/>
+      <div class="sans" style="font-size:13.5px;line-height:1.55">${esc(fl.l)}</div></div>`;
     if(fl.t==='textarea') return `<label>${esc(fl.l)}</label><textarea id="${id}" rows="2">${esc(v||'')}</textarea>`;
     if(fl.t==='check') return `<label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500;margin-top:10px"><input type="checkbox" id="${id}" ${v?'checked':''} style="width:auto"/> ${esc(fl.l)}</label>`;
     if(fl.t==='select') return `<label>${esc(fl.l)}</label><select id="${id}">${fl.o.map(o=>`<option ${v===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;

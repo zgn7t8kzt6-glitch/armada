@@ -1897,6 +1897,45 @@ export async function kipuUrProbe(locationName) {
   return { sampleCasefile: cf, sampleName: samples[0].name, probes: out };
 }
 
+// Group NOTES for one day, for the whole census in one call. Group documentation
+// lives OUTSIDE the patient chart (/api/group_sessions with attendee lists), so a
+// day covered only by group would read "no documentation" from the evaluations
+// list alone — the billing sweep merges these into each patient's day. A patient
+// explicitly marked absent/no-show does NOT get credit for that session.
+export async function kipuDayGroupNotes(date, conn = null) {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const d0 = String(date || '').slice(0, 10);
+  if (!d0) return { ok: false, error: 'no date' };
+  const sessions = [];
+  for (let page = 1; page <= 10; page++) {
+    const path = `/api/group_sessions?page=${page}&per=100&start_date=${encodeURIComponent(d0)}&end_date=${encodeURIComponent(d0)}`;
+    let d; try { d = await kipuGet(path, conn); } catch (e) { if (page === 1) return { ok: false, error: 'group_sessions: ' + e.message }; break; }
+    const arr = d?.group_sessions || d?.sessions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []);
+    if (!Array.isArray(arr) || arr.length === 0) break;
+    sessions.push(...arr);
+    if (arr.length < 100) break;
+  }
+  const byPatient = new Map();
+  for (const s of sessions) {
+    const raw = pick(s, 'session_start_time', 'start_time', 'session_date', 'date');
+    const day = localDateOf(raw) || (raw ? String(raw).slice(0, 10) : '');
+    if (day && day !== d0) continue;   // server-side date filter is best-effort
+    const title = String(pick(s, 'title', 'group_title', 'name', 'topic', 'session_topic') || '').slice(0, 120);
+    const time = (String(pick(s, 'session_start_time', 'start_time') || '').match(/[T ](\d{2}:\d{2})/) || [])[1] || '';
+    const leader = String(pick(s, 'provider_name', 'facilitator', 'leader', 'staff_name', 'created_by') || '') || null;
+    const pts = s.patients || s.attendees || s.patient_attendances || [];
+    for (const pt of (Array.isArray(pts) ? pts : [])) {
+      const kid = String(pick(pt, 'casefile_id', 'patient_id', 'id') || '');
+      if (!kid) continue;
+      const att = pick(pt, 'attended', 'present', 'attendance', 'status', 'attendance_status', 'patient_attended');
+      if (att != null && /no.?show|absent|^no$|false|cancel|excused/i.test(String(att))) continue;
+      const note = { id: null, name: 'Group Session' + (title ? ': ' + title : ''), status: 'completed', time, author: leader };
+      const a = byPatient.get(kid) || []; a.push(note); byPatient.set(kid, a);
+    }
+  }
+  return { ok: true, byPatient, sessions: sessions.length };
+}
+
 // Group attendance via /api/group_sessions (the endpoint that actually exists on
 // this account — it carries session_start_time + a `patients` attendee list).
 // Returns, for the given date window, who attended at least one group each day and

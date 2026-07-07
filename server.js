@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured, kipuDayGroupNotes } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -848,6 +848,18 @@ async function runBillingSweep({ date, byName = 'scheduler', facilityId = null }
       WHERE billing_ready_status.status != 'exception'`);   // a human exception outranks the machine
     const prevState = db.prepare(`SELECT id, status, alert_state FROM billing_ready_status WHERE date=? AND client_id=?`);
     let complete = 0, missing = 0, review = 0, errors = 0;
+    // Group notes live OUTSIDE the patient chart — one call covers the whole
+    // census; each client's attended sessions merge into their day below.
+    let groupNotes = null;
+    if (swConn || kipuConfigured()) {
+      try { const g = await kipuDayGroupNotes(day, swConn); if (g.ok) groupNotes = g.byPatient; else console.error('[billing] group notes:', g.error); }
+      catch (e) { console.error('[billing] group notes:', e.message); }
+    }
+    const groupNotesFor = (kipuId) => {
+      if (!groupNotes) return [];
+      const full = String(kipuId || '');
+      return groupNotes.get(full) || groupNotes.get(full.split(':')[0]) || [];
+    };
     const judgeOne = async (c) => {
       let status = 'missing', type = null, title = null, time = null, staff = null, detail = null;
       if (!swConn && !kipuConfigured()) { status = 'sync_error'; detail = 'Kipu is not connected.'; }
@@ -856,6 +868,8 @@ async function runBillingSweep({ date, byName = 'scheduler', facilityId = null }
         const r = await kipuDayEncounters(c.kipu_id, day, swConn);
         if (!r.ok) { status = 'sync_error'; detail = 'Kipu fetch failed: ' + (r.error || 'unknown'); }
         else {
+          const gNotes = groupNotesFor(c.kipu_id);
+          if (gNotes.length) r.notes = [...(r.notes || []), ...gNotes];
           const done = (n) => !cfg.requireCompleted || !n.status || /complete|signed|final/i.test(n.status);
           const locCode = String(c.loc || '').trim();
           const rule = (cfg.locRules || {})[locCode] || null;
@@ -940,7 +954,7 @@ async function runBillingSweep({ date, byName = 'scheduler', facilityId = null }
     if ((missing + review + errors) > 0 && emailConfigured()) {
       const rows = db.prepare(`SELECT s.*, c.pref, c.name, c.therapist, c.case_manager, c.program, c.loc FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=? AND s.status IN ('missing','needs_review','sync_error')${swFac ? ` AND s.facility_id = ${swFac.id}` : ''} ORDER BY s.status`).all(day);
       const esc3 = htmlEsc;
-      const line = (r) => `<div>• <strong>${esc3(r.pref || r.name)}</strong>${r.loc ? ' · ' + esc3(r.loc) : ''} — ${r.status === 'missing' ? '<span style="color:#b00">no qualifying encounter</span>' : esc3(r.detail || r.status)}${r.therapist ? ' · therapist: ' + esc3(r.therapist) : ''}${r.case_manager ? ' · CM: ' + esc3(r.case_manager) : ''}</div>`;
+      const line = (r) => `<div>• <strong>${esc3(r.pref || r.name)}</strong>${r.loc ? ' · ' + esc3(r.loc) : ''} — ${r.status === 'missing' ? '<span style="color:#b00">no qualifying encounter</span>' + (r.detail ? ' <span style="color:#777;font-size:12px">(' + esc3(r.detail) + ')</span>' : '') : esc3(r.detail || r.status)}${r.therapist ? ' · therapist: ' + esc3(r.therapist) : ''}${r.case_manager ? ' · CM: ' + esc3(r.case_manager) : ''}</div>`;
       // Each facility can route its list to its own team (⚙️ billing_email);
       // fall back to the global config, then the insurance recipients.
       const to = (swFac && (facSetting(swFac.id, 'billing_email') || '').trim()) || (cfg.email || '').trim() || insuranceRecipients();

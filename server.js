@@ -857,8 +857,11 @@ async function runBillingSweep({ date, byName = 'scheduler', facilityId = null }
     }
     const groupNotesFor = (kipuId) => {
       if (!groupNotes) return [];
+      // Roster ids look like "40017:uuid" — group attendees may carry the
+      // casefile number, the uuid, or the composite. Try all three.
       const full = String(kipuId || '');
-      return groupNotes.get(full) || groupNotes.get(full.split(':')[0]) || [];
+      const [num, uuid] = full.split(':');
+      return groupNotes.get(full) || groupNotes.get(num) || (uuid && groupNotes.get(uuid)) || [];
     };
     const judgeOne = async (c) => {
       let status = 'missing', type = null, title = null, time = null, staff = null, detail = null;
@@ -4538,7 +4541,8 @@ app.get('/api/diag/group-notes', requireAuth, requireAdmin, async (req, res) => 
     if (g.ok) {
       for (const c of roster) {
         const full = String(c.kipu_id || '');
-        const hit = g.byPatient.get(full) || g.byPatient.get(full.split(':')[0]);
+        const [num, uuid] = full.split(':');
+        const hit = g.byPatient.get(full) || g.byPatient.get(num) || (uuid && g.byPatient.get(uuid));
         if (hit) matched.push({ client: c.pref || c.name, loc: c.loc, groupNotes: hit.length });
         else unmatched.push({ client: c.pref || c.name, loc: c.loc, rosterKipuId: full });
       }

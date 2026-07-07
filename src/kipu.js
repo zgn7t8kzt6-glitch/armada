@@ -1902,24 +1902,64 @@ export async function kipuUrProbe(locationName) {
 // day covered only by group would read "no documentation" from the evaluations
 // list alone — the billing sweep merges these into each patient's day. A patient
 // explicitly marked absent/no-show does NOT get credit for that session.
+const _gsPick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+const _gsDayOf = (s) => { const raw = _gsPick(s, 'session_start_time', 'start_time', 'session_date', 'date'); return localDateOf(raw) || (raw ? String(raw).slice(0, 10) : ''); };
+// Fetch the group sessions for ONE date. This account's Kipu IGNORES the
+// start_date/end_date params on /api/group_sessions and returns the FULL history
+// oldest-first — today's groups live on the LAST pages. So: try the filter, and
+// when it's ignored, find the tail (pagination metadata when present, else an
+// exponential + binary probe) and walk backwards until the dates pass the target.
+async function groupSessionsOnDate(d0, conn, trace = null) {
+  const parse = (d) => ({
+    arr: d?.group_sessions || d?.sessions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []),
+    pag: d?.pagination || d?.meta || null,
+  });
+  const getPage = async (page, withDates) => parse(await kipuGet(`/api/group_sessions?page=${page}&per=100` + (withDates ? `&start_date=${encodeURIComponent(d0)}&end_date=${encodeURIComponent(d0)}` : ''), conn));
+  const out = [];
+  const first = await getPage(1, true);
+  if (first.arr.some((s) => _gsDayOf(s) === d0)) {
+    if (trace) trace.mode = 'filtered';
+    let page = 1, cur = first;
+    for (;;) {
+      for (const s of cur.arr) if (_gsDayOf(s) === d0) out.push(s);
+      if (cur.arr.length < 100 || page >= 10) break;
+      page++; cur = await getPage(page, true);
+    }
+    return out;
+  }
+  if (trace) { trace.mode = 'archive (date filter ignored)'; trace.pagMeta = first.pag ? Object.keys(first.pag).slice(0, 8) : null; }
+  let last = +(first.pag?.total_pages ?? first.pag?.pages ?? first.pag?.totalPages ?? 0) || 0;
+  if (!last) {
+    // No pagination metadata — probe for the first empty page, then binary-search
+    // the boundary. ~20 light calls worst case; runs once per sweep.
+    let lo = 1, hi = 2;
+    while (hi <= 4096) { const p = await getPage(hi, false); if (!p.arr.length) break; lo = hi; hi *= 2; }
+    if (hi > 4096) { lo = 4096; hi = 4097; }
+    while (lo + 1 < hi) { const mid = Math.floor((lo + hi) / 2); const p = await getPage(mid, false); if (p.arr.length) lo = mid; else hi = mid; }
+    last = lo;
+  }
+  if (trace) trace.lastPage = last;
+  // Walk backwards from the tail; stop when a whole page is older than the date.
+  for (let page = last, walked = 0; page >= 1 && walked < 15; page--, walked++) {
+    const p = await getPage(page, false);
+    if (trace) trace.walkedPages = walked + 1;
+    if (!p.arr.length) continue;
+    let pageMax = '';
+    for (const s of p.arr) { const dd = _gsDayOf(s); if (dd > pageMax) pageMax = dd; if (dd === d0) out.push(s); }
+    if (pageMax && pageMax < d0) break;
+  }
+  return out;
+}
+
 export async function kipuDayGroupNotes(date, conn = null) {
-  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const pick = _gsPick;
   const d0 = String(date || '').slice(0, 10);
   if (!d0) return { ok: false, error: 'no date' };
-  const sessions = [];
-  for (let page = 1; page <= 10; page++) {
-    const path = `/api/group_sessions?page=${page}&per=100&start_date=${encodeURIComponent(d0)}&end_date=${encodeURIComponent(d0)}`;
-    let d; try { d = await kipuGet(path, conn); } catch (e) { if (page === 1) return { ok: false, error: 'group_sessions: ' + e.message }; break; }
-    const arr = d?.group_sessions || d?.sessions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []);
-    if (!Array.isArray(arr) || arr.length === 0) break;
-    sessions.push(...arr);
-    if (arr.length < 100) break;
-  }
+  let sessions;
+  try { sessions = await groupSessionsOnDate(d0, conn); }
+  catch (e) { return { ok: false, error: 'group_sessions: ' + e.message }; }
   const byPatient = new Map();
   for (const s of sessions) {
-    const raw = pick(s, 'session_start_time', 'start_time', 'session_date', 'date');
-    const day = localDateOf(raw) || (raw ? String(raw).slice(0, 10) : '');
-    if (day && day !== d0) continue;   // server-side date filter is best-effort
     const title = String(pick(s, 'title', 'group_title', 'name', 'topic', 'session_topic') || '').slice(0, 120);
     const time = (String(pick(s, 'session_start_time', 'start_time') || '').match(/[T ](\d{2}:\d{2})/) || [])[1] || '';
     const leader = String(pick(s, 'provider_name', 'facilitator', 'leader', 'staff_name', 'created_by') || '') || null;
@@ -1941,34 +1981,26 @@ export async function kipuDayGroupNotes(date, conn = null) {
 // the date filter, what dates came back, and the attendee shape — everything
 // needed to see why a group note wouldn't credit a client's day.
 export async function kipuGroupNotesDiag(date, conn = null) {
-  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const pick = _gsPick;
   const d0 = String(date || '').slice(0, 10);
-  const out = { date: d0, pages: 0, totalReturned: 0, datesSeen: [], onDate: 0, attendeeSample: null, sessionSample: null, error: null };
-  const seenDates = new Map();
+  const out = { date: d0, mode: null, onDate: 0, datesSeen: [], attendeeSample: null, sessionSample: null, error: null };
   try {
-    for (let page = 1; page <= 10; page++) {
-      const path = `/api/group_sessions?page=${page}&per=100&start_date=${encodeURIComponent(d0)}&end_date=${encodeURIComponent(d0)}`;
-      let d; try { d = await kipuGet(path, conn); } catch (e) { if (page === 1) { out.error = 'group_sessions: ' + e.message; return out; } break; }
-      const arr = d?.group_sessions || d?.sessions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []);
-      if (!Array.isArray(arr) || arr.length === 0) { if (page === 1) out.topKeys = Object.keys(d || {}).slice(0, 12); break; }
-      out.pages = page; out.totalReturned += arr.length;
-      for (const s of arr) {
-        const raw = pick(s, 'session_start_time', 'start_time', 'session_date', 'date');
-        const day = localDateOf(raw) || (raw ? String(raw).slice(0, 10) : '(no date)');
-        seenDates.set(day, (seenDates.get(day) || 0) + 1);
-        if (day === d0) {
-          out.onDate++;
-          if (!out.sessionSample) out.sessionSample = { keys: Object.keys(s).slice(0, 24), title: pick(s, 'title', 'group_title', 'name', 'topic'), start: raw, location_id: s.location_id ?? null };
-          const pts = s.patients || s.attendees || s.patient_attendances || [];
-          if (!out.attendeeSample && Array.isArray(pts) && pts[0]) {
-            out.attendeeSample = { count: pts.length, keys: Object.keys(pts[0]).slice(0, 24), example: Object.fromEntries(Object.entries(pts[0]).slice(0, 10).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 40) : v])) };
-          }
-        }
+    const trace = {};
+    const sessions = await groupSessionsOnDate(d0, conn, trace);
+    Object.assign(out, trace);
+    out.onDate = sessions.length;
+    const seenDates = new Map();
+    for (const s of sessions) {
+      const day = _gsDayOf(s) || '(no date)';
+      seenDates.set(day, (seenDates.get(day) || 0) + 1);
+      if (!out.sessionSample) out.sessionSample = { keys: Object.keys(s).slice(0, 24), title: pick(s, 'title', 'group_title', 'name', 'topic'), start: pick(s, 'session_start_time', 'start_time', 'session_date', 'date'), location_id: s.location_id ?? null };
+      const pts = s.patients || s.attendees || s.patient_attendances || [];
+      if (!out.attendeeSample && Array.isArray(pts) && pts[0]) {
+        out.attendeeSample = { count: pts.length, keys: Object.keys(pts[0]).slice(0, 24), example: Object.fromEntries(Object.entries(pts[0]).slice(0, 10).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 40) : v])) };
       }
-      if (arr.length < 100) break;
     }
+    out.datesSeen = [...seenDates.entries()].sort().slice(0, 12).map(([k, v]) => `${k}×${v}`);
   } catch (e) { out.error = e.message; }
-  out.datesSeen = [...seenDates.entries()].sort().slice(0, 12).map(([k, v]) => `${k}×${v}`);
   return out;
 }
 

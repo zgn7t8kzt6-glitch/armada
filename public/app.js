@@ -7048,7 +7048,9 @@ async function loadBillingReady(){
         <label class="hint">Day <input type="date" id="brDate" value="${esc(BR_DATE)}" onchange="BR_DATE=this.value;loadBillingReady()"/></label>
         ${d.leadership?`<button class="btn btn-gold btn-sm sans" onclick="brRun(this)">▶ Run check now</button>`:''}
         ${d.leadership?`<a class="btn btn-ghost btn-sm sans" href="/api/billingready/export?since=${esc(BR_DATE)}&end=${esc(BR_DATE)}">⬇ CSV</a>`:''}
+        ${ME.role==='admin'?`<button class="btn btn-ghost btn-sm sans" title="Check what Kipu returns for group sessions today" onclick="brGroupDiag(this)">🔬 Group diag</button>`:''}
       </div></div>
+      <div id="brDiagOut"></div>
       ${!d.kipu?'<div class="banner-warn" style="margin-top:8px">⚠️ Kipu is not connected — every client shows as a sync error rather than silently complete.</div>':''}
       <div class="ret-cards" style="margin-top:8px">${box(s.active||0,'Active clients')}${box(s.complete||0,'Complete')}${box(s.missing||0,'Missing',(s.missing?'rc-high':''))}${box(s.review||0,'Needs review',(s.review?'rc-elev':''))}${box(s.pct!=null?s.pct+'%':'—','Completion')}${box(s.openAlerts||0,'Open alerts',(s.openAlerts?'rc-elev':''))}</div>
       <div class="hint" style="margin-top:6px">${d.lastRun?`Last checked ${esc(d.lastRun.at)} by ${esc(d.lastRun.by||'scheduler')}.`:'No check has run for this day yet.'}${s.errors?` <span style="color:var(--crit)">· ${s.errors} sync error${s.errors===1?'':'s'} — those clients are NOT confirmed complete.</span>`:''}</div>
@@ -7059,6 +7061,24 @@ async function loadBillingReady(){
     <div id="brDrawerHost"></div>
     ${d.runs&&d.runs.length?`<div class="card"><details><summary style="cursor:pointer"><strong>Check history</strong> <span class="hint">· audit trail</span></summary><table class="tbl" style="margin-top:6px"><tr><th>Date</th><th>Ran at</th><th>By</th><th>Active</th><th>Complete</th><th>Missing</th><th>Review</th><th>Errors</th></tr>${d.runs.map(r=>`<tr><td>${esc(r.date)}</td><td class="hint">${esc(r.ran_at)}</td><td class="hint">${esc(r.by_name||'')}</td><td>${r.active_n}</td><td>${r.complete_n}</td><td>${r.missing_n}</td><td>${r.review_n}</td><td>${r.error_n||0}</td></tr>`).join('')}</table></details></div>`:''}
     ${d.cfg?brSettingsCard(d.cfg):''}`;
+}
+/* Group-notes diagnostic: shows plainly whether Kipu returned today's group
+   sessions and whether the people in them match our roster ids. */
+async function brGroupDiag(btn){
+  const host=$('brDiagOut'); if(!host) return;
+  if(btn){ btn.disabled=true; btn.textContent='Checking Kipu…'; }
+  host.innerHTML='<div class="card"><div class="hint">Asking Kipu about group sessions for '+esc(BR_DATE)+'… (can take ~30 seconds)</div></div>';
+  try{
+    const d=await api('/diag/group-notes?date='+encodeURIComponent(BR_DATE));
+    const k=d.whatKipuReturned||{}, m=d.merge||{}, r=d.roster||{};
+    const verdict = k.error||m.error ? `<div style="color:var(--danger)"><strong>Kipu call failed:</strong> ${esc(k.error||m.error)}</div>`
+      : !m.sessionsOnDate ? `<div style="color:#b3382f"><strong>Kipu returned NO group sessions for ${esc(d.day)}.</strong> It sent back ${k.totalReturned||0} session(s) across dates: ${esc((k.datesSeen||[]).join(', ')||'none')} — if today isn't in that list, Kipu is ignoring our date filter and I'll switch to a different query.</div>`
+      : !r.matched ? `<div style="color:#b3382f"><strong>Kipu HAS ${m.sessionsOnDate} group session(s) today crediting ${m.patientsCredited} people — but none match our roster ids.</strong> Group records use different patient ids than the chart. Compare: group ids ${esc((m.attendeeIdSample||[]).join(', '))} vs roster ids in the sample below — send me a screenshot of this box.</div>`
+      : `<div style="color:#2f7a4f"><strong>Working:</strong> ${m.sessionsOnDate} session(s) today · ${r.matched}/${r.active} active clients have a group note. Hit ▶ Run check now to re-judge the day.</div>`;
+    host.innerHTML=`<div class="card" style="border-left:4px solid var(--gold)"><h3 style="margin:0 0 6px">🔬 Group-notes diagnostic — ${esc(d.day)}</h3>${verdict}
+      <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Full detail (for Claude)</summary><pre style="font-size:11px;overflow-x:auto;white-space:pre-wrap">${esc(JSON.stringify(d,null,2))}</pre></details></div>`;
+  }catch(e){ host.innerHTML='<div class="card"><div style="color:var(--danger)">'+esc(e.message)+'</div></div>'; }
+  if(btn){ btn.disabled=false; btn.textContent='🔬 Group diag'; }
 }
 function brSettingsCard(c){
   return `<div class="card"><details><summary style="cursor:pointer"><strong>⚙️ Qualifying-encounter mapping</strong> <span class="hint">· admin — how Kipu note types are judged</span></summary>

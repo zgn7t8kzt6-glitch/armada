@@ -185,10 +185,16 @@ async function evalListRaw(casefileId, { all = false, conn = null } = {}) {
     : [`/api/patients/${master}/patient_evaluations?phi_level=${phi}&patient_master_id=${e(uuid)}`, tmpl.replace('{id}', s)];
   let list = null, baseUsed = null;
   for (const base of bases) {
-    try { const d = await kipuGet(base, conn); const arr = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : null); if (Array.isArray(arr)) { list = arr; baseUsed = base; break; } }
-    catch { /* try next base */ }
+    try {
+      const d = await kipuGet(base, conn);
+      const arr = d?.patient_evaluations || d?.evaluations || (Array.isArray(d) ? d : null);
+      if (Array.isArray(arr) && arr.length) { list = arr; baseUsed = base; break; }
+      // An EMPTY answer doesn't win — a stale master/uuid pair returns [] here
+      // while the fallback path still has the chart. Remember it, keep trying.
+      if (Array.isArray(arr) && !list) { list = arr; baseUsed = base; }
+    } catch { /* try next base */ }
   }
-  if (!list) return [];
+  if (!list || !list.length) return [];
   const sep = baseUsed.includes('?') ? '&' : '?';
   const seenIds = new Set(list.map((x) => x.id ?? x.evaluation_id));
   for (let pg = 2; pg <= 80; pg++) {

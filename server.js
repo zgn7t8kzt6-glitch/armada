@@ -955,9 +955,11 @@ async function runBillingSweep({ date, byName = 'scheduler', facilityId = null }
     if (missing + errors > 0) publishEvent({ event: 'billing.day_at_risk', entity: 'billing', actor: 'system', summary: `${facTag}${missing + errors} client day${missing + errors === 1 ? '' : 's'} at risk for ${day}` });
     // End-of-day email to the evening team (names are internal-operational — same policy as the census email).
     if ((missing + review + errors) > 0 && emailConfigured()) {
-      const rows = db.prepare(`SELECT s.*, c.pref, c.name, c.therapist, c.case_manager, c.program, c.loc FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=? AND s.status IN ('missing','needs_review','sync_error')${swFac ? ` AND s.facility_id = ${swFac.id}` : ''} ORDER BY s.status`).all(day);
+      const rows = db.prepare(`SELECT s.*, c.pref, c.name, c.therapist, c.case_manager, c.program, c.loc, c.admit, c.discharge_date FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=? AND s.status IN ('missing','needs_review','sync_error')${swFac ? ` AND s.facility_id = ${swFac.id}` : ''} ORDER BY s.status`).all(day);
       const esc3 = htmlEsc;
-      const line = (r) => `<div>• <strong>${esc3(r.pref || r.name)}</strong>${r.loc ? ' · ' + esc3(r.loc) : ''} — ${r.status === 'missing' ? '<span style="color:#b00">no qualifying encounter</span>' + (r.detail ? ' <span style="color:#777;font-size:12px">(' + esc3(r.detail) + ')</span>' : '') : esc3(r.detail || r.status)}${r.therapist ? ' · therapist: ' + esc3(r.therapist) : ''}${r.case_manager ? ' · CM: ' + esc3(r.case_manager) : ''}</div>`;
+      const dayTag = (r) => String(r.admit || '').slice(0, 10) === day ? ' <span style="background:#e8f0f7;color:#28527a;font-size:11px;padding:1px 6px;border-radius:8px">admitted today</span>'
+        : String(r.discharge_date || '').slice(0, 10) === day ? ' <span style="background:#f4ece2;color:#8a5a23;font-size:11px;padding:1px 6px;border-radius:8px">discharged today</span>' : '';
+      const line = (r) => `<div>• <strong>${esc3(r.pref || r.name)}</strong>${dayTag(r)}${r.loc ? ' · ' + esc3(r.loc) : ''} — ${r.status === 'missing' ? '<span style="color:#b00">no qualifying encounter</span>' + (r.detail ? ' <span style="color:#777;font-size:12px">(' + esc3(r.detail) + ')</span>' : '') : esc3(r.detail || r.status)}${r.therapist ? ' · therapist: ' + esc3(r.therapist) : ''}${r.case_manager ? ' · CM: ' + esc3(r.case_manager) : ''}</div>`;
       // Each facility can route its list to its own team (⚙️ billing_email);
       // fall back to the global config, then the insurance recipients.
       const to = (swFac && (facSetting(swFac.id, 'billing_email') || '').trim()) || (cfg.email || '').trim() || insuranceRecipients();
@@ -4545,13 +4547,23 @@ app.get('/api/diag/client-day', requireAuth, requireAdmin, async (req, res) => {
     const [num, uuid] = String(c.kipu_id || '').split(':');
     const groupNotes = g.ok ? (g.byPatient.get(String(c.kipu_id)) || g.byPatient.get(num) || (uuid && g.byPatient.get(uuid)) || []) : [];
     const twins = db.prepare(`SELECT id, pref, name, kipu_id, active, discharge_date FROM clients WHERE id != ? AND merged_into IS NULL AND lower(trim(name)) = lower(trim(?))`).all(c.id, c.name);
+    // Check each twin's chart too — if today's notes landed on the twin's
+    // casefile, say so outright instead of making a human cross-reference.
+    const twinRows = [];
+    for (const t of twins.slice(0, 4)) {
+      let notesToday = null;
+      if (t.kipu_id) {
+        try { const td = await kipuClientDayDiag(t.kipu_id, day, conn); notesToday = td.ok ? (td.recent || []).filter((n) => n.onDate).map((n) => n.name) : null; } catch { /* twin unreadable */ }
+      }
+      twinRows.push({ id: t.id, kipu_id: t.kipu_id, active: t.active, discharged: (t.discharge_date || '').slice(0, 10) || null, notesToday });
+    }
     res.json({
       day,
       client: { id: c.id, name: c.pref || c.name, loc: c.loc, kipu_id: c.kipu_id },
       chartNotes: chart,
       groupNotesToday: groupNotes,
-      sameNameRows: twins.map((t) => ({ id: t.id, kipu_id: t.kipu_id, active: t.active, discharged: (t.discharge_date || '').slice(0, 10) || null })),
-      readThisWay: 'A note with onDate=false whose easternDay is one day off = timezone shift (now fixed — re-run the check). chartNotes empty while Kipu shows notes = this row points at a different casefile; check sameNameRows for the twin holding the notes.',
+      sameNameRows: twinRows,
+      readThisWay: 'A note with onDate=false whose easternDay is one day off = timezone shift (fixed — re-run the check). chartNotes empty while Kipu shows notes = this row points at a different casefile; if a sameNameRows entry lists notesToday, the documentation landed on THAT row’s chart.',
     });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });

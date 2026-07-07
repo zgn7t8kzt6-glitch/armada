@@ -7042,7 +7042,7 @@ async function loadBillingReady(){
     <td>${r.loc?'<span class="badge-info">'+esc(r.loc)+'</span> ':''}${stBadge(r)} ${alBadge(r.alert)}</td>
     <td>${r.status==='complete'?`<strong>${esc(r.type||'')}</strong><div class="hint">${esc(r.title||'')}${r.time?' · '+esc(r.time):''}${r.staff?' · '+esc(r.staff):''}</div>`:`<span class="hint">${esc(r.detail||r.exception||'')}</span>`}</td>
     <td class="hint">${esc(r.therapist||'')}</td><td class="hint">${esc(r.case_manager||'')}</td>
-    <td>${r.notes?`💬${r.notes}`:''}</td></tr>`;
+    <td>${r.notes?`💬${r.notes}`:''}${ME.role==='admin'&&r.status!=='complete'?` <button class="btn btn-ghost btn-sm sans" style="padding:2px 8px" title="Show exactly what Kipu has for this client today" onclick="event.stopPropagation();brWhy(${r.client_id},'${esc(r.client).replace(/'/g,"\\'")}')">🔬</button>`:''}</td></tr>`;
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">Billing Readiness</h3><p class="sub sans" style="margin:0">Every client day needs one qualifying encounter documented in Kipu. The check runs at ${(d.cfg&&d.cfg.checkHour)||16}:00 facility time — anything missing alerts the evening team. Kipu is read-only; notes live here.</p></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <label class="hint">Day <input type="date" id="brDate" value="${esc(BR_DATE)}" onchange="BR_DATE=this.value;loadBillingReady()"/></label>
@@ -7061,6 +7061,24 @@ async function loadBillingReady(){
     <div id="brDrawerHost"></div>
     ${d.runs&&d.runs.length?`<div class="card"><details><summary style="cursor:pointer"><strong>Check history</strong> <span class="hint">· audit trail</span></summary><table class="tbl" style="margin-top:6px"><tr><th>Date</th><th>Ran at</th><th>By</th><th>Active</th><th>Complete</th><th>Missing</th><th>Review</th><th>Errors</th></tr>${d.runs.map(r=>`<tr><td>${esc(r.date)}</td><td class="hint">${esc(r.ran_at)}</td><td class="hint">${esc(r.by_name||'')}</td><td>${r.active_n}</td><td>${r.complete_n}</td><td>${r.missing_n}</td><td>${r.review_n}</td><td>${r.error_n||0}</td></tr>`).join('')}</table></details></div>`:''}
     ${d.cfg?brSettingsCard(d.cfg):''}`;
+}
+/* Per-client "why": show exactly what Kipu has on this client's chart today —
+   raw timestamps vs the Eastern day, group notes, and same-name twin rows. */
+async function brWhy(clientId,label){
+  const host=$('brDiagOut'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="hint">Reading '+esc(label||'client')+'’s chart from Kipu…</div></div>';
+  try{
+    const d=await api('/diag/client-day?client_id='+clientId+'&date='+encodeURIComponent(BR_DATE));
+    const ch=d.chartNotes||{};
+    const noteRow=(n)=>`<tr${n.onDate?' style="background:#e8f3ec"':''}><td>${esc(n.name)}</td><td class="hint">${esc(n.status||'')}</td><td class="hint">${esc(n.created_at||'')}</td><td>${esc(n.easternDay||'')} ${n.onDate?'✓ today':''}</td></tr>`;
+    host.innerHTML=`<div class="card" style="border-left:4px solid var(--gold)"><h3 style="margin:0 0 4px">🔬 ${esc(d.client.name)} — what Kipu has for ${esc(d.day)}</h3>
+      <div class="hint">Chart ${esc(d.client.kipu_id||'—')}${d.client.loc?' · '+esc(d.client.loc):''}</div>
+      ${ch.ok?`<div style="overflow-x:auto"><table class="tbl" style="margin-top:8px"><tr><th>Note</th><th>Status</th><th>Kipu timestamp (UTC)</th><th>Counts toward</th></tr>${(ch.recent||[]).map(noteRow).join('')||'<tr><td colspan="4" class="hint">No notes on this chart at all.</td></tr>'}</table></div>`
+        :`<div style="color:var(--danger);margin-top:6px">${esc(ch.error||'Chart read failed')}</div>`}
+      ${(d.groupNotesToday||[]).length?`<div style="margin-top:6px"><strong class="sans" style="font-size:13px">Group sessions today:</strong> ${d.groupNotesToday.map(g=>esc(g.name)).join(' · ')}</div>`:'<div class="hint" style="margin-top:6px">No group sessions matched this client today.</div>'}
+      ${(d.sameNameRows||[]).length?`<div style="margin-top:6px;color:#a35a23"><strong class="sans" style="font-size:13px">⚠ Same name on the roster:</strong> ${d.sameNameRows.map(t=>`row #${t.id} (chart ${esc(t.kipu_id||'none')}${t.active?', active':t.discharged?', discharged '+esc(t.discharged):''})`).join(' · ')} — a note documented on the twin’s chart looks exactly like a missing note here.</div>`:''}
+      <div class="hint" style="margin-top:8px">${esc(d.readThisWay||'')}</div></div>`;
+  }catch(e){ host.innerHTML='<div class="card"><div style="color:var(--danger)">'+esc(e.message)+'</div></div>'; }
 }
 /* Group-notes diagnostic: shows plainly whether Kipu returned today's group
    sessions and whether the people in them match our roster ids. */

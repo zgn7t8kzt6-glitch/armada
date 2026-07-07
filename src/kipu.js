@@ -2182,8 +2182,10 @@ export async function kipuDayEncounters(casefileId, date, conn = null) {
   catch (e) { return { ok: false, error: e.message }; }
   const anyDated = list.some((x) => x.created_at);
   if (anyDated) {
+    // Compare EASTERN days, not raw UTC slices — a note written 8:30 PM ET is
+    // stamped next-day UTC and would otherwise vanish from today's check.
     const notes = list
-      .filter((x) => String(x.created_at || '').slice(0, 10) === date)
+      .filter((x) => (localDateOf(x.created_at) || String(x.created_at || '').slice(0, 10)) === date)
       .map((x) => ({ id: x.id ?? x.evaluation_id, name: String(x.name || ''), status: String(x.status || ''), time: (String(x.created_at).match(/[T ](\d{2}:\d{2})/) || [])[1] || '' }));
     return { ok: true, dated: true, notes };
   }
@@ -2193,12 +2195,27 @@ export async function kipuDayEncounters(casefileId, date, conn = null) {
   await mapLimit(recent, 4, async (x) => {
     try {
       const ev = await fetchEvalDetail(casefileId, x.id ?? x.evaluation_id, conn);
-      const d = String(ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '').slice(0, 10);
+      const rawD = ev?.created_at || ev?.evaluation_date || ev?.date || ev?.updated_at || '';
+      const d = localDateOf(rawD) || String(rawD).slice(0, 10);
       if (d === date) out.push({ id: x.id ?? x.evaluation_id, name: String(x.name || ''), status: String(x.status || ev?.status || ''), time: (String(ev?.created_at || '').match(/[T ](\d{2}:\d{2})/) || [])[1] || '', author: evalAuthor(x, ev) });
     } catch { /* skip note */ }
   });
   return { ok: true, dated: false, notes: out };
 }
+// Per-client "why": every recent note on the chart with its raw timestamp and
+// the EASTERN day it lands on — shows date-shifts and note-type gaps plainly.
+export async function kipuClientDayDiag(casefileId, date, conn = null) {
+  let list;
+  try { list = await evalListRaw(casefileId, { all: false, conn }); }
+  catch (e) { return { ok: false, error: e.message }; }
+  const rows = list.map((x) => {
+    const raw = x.created_at || '';
+    const day = localDateOf(raw) || String(raw).slice(0, 10);
+    return { id: x.id ?? x.evaluation_id, name: String(x.name || ''), status: String(x.status || ''), created_at: String(raw), easternDay: day, onDate: day === date };
+  }).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  return { ok: true, total: rows.length, recent: rows.slice(0, 20) };
+}
+
 // Author of one specific note (used only for the note that qualified the day).
 export async function kipuNoteAuthor(casefileId, evalId, conn = null) {
   try { const ev = await fetchEvalDetail(casefileId, evalId, conn); return evalAuthor(ev) || null; }

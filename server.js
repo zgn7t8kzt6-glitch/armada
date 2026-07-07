@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured, kipuDayGroupNotes, kipuGroupNotesDiag } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured, kipuDayGroupNotes, kipuGroupNotesDiag, kipuClientDayDiag } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -1006,7 +1006,7 @@ app.get('/api/billingready', requireAuth, requireBilling, (req, res) => {
       (SELECT COUNT(*) FROM billing_ready_notes n WHERE n.status_id=s.id) note_count
     FROM billing_ready_status s JOIN clients c ON c.id=s.client_id WHERE s.date=?${fc.frag('s.facility_id')} ORDER BY (s.status='complete'), c.name`).all(day);
   const rows = billingScopeRows(req.user, all).map((r) => ({
-    id: r.id, client: r.pref || r.client_name, kipu: (r.kipu_id || '').split(':')[0], program: r.program || '', loc: r.loc || '',
+    id: r.id, client_id: r.client_id, client: r.pref || r.client_name, kipu: (r.kipu_id || '').split(':')[0], program: r.program || '', loc: r.loc || '',
     therapist: r.therapist || '', case_manager: r.case_manager || '', status: r.status, type: r.encounter_type || '', title: r.encounter_title || '',
     time: r.encounter_time || '', staff: r.encounter_staff || '', alert: r.alert_state || '', exception: r.exception_reason || '', detail: r.detail || '',
     admittedToday: String(r.admit || '').slice(0, 10) === day, dischargedToday: String(r.discharge_date || '').slice(0, 10) === day, notes: r.note_count,
@@ -4531,6 +4531,30 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
 // Diagnostic: does the billing group-notes merge see today's group sessions,
 // and do the attendee ids match our roster? Open /api/diag/group-notes while
 // signed in as the owner; add ?date=YYYY-MM-DD for another day.
+// Per-client billing "why": the chart's raw notes vs the Eastern day judged,
+// today's group notes matched to this client, and any same-name roster rows
+// (a note documented on a twin's casefile looks exactly like a missing note).
+app.get('/api/diag/client-day', requireAuth, requireAdmin, async (req, res) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  const c = db.prepare(`SELECT id, pref, name, kipu_id, loc, facility_id FROM clients WHERE id = ?`).get(+req.query.client_id);
+  if (!c) return res.status(404).json({ error: 'Client not found' });
+  try {
+    const conn = c.facility_id ? resolveKipuConn(c.facility_id) : null;
+    const chart = c.kipu_id ? await kipuClientDayDiag(c.kipu_id, day, conn) : { ok: false, error: 'No Kipu chart linked to this row' };
+    const g = await kipuDayGroupNotes(day, conn);
+    const [num, uuid] = String(c.kipu_id || '').split(':');
+    const groupNotes = g.ok ? (g.byPatient.get(String(c.kipu_id)) || g.byPatient.get(num) || (uuid && g.byPatient.get(uuid)) || []) : [];
+    const twins = db.prepare(`SELECT id, pref, name, kipu_id, active, discharge_date FROM clients WHERE id != ? AND merged_into IS NULL AND lower(trim(name)) = lower(trim(?))`).all(c.id, c.name);
+    res.json({
+      day,
+      client: { id: c.id, name: c.pref || c.name, loc: c.loc, kipu_id: c.kipu_id },
+      chartNotes: chart,
+      groupNotesToday: groupNotes,
+      sameNameRows: twins.map((t) => ({ id: t.id, kipu_id: t.kipu_id, active: t.active, discharged: (t.discharge_date || '').slice(0, 10) || null })),
+      readThisWay: 'A note with onDate=false whose easternDay is one day off = timezone shift (now fixed — re-run the check). chartNotes empty while Kipu shows notes = this row points at a different casefile; check sameNameRows for the twin holding the notes.',
+    });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 app.get('/api/diag/group-notes', requireAuth, requireAdmin, async (req, res) => {
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
   try {

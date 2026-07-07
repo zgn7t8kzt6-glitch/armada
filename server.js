@@ -10,7 +10,7 @@ import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
 import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
-import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured, kipuDayGroupNotes } from './src/kipu.js';
+import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured, kipuDayGroupNotes, kipuGroupNotesDiag } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
 import {
@@ -4525,6 +4525,33 @@ app.get('/api/command/since', requireAuth, requireAdmin, (req, res) => {
 // evaluations and reports every signature-shaped field Kipu's detail exposes —
 // run this first to learn the tenant's shape, then we wire the real detector.
 // ?q=nurs.*assess &days=14 &max=6 — PHI-light output (client initials only).
+// Diagnostic: does the billing group-notes merge see today's group sessions,
+// and do the attendee ids match our roster? Open /api/diag/group-notes while
+// signed in as the owner; add ?date=YYYY-MM-DD for another day.
+app.get('/api/diag/group-notes', requireAuth, requireAdmin, async (req, res) => {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : appToday();
+  try {
+    const diag = await kipuGroupNotesDiag(day, null);
+    const g = await kipuDayGroupNotes(day, null);
+    const roster = db.prepare(`SELECT id, pref, name, kipu_id, loc FROM clients WHERE active = 1 AND merged_into IS NULL AND kipu_id IS NOT NULL`).all();
+    const matched = [], unmatched = [];
+    if (g.ok) {
+      for (const c of roster) {
+        const full = String(c.kipu_id || '');
+        const hit = g.byPatient.get(full) || g.byPatient.get(full.split(':')[0]);
+        if (hit) matched.push({ client: c.pref || c.name, loc: c.loc, groupNotes: hit.length });
+        else unmatched.push({ client: c.pref || c.name, loc: c.loc, rosterKipuId: full });
+      }
+    }
+    res.json({
+      day,
+      whatKipuReturned: diag,
+      merge: g.ok ? { sessionsOnDate: g.sessions, patientsCredited: g.byPatient.size, attendeeIdSample: [...g.byPatient.keys()].slice(0, 5) } : { error: g.error },
+      roster: { active: roster.length, matched: matched.length, matchedSample: matched.slice(0, 8), unmatchedSample: unmatched.slice(0, 8) },
+      readThisWay: 'If sessionsOnDate is 0 → Kipu returned no groups for the date (check datesSeen: the date filter may be ignored). If patientsCredited > 0 but matched is 0 → the attendee ids do not match roster kipu_ids (compare attendeeIdSample with rosterKipuId).',
+    });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 app.get('/api/diag/kipu-cosign', requireAuth, requireAdmin, async (req, res) => {
   try {
     if (!kipuConfigured()) return res.status(400).json({ error: 'Kipu is not connected.' });

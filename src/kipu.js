@@ -1936,6 +1936,42 @@ export async function kipuDayGroupNotes(date, conn = null) {
   return { ok: true, byPatient, sessions: sessions.length };
 }
 
+// Diagnostic for the billing group-notes merge: what does /api/group_sessions
+// actually return for a date on THIS account? Shows whether the server honors
+// the date filter, what dates came back, and the attendee shape — everything
+// needed to see why a group note wouldn't credit a client's day.
+export async function kipuGroupNotesDiag(date, conn = null) {
+  const pick = (p, ...keys) => { for (const k of keys) { if (p && p[k] != null && p[k] !== '') return p[k]; } return null; };
+  const d0 = String(date || '').slice(0, 10);
+  const out = { date: d0, pages: 0, totalReturned: 0, datesSeen: [], onDate: 0, attendeeSample: null, sessionSample: null, error: null };
+  const seenDates = new Map();
+  try {
+    for (let page = 1; page <= 10; page++) {
+      const path = `/api/group_sessions?page=${page}&per=100&start_date=${encodeURIComponent(d0)}&end_date=${encodeURIComponent(d0)}`;
+      let d; try { d = await kipuGet(path, conn); } catch (e) { if (page === 1) { out.error = 'group_sessions: ' + e.message; return out; } break; }
+      const arr = d?.group_sessions || d?.sessions || (Array.isArray(d) ? d : Object.values(d || {}).find((v) => Array.isArray(v)) || []);
+      if (!Array.isArray(arr) || arr.length === 0) { if (page === 1) out.topKeys = Object.keys(d || {}).slice(0, 12); break; }
+      out.pages = page; out.totalReturned += arr.length;
+      for (const s of arr) {
+        const raw = pick(s, 'session_start_time', 'start_time', 'session_date', 'date');
+        const day = localDateOf(raw) || (raw ? String(raw).slice(0, 10) : '(no date)');
+        seenDates.set(day, (seenDates.get(day) || 0) + 1);
+        if (day === d0) {
+          out.onDate++;
+          if (!out.sessionSample) out.sessionSample = { keys: Object.keys(s).slice(0, 24), title: pick(s, 'title', 'group_title', 'name', 'topic'), start: raw, location_id: s.location_id ?? null };
+          const pts = s.patients || s.attendees || s.patient_attendances || [];
+          if (!out.attendeeSample && Array.isArray(pts) && pts[0]) {
+            out.attendeeSample = { count: pts.length, keys: Object.keys(pts[0]).slice(0, 24), example: Object.fromEntries(Object.entries(pts[0]).slice(0, 10).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 40) : v])) };
+          }
+        }
+      }
+      if (arr.length < 100) break;
+    }
+  } catch (e) { out.error = e.message; }
+  out.datesSeen = [...seenDates.entries()].sort().slice(0, 12).map(([k, v]) => `${k}×${v}`);
+  return out;
+}
+
 // Group attendance via /api/group_sessions (the endpoint that actually exists on
 // this account — it carries session_start_time + a `patients` attendee list).
 // Returns, for the given date window, who attended at least one group each day and

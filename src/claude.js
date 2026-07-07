@@ -440,6 +440,59 @@ export async function triageEmail({ from, subject, preview, myEmail, addressing 
   return t ? JSON.parse(t.text) : { needs_me: true, category: 'review', reason: '', action: '' };
 }
 
+// ---- Accountability: read the owner's SENT mail and pull out the asks he made ----
+const MAIL_ASK_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    is_request: { type: 'boolean', description: 'true ONLY if the owner is asking the recipient(s) to DO something — a task, deliverable, answer, decision, or commitment he would need to chase. Pure FYI, thanks, praise, confirmations, and replies that close a loop are false.' },
+    ask: { type: 'string', description: 'The request as one short imperative line (e.g. "Send the July census report"). Empty string when is_request is false.' },
+    assignee: { type: 'string', description: 'Who owes it — the person\'s name (first name is fine, from the To line or the body). Empty if unclear.' },
+    due_date: { type: 'string', description: 'YYYY-MM-DD when the email states or implies a deadline — resolve relative phrases ("by Friday", "EOD tomorrow", "end of month") against the SENT date. Empty string when no timeline was given.' },
+  },
+  required: ['is_request', 'ask', 'assignee', 'due_date'],
+};
+export async function extractMailAsk({ to, subject, preview, sentAt, myEmail }) {
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 300,
+    system: G + 'You read email the OWNER of Armada Recovery SENT, to find the requests he made of his people — his accountability list. A request = the recipient now owes him an action, answer, decision, or deliverable. Questions count (they owe an answer). NOT requests: pure information, thanks/recognition, "sounds good" replies, meeting acceptances, mail clearly closing out an earlier thread, and anything addressed only to himself. Extract the single MAIN ask (the one he would chase), who owes it, and the deadline if one is stated or clearly implied — resolve relative dates against the SENT date. Judge only from what is given.',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: MAIL_ASK_SCHEMA } },
+    messages: [{ role: 'user', content: `OWNER: ${myEmail || '(unknown)'}\nSENT: ${String(sentAt || '').slice(0, 10)}\nTO: ${scrub(String(to || '').slice(0, 200))}\nSUBJECT: ${scrub(String(subject || '').slice(0, 250))}\nBODY PREVIEW: ${scrub(String(preview || '').slice(0, 500))}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('declined');
+  const t = response.content.find((b) => b.type === 'text');
+  return t ? JSON.parse(t.text) : { is_request: false, ask: '', assignee: '', due_date: '' };
+}
+
+// The follow-up nudge, written the Armada way: assume good intent, restate the
+// ask and its date, make winning easy ("done? just say so — stuck? tell me what
+// you need"), and land a specific reply-by. Never guilt, never corporate filler.
+const FOLLOWUP_DRAFT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    subject: { type: 'string', description: 'Subject line — usually "Re: <original subject>" unless something clearer fits.' },
+    body: { type: 'string', description: 'Plain-text body, 3–6 sentences with blank lines between paragraphs. Warm and direct: assume good intent, restate the ask (and the original date if there was one), invite a win ("if it\'s done, just tell me; if it\'s stuck, tell me what you need"), close with a specific reply-by. First name sign-off.' },
+  },
+  required: ['subject', 'body'],
+};
+export async function draftFollowupEmail({ ask, toName, subject, sentAt, dueDate, daysWaiting, senderName }) {
+  const client = await getClient();
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 500,
+    system: G + 'You write follow-up emails for the owner of Armada Recovery, chasing a request he already made. His standard is accountability WITH warmth — the Excellence Win concept: celebrate it if it happened, unblock it if it did not, and never shame anyone. Short, human, zero corporate filler. Never include client/patient names or health details. Do not invent facts beyond what is given.',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: FOLLOWUP_DRAFT_SCHEMA } },
+    messages: [{ role: 'user', content: `SENDER (the owner): ${senderName || 'Shlomo'}\nRECIPIENT: ${toName || '(name unknown)'}\nTHE ASK: ${scrub(String(ask || '').slice(0, 300))}\nORIGINAL SUBJECT: ${scrub(String(subject || '').slice(0, 200))}\nASKED ON: ${String(sentAt || '').slice(0, 10)}${dueDate ? `\nDEADLINE GIVEN: ${dueDate}` : '\nDEADLINE GIVEN: none'}\nDAYS SINCE ASKED: ${daysWaiting ?? '?'}` }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('declined');
+  const t = response.content.find((b) => b.type === 'text');
+  if (!t) throw new Error('no draft returned');
+  return JSON.parse(t.text);
+}
+
 // Desk → email: draft the email that gets a captured task moving. The owner edits
 // before sending — this writes the first 90%, never hits Send itself.
 const DESK_EMAIL_SCHEMA = {

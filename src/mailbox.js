@@ -9,7 +9,7 @@
 // logs; we ask for Mail.Read only — this module cannot send or delete mail.
 
 import { db, getState, setState } from './db.js';
-import { triageEmail, claudeConfigured } from './claude.js';
+import { triageEmail, extractMailAsk, claudeConfigured } from './claude.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS desk_mail (
   id INTEGER PRIMARY KEY,
@@ -38,6 +38,24 @@ for (const ddl of [`ALTER TABLE desk_mail ADD COLUMN addressing TEXT`, `ALTER TA
   try { db.exec(ddl); } catch { /* already there */ }
 }
 export const MAIL_RULES_V = 2;   // v2: direct-to-me / cc / distribution-list policy
+
+// Accountability: every request the owner made by email, tracked to its date.
+db.exec(`CREATE TABLE IF NOT EXISTS desk_mail_asks (
+  id INTEGER PRIMARY KEY,
+  msg_id TEXT UNIQUE,                  -- Graph message id of HIS sent mail
+  conv_id TEXT,                        -- thread id — how replies find the ask
+  sent_at TEXT,
+  to_name TEXT, to_email TEXT,
+  subject TEXT, preview TEXT, web_link TEXT,
+  ask TEXT,                            -- what he asked for, one line
+  due_date TEXT,                       -- deadline stated in the email ('' = none)
+  followup_on TEXT,                    -- when to chase: due_date, else sent+3d
+  status TEXT NOT NULL DEFAULT 'open', -- open | done | dismissed
+  replied_at TEXT,                     -- newest inbound reply on the thread
+  closed_note TEXT, acted_at TEXT,
+  created TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_desk_mail_asks ON desk_mail_asks(status, followup_on);`);
 
 export function muteSender(fromEmail, why = 'muted') {
   const e = String(fromEmail || '').trim().toLowerCase();
@@ -149,7 +167,7 @@ export async function pollMailbox({ max = 25 } = {}) {
     // First run looks back 24h; afterwards we resume from the newest seen mail.
     const since = getState('mail_last_poll') || new Date(Date.now() - 24 * 3600e3).toISOString();
     const q = `/me/messages?$top=50&$orderby=receivedDateTime asc&$filter=receivedDateTime gt ${encodeURIComponent(since)}` +
-      `&$select=id,subject,from,receivedDateTime,bodyPreview,webLink,toRecipients,ccRecipients`;
+      `&$select=id,subject,from,receivedDateTime,bodyPreview,webLink,toRecipients,ccRecipients,conversationId`;
     const d = await graphGet(q);
     const msgs = Array.isArray(d.value) ? d.value : [];
     const has = db.prepare(`SELECT 1 FROM desk_mail WHERE msg_id = ?`);
@@ -184,6 +202,11 @@ export async function pollMailbox({ max = 25 } = {}) {
     }
     for (const m of msgs) {
       if (m.receivedDateTime && m.receivedDateTime > newest) newest = m.receivedDateTime;
+      // Accountability loop: an inbound message on a tracked thread = they replied.
+      // (Every inbound message checks this, even ones triage will ignore.)
+      if (m.conversationId) {
+        try { db.prepare(`UPDATE desk_mail_asks SET replied_at = ? WHERE conv_id = ? AND status = 'open' AND (replied_at IS NULL OR replied_at < ?)`).run(m.receivedDateTime || '', m.conversationId, m.receivedDateTime || ''); } catch { /* best effort */ }
+      }
       if (has.get(m.id)) continue;
       if (triaged >= max) break;   // stay gentle on the AI budget; next poll continues
       const fromName = m.from?.emailAddress?.name || '';
@@ -218,6 +241,87 @@ export async function pollMailbox({ max = 25 } = {}) {
     return { ok: true, checked: msgs.length, triaged, surfaced, ignored, retried: retryRows.length, lastError: lastErr };
   } catch (e) { return { error: e.message }; }
   finally { _polling = false; }
+}
+
+// ── Accountability sweep: read HIS sent mail, extract the asks he made ───────
+let _askPolling = false;
+export function askPolling() { return _askPolling; }
+const _addDays = (iso, n) => { const d = new Date(String(iso).slice(0, 10) + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+export async function pollSentAsks({ max = 15 } = {}) {
+  if (!mailConnected()) return { error: 'Mailbox is not connected.' };
+  if (!claudeConfigured()) return { error: 'AI is not configured.' };
+  if (_askPolling) return { error: 'A sent-mail sweep is already running.' };
+  _askPolling = true;
+  try {
+    // First run looks back 3 days; afterwards resume from the newest seen mail.
+    const since = getState('mail_sent_last_poll') || new Date(Date.now() - 3 * 24 * 3600e3).toISOString();
+    const q = `/me/mailFolders/SentItems/messages?$top=50&$orderby=sentDateTime asc&$filter=sentDateTime gt ${encodeURIComponent(since)}` +
+      `&$select=id,conversationId,subject,sentDateTime,bodyPreview,toRecipients,webLink`;
+    const d = await graphGet(q);
+    const msgs = Array.isArray(d.value) ? d.value : [];
+    const has = db.prepare(`SELECT 1 FROM desk_mail_asks WHERE msg_id = ?`);
+    const seenConv = db.prepare(`SELECT 1 FROM desk_mail_asks WHERE conv_id = ? AND status = 'open'`);
+    const ins = db.prepare(`INSERT OR IGNORE INTO desk_mail_asks
+      (msg_id, conv_id, sent_at, to_name, to_email, subject, preview, web_link, ask, due_date, followup_on)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+    const sleep = (ms) => new Promise((r2) => setTimeout(r2, ms));
+    const meAddr = String(getState('msgraph_user') || '').toLowerCase();
+    let scanned = 0, tracked = 0, newest = since, lastErr = null, rateLimited = 0;
+    for (const m of msgs) {
+      if (m.sentDateTime && m.sentDateTime > newest) newest = m.sentDateTime;
+      if (has.get(m.id)) continue;
+      const tos = (m.toRecipients || []).map((x) => x.emailAddress || {}).filter((x) => String(x.address || '').toLowerCase() !== meAddr);
+      if (!tos.length) continue;                            // notes to himself aren't asks
+      if (m.conversationId && seenConv.get(m.conversationId)) continue;   // thread already tracked
+      if (scanned >= max) break;                            // gentle on the AI budget
+      if (rateLimited >= 2) break;                          // throttled — cursor holds
+      let t;
+      try {
+        t = await extractMailAsk({
+          to: tos.map((x) => `${x.name || ''} <${x.address || ''}>`).join(', '),
+          subject: m.subject || '', preview: m.bodyPreview || '',
+          sentAt: m.sentDateTime || '', myEmail: getState('msgraph_user') || '',
+        });
+      } catch (e1) {
+        const isRate = /429|rate|too many/i.test(String(e1.message || e1));
+        if (isRate) rateLimited++;
+        lastErr = String(e1.message || e1).slice(0, 200);
+        await sleep(isRate ? 20000 : 2500);
+        scanned++; continue;                                 // cursor holds; retried next sweep
+      }
+      scanned++;
+      await sleep(1500);                                     // pace the API
+      if (t.is_request && (t.ask || '').trim()) {
+        const sentDay = String(m.sentDateTime || '').slice(0, 10);
+        const due = /^\d{4}-\d{2}-\d{2}$/.test(t.due_date || '') ? t.due_date : '';
+        ins.run(m.id, m.conversationId || null, m.sentDateTime || null,
+          (t.assignee || tos[0].name || '').slice(0, 120), (tos[0].address || '').slice(0, 200),
+          String(m.subject || '').slice(0, 300), String(m.bodyPreview || '').slice(0, 400), m.webLink || null,
+          String(t.ask).slice(0, 300), due, due || _addDays(sentDay || new Date().toISOString(), 3));
+        tracked++;
+      }
+    }
+    if ((scanned >= max && msgs.length > scanned) || rateLimited >= 2) { /* cursor holds; next run resumes */ } else { setState('mail_sent_last_poll', newest); }
+    setState('mail_asks_last_run', new Date().toISOString());
+    if (lastErr) setState('mail_asks_last_error', lastErr); else setState('mail_asks_last_error', '');
+    return { ok: true, checked: msgs.length, scanned, tracked, lastError: lastErr };
+  } catch (e) { return { error: e.message }; }
+  finally { _askPolling = false; }
+}
+
+export function asksBoard() {
+  const today = new Date().toISOString().slice(0, 10);
+  const open = db.prepare(`SELECT * FROM desk_mail_asks WHERE status = 'open' ORDER BY followup_on, sent_at`).all();
+  return {
+    today,
+    replied: open.filter((a) => a.replied_at),
+    overdue: open.filter((a) => !a.replied_at && a.followup_on && a.followup_on < today),
+    dueToday: open.filter((a) => !a.replied_at && a.followup_on === today),
+    upcoming: open.filter((a) => !a.replied_at && (!a.followup_on || a.followup_on > today)).slice(0, 30),
+    closedRecent: db.prepare(`SELECT to_name, ask, closed_note, status, acted_at FROM desk_mail_asks WHERE status != 'open' ORDER BY acted_at DESC LIMIT 10`).all(),
+    lastRun: getState('mail_asks_last_run') || null,
+    lastError: getState('mail_asks_last_error') || null,
+  };
 }
 
 export function mailBoard() {

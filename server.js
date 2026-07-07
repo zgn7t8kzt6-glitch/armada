@@ -19,11 +19,11 @@ import {
   allowedDomains, setAllowedDomains, emailDomainAllowed, createInvite, regenInvite, inviteInfo, acceptInvite, verifyCredentials, verifyUserById,
 } from './src/auth.js';
 import { ensureAdmin, ensureCorporateUser, ensureHrRoster, ensureSampleData, ensureExampleClient12A, ensureInventoryCatalog, ensureInventoryItems, ensureStaffingStandard, ensureShiftTemplates, ensureArrivalItems, ensureOpsRoutines, ensureNourishment } from './src/seed.js';
-import { classifyDeskItem, draftDeskEmail } from './src/claude.js';
+import { classifyDeskItem, draftDeskEmail, draftFollowupEmail } from './src/claude.js';
 import { generateShiftTasks, generateAmaRead, generateCareBrief, generateShiftBriefing, askAssistant, askLease, askLeaseDoc, extractInsuranceDoc, extractLeaseDoc, extractOrderItems, extractOrderItemsDoc, scanNote, claudeConfigured, AMA_TRIGGERS, DEID, scrub, aiHealth, aiProvider, generateReferralInsights, generateOutcomeInsights, generateDischargeDebrief, generateIssueDigest, generateWelcomePlan, generateAftercarePlan, extractKudos, anthropicKey, resetAiClient } from './src/claude.js';
 import { mountHousing } from './src/housing.js';
 import { mountPeople, linkPeople, journeyFor, personIdFor, normName as personNameKey } from './src/people.js';
-import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard, muteSender, unmuteSender, mutedSenders, noteDismissal, mailPolling } from './src/mailbox.js';
+import { mailConfigured, mailConnected, startDeviceFlow, disconnectMailbox, pollMailbox, mailBoard, muteSender, unmuteSender, mutedSenders, noteDismissal, mailPolling, pollSentAsks, asksBoard, askPolling } from './src/mailbox.js';
 import { parseEntityWorkbook, workbookText } from './src/xlsx.js';
 import { ARMADA_PRINCIPLES, ARMADA_STANDARD, ALL_BEHIND_YOU, HANDBOOK, HANDBOOK_INTRO, todaysPrinciple, todaysSafety, chapterForRole } from './src/handbook.js';
 
@@ -1511,9 +1511,40 @@ app.post('/api/mail/disconnect', requireAuth, requireAdmin, (req, res) => { disc
 app.post('/api/mail/poll', requireAuth, requireAdmin, (req, res) => {
   // Fire-and-forget: a big backlog can take minutes (the calls are deliberately
   // paced) — never make the browser wait on it. The board refreshes itself.
-  if (mailPolling()) return res.json({ ok: true, running: true });
-  pollMailbox({ max: 25 }).then((r) => { if (r && r.error) console.error('[mail] poll:', r.error); else console.log('[mail] poll:', JSON.stringify(r)); }).catch((e) => console.error('[mail] poll:', e.message));
+  // The sent-mail accountability sweep chains AFTER the inbox pass so the two
+  // never compete for the AI rate limit.
+  if (mailPolling() || askPolling()) return res.json({ ok: true, running: true });
+  pollMailbox({ max: 25 })
+    .then((r) => { if (r && r.error) console.error('[mail] poll:', r.error); else console.log('[mail] poll:', JSON.stringify(r)); })
+    .catch((e) => console.error('[mail] poll:', e.message))
+    .then(() => pollSentAsks({ max: 15 }))
+    .then((r) => { if (r && r.error) console.error('[mail] asks:', r.error); else console.log('[mail] asks:', JSON.stringify(r)); })
+    .catch((e) => console.error('[mail] asks:', e.message));
   res.json({ ok: true, started: true });
+});
+// ── Accountability: the asks he sent, tracked to their dates ──────────────────
+app.get('/api/mail/asks', requireAuth, requireAdmin, (req, res) => res.json(asksBoard()));
+app.post('/api/mail/asks/:id', requireAuth, requireAdmin, (req, res) => {
+  const a = db.prepare(`SELECT * FROM desk_mail_asks WHERE id = ?`).get(+req.params.id);
+  if (!a) return res.status(404).json({ error: 'Not found.' });
+  const b = req.body || {};
+  if (b.status && ['done', 'dismissed', 'open'].includes(b.status)) {
+    db.prepare(`UPDATE desk_mail_asks SET status=?, closed_note=?, acted_at=CASE WHEN ?='open' THEN NULL ELSE datetime('now') END WHERE id=?`)
+      .run(b.status, String(b.note || '').slice(0, 300) || a.closed_note, b.status, a.id);
+  }
+  if (b.followup_on && /^\d{4}-\d{2}-\d{2}$/.test(b.followup_on)) {
+    db.prepare(`UPDATE desk_mail_asks SET followup_on=?, replied_at=NULL WHERE id=?`).run(b.followup_on, a.id);
+  }
+  res.json({ ok: true });
+});
+app.post('/api/mail/asks/:id/draft', requireAuth, requireAdmin, async (req, res) => {
+  const a = db.prepare(`SELECT * FROM desk_mail_asks WHERE id = ?`).get(+req.params.id);
+  if (!a) return res.status(404).json({ error: 'Not found.' });
+  const days = Math.max(0, Math.round((Date.now() - Date.parse(a.sent_at || Date.now())) / 864e5));
+  try {
+    const d = await draftFollowupEmail({ ask: a.ask, toName: a.to_name, subject: a.subject, sentAt: a.sent_at, dueDate: a.due_date || '', daysWaiting: days, senderName: (req.user.name || '').split(/\s+/)[0] });
+    res.json({ ...d, to: a.to_email || '' });
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get('/api/mail/board', requireAuth, requireAdmin, (req, res) => res.json(mailBoard()));
 app.post('/api/mail/mute', requireAuth, requireAdmin, (req, res) => {
@@ -1550,7 +1581,12 @@ setInterval(() => {
   try {
     if (getState('mail_enabled') === 'off') return;
     if (!mailConnected() || !claudeConfigured()) return;
-    pollMailbox({ max: 25 }).then((r) => { if (r && r.ok && (r.triaged || 0) > 0) console.log('[mail] poll:', JSON.stringify(r)); }).catch((e) => console.error('[mail] poll:', e.message));
+    pollMailbox({ max: 25 })
+      .then((r) => { if (r && r.ok && (r.triaged || 0) > 0) console.log('[mail] poll:', JSON.stringify(r)); })
+      .catch((e) => console.error('[mail] poll:', e.message))
+      .then(() => pollSentAsks({ max: 15 }))
+      .then((r) => { if (r && r.ok && (r.tracked || 0) > 0) console.log('[mail] asks:', JSON.stringify(r)); })
+      .catch((e) => console.error('[mail] asks:', e.message));
   } catch (e) { console.error('[mail] scheduler:', e.message); }
 }, 10 * 60 * 1000);
 

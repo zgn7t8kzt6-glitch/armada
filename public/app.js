@@ -6403,7 +6403,7 @@ async function loadMyDesk(){
     waiting:live.filter(x=>x.status==='waiting').length, inbox:live.filter(x=>deskLane(x)==='inbox').length,
     done7:items.filter(x=>x.status==='done').length };
   const stat=(nn,l,tab,sev)=>`<div class="ret-card ${sev||''}" style="cursor:pointer" onclick="DESK_TAB='${tab}';renderDeskTab()"><div class="n">${nn}</div><div class="l">${l}</div></div>`;
-  const tabs=[['focus','🎯 Focus'],['board','📋 Board'],['mail','📧 Mail'],['buckets','🗂 Buckets'],['places','📍 Locations'],['people','👥 People'],['setup','⚙️']];
+  const tabs=[['focus','🎯 Focus'],['board','📋 Board'],['mail','📧 Mail'],['asks','📤 Follow-ups'],['buckets','🗂 Buckets'],['places','📍 Locations'],['people','👥 People'],['setup','⚙️']];
   host.innerHTML=`<div class="card">
     <div class="cmd-hero-row"><div><h3 style="margin:0">My Desk</h3><p class="sub sans" style="margin:0">Say it like a text — dates, people &amp; buckets file themselves.</p></div>
       <button class="btn btn-ghost btn-sm sans" onclick="deskDigestNow(this)">☀️ Digest now</button></div>
@@ -6420,6 +6420,7 @@ function renderDeskTab(){
   if(DESK_TAB==='focus') return deskFocus(b);
   if(DESK_TAB==='board') return deskBoard(b);
   if(DESK_TAB==='mail') return deskMail(b);
+  if(DESK_TAB==='asks') return deskAsks(b);
   if(DESK_TAB==='buckets') return deskGrouped(b,'bucket','🏷','Unfiled — tap 🏷 to file');
   if(DESK_TAB==='places') return deskGrouped(b,'facility_name','📍','No location');
   if(DESK_TAB==='people') return deskPeople(b);
@@ -6599,6 +6600,78 @@ async function deskMail(b){
   api('/mail/muted').then(r=>{ const el=$('mailMutedList'); if(!el) return;
     el.innerHTML=(r.muted||[]).map(x=>`<div style="margin-top:3px">🔇 ${esc(x.from_email)} <span style="opacity:.7">(${esc(x.why||'')})</span> <a href="#" onclick="mailUnmute('${esc(x.from_email)}');return false">unmute</a></div>`).join('')||'No muted senders yet — tap 🔇 on any card, or dismiss the same sender 3 times and it mutes itself.';
   }).catch(()=>{});
+}
+/* ── 📤 Follow-ups: every ask he emailed, tracked until it's honored ────────── */
+let ASK_DRAFTS={};
+async function deskAsks(b){
+  b.innerHTML='<div class="hint" style="margin-top:10px">Loading follow-ups…</div>';
+  let st; try{ st=await api('/mail/status'); }catch(e){ b.innerHTML='<div class="hint" style="margin-top:10px">'+esc(e.message)+'</div>'; return; }
+  if(!st.configured||!st.connected){
+    b.innerHTML=`<div style="margin-top:10px;max-width:640px"><h3 style="margin:0 0 4px">📤 Follow-ups</h3>
+      <p class="sub sans">Reads the email <strong>you send</strong>, spots every request you make (with or without a deadline), and holds it here until it's honored — with a ready-to-send follow-up when someone goes quiet.</p>
+      <p class="sub sans">Connect your mailbox on the <strong>📧 Mail</strong> tab first — this uses the same read-only connection.</p></div>`;
+    return;
+  }
+  let d; try{ d=await api('/mail/asks'); }catch(e){ b.innerHTML='<div class="hint" style="margin-top:10px">'+esc(e.message)+'</div>'; return; }
+  ASK_DRAFTS={};
+  const chip=(a)=>a.replied_at?`<span class="badge-idle" style="background:#e8f3ec;color:#2f7a4f">replied ${esc(String(a.replied_at).slice(5,10))}</span>`
+    :a.due_date?`<span class="badge-idle" ${a.due_date<d.today?'style="background:#fdeaea;color:#b3382f"':''}>due ${esc(a.due_date)}</span>`
+    :`<span class="badge-idle">no timeline · chase ${esc(a.followup_on||'')}</span>`;
+  const row=(a)=>`<div class="q-row" style="display:block;padding:10px 12px">
+    <div><strong>${esc(a.to_name||a.to_email||'?')}</strong> — ${esc(a.ask||'')}</div>
+    <div class="hint" style="margin-top:2px">${esc(a.subject||'')} · asked ${esc(String(a.sent_at||'').slice(0,10))} ${chip(a)}</div>
+    <div class="toolbar" style="gap:4px;margin-top:6px;justify-content:flex-start;flex-wrap:wrap">
+      <button class="btn btn-gold btn-sm sans" onclick="askDraft(${a.id})">✉️ Draft follow-up</button>
+      <button class="btn btn-ghost btn-sm sans" title="It happened — close it out" onclick="askAct(${a.id},'done')">✅ Done</button>
+      <button class="btn btn-ghost btn-sm sans" title="Push the chase date" onclick="askSnooze(${a.id})">📅 Later</button>
+      <button class="btn btn-ghost btn-sm sans" title="Not actually a request" onclick="askAct(${a.id},'dismissed')">✕</button>
+      ${a.web_link?`<a class="btn btn-ghost btn-sm sans" href="${esc(a.web_link)}" target="_blank" rel="noopener">↗ Original</a>`:''}
+    </div><div id="askDraft_${a.id}"></div></div>`;
+  const sec=(title,arr,color)=>arr.length?`<div class="card" style="border-left:4px solid ${color};margin-top:10px"><h3 style="margin:0 0 6px">${title} <span class="hint" style="font-weight:400">· ${arr.length}</span></h3>${arr.map(row).join('')}</div>`:'';
+  const total=(d.overdue||[]).length+(d.dueToday||[]).length+(d.replied||[]).length+(d.upcoming||[]).length;
+  b.innerHTML=`<div style="margin-top:10px">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">📤 Follow-ups — the asks you sent</h3>
+      <p class="sub sans" style="margin:0">Every request in your sent mail, tracked to its date.${d.lastRun?' Last sweep '+esc(String(d.lastRun).slice(11,16))+'.':''} Sweeps with every mail check.</p></div>
+      <button class="btn btn-ghost btn-sm sans" onclick="mailPoll(this)">↻ Check now</button></div>
+    ${d.lastError?`<div class="hint" style="color:var(--danger)">Last sweep hiccup: ${esc(d.lastError)}</div>`:''}
+    ${sec('💬 They replied — review & close', d.replied||[], '#2f7a4f')}
+    ${sec('🔴 Overdue — nudge time', d.overdue||[], '#c0392b')}
+    ${sec('🟡 Due today', d.dueToday||[], '#d29a5e')}
+    ${sec('⏳ Coming up', d.upcoming||[], '#c9c2b4')}
+    ${total?'':'<div class="empty"><div class="e-ico">📤</div>No open asks tracked yet.<br>Send a request by email (or tap ↻ Check now to sweep your recent sent mail) and it lands here.</div>'}
+    ${(d.closedRecent||[]).length?`<details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Recently closed (${d.closedRecent.length})</summary>
+      ${d.closedRecent.map(x=>`<div class="hint" style="margin-top:4px">${x.status==='done'?'✅':'✕'} <strong>${esc(x.to_name||'')}</strong> — ${esc(x.ask||'')}${x.closed_note?' · <em>'+esc(x.closed_note)+'</em>':''}</div>`).join('')}</details>`:''}
+  </div>`;
+}
+async function askAct(id,status){
+  let note='';
+  if(status==='done'){ note=prompt('Close-out note (optional) — e.g. "Plan was solid — done."')||''; }
+  try{ await api('/mail/asks/'+id,{method:'POST',body:JSON.stringify({status,note})}); }catch(e){ alert(e.message); }
+  renderDeskTab();
+}
+async function askSnooze(id){
+  const dte=prompt('Follow up on (YYYY-MM-DD):', new Date(Date.now()+3*864e5).toISOString().slice(0,10));
+  if(!dte) return;
+  try{ await api('/mail/asks/'+id,{method:'POST',body:JSON.stringify({followup_on:dte})}); }catch(e){ alert(e.message); }
+  renderDeskTab();
+}
+async function askDraft(id){
+  const host=$('askDraft_'+id); if(!host) return;
+  host.innerHTML='<div class="hint" style="margin-top:6px">Writing the follow-up…</div>';
+  try{
+    const r=await api('/mail/asks/'+id+'/draft',{method:'POST'});
+    ASK_DRAFTS[id]={to:r.to||'',subject:r.subject||''};
+    host.innerHTML=`<div style="margin-top:6px"><div class="hint">To: ${esc(r.to||'?')} · ${esc(r.subject||'')}</div>
+      <textarea id="askDraftTxt_${id}" rows="7" style="margin-top:4px">${esc(r.body||'')}</textarea>
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;margin-top:4px">
+        <button class="btn btn-gold btn-sm sans" onclick="askMailto(${id})">✉️ Open in email app</button>
+        <button class="btn btn-ghost btn-sm sans" onclick="navigator.clipboard.writeText(document.getElementById('askDraftTxt_${id}').value).then(()=>this.textContent='Copied ✓')">Copy</button>
+      </div><div class="hint">Edit freely — nothing sends until you hit send in your own mail app.</div></div>`;
+  }catch(e){ host.innerHTML='<div class="hint" style="color:var(--danger);margin-top:6px">'+esc(e.message)+'</div>'; }
+}
+function askMailto(id){
+  const dft=ASK_DRAFTS[id]||{}; const body=($('askDraftTxt_'+id)||{}).value||'';
+  location.href='mailto:'+encodeURIComponent(dft.to||'')+'?subject='+encodeURIComponent(dft.subject||'')+'&body='+encodeURIComponent(body);
 }
 async function mailInstantSetup(){
   const m=$('mg_msg2'); if(m)m.textContent='Setting up…';

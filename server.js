@@ -5343,7 +5343,10 @@ app.delete('/api/corp/docs/:id', requireAuth, requireCorp, (req, res) => { db.pr
 // ── Corporate ordering (all 8 locations) ──────────────────────────────────────
 app.get('/api/corp/orders', requireAuth, requireCorp, (req, res) => {
   const status = ['requested', 'ordered', 'received', 'cancelled', 'open'].includes(req.query.status) ? req.query.status : null;
-  const rows = db.prepare(`SELECT * FROM order_requests ${status ? (status === 'open' ? `WHERE status IN ('requested','ordered')` : `WHERE status = '${status}'`) : ''}
+  const rows = db.prepare(`SELECT *,
+      (SELECT COUNT(*) FROM order_request_notes n WHERE n.order_id = order_requests.id) AS note_count,
+      (SELECT n.note FROM order_request_notes n WHERE n.order_id = order_requests.id ORDER BY n.id DESC LIMIT 1) AS last_note
+    FROM order_requests ${status ? (status === 'open' ? `WHERE status IN ('requested','ordered')` : `WHERE status = '${status}'`) : ''}
     ORDER BY (status='received'),(status='cancelled'), CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, id DESC`).all();
   const byLoc = {};
   for (const r of rows) { const l = byLoc[r.facility] = byLoc[r.facility] || { facility: r.facility, requested: 0, ordered: 0, received: 0, items: [] }; l.items.push(r); if (l[r.status] != null) l[r.status]++; }
@@ -5401,6 +5404,18 @@ app.post('/api/corp/orders/:id/email-landlord', requireAuth, requireCorp, async 
   // Not-sendable is an answer, not an error — return 200 so the UI shows WHY
   // ("no landlord email on file for this facility — add it on the lease").
   try { res.json(await maybeEmailLandlord(o, req.user, true)); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// The chase log: dated, signed notes on one order ("called vendor", "backordered").
+app.get('/api/corp/orders/:id/notes', requireAuth, requireCorp, (req, res) => {
+  res.json({ notes: db.prepare(`SELECT id, by_name, note, created FROM order_request_notes WHERE order_id = ? ORDER BY id`).all(+req.params.id) });
+});
+app.post('/api/corp/orders/:id/notes', requireAuth, requireCorp, (req, res) => {
+  const o = db.prepare(`SELECT id FROM order_requests WHERE id = ?`).get(+req.params.id);
+  if (!o) return res.status(404).json({ error: 'Order not found.' });
+  const note = String(req.body?.note || '').trim().slice(0, 500);
+  if (!note) return res.status(400).json({ error: 'Write the note first.' });
+  db.prepare(`INSERT INTO order_request_notes (order_id, by_name, note) VALUES (?,?,?)`).run(o.id, req.user.name, note);
+  res.json({ ok: true });
 });
 app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
   const b = req.body || {};

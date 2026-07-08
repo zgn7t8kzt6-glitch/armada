@@ -3062,6 +3062,17 @@ if (getState('phase5_shift_backfill') !== 'done') {
   } catch (e) { console.error('[phase5 shifts]', e.message); }
 }
 
+// Running work-log on an order request ("called vendor", "backordered 7/15") —
+// the single notes field on the order is the REQUEST note; this is the chase.
+db.exec(`CREATE TABLE IF NOT EXISTS order_request_notes (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES order_requests(id) ON DELETE CASCADE,
+  by_name TEXT,
+  note TEXT NOT NULL,
+  created TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_order_notes ON order_request_notes(order_id);`);
+
 // ── Deferred-ledger batch: referrals origin, beds + program schedule ─────────
 // outbound_referrals.facility_id is the DESTINATION partner (facilities table);
 // the ORIGIN — which of OUR buildings sent the person out — gets its own column.

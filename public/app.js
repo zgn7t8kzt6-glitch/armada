@@ -337,10 +337,10 @@ function moduleVisible(v){
 }
 // Where each facility TYPE lands when you switch to it — its natural home page.
 const TYPE_HOME = { 'detox':'opscenter', 'residential':'opscenter', 'outpatient':'outpatient', 'sober-living':'housing', 'corporate':'corphub' };
-// Corporate Operations (Chava): walled to her lane — the hub, ordering, food
-// service, supplies/par levels, and maintenance work orders. No facility pulse
-// (Ops Center is clinical-operations ground she doesn't work).
-const CORPORATE_VIEWS = ['corphub','inventory','meals','maintenance'];
+// Corporate Operations (Chava): walled to her lane — the hub, ordering,
+// supplies/par levels, and maintenance work orders. No facility pulse and no
+// food-service pages: ordering happens on the Corp Hub queue, not in Meals.
+const CORPORATE_VIEWS = ['corphub','inventory','maintenance'];
 let PREVIEW_ROLE=null;   // admin "preview as" — see the app exactly as a role does
 function isCorporateRole(){ const jr=(v)=>String(v||'').trim().toLowerCase()==='executive assistant'; return !!(ME && (jr(ME.job_role) || jr(PREVIEW_ROLE))); }
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
@@ -354,7 +354,7 @@ const ROLE_MENU = {
   'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','handbook','library'],
   'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','handbook','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
-  'Executive Assistant': ['corphub','inventory','meals','maintenance','myrole','mygrowth','handbook','messages'],
+  'Executive Assistant': ['corphub','inventory','maintenance','myrole','mygrowth','handbook','messages'],
   // The Case Manager's day, in order: home → meeting queue → caseload → the exits
   // (discharge/continuum) → the money guardrails (auths, billing readiness) → circle.
   'Case Manager': ['dashboard','appts','casemgmt','clients','records','dischargepage','continuum','authreg','billingready','family','referrals','alumni','incidents','messages','team','training','handbook','library'],
@@ -7627,18 +7627,20 @@ async function renderCorpOrders(body){
     if(o.status==='requested') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'ordered')">Mark ordered</button>`;
     if(o.status==='ordered') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'received')">Mark received</button><button class="btn btn-ghost btn-sm sans" onclick="orderTracking(${o.id})" title="Add carrier tracking — the requester sees it on their status page">📦</button>`;
     if(o.status!=='received'&&o.status!=='cancelled') b+=`<button class="btn btn-ghost btn-sm sans" onclick="setOrder(${o.id},'cancelled')">Cancel</button>`;
+    b+=`<button class="btn btn-ghost btn-sm sans" onclick="orderNotes(${o.id})" title="Chase log — dated notes on this order">💬${o.note_count?o.note_count:''}</button>`;
     b+=`<button class="btn btn-ghost btn-sm sans" onclick="emailLandlord(${o.id},this)" title="Email the landlord (if this is their responsibility)">🏠</button>`;
     b+=`<button class="btn btn-ghost btn-sm sans" onclick="delOrder(${o.id})">🗑</button>`;
     return b;
   };
   const trackBit=(o)=>o.tracking?`<div class="hint">📦 ${/^https?:\/\//i.test(o.tracking)?`<a href="${esc(o.tracking)}" target="_blank" rel="noopener">tracking ↗</a>`:esc(o.tracking)}</div>`:'';
   const rowH=(o)=>`<tr>
-    <td><strong>${esc(o.item_name)}</strong>${o.qty?` <span class="hint">· ${esc(o.qty)}</span>`:''}${o.link?` <a href="${esc(o.link)}" target="_blank" rel="noopener">🔗</a>`:''}${o.notes?`<div class="hint">${esc(o.notes)}</div>`:''}${trackBit(o)}</td>
+    <td><strong>${esc(o.item_name)}</strong>${o.qty?` <span class="hint">· ${esc(o.qty)}</span>`:''}${o.link?` <a href="${esc(o.link)}" target="_blank" rel="noopener">🔗</a>`:''}${o.notes?`<div class="hint">${esc(o.notes)}</div>`:''}${o.last_note?`<div class="hint">💬 ${esc(o.last_note)}</div>`:''}${trackBit(o)}</td>
     <td class="hint">${esc(o.facility)}</td>
     <td>${o.priority!=='Normal'?`<span style="color:${priColor(o.priority)}">${esc(o.priority)}</span>`:'<span class="hint">Normal</span>'}</td>
     <td class="hint">${esc(o.vendor||'')}${o.est_cost?`<div>${esc(o.est_cost)}</div>`:''}</td>
     <td>${statusPill(o.status)}<div class="hint">${esc(o.requested_by||'')}</div></td>
-    <td><div style="display:flex;gap:4px;flex-wrap:wrap">${actions(o)}</div></td></tr>`;
+    <td><div style="display:flex;gap:4px;flex-wrap:wrap">${actions(o)}</div></td></tr>
+    <tr id="onotesRow_${o.id}" style="display:none"><td colspan="6" style="background:#faf8f3"><div id="onotes_${o.id}"></div></td></tr>`;
   const open=orders.filter(o=>o.status==='requested'||o.status==='ordered');
   const doneList=orders.filter(o=>o.status==='received'||o.status==='cancelled').slice(0,30);
   body.innerHTML=`
@@ -7708,6 +7710,27 @@ async function orderTracking(id){
   try{ await api('/corp/orders/'+id,{method:'PATCH',body:JSON.stringify({tracking:t})}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); }
 }
 async function delOrder(id){ if(!confirm('Delete this order request?'))return; try{ await api('/corp/orders/'+id,{method:'DELETE'}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
+/* The chase log: dated, signed notes on one order — "called vendor", "backordered 7/15". */
+async function orderNotes(id){
+  const tr=$('onotesRow_'+id); if(!tr) return;
+  if(tr.style.display!=='none'){ tr.style.display='none'; return; }
+  tr.style.display='';
+  const host=$('onotes_'+id); host.innerHTML='<div class="hint">Loading…</div>';
+  try{
+    const d=await api('/corp/orders/'+id+'/notes');
+    host.innerHTML=`${(d.notes||[]).map(n=>`<div class="pc-note">💬 ${esc(n.note)} <span class="hint">— ${esc(n.by_name||'')} · ${esc((n.created||'').slice(0,16))}</span></div>`).join('')||'<div class="hint">No notes yet — the first one starts the story.</div>'}
+      <div class="toolbar" style="justify-content:flex-start;gap:6px;margin-top:6px"><input id="onoteIn_${id}" placeholder="Add a note — e.g. called vendor, backordered until 7/15" style="flex:1;min-width:180px" onkeydown="if(event.key==='Enter')orderNoteAdd(${id})"/><button class="btn btn-gold btn-sm sans" onclick="orderNoteAdd(${id})">Add note</button></div>`;
+    const inp=$('onoteIn_'+id); if(inp) inp.focus();
+  }catch(e){ host.innerHTML='<div class="hint">'+esc(e.message)+'</div>'; }
+}
+async function orderNoteAdd(id){
+  const el=$('onoteIn_'+id); const t=((el&&el.value)||'').trim(); if(!t) return;
+  try{
+    await api('/corp/orders/'+id+'/notes',{method:'POST',body:JSON.stringify({note:t})});
+    const tr=$('onotesRow_'+id); if(tr) tr.style.display='none';
+    orderNotes(id);   // reopen fresh with the new note in the list
+  }catch(e){ alert(e.message); }
+}
 let PAY_SHOW=false;
 async function renderCorpPayments(body){
   let d; try{ d=await api('/corp/payments'); }catch(e){ body.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }

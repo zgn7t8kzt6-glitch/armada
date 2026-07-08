@@ -5248,7 +5248,7 @@ app.get('/api/corp/overview', requireAuth, requireCorp, (req, res) => {
   // Ordering from the unified order_requests stream (all locations, facility-scopable).
   const ordDone = db.prepare(`SELECT created_at, ordered_at, received_at FROM order_requests WHERE status='received' AND substr(received_at,1,10) >= ?${facSql}`).all(since, ...fa);
   const ordering = {
-    open: db.prepare(`SELECT COUNT(*) n FROM order_requests WHERE status IN ('requested','ordered')${facSql}`).get(...fa).n,
+    open: db.prepare(`SELECT COUNT(*) n FROM order_requests WHERE status IN ('requested','needs_info','approval','ordered')${facSql}`).get(...fa).n,
     awaitingOrder: db.prepare(`SELECT COUNT(*) n FROM order_requests WHERE status='requested'${facSql}`).get(...fa).n,
     ordered: db.prepare(`SELECT COUNT(*) n FROM order_requests WHERE status='ordered'${facSql}`).get(...fa).n,
     completed: ordDone.length,
@@ -5269,7 +5269,7 @@ app.get('/api/corp/overview', requireAuth, requireCorp, (req, res) => {
   const taskCounts = { todo: 0, doing: 0, blocked: 0, done: 0 };
   for (const t of tasks) taskCounts[t.status] = t.n;
   // Where things are being requested right now (only meaningful in the all-locations view).
-  const openOrders = db.prepare(`SELECT facility, status, COUNT(*) n FROM order_requests WHERE status IN ('requested','ordered') GROUP BY facility, status`).all();
+  const openOrders = db.prepare(`SELECT facility, status, COUNT(*) n FROM order_requests WHERE status IN ('requested','needs_info','approval','ordered') GROUP BY facility, status`).all();
   const ordersByLocation = {};
   for (const r of openOrders) { const l = ordersByLocation[r.facility] = ordersByLocation[r.facility] || { facility: r.facility, requested: 0, ordered: 0 }; l[r.status] = r.n; }
   ordering.byLocation = Object.values(ordersByLocation).sort((a, b) => (b.requested + b.ordered) - (a.requested + a.ordered));
@@ -5345,11 +5345,11 @@ app.post('/api/corp/docs', requireAuth, requireCorp, (req, res) => {
 app.delete('/api/corp/docs/:id', requireAuth, requireCorp, (req, res) => { db.prepare(`DELETE FROM facility_docs WHERE id = ?`).run(req.params.id); res.json({ ok: true }); });
 // ── Corporate ordering (all 8 locations) ──────────────────────────────────────
 app.get('/api/corp/orders', requireAuth, requireCorp, (req, res) => {
-  const status = ['requested', 'ordered', 'received', 'cancelled', 'open'].includes(req.query.status) ? req.query.status : null;
+  const status = ['requested', 'needs_info', 'approval', 'ordered', 'received', 'cancelled', 'open'].includes(req.query.status) ? req.query.status : null;
   const rows = db.prepare(`SELECT *,
       (SELECT COUNT(*) FROM order_request_notes n WHERE n.order_id = order_requests.id) AS note_count,
       (SELECT n.note FROM order_request_notes n WHERE n.order_id = order_requests.id ORDER BY n.id DESC LIMIT 1) AS last_note
-    FROM order_requests ${status ? (status === 'open' ? `WHERE status IN ('requested','ordered')` : `WHERE status = '${status}'`) : ''}
+    FROM order_requests ${status ? (status === 'open' ? `WHERE status IN ('requested','needs_info','approval','ordered')` : `WHERE status = '${status}'`) : ''}
     ORDER BY (status='received'),(status='cancelled'), CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, id DESC`).all();
   const byLoc = {};
   for (const r of rows) { const l = byLoc[r.facility] = byLoc[r.facility] || { facility: r.facility, requested: 0, ordered: 0, received: 0, items: [] }; l.items.push(r); if (l[r.status] != null) l[r.status]++; }
@@ -5424,7 +5424,7 @@ app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
   const b = req.body || {};
   const o = db.prepare(`SELECT * FROM order_requests WHERE id = ?`).get(req.params.id);
   if (!o) return res.status(404).json({ error: 'Not found.' });
-  const status = ['requested', 'ordered', 'received', 'cancelled'].includes(b.status) ? b.status : o.status;
+  const status = ['requested', 'needs_info', 'approval', 'ordered', 'received', 'cancelled'].includes(b.status) ? b.status : o.status;
   const now = new Date().toISOString();
   const orderedAt = status === 'ordered' && o.status !== 'ordered' ? now : o.ordered_at;
   const receivedAt = status === 'received' && o.status !== 'received' ? now : o.received_at;
@@ -5448,7 +5448,7 @@ app.patch('/api/corp/orders/:id', requireAuth, requireCorp, (req, res) => {
   }
   if (status !== o.status && status !== 'requested') {
     const evName = { ordered: 'order.placed', received: 'order.received', cancelled: 'order.cancelled' }[status];
-    publishEvent({ event: evName, entity: 'order', entity_id: o.id, facility_id: facilityForEntity(o.facility)?.id ?? null, actor: req.user.username, summary: `${o.item_name} ${status} · ${o.facility}` });
+    if (evName) publishEvent({ event: evName, entity: 'order', entity_id: o.id, facility_id: facilityForEntity(o.facility)?.id ?? null, actor: req.user.username, summary: `${o.item_name} ${status} · ${o.facility}` });
   }
   res.json({ ok: true });
 });

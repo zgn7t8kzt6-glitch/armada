@@ -7621,31 +7621,47 @@ async function renderCorpOrders(body){
   if(CORP_FAC) orders=orders.filter(o=>o.facility===CORP_FAC);
   const pris=['Low','Normal','High','Urgent'];
   const priColor=(p)=>p==='Urgent'?'var(--danger)':p==='High'?'#a60':'';
-  const statusPill=(s)=>({requested:'<span class="risk risk-elev">requested</span>',ordered:'<span class="risk risk-low">ordered</span>',received:'<span class="risk" style="background:#e6f4ea;color:#137333">received</span>',cancelled:'<span class="hint">cancelled</span>'}[s]||s);
-  const actions=(o)=>{
+  const trackBit=(o)=>o.tracking?`<div class="hint">📦 ${/^https?:\/\//i.test(o.tracking)?`<a href="${esc(o.tracking)}" target="_blank" rel="noopener">tracking ↗</a>`:esc(o.tracking)}</div>`:'';
+  // The board: drag a card between lanes on desktop; the buttons do the same on a phone.
+  const LANES=[
+    ['requested','📥 Requested','#c9a35c'],
+    ['needs_info','❓ Questions needed','#b3762f'],
+    ['approval','✋ Approval needed','#9a5aa3'],
+    ['ordered','🛒 Ordered','#4f7fa8'],
+    ['received','✅ Received','#2f7a4f'],
+  ];
+  const moves=(o)=>{
+    const btn=(st,label,gold)=>`<button class="btn ${gold?'btn-gold':'btn-ghost'} btn-sm sans" style="padding:3px 8px" onclick="setOrder(${o.id},'${st}')">${label}</button>`;
     let b='';
-    if(o.status==='requested') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'ordered')">Mark ordered</button>`;
-    if(o.status==='ordered') b+=`<button class="btn btn-gold btn-sm sans" onclick="setOrder(${o.id},'received')">Mark received</button><button class="btn btn-ghost btn-sm sans" onclick="orderTracking(${o.id})" title="Add carrier tracking — the requester sees it on their status page">📦</button>`;
-    if(o.status!=='received'&&o.status!=='cancelled') b+=`<button class="btn btn-ghost btn-sm sans" onclick="setOrder(${o.id},'cancelled')">Cancel</button>`;
-    b+=`<button class="btn btn-ghost btn-sm sans" onclick="orderNotes(${o.id})" title="Chase log — dated notes on this order">💬${o.note_count?o.note_count:''}</button>`;
-    b+=`<button class="btn btn-ghost btn-sm sans" onclick="delOrder(${o.id})">🗑</button>`;
+    if(o.status==='requested'){ b+=btn('ordered','✓ Ordered',1)+btn('needs_info','❓')+btn('approval','✋'); }
+    else if(o.status==='needs_info'){ b+=btn('ordered','✓ Ordered',1)+btn('requested','📥 Back')+btn('approval','✋'); }
+    else if(o.status==='approval'){ b+=btn('ordered','✓ Approve & order',1)+btn('requested','📥 Back'); }
+    else if(o.status==='ordered'){ b+=btn('received','📬 Received',1)+`<button class="btn btn-ghost btn-sm sans" style="padding:3px 8px" onclick="orderTracking(${o.id})" title="Add carrier tracking">📦</button>`; }
+    if(!['received','cancelled'].includes(o.status)) b+=btn('cancelled','✕');
+    b+=`<button class="btn btn-ghost btn-sm sans" style="padding:3px 8px" onclick="orderNotes(${o.id})" title="Chase log — dated notes">💬${o.note_count?o.note_count:''}</button>`;
+    b+=`<button class="btn btn-ghost btn-sm sans" style="padding:3px 8px" onclick="delOrder(${o.id})">🗑</button>`;
     return b;
   };
-  const trackBit=(o)=>o.tracking?`<div class="hint">📦 ${/^https?:\/\//i.test(o.tracking)?`<a href="${esc(o.tracking)}" target="_blank" rel="noopener">tracking ↗</a>`:esc(o.tracking)}</div>`:'';
-  const rowH=(o)=>`<tr>
-    <td><strong>${esc(o.item_name)}</strong>${o.qty?` <span class="hint">· ${esc(o.qty)}</span>`:''}${o.link?` <a href="${esc(o.link)}" target="_blank" rel="noopener">🔗</a>`:''}${o.notes?`<div class="hint">${esc(o.notes)}</div>`:''}${o.last_note?`<div class="hint">💬 ${esc(o.last_note)}</div>`:''}${trackBit(o)}</td>
-    <td class="hint">${esc(o.facility)}</td>
-    <td>${o.priority!=='Normal'?`<span style="color:${priColor(o.priority)}">${esc(o.priority)}</span>`:'<span class="hint">Normal</span>'}</td>
-    <td class="hint">${esc(o.vendor||'')}${o.est_cost?`<div>${esc(o.est_cost)}</div>`:''}</td>
-    <td>${statusPill(o.status)}<div class="hint">${esc(o.requested_by||'')}</div></td>
-    <td><div style="display:flex;gap:4px;flex-wrap:wrap">${actions(o)}</div></td></tr>
-    <tr id="onotesRow_${o.id}" style="display:none"><td colspan="6" style="background:#faf8f3"><div id="onotes_${o.id}"></div></td></tr>`;
-  const open=orders.filter(o=>o.status==='requested'||o.status==='ordered');
-  const doneList=orders.filter(o=>o.status==='received'||o.status==='cancelled').slice(0,30);
+  const card=(o)=>`<div class="q-row" draggable="true" ondragstart="ordDragStart(event,${o.id})" style="display:block;padding:10px 12px;cursor:grab">
+    <div><strong>${esc(o.item_name)}</strong>${o.qty?` <span class="hint">· ${esc(o.qty)}</span>`:''}${o.link?` <a href="${esc(o.link)}" target="_blank" rel="noopener">🔗</a>`:''}${o.priority!=='Normal'?` <span style="color:${priColor(o.priority)};font-size:11px;font-weight:700">${esc(o.priority.toUpperCase())}</span>`:''}</div>
+    <div class="hint">${esc(o.facility)}${o.vendor?' · '+esc(o.vendor):''}${o.est_cost?' · '+esc(o.est_cost):''}${o.requested_by?' · by '+esc(o.requested_by):''}</div>
+    ${o.notes?`<div class="hint">${esc(o.notes)}</div>`:''}${o.last_note?`<div class="hint">💬 ${esc(o.last_note)}</div>`:''}${trackBit(o)}
+    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${moves(o)}</div>
+    <div id="onotesRow_${o.id}" style="display:none"><div id="onotes_${o.id}"></div></div>
+  </div>`;
+  const cutoff=new Date(Date.now()-14*864e5).toISOString().slice(0,10);
+  const laneItems=(k)=>k==='received'
+    ? orders.filter(o=>o.status==='received'&&String(o.received_at||o.updated_at||'').slice(0,10)>=cutoff).slice(0,15)
+    : orders.filter(o=>o.status===k);
+  const col=([k,label,color])=>{const items=laneItems(k);return `<div class="trello-col" data-lane="${k}" ondragover="ordDragOver(event)" ondragleave="this.classList.remove('dragover')" ondrop="ordDrop(event,'${k}')">
+    <div class="trello-head" style="border-top:3px solid ${color};border-radius:12px 12px 0 0"><strong class="sans">${label}</strong> <span class="hint">${items.length}${k==='received'?' · 14d':''}</span></div>
+    <div class="trello-body">${items.map(card).join('')||'<div class="hint" style="padding:8px">Empty.</div>'}</div></div>`;};
+  const openN=orders.filter(o=>['requested','needs_info','approval','ordered'].includes(o.status)).length;
+  const doneList=orders.filter(o=>o.status==='cancelled'||(o.status==='received'&&String(o.received_at||o.updated_at||'').slice(0,10)<cutoff)).slice(0,30);
   body.innerHTML=`
-    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🛒 Open queue <span class="hint" style="font-weight:400">· ${open.length}</span></h3></div>
+    <div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">🛒 Order board <span class="hint" style="font-weight:400">· ${openN} open · drag cards between lanes (or use the buttons)</span></h3></div>
       <label class="hint">Location <select onchange="CORP_FAC=this.value;renderCorpOrders($('corpBody'))"><option value="">All</option>${locs.map(l=>`<option ${CORP_FAC===l?'selected':''}>${esc(l)}</option>`).join('')}</select></label></div>
-      ${open.length?`<table class="tbl"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${open.map(rowH).join('')}</table>`:'<div class="hint">Nothing open. Detox auto-flags land here automatically; add anything below.</div>'}</div>
+      <div class="trello" style="margin-top:8px">${LANES.map(col).join('')}</div></div>
     <div class="card"><details><summary><strong>＋ Add an order request</strong> <span class="hint">any location — defaults to Detox</span></summary><div style="margin-top:8px">
       <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">
         <select id="oFac">${locs.map(l=>`<option ${(CORP_FAC||'Armada Detox of Akron')===l?'selected':''}>${esc(l)}</option>`).join('')}</select>
@@ -7658,7 +7674,7 @@ async function renderCorpOrders(body){
         <input id="oLink" placeholder="Amazon / supplier link (optional)" style="width:100%"/>
         <button class="btn btn-gold sans" onclick="addOrder()">Add order</button></div>
       <span id="oMsg" class="hint"></span></div></details></div>
-    ${doneList.length?`<div class="card"><details><summary><strong>Recently completed</strong> <span class="hint">· ${doneList.length}</span></summary><table class="tbl" style="margin-top:6px"><tr><th>Item</th><th>Location</th><th>Priority</th><th>Vendor</th><th>Status</th><th></th></tr>${doneList.map(rowH).join('')}</table></details></div>`:''}
+    ${doneList.length?`<div class="card"><details><summary><strong>Older received &amp; cancelled</strong> <span class="hint">· ${doneList.length}</span></summary>${doneList.map(o=>`<div class="pc-note">${o.status==='received'?'✅':'✕'} <strong>${esc(o.item_name)}</strong> <span class="hint">· ${esc(o.facility)}${o.vendor?' · '+esc(o.vendor):''} · ${esc(String(o.received_at||o.updated_at||'').slice(0,10))}</span></div>`).join('')}</details></div>`:''}
     <div id="intakePanel"></div>`;
   loadIntakePanel();
 }
@@ -7709,6 +7725,10 @@ async function orderTracking(id){
   try{ await api('/corp/orders/'+id,{method:'PATCH',body:JSON.stringify({tracking:t})}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); }
 }
 async function delOrder(id){ if(!confirm('Delete this order request?'))return; try{ await api('/corp/orders/'+id,{method:'DELETE'}); renderCorpOrders($('corpBody')); }catch(e){ alert(e.message); } }
+/* Drag & drop between board lanes (desktop); the card buttons cover mobile. */
+function ordDragStart(ev,id){ ev.dataTransfer.setData('text/plain',String(id)); ev.dataTransfer.effectAllowed='move'; }
+function ordDragOver(ev){ ev.preventDefault(); ev.dataTransfer.dropEffect='move'; ev.currentTarget.classList.add('dragover'); }
+function ordDrop(ev,lane){ ev.preventDefault(); ev.currentTarget.classList.remove('dragover'); const id=+ev.dataTransfer.getData('text/plain'); if(id) setOrder(id,lane); }
 /* The chase log: dated, signed notes on one order — "called vendor", "backordered 7/15". */
 async function orderNotes(id){
   const tr=$('onotesRow_'+id); if(!tr) return;

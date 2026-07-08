@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>My Hilltop</title>
+<link rel="icon" href="/logo.png"/>
+<style>
+:root{--navy:#235056;--gold:#d29a5e;--cream:#f6f2ea;--paper:#fffdf9;--ink:#20302d;--muted:#6f7a75;--line:#e7e0d3;--danger:#b3382f;--good:#2f7a4f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--cream);color:var(--ink);min-height:100vh;padding-bottom:90px}
+.wrap{max-width:520px;margin:0 auto;padding:18px 16px}
+h1{font-size:24px;color:var(--navy)} h2{font-size:17px;margin-bottom:8px;color:var(--navy)}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:14px;box-shadow:0 2px 10px rgba(35,80,86,.06)}
+.hint{font-size:13px;color:var(--muted)}
+input,select,textarea{width:100%;font-size:16px;padding:13px;border:1px solid var(--line);border-radius:12px;background:#fcfbf8;margin-top:8px}
+button{font-size:16px;font-weight:700;padding:14px;border:none;border-radius:13px;background:var(--gold);color:#fff;width:100%;margin-top:10px;cursor:pointer}
+button.ghost{background:var(--paper);color:var(--ink);border:1px solid var(--line)}
+.stat{display:flex;gap:10px;margin-top:12px}
+.stat>div{flex:1;background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:14px 8px;text-align:center}
+.stat .n{font-size:30px;font-weight:800;color:var(--navy)} .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.tabs{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--paper);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+.tabs button{flex:1;background:none;color:var(--muted);font-size:10.5px;font-weight:600;margin:0;padding:6px 2px;display:flex;flex-direction:column;align-items:center;gap:2px;border-radius:12px}
+.tabs button.on{color:var(--navy);background:rgba(95,176,194,.12)}
+.tabs .i{font-size:21px}
+.row{padding:10px 0;border-bottom:1px solid var(--line);font-size:14.5px}
+.row:last-child{border-bottom:none}
+.pill{font-size:11px;padding:2px 8px;border-radius:9px;background:#eee}
+.pill.open{background:#fdf0e2;color:#8a5a23}.pill.done{background:#e8f3ec;color:var(--good)}
+.msg{margin-top:8px;font-size:14px;color:var(--good)} .err{color:var(--danger)}
+pre{white-space:pre-wrap;font-family:inherit;font-size:14.5px;line-height:1.7}
+.screen{display:none}.screen.on{display:block}
+.pinbox{font-size:28px;letter-spacing:10px;text-align:center;font-weight:800}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="login" class="screen on">
+    <div style="text-align:center;margin-top:36px"><img src="/logo.png" alt="" style="height:64px"/><h1 style="margin-top:10px">My Hilltop</h1>
+      <div class="hint">Your house, your progress, your requests — on your phone.</div></div>
+    <div class="card">
+      <h2>Sign in with your PIN</h2>
+      <div class="hint">A staff member gives you your 6-digit PIN. It's yours only.</div>
+      <input id="pin" class="pinbox" inputmode="numeric" maxlength="6" placeholder="••••••" autocomplete="one-time-code"/>
+      <button onclick="doLogin()">Sign in</button>
+      <div id="loginMsg" class="msg err"></div>
+    </div>
+  </div>
+
+  <div id="home" class="screen">
+    <h1 id="hello">Welcome</h1>
+    <div class="stat"><div><div class="n" id="soberN">–</div><div class="l">days sober</div></div>
+      <div><div class="n" id="houseN">–</div><div class="l">days in house</div></div>
+      <div><div class="n" id="meetN">–</div><div class="l">meetings · 7d</div></div></div>
+    <div class="card"><h2>🙌 Log a meeting</h2>
+      <div class="hint">Went to a meeting? Log it — it counts toward your weekly goal.</div>
+      <input id="meetDetail" placeholder="e.g. Tuesday Big Book, 7pm"/>
+      <button onclick="logMeeting()">Log meeting</button><div id="meetMsg" class="msg"></div></div>
+    <div class="card"><h2>📸 Upload a meeting sheet</h2>
+      <div class="hint">Snap a photo of your signed sheet — it goes straight to your file.</div>
+      <input id="sheet" type="file" accept="image/*,.pdf"/>
+      <button onclick="upSheet()">Upload</button><div id="sheetMsg" class="msg"></div></div>
+  </div>
+
+  <div id="rules" class="screen">
+    <h1>House rules</h1>
+    <div class="card"><pre id="rulesText">Loading…</pre></div>
+  </div>
+
+  <div id="rent" class="screen">
+    <h1>My rent</h1>
+    <div class="card"><h2>Balance</h2><div style="font-size:34px;font-weight:800" id="balN">–</div>
+      <div class="hint">Positive = you owe; talk to your house manager about a plan any time.</div></div>
+    <div class="card"><h2>Recent activity</h2><div id="ledList" class="hint">Loading…</div></div>
+  </div>
+
+  <div id="req" class="screen">
+    <h1>Requests</h1>
+    <div class="card"><h2>Ask for something</h2>
+      <select id="reqCat"><option>Maintenance</option><option>Supplies</option><option>Other</option></select>
+      <textarea id="reqText" rows="3" placeholder="e.g. Bathroom sink is dripping · we're out of paper towels"></textarea>
+      <button onclick="sendReq()">Send to staff</button><div id="reqMsg" class="msg"></div></div>
+    <div class="card"><h2>My requests</h2><div id="reqList" class="hint">Loading…</div></div>
+  </div>
+</div>
+
+<div class="tabs" id="tabs" style="display:none">
+  <button data-s="home" class="on" onclick="go('home')"><span class="i">☀️</span>Home</button>
+  <button data-s="rules" onclick="go('rules')"><span class="i">📜</span>Rules</button>
+  <button data-s="rent" onclick="go('rent')"><span class="i">💵</span>Rent</button>
+  <button data-s="req" onclick="go('req')"><span class="i">🙋</span>Requests</button>
+  <button onclick="signOut()"><span class="i">🚪</span>Sign out</button>
+</div>
+
+<script>
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let TOKEN=localStorage.getItem('portalToken')||'';
+async function api(p,o={}){
+  const r=await fetch('/api'+p,{headers:{'Content-Type':'application/json','X-Portal-Token':TOKEN},...o});
+  const d=await r.json().catch(()=>({}));
+  if(r.status===401&&!p.startsWith('/portal/login')){ signOut(); throw new Error('auth'); }
+  if(!r.ok) throw new Error(d.error||'Something went wrong');
+  return d;
+}
+function go(s){
+  document.querySelectorAll('.screen').forEach(x=>x.classList.toggle('on',x.id===s));
+  document.querySelectorAll('#tabs button[data-s]').forEach(b=>b.classList.toggle('on',b.dataset.s===s));
+  window.scrollTo(0,0);
+}
+function signOut(){ localStorage.removeItem('portalToken'); TOKEN=''; $('tabs').style.display='none'; go('login'); }
+async function doLogin(){
+  $('loginMsg').textContent='';
+  try{
+    const d=await api('/portal/login',{method:'POST',body:JSON.stringify({pin:$('pin').value})});
+    TOKEN=d.token; localStorage.setItem('portalToken',TOKEN); $('pin').value='';
+    await boot();
+  }catch(e){ $('loginMsg').textContent=e.message; }
+}
+async function boot(){
+  let d; try{ d=await api('/portal/me'); }catch(e){ return; }
+  $('tabs').style.display='flex'; go('home');
+  $('hello').textContent='Welcome home, '+(d.firstName||'')+(d.house?' · '+d.house:'');
+  $('soberN').textContent=d.soberDays!=null?d.soberDays:'–';
+  $('houseN').textContent=d.daysInHouse!=null?d.daysInHouse:'–';
+  $('meetN').textContent=d.meetingsThisWeek!=null?d.meetingsThisWeek:'–';
+  $('rulesText').textContent=d.rules||'';
+  $('balN').textContent='$'+Number(d.rent&&d.rent.balance||0).toLocaleString();
+  $('balN').style.color=(d.rent&&d.rent.balance>0)?'var(--danger)':'var(--good)';
+  $('ledList').innerHTML=((d.rent&&d.rent.recent)||[]).map(l=>`<div class="row">${esc(l.date)} · ${esc(l.kind)} · $${Number(l.amount).toLocaleString()}${l.memo?' · '+esc(l.memo):''}</div>`).join('')||'No activity yet.';
+  $('reqList').innerHTML=(d.requests||[]).map(r=>`<div class="row">${esc(r.text)} <span class="pill ${r.status==='open'?'open':'done'}">${esc(r.status)}</span><div class="hint">${esc(r.category)} · ${esc((r.created||'').slice(0,10))}</div></div>`).join('')||'Nothing yet — ask for what you need.';
+}
+async function logMeeting(){
+  try{ await api('/portal/meeting',{method:'POST',body:JSON.stringify({detail:$('meetDetail').value})}); $('meetMsg').textContent='✓ Logged — nice work.'; $('meetDetail').value=''; boot(); }
+  catch(e){ $('meetMsg').textContent=e.message; }
+}
+function upSheet(){
+  const f=$('sheet').files[0];
+  if(!f){ $('sheetMsg').textContent='Pick a photo first.'; return; }
+  if(f.size>6e6){ $('sheetMsg').textContent='Photo too large — try again a bit smaller.'; return; }
+  $('sheetMsg').textContent='Uploading…';
+  const rd=new FileReader();
+  rd.onload=async()=>{ try{ await api('/portal/file',{method:'POST',body:JSON.stringify({name:f.name,data:rd.result})}); $('sheetMsg').textContent='✓ On your file. Thank you!'; $('sheet').value=''; }catch(e){ $('sheetMsg').textContent=e.message; } };
+  rd.readAsDataURL(f);
+}
+async function sendReq(){
+  try{ await api('/portal/request',{method:'POST',body:JSON.stringify({category:$('reqCat').value,text:$('reqText').value})}); $('reqMsg').textContent='✓ Sent — staff will see it right away.'; $('reqText').value=''; boot(); }
+  catch(e){ $('reqMsg').textContent=e.message; }
+}
+if(TOKEN) boot();
+</script>
+</body>
+</html>

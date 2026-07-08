@@ -1325,6 +1325,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_housing_rounds_log ON housing_rounds_log(resident_id, id);
 `);
+try { db.exec(`ALTER TABLE housing_residents ADD COLUMN portal_pin TEXT`); } catch { /* exists */ }
 
 export function mountHousing(app) {
   housingSchema();
@@ -1801,6 +1802,102 @@ export function mountHousing(app) {
     const rows = db.prepare(`SELECT l.*, r.name FROM housing_rounds_log l JOIN housing_residents r ON r.id=l.resident_id
       WHERE substr(l.created,1,10)=?${hid ? ` AND l.house_id=${hid}` : ''} ORDER BY l.id DESC LIMIT 200`).all(date);
     res.json({ date, rows });
+  });
+
+  /* ═══ RESIDENT PORTAL — each resident's own page on their own phone.
+     PIN-gated (staff issues the PIN), 30-day signed token, no password and no
+     access to anyone else's data. House tablets use the same page. ═══ */
+  function portalSecret() { let s = getState('portal_secret'); if (!s) { s = crypto.randomBytes(24).toString('hex'); setState('portal_secret', s); } return s; }
+  const signPortal = (rid) => { const p = (Date.now() + 30 * 864e5) + '.' + rid; return p + '.' + crypto.createHmac('sha256', portalSecret()).update(p).digest('hex').slice(0, 32); };
+  const verifyPortal = (tok) => {
+    const [exp, rid, sig] = String(tok || '').split('.');
+    if (!exp || !rid || !sig || +exp < Date.now()) return null;
+    const good = crypto.createHmac('sha256', portalSecret()).update(exp + '.' + rid).digest('hex').slice(0, 32);
+    try { if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(good))) return null; } catch { return null; }
+    return +rid;
+  };
+  function requirePortal(req, res, next) {
+    const rid = verifyPortal(req.headers['x-portal-token'] || req.query.t);
+    const r = rid ? db.prepare(`SELECT * FROM housing_residents WHERE id=? AND status='active'`).get(rid) : null;
+    if (!r) return res.status(401).json({ error: 'Sign in with your PIN.' });
+    req.portalResident = r; next();
+  }
+  // PIN sign-in is public — pace it hard so 6 digits can't be guessed.
+  const _pinTries = new Map();
+  app.post('/api/portal/login', (req, res) => {
+    const ip = req.ip || 'x';
+    const t = _pinTries.get(ip) || { n: 0, at: Date.now() };
+    if (Date.now() - t.at > 3600e3) { t.n = 0; t.at = Date.now(); }
+    if (t.n >= 10) return res.status(429).json({ error: 'Too many tries — ask a staff member to help you sign in.' });
+    t.n++; _pinTries.set(ip, t);
+    const pin = String(req.body?.pin || '').replace(/\D/g, '');
+    if (pin.length < 6) return res.status(400).json({ error: 'Enter your 6-digit PIN.' });
+    const r = db.prepare(`SELECT id, name FROM housing_residents WHERE portal_pin=? AND status='active'`).get(pin);
+    if (!r) return res.status(401).json({ error: 'PIN not recognized — ask a staff member to set or reset it.' });
+    _pinTries.delete(ip);
+    audit({ user: { name: 'portal' }, action: 'PORTAL_LOGIN', detail: r.name, ip: req.ip });
+    res.json({ token: signPortal(r.id), firstName: (r.name || '').split(/\s+/)[0] });
+  });
+  const DEFAULT_HOUSE_RULES = 'Curfew is 9:00 PM.\nNo mood- or mind-altering substances while you are a resident.\nAttend your required recovery meetings each week.\nTreat staff and housemates with the kindness you want back.\nIf you need something, ask — staff will always give you an answer.';
+  app.get('/api/portal/me', requirePortal, (req, res) => {
+    const r = req.portalResident;
+    const days = (d) => d ? Math.max(0, Math.floor((Date.now() - Date.parse(String(d).slice(0, 10) + 'T12:00:00')) / 864e5)) : null;
+    const led = db.prepare(`SELECT date, kind, amount, memo FROM housing_ledger WHERE resident_id=? ORDER BY date DESC, id DESC LIMIT 8`).all(r.id);
+    const bal = db.prepare(`SELECT COALESCE(SUM(CASE WHEN kind IN ('charge','adjustment') THEN amount ELSE -amount END),0) b FROM housing_ledger WHERE resident_id=?`).get(r.id).b;
+    res.json({
+      firstName: (r.name || '').split(/\s+/)[0],
+      house: db.prepare(`SELECT name FROM housing_houses WHERE id=?`).get(r.house_id)?.name || null,
+      soberDays: days(r.sober_date), daysInHouse: days(r.move_in), phase: r.phase,
+      rules: getState('house_rules_text') || DEFAULT_HOUSE_RULES,
+      rent: { balance: Math.round(bal * 100) / 100, recent: led },
+      requests: db.prepare(`SELECT id, category, text, status, created FROM housing_requests WHERE resident_id=? ORDER BY id DESC LIMIT 10`).all(r.id),
+      meetingsThisWeek: db.prepare(`SELECT COUNT(*) n FROM housing_supports WHERE resident_id=? AND type='meeting' AND date >= date('now','-6 day')`).get(r.id).n,
+    });
+  });
+  app.post('/api/portal/request', requirePortal, (req, res) => {
+    const cat = ['Maintenance', 'Supplies', 'Other'].includes(req.body?.category) ? req.body.category : 'Other';
+    const text = String(req.body?.text || '').trim().slice(0, 500);
+    if (!text) return res.status(400).json({ error: 'Tell us what you need.' });
+    db.prepare(`INSERT INTO housing_requests (resident_id, category, text) VALUES (?,?,?)`).run(req.portalResident.id, cat, text);
+    res.json({ ok: true });
+  });
+  app.post('/api/portal/meeting', requirePortal, (req, res) => {
+    const detail = String(req.body?.detail || '').trim().slice(0, 200) || 'Recovery meeting (self-logged)';
+    db.prepare(`INSERT INTO housing_supports (resident_id, date, type, detail, by) VALUES (?,?,?,?,?)`)
+      .run(req.portalResident.id, todayStr(), 'meeting', detail, 'resident (portal)');
+    res.json({ ok: true });
+  });
+  app.post('/api/portal/file', requirePortal, (req, res) => {
+    const b = req.body || {};
+    const m = String(b.data || '').match(/^data:([\w/+.-]+);base64,(.+)$/s);
+    if (!m) return res.status(400).json({ error: 'Attach a photo first.' });
+    if (m[2].length > 8_000_000) return res.status(400).json({ error: 'Photo too large — try a smaller one.' });
+    db.prepare(`INSERT INTO housing_files (resident_id, name, media_type, size, data, by_name) VALUES (?,?,?,?,?,?)`)
+      .run(req.portalResident.id, ('Meeting sheet — ' + String(b.name || todayStr())).slice(0, 200), m[1].slice(0, 100), Math.round(m[2].length * 0.75), m[2], 'resident (portal)');
+    db.prepare(`INSERT INTO housing_notes (resident_id, category, note, by_name) VALUES (?,?,?,?)`)
+      .run(req.portalResident.id, 'Task', 'Uploaded a meeting sheet from the resident portal.', 'portal');
+    res.json({ ok: true });
+  });
+  // Staff side: issue / reset a resident's PIN (unique across active residents).
+  app.post('/api/housing/residents/:id/portal-pin', requireAuth, (req, res) => {
+    const r = db.prepare(`SELECT id, name FROM housing_residents WHERE id=?`).get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Not found' });
+    let pin = '';
+    for (let i = 0; i < 25 && !pin; i++) {
+      const cand = String(crypto.randomInt(100000, 999999));
+      if (!db.prepare(`SELECT 1 FROM housing_residents WHERE portal_pin=?`).get(cand)) pin = cand;
+    }
+    if (!pin) return res.status(500).json({ error: 'Could not generate a unique PIN — try again.' });
+    db.prepare(`UPDATE housing_residents SET portal_pin=? WHERE id=?`).run(pin, r.id);
+    audit({ user: req.user, action: 'PORTAL_PIN_SET', detail: r.name, ip: req.ip });
+    res.json({ ok: true, pin });
+  });
+  // House rules text (shown to every resident in the portal).
+  app.get('/api/housing/rules', requireAuth, (req, res) => res.json({ rules: getState('house_rules_text') || DEFAULT_HOUSE_RULES }));
+  app.post('/api/housing/rules', requireAuth, (req, res) => {
+    if (!(req.user.role === 'admin' || ['Housing Director', 'Executive Director'].includes(req.user.job_role))) return res.status(403).json({ error: 'Housing leadership only.' });
+    setState('house_rules_text', String(req.body?.rules || '').slice(0, 8000));
+    res.json({ ok: true });
   });
 
   app.post('/api/housing/residents', requireAuth, (req, res) => {

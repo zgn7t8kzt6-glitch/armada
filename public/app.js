@@ -338,8 +338,9 @@ function moduleVisible(v){
 // Where each facility TYPE lands when you switch to it — its natural home page.
 const TYPE_HOME = { 'detox':'opscenter', 'residential':'opscenter', 'outpatient':'outpatient', 'sober-living':'housing', 'corporate':'corphub' };
 // Corporate Operations (Chava): walled to her lane — the hub, ordering, food
-// service, supplies/par levels, maintenance.
-const CORPORATE_VIEWS = ['corphub','opscenter','inventory','meals','maintenance'];
+// service, supplies/par levels, and maintenance work orders. No facility pulse
+// (Ops Center is clinical-operations ground she doesn't work).
+const CORPORATE_VIEWS = ['corphub','inventory','meals','maintenance'];
 let PREVIEW_ROLE=null;   // admin "preview as" — see the app exactly as a role does
 function isCorporateRole(){ const jr=(v)=>String(v||'').trim().toLowerCase()==='executive assistant'; return !!(ME && (jr(ME.job_role) || jr(PREVIEW_ROLE))); }
 // Role-based menu: frontline care staff get a flat, task-ordered sidebar (no group
@@ -353,7 +354,7 @@ const ROLE_MENU = {
   'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','handbook','library'],
   'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','handbook','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
-  'Executive Assistant': ['corphub','opscenter','inventory','meals','maintenance','myrole','mygrowth','handbook','messages'],
+  'Executive Assistant': ['corphub','inventory','meals','maintenance','myrole','mygrowth','handbook','messages'],
   // The Case Manager's day, in order: home → meeting queue → caseload → the exits
   // (discharge/continuum) → the money guardrails (auths, billing readiness) → circle.
   'Case Manager': ['dashboard','appts','casemgmt','clients','records','dischargepage','continuum','authreg','billingready','family','referrals','alumni','incidents','messages','team','training','handbook','library'],

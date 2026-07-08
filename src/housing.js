@@ -1292,6 +1292,40 @@ async function deliverDailyMovement(date) {
   return { sent, total: list.length, failed, census: e.census, intakes: e.intakes.length, discharges: e.discharges.length };
 }
 
+// ── One Step replacement: the resident CHART grows quick notes, medication
+// logging, uploaded documents, and the overnight rounds trail. ──────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS housing_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER NOT NULL, category TEXT DEFAULT 'General',
+    note TEXT NOT NULL, by_name TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_housing_notes ON housing_notes(resident_id, id);
+  CREATE TABLE IF NOT EXISTS housing_meds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER NOT NULL, med TEXT NOT NULL, dose TEXT, schedule TEXT,
+    prescriber TEXT, active INTEGER DEFAULT 1, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS housing_med_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER NOT NULL, med_id INTEGER, status TEXT DEFAULT 'taken',
+    note TEXT, by_name TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_housing_med_logs ON housing_med_logs(resident_id, id);
+  CREATE TABLE IF NOT EXISTS housing_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resident_id INTEGER NOT NULL, name TEXT, media_type TEXT, size INTEGER,
+    data TEXT, by_name TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_housing_files ON housing_files(resident_id, id);
+  CREATE TABLE IF NOT EXISTS housing_rounds_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    house_id INTEGER, resident_id INTEGER NOT NULL, status TEXT NOT NULL,
+    note TEXT, by_name TEXT, created TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_housing_rounds_log ON housing_rounds_log(resident_id, id);
+`);
+
 export function mountHousing(app) {
   housingSchema();
   try {
@@ -1675,7 +1709,98 @@ export function mountHousing(app) {
       employment: currentEmployment(r.id) || null,
       employmentHistory: db.prepare(`SELECT * FROM housing_employment WHERE resident_id=? ORDER BY date DESC LIMIT 10`).all(r.id),
       jobsearch: db.prepare(`SELECT * FROM housing_jobsearch WHERE resident_id=? ORDER BY date DESC LIMIT 30`).all(r.id),
+      chartNotes: db.prepare(`SELECT * FROM housing_notes WHERE resident_id=? ORDER BY id DESC LIMIT 40`).all(r.id),
+      meds: db.prepare(`SELECT m.*, (SELECT l.status || ' · ' || substr(l.created,1,16) || ' · ' || COALESCE(l.by_name,'') FROM housing_med_logs l WHERE l.med_id=m.id ORDER BY l.id DESC LIMIT 1) AS last_log FROM housing_meds m WHERE m.resident_id=? ORDER BY m.active DESC, m.id`).all(r.id),
+      medLogs: db.prepare(`SELECT l.*, m.med FROM housing_med_logs l LEFT JOIN housing_meds m ON m.id=l.med_id WHERE l.resident_id=? ORDER BY l.id DESC LIMIT 20`).all(r.id),
+      files: db.prepare(`SELECT id, name, media_type, size, by_name, created FROM housing_files WHERE resident_id=? ORDER BY id DESC LIMIT 40`).all(r.id),
+      roundsLog: db.prepare(`SELECT * FROM housing_rounds_log WHERE resident_id=? ORDER BY id DESC LIMIT 25`).all(r.id),
     });
+  });
+
+  // ── Chart quick-notes: "sex-offender check done", "got bedding", behavior
+  // patterns — anything real that doesn't warrant a full form. Append-only.
+  app.post('/api/housing/residents/:id/notes', requireAuth, (req, res) => {
+    const r = db.prepare(`SELECT id, name FROM housing_residents WHERE id=?`).get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Not found' });
+    const note = String(req.body?.note || '').trim().slice(0, 1000);
+    if (!note) return res.status(400).json({ error: 'Write the note first.' });
+    const cat = ['General', 'Task', 'Behavior', 'Property', 'Compliance', 'Milestone'].includes(req.body?.category) ? req.body.category : 'General';
+    db.prepare(`INSERT INTO housing_notes (resident_id, category, note, by_name) VALUES (?,?,?,?)`).run(r.id, cat, note, req.user.name);
+    audit({ user: req.user, action: 'HOUSING_NOTE', detail: `${r.name}: ${cat}`, ip: req.ip });
+    res.json({ ok: true });
+  });
+
+  // ── Medications: the list + self-administration observation log.
+  app.post('/api/housing/residents/:id/meds', requireAuth, (req, res) => {
+    const r = db.prepare(`SELECT id FROM housing_residents WHERE id=?`).get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Not found' });
+    const med = String(req.body?.med || '').trim().slice(0, 160);
+    if (!med) return res.status(400).json({ error: 'Medication name required.' });
+    db.prepare(`INSERT INTO housing_meds (resident_id, med, dose, schedule, prescriber) VALUES (?,?,?,?,?)`)
+      .run(r.id, med, String(req.body?.dose || '').slice(0, 80) || null, String(req.body?.schedule || '').slice(0, 120) || null, String(req.body?.prescriber || '').slice(0, 120) || null);
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/meds/:mid/log', requireAuth, (req, res) => {
+    const m = db.prepare(`SELECT * FROM housing_meds WHERE id=?`).get(req.params.mid);
+    if (!m) return res.status(404).json({ error: 'Not found' });
+    const status = ['taken', 'missed', 'refused'].includes(req.body?.status) ? req.body.status : 'taken';
+    db.prepare(`INSERT INTO housing_med_logs (resident_id, med_id, status, note, by_name) VALUES (?,?,?,?,?)`)
+      .run(m.resident_id, m.id, status, String(req.body?.note || '').slice(0, 300) || null, req.user.name);
+    res.json({ ok: true });
+  });
+  app.post('/api/housing/meds/:mid/stop', requireAuth, (req, res) => {
+    db.prepare(`UPDATE housing_meds SET active=0 WHERE id=?`).run(req.params.mid);
+    res.json({ ok: true });
+  });
+
+  // ── Chart documents: scanned forms, meeting sheets, anything on paper.
+  app.post('/api/housing/residents/:id/files', requireAuth, (req, res) => {
+    const r = db.prepare(`SELECT id, name FROM housing_residents WHERE id=?`).get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    const m = String(b.data || '').match(/^data:([\w/+.-]+);base64,(.+)$/s);
+    if (!m) return res.status(400).json({ error: 'Attach a file first.' });
+    if (m[2].length > 8_000_000) return res.status(400).json({ error: 'File too large — keep uploads under ~6 MB.' });
+    db.prepare(`INSERT INTO housing_files (resident_id, name, media_type, size, data, by_name) VALUES (?,?,?,?,?,?)`)
+      .run(r.id, String(b.name || 'document').slice(0, 200), m[1].slice(0, 100), Math.round(m[2].length * 0.75), m[2], req.user.name);
+    audit({ user: req.user, action: 'HOUSING_FILE_UPLOAD', detail: `${r.name}: ${String(b.name || '').slice(0, 80)}`, ip: req.ip });
+    res.json({ ok: true });
+  });
+  app.get('/api/housing/files/:id', requireAuth, (req, res) => {
+    const f = db.prepare(`SELECT * FROM housing_files WHERE id=?`).get(req.params.id);
+    if (!f) return res.status(404).json({ error: 'Not found' });
+    res.setHeader('Content-Type', f.media_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${String(f.name || 'document').replace(/[^\w. -]/g, '_')}"`);
+    res.send(Buffer.from(f.data, 'base64'));
+  });
+  app.delete('/api/housing/files/:id', requireAuth, requireAdmin, (req, res) => {
+    db.prepare(`DELETE FROM housing_files WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  });
+
+  // ── Overnight rounds sweep: one pass logs every resident's status to their
+  // chart — in place by curfew, and documented in place through the night.
+  app.post('/api/housing/rounds-sweep', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const entries = Array.isArray(b.entries) ? b.entries : [];
+    if (!entries.length) return res.status(400).json({ error: 'Nothing to log.' });
+    const ins = db.prepare(`INSERT INTO housing_rounds_log (house_id, resident_id, status, note, by_name) VALUES (?,?,?,?,?)`);
+    let n = 0;
+    for (const e of entries.slice(0, 100)) {
+      const rid = num(e.resident_id); if (!rid) continue;
+      const status = ['in_place', 'awake', 'not_present', 'excused'].includes(e.status) ? e.status : 'in_place';
+      ins.run(b.house_id ? num(b.house_id) : null, rid, status, String(e.note || '').slice(0, 200) || null, req.user.name);
+      n++;
+    }
+    audit({ user: req.user, action: 'HOUSING_ROUNDS_SWEEP', detail: `${n} residents`, ip: req.ip });
+    res.json({ ok: true, logged: n });
+  });
+  app.get('/api/housing/rounds-sweep', requireAuth, (req, res) => {
+    const hid = num(req.query.house_id);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : todayStr();
+    const rows = db.prepare(`SELECT l.*, r.name FROM housing_rounds_log l JOIN housing_residents r ON r.id=l.resident_id
+      WHERE substr(l.created,1,10)=?${hid ? ` AND l.house_id=${hid}` : ''} ORDER BY l.id DESC LIMIT 200`).all(date);
+    res.json({ date, rows });
   });
 
   app.post('/api/housing/residents', requireAuth, (req, res) => {

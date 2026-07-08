@@ -499,6 +499,78 @@ async function openResident(id){
       </div>
     </div>`;
   if (typeof loadOneJourney === 'function') loadOneJourney({resident_id:r.id}, 'residentBody');
+  renderChartExtras(r);
+}
+/* ── The One Step chart: quick notes, medications, documents, rounds trail ── */
+const NOTE_CATS={General:'📝',Task:'✅',Behavior:'⚠️',Property:'📦',Compliance:'🛡️',Milestone:'🌟'};
+function renderChartExtras(r){
+  const host=document.createElement('div'); host.id='chartExtras';
+  const noteRow=(n)=>`<div class="pc-note">${NOTE_CATS[n.category]||'📝'} ${esc(n.note)} <span class="hint">— ${esc(n.by_name||'')} · ${esc((n.created||'').slice(0,16).replace('T',' '))}${n.category&&n.category!=='General'?' · '+esc(n.category):''}</span></div>`;
+  const medRow=(m)=>`<div class="pc-note" style="${m.active?'':'opacity:.55'}">💊 <strong>${esc(m.med)}</strong>${m.dose?' · '+esc(m.dose):''}${m.schedule?' · '+esc(m.schedule):''}${m.prescriber?' <span class="hint">('+esc(m.prescriber)+')</span>':''}
+    ${m.last_log?`<div class="hint">last: ${esc(m.last_log)}</div>`:''}
+    ${m.active?`<div class="toolbar no-print" style="justify-content:flex-start;gap:4px;margin-top:4px">
+      <button class="btn btn-gold btn-sm sans" style="padding:3px 9px" onclick="hMedLog(${m.id},'taken')">✓ Taken</button>
+      <button class="btn btn-ghost btn-sm sans" style="padding:3px 9px" onclick="hMedLog(${m.id},'missed')">Missed</button>
+      <button class="btn btn-ghost btn-sm sans" style="padding:3px 9px" onclick="hMedLog(${m.id},'refused')">Refused</button>
+      <button class="btn btn-ghost btn-sm sans" style="padding:3px 9px" onclick="hMedStop(${m.id})" title="No longer prescribed">Stop</button></div>`:'<div class="hint">stopped</div>'}</div>`;
+  const fileRow=(f)=>`<div class="pc-note">📎 <a href="/api/housing/files/${f.id}" target="_blank" rel="noopener">${esc(f.name)}</a> <span class="hint">· ${f.size?Math.round(f.size/1024)+' KB · ':''}${esc(f.by_name||'')} · ${esc((f.created||'').slice(0,10))}</span>${ME&&ME.role==='admin'?` <a href="#" onclick="hDelFile(${f.id},${r.id});return false" title="Delete">✕</a>`:''}</div>`;
+  const rl=(x)=>`<div class="pc-note">${x.status==='in_place'?'🛏️ In place':x.status==='awake'?'👁 Awake':x.status==='excused'?'🏷 Excused (pass)':'🚨 NOT PRESENT'}${x.note?' — '+esc(x.note):''} <span class="hint">· ${esc((x.created||'').slice(0,16).replace('T',' '))} · ${esc(x.by_name||'')}</span></div>`;
+  host.innerHTML=`
+    <div class="card"><h3 style="margin:0 0 4px">📝 Chart notes <span class="hint" style="font-weight:400">· the little things that build the record</span></h3>
+      <div class="toolbar no-print" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin:6px 0">
+        <select id="hNoteCat" style="width:auto">${Object.keys(NOTE_CATS).map(c=>`<option>${c}</option>`).join('')}</select>
+        <input id="hNoteText" placeholder="e.g. Sex-offender check completed — clear · received bedding &amp; food bag" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')hAddNote(${r.id})"/>
+        <button class="btn btn-gold btn-sm sans" onclick="hAddNote(${r.id})">Add note</button></div>
+      ${(r.chartNotes||[]).map(noteRow).join('')||'<div class="hint">No notes yet.</div>'}</div>
+    <div class="card"><h3 style="margin:0 0 4px">💊 Medications <span class="hint" style="font-weight:400">· self-administration observation log</span></h3>
+      ${(r.meds||[]).map(medRow).join('')||'<div class="hint">No medications listed.</div>'}
+      <details class="no-print" style="margin-top:8px"><summary class="hint" style="cursor:pointer">＋ Add a medication</summary>
+        <div class="toolbar" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">
+          <input id="hMedName" placeholder="Medication" style="min-width:140px"/><input id="hMedDose" placeholder="Dose" style="width:90px"/>
+          <input id="hMedSched" placeholder="Schedule (e.g. AM daily)" style="width:150px"/><input id="hMedRx" placeholder="Prescriber" style="width:130px"/>
+          <button class="btn btn-gold btn-sm sans" onclick="hAddMed(${r.id})">Add</button></div></details>
+      ${(r.medLogs||[]).length?`<details style="margin-top:6px"><summary class="hint" style="cursor:pointer">Recent log (${r.medLogs.length})</summary>${r.medLogs.map(l=>`<div class="hint" style="margin-top:3px">${l.status==='taken'?'✓':l.status==='refused'?'✕':'○'} ${esc(l.med||'')} — ${esc(l.status)}${l.note?' · '+esc(l.note):''} · ${esc((l.created||'').slice(0,16).replace('T',' '))} · ${esc(l.by_name||'')}</div>`).join('')}</details>`:''}</div>
+    <div class="card"><h3 style="margin:0 0 4px">📎 Documents <span class="hint" style="font-weight:400">· scans, meeting sheets, signed paper</span></h3>
+      <div class="toolbar no-print" style="justify-content:flex-start;gap:6px;margin:6px 0"><input id="hFileIn" type="file" accept="image/*,.pdf" style="width:auto" onchange="hUploadFile(${r.id},this.files[0])"/><span id="hFileMsg" class="hint"></span></div>
+      ${(r.files||[]).map(fileRow).join('')||'<div class="hint">Nothing uploaded yet.</div>'}</div>
+    ${(r.roundsLog||[]).length?`<div class="card"><h3 style="margin:0 0 4px">🌙 Rounds trail <span class="hint" style="font-weight:400">· overnight checks land here automatically</span></h3>${r.roundsLog.map(rl).join('')}</div>`:''}`;
+  $('residentBody').appendChild(host);
+}
+async function hAddNote(rid){
+  const t=($('hNoteText')||{}).value||''; if(!t.trim()) return;
+  try{ await api(`/housing/residents/${rid}/notes`,{method:'POST',body:JSON.stringify({note:t,category:($('hNoteCat')||{}).value||'General'})}); openResident(rid); }catch(e){ alert(e.message); }
+}
+async function hAddMed(rid){
+  try{ await api(`/housing/residents/${rid}/meds`,{method:'POST',body:JSON.stringify({med:($('hMedName')||{}).value,dose:($('hMedDose')||{}).value,schedule:($('hMedSched')||{}).value,prescriber:($('hMedRx')||{}).value})}); openResident(rid); }catch(e){ alert(e.message); }
+}
+async function hMedLog(mid,status){
+  const note=status==='taken'?'':prompt(status==='refused'?'Refused — note (optional):':'Missed — note (optional):')||'';
+  try{ await api(`/housing/meds/${mid}/log`,{method:'POST',body:JSON.stringify({status,note})}); if(HOUSING.current) openResident(HOUSING.current.id); }catch(e){ alert(e.message); }
+}
+async function hMedStop(mid){ if(!confirm('Mark this medication as no longer prescribed?'))return; try{ await api(`/housing/meds/${mid}/stop`,{method:'POST'}); if(HOUSING.current) openResident(HOUSING.current.id); }catch(e){ alert(e.message); } }
+function hUploadFile(rid,file){
+  if(!file) return;
+  if(file.size>6_000_000){ alert('Keep uploads under ~6 MB — photograph pages individually if needed.'); return; }
+  const msg=$('hFileMsg'); if(msg) msg.textContent='Uploading…';
+  const rd=new FileReader();
+  rd.onload=async()=>{ try{ await api(`/housing/residents/${rid}/files`,{method:'POST',body:JSON.stringify({name:file.name,data:rd.result})}); openResident(rid); }catch(e){ if(msg)msg.textContent=e.message; } };
+  rd.readAsDataURL(file);
+}
+async function hDelFile(fid,rid){ if(!confirm('Delete this document?'))return; try{ await api('/housing/files/'+fid,{method:'DELETE'}); openResident(rid); }catch(e){ alert(e.message); } }
+/* Night rounds: one sweep logs every resident in the house to their chart. */
+async function openNightRounds(houseId){
+  let d; try{ d=await api(`/housing/houselife?house_id=${houseId}&date=${today()}`); }catch(e){ alert(e.message); return; }
+  const rows=(d.residents||[]);
+  if(!rows.length){ alert('No active residents in this house.'); return; }
+  const seg=(r)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap"><strong style="min-width:130px">${esc(r.name)}</strong>
+    <select data-nr="${r.id}" style="width:auto"><option value="in_place">🛏️ In place</option><option value="awake">👁 Awake</option><option value="not_present">🚨 Not present</option><option value="excused">🏷 Excused / pass</option></select>
+    <input data-nrnote="${r.id}" placeholder="note (optional)" style="flex:1;min-width:120px"/></div>`;
+  const save=hmodal(`<h3>🌙 Night rounds — ${esc((HOUSING.houses.find(h=>h.id==houseId)||{}).name||'house')}</h3>
+    <p class="sub sans">One pass, every resident — each check lands on their chart with your name and the exact time.</p>${rows.map(seg).join('')}`);
+  save.onclick=async()=>{
+    const entries=[...document.querySelectorAll('#hModalBody select[data-nr]')].map(s=>({resident_id:+s.dataset.nr,status:s.value,note:(document.querySelector(`#hModalBody input[data-nrnote="${s.dataset.nr}"]`)||{}).value||''}));
+    try{ const r2=await api('/housing/rounds-sweep',{method:'POST',body:JSON.stringify({house_id:houseId,entries})}); closeHModal(); alert('✓ Logged '+r2.logged+' residents.'); }catch(e){ alert(e.message); }
+  };
 }
 function screenResultBadge(r){ const m={negative:'#2f7a4f',positive:'#c06a52',refused:'#c06a52',diluted:'#9a6a1f',pending:'#6f7a75'}; return `<span class="loc-pill" style="background:${m[r]||'#6f7a75'}">${esc(r)}</span>`; }
 
@@ -603,7 +675,8 @@ async function loadHouseLife(){
   if(!houseId){ $('houseLifeBody').innerHTML='<div class="empty">Add a house first.</div>'; return; }
   let d; try{ d=await api(`/housing/houselife?house_id=${houseId}&date=${date}`); }catch(e){ $('houseLifeBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; return; }
   if(!d.residents.length){ $('houseLifeBody').innerHTML='<div class="empty">No active residents in this house.</div>'; return; }
-  $('houseLifeBody').innerHTML=`<table class="tbl"><thead><tr><th>Resident</th><th>Bed</th><th>Curfew / bed check</th><th>Chore</th><th>Meeting today</th></tr></thead><tbody>${d.residents.map(r=>{
+  $('houseLifeBody').innerHTML=`<div class="toolbar no-print" style="justify-content:flex-start"><button class="btn btn-gold btn-sm sans" onclick="openNightRounds(${houseId})">🌙 Night rounds sweep</button><span class="hint">one pass logs every resident to their chart — run it each round overnight</span></div>
+  <table class="tbl"><thead><tr><th>Resident</th><th>Bed</th><th>Curfew / bed check</th><th>Chore</th><th>Meeting today</th></tr></thead><tbody>${d.residents.map(r=>{
     const cs=r.curfew?r.curfew.status:null;
     const curfewBtns=['in','late','pass','absent'].map(s=>`<button class="btn btn-sm sans ${cs===s?(s==='in'?'btn-gold':'btn-danger'):'btn-ghost'}" onclick="setCurfew(${r.id},${houseId},'${s}')" style="padding:4px 9px">${s==='in'?'✓ In':s[0].toUpperCase()+s.slice(1)}</button>`).join(' ');
     const choreDone=r.chore&&r.chore.done;
@@ -1823,4 +1896,4 @@ async function openVehicle(id){
   <div class="card"><h3>✓ Checks &amp; cleanliness</h3>${checkRows}</div>`;
 }
 
-Object.assign(window,{loadFleet,openVehForm,openVehFuel,openVehMaint,openVehCheck,openVehicle,hubLineup,logLineup,editStandards,loadServiceRecovery,openServiceRecovery,resolveServiceRecovery,claimRequest,loadStaffDev,openStaffDev,toggleStaffOnboard,setCompetency,editStaffProfile,loadFarewell,openFarewell,toggleFarewell,openAlumniCheckin,loadTargets,editTargets,openKnowMe,loadStaffHub,setHubTab,hubFocus,hubTasks,toggleShiftTask,hubFirstDay,openFirstDay,toggleOnboard,hubRecognition,giveRecognition,kudosRecognition,loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction});
+Object.assign(window,{loadFleet,openVehForm,openVehFuel,openVehMaint,openVehCheck,openVehicle,hubLineup,logLineup,editStandards,loadServiceRecovery,openServiceRecovery,resolveServiceRecovery,claimRequest,loadStaffDev,openStaffDev,toggleStaffOnboard,setCompetency,editStaffProfile,loadFarewell,openFarewell,toggleFarewell,openAlumniCheckin,loadTargets,editTargets,openKnowMe,loadStaffHub,setHubTab,hubFocus,hubTasks,toggleShiftTask,hubFirstDay,openFirstDay,toggleOnboard,hubRecognition,giveRecognition,kudosRecognition,loadHousingHQ,loadHouses,loadResidents,renderResidents,setResStatus,loadVoice,voiceRequestDone,voiceToWorkOrder,openSlKioskCode,loadHmaint,setMaintTab,loadWorkOrders,openMaintForm,closeWorkOrder,loadHinventory,adjItem,openInvForm,suggestReorder,loadOrders,orderStatus,loadDailyMovement,sendDailyMovement,openMovementSettings,setActTab,loadActivities,loadActSchedule,actWeekShift,weekStart,openActPlan,completeActivity,cancelActivity,openActFeedback,loadActCatalog,loadActEngagement,printWeekFlyer,generateWeek,editActMin,openResidentForm,openResident,openHouseForm,saveHouse:openHouseForm,bedClick,doAssignBed,setBedStatus,deleteBed,addBed,openReccapForm,openSupportForm,openCoordForm,openDischargeForm,openResidentEdit,loadScreens,randomScreens,openScreenForm,loadHouseLife,setCurfew,toggleChore,loadCoordination,loadLedger,openLedgerForm,loadOrh,cycleOrh,openInspectionForm,openGrievanceForm,resolveGrievance,loadHousingOutcomes,closeHModal,screenResultBadge,loadIntake,openPacket,openFormModal,loadEmployment,openEmploymentForm,openJobSearchForm,loadRentRun,recordRent,openPayplanForm,loadHousingStaff,assignStaffShift,removeStaffShift,loadShiftReports,openShiftReportForm,loadHIncidents,setIncStatus,openIncidentForm,closeIncident,openImportForm,fixDob,setTenure,uploadResidentPhoto,removeResidentPhoto,pickResidentPhoto,setRestrFilter,openRestrictionForm,liftRestriction,renderChartExtras,hAddNote,hAddMed,hMedLog,hMedStop,hUploadFile,hDelFile,openNightRounds});

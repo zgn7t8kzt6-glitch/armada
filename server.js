@@ -5275,7 +5275,10 @@ app.get('/api/corp/overview', requireAuth, requireCorp, (req, res) => {
   ordering.byLocation = Object.values(ordersByLocation).sort((a, b) => (b.requested + b.ordered) - (a.requested + a.ordered));
   ordering.locationsRequesting = ordering.byLocation.length;
   // The actual to-order list so it pops on the dashboard and she can act right away.
-  ordering.toOrder = db.prepare(`SELECT id, facility, item_name, qty, category, vendor, link, priority FROM order_requests WHERE status='requested'${facSql} ORDER BY CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, id DESC LIMIT 40`).all(...fa);
+  ordering.toOrder = db.prepare(`SELECT id, facility, item_name, qty, category, vendor, link, priority,
+      (SELECT COUNT(*) FROM order_request_notes n WHERE n.order_id = order_requests.id) AS note_count,
+      (SELECT n.note FROM order_request_notes n WHERE n.order_id = order_requests.id ORDER BY n.id DESC LIMIT 1) AS last_note
+    FROM order_requests WHERE status='requested'${facSql} ORDER BY CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, id DESC LIMIT 40`).all(...fa);
   res.json({ since, facility, locations: orgLocations(), ordering, maintenance, taskCounts });
 });
 // Project / task board — anyone with corp access can add; corporate works them.

@@ -11530,6 +11530,50 @@ app.post('/api/visits/:id/status', requireAuth, (req, res) => {
 });
 
 /* ---------------- Admissions pipeline + bed board ---------------- */
+/* ── Bed forecast — the Written Standard's formula, live (Domain C):
+   Projected Available = Licensed − Census − Scheduled Admits + Planned
+   Discharges + Projected Attrition, where attrition is the trailing 8-week
+   unplanned-departure rate (AMA / administrative / transfer) as a weekly
+   number. Yellow within 2 beds of capacity; red at/over → morning huddle. */
+app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = fc.frag('facility_id');
+  const dfid = defaultFacilityId();
+  let licensed = +(getState('detox_bed_count') || 40);
+  if (fc.one && fc.one !== dfid) licensed = +(db.prepare(`SELECT beds FROM org_facilities WHERE id = ?`).get(fc.one)?.beds) || 0;
+  const today = appToday();
+  const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND merged_into IS NULL${F}`).get().n;
+  // Trailing 8 weeks of unplanned departures — everything that wasn't a completion.
+  const unplanned8w = db.prepare(`SELECT COUNT(*) n FROM clients WHERE merged_into IS NULL AND discharge_status IS NOT NULL
+    AND discharge_status NOT IN ('Completed','Merged (duplicate)') AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ?${F}`)
+    .get(addDays(today, -56), today).n;
+  const weeklyAttrition = unplanned8w / 8, dailyAttrition = weeklyAttrition / 7;
+  const horizon = addDays(today, 7);
+  const aMap = {};
+  for (const r of db.prepare(`SELECT substr(scheduled_date,1,10) d, COUNT(*) n FROM expected_arrivals WHERE status='expected' AND scheduled_date >= ? AND scheduled_date <= ?${F} GROUP BY 1`).all(today, horizon)) aMap[r.d] = r.n;
+  const dMap = {};
+  for (const r of db.prepare(`SELECT substr(anticipated_dc,1,10) d, COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND anticipated_dc IS NOT NULL AND substr(anticipated_dc,1,10) <= ?${F} GROUP BY 1`).all(horizon)) {
+    const key = r.d < today ? today : r.d;   // overdue planned discharges count toward today
+    dMap[key] = (dMap[key] || 0) + r.n;
+  }
+  let projCensus = census;
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(today, i);
+    const ad = aMap[date] || 0, dc = dMap[date] || 0;
+    projCensus = projCensus + ad - dc - dailyAttrition;
+    const available = licensed - projCensus;
+    days.push({ date, admits: ad, discharges: dc, projectedCensus: +projCensus.toFixed(1), available: +available.toFixed(1), flag: available <= 0 ? 'red' : available <= 2 ? 'yellow' : 'ok' });
+  }
+  // Standard 1 fuel: who has no anticipated discharge date, and 30-day compliance.
+  const missing = db.prepare(`SELECT id, pref, name, admit FROM clients WHERE active=1 AND discharge_status IS NULL AND merged_into IS NULL AND (anticipated_dc IS NULL OR anticipated_dc='')${F} ORDER BY admit`).all();
+  const comp = db.prepare(`SELECT COUNT(*) t, SUM(CASE WHEN anticipated_dc IS NOT NULL AND anticipated_dc != '' THEN 1 ELSE 0 END) w FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ?${F}`).get(addDays(today, -30));
+  res.json({
+    licensed, census, unplanned8w, weeklyAttrition: +weeklyAttrition.toFixed(2), days,
+    missingDates: missing.map((c) => ({ id: c.id, name: c.pref || c.name, admit: (c.admit || '').slice(0, 10) })),
+    dateCompliance: { total: comp.t || 0, withDate: comp.w || 0, pct: comp.t ? Math.round(100 * (comp.w || 0) / comp.t) : null },
+  });
+});
 app.get('/api/admissions', requireAuth, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
   res.json({ admissions: db.prepare(`SELECT * FROM admissions WHERE (status != 'Admitted' OR created_at >= datetime('now','-14 day'))${fc.frag('facility_id')} ORDER BY (status='Declined'), id DESC`).all() });

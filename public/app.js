@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/\d)|auth-register($|\?)|finance\/revenue|analytics($|\?)|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?)|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -8861,7 +8861,32 @@ async function setVisit(id,status){ await api('/visits/'+id+'/status',{method:'P
 function openFamily(id){ show('family'); setTimeout(async()=>{ await fillClientSelect($('fm_client'),null); $('fm_client').value=id; loadFamily(); },50); }
 
 /* ---- admissions + bed board ---- */
+/* Bed forecast — the Written Standard's rolling 7-day availability, live.
+   Admissions schedules against PROJECTED beds, not just currently open ones. */
+async function loadBedForecast(){
+  const host=$('bedForecast'); if(!host) return;
+  let d; try{ d=await api('/admissions/bed-forecast'); }catch(e){ host.innerHTML=''; return; }
+  const dayName=(iso)=>new Date(iso+'T12:00:00').toLocaleDateString(undefined,{weekday:'short'});
+  const cell=(x,i)=>`<div style="flex:1;min-width:86px;background:${x.flag==='red'?'#fdeaea':x.flag==='yellow'?'#fdf4e2':'var(--paper)'};border:1px solid ${x.flag==='red'?'#f3c4c0':x.flag==='yellow'?'#f0d9a3':'var(--line)'};border-radius:12px;padding:10px 8px;text-align:center">
+      <div class="hint" style="font-size:11px">${i===0?'Today':dayName(x.date)} · ${esc(x.date.slice(5))}</div>
+      <div style="font-size:26px;font-weight:800;color:${x.flag==='red'?'var(--danger)':x.flag==='yellow'?'#9a6a1f':'var(--navy)'}">${x.available}</div>
+      <div class="hint" style="font-size:10px">beds projected</div>
+      <div class="hint" style="font-size:10.5px;margin-top:3px">+${x.admits} in · −${x.discharges} out</div>
+    </div>`;
+  const red=d.days.some(x=>x.flag==='red'), yellow=d.days.some(x=>x.flag==='yellow');
+  host.innerHTML=`<div class="card" style="border-left:4px solid ${red?'var(--danger)':yellow?'#d29a5e':'var(--good,#2f7a4f)'}">
+    <div class="cmd-hero-row"><div><h3 style="margin:0">🛏 Rolling 7-day bed forecast</h3>
+      <p class="sub sans" style="margin:0">Projected available = ${d.licensed} licensed − census − scheduled admits + planned discharges + attrition (${d.weeklyAttrition}/wk from the last 8 weeks: ${d.unplanned8w} unplanned departures). Schedule against these numbers, not today's headcount.</p></div>
+      <div class="ret-card" style="min-width:110px"><div class="n">${d.census}<span class="hint" style="font-size:13px">/${d.licensed}</span></div><div class="l">census now</div></div></div>
+    <div style="display:flex;gap:8px;margin-top:10px;overflow-x:auto;padding-bottom:4px">${d.days.map(cell).join('')}</div>
+    ${red?'<div style="margin-top:8px;color:var(--danger)"><strong>🔴 At or over capacity in the window</strong> — same-morning huddle: Clinical Director + Director of Admissions. No unilateral cancellations.</div>':yellow?'<div style="margin-top:8px;color:#9a6a1f"><strong>🟡 Within 2 beds of capacity</strong> — watch the yellow days at Line-Up.</div>':''}
+    <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;align-items:baseline">
+      <span class="hint"><strong>${d.dateCompliance.pct!=null?d.dateCompliance.pct+'%':'—'}</strong> of the last 30 days' admits have an anticipated discharge date (${d.dateCompliance.withDate}/${d.dateCompliance.total})</span>
+      ${d.missingDates.length?`<details style="flex:1;min-width:220px"><summary class="hint" style="cursor:pointer;color:#9a6a1f"><strong>⚠ ${d.missingDates.length} on census with NO anticipated discharge date</strong> — the forecast is blind to them</summary>${d.missingDates.map(m=>`<div class="pc-note">• ${esc(m.name)} <span class="hint">admitted ${esc(m.admit)}</span></div>`).join('')}<div class="hint" style="margin-top:4px">Standard: date entered within 4 hours of admission (Kipu is source of truth — set it there and sync).</div></details>`:'<span class="hint" style="color:var(--good,#2f7a4f)">✓ every active client has an anticipated discharge date</span>'}
+    </div></div>`;
+}
 async function loadAdmissions(){
+  loadBedForecast();
   const { admissions } = await api('/admissions');
   const stages=['Inquiry','Screening','Scheduled','Admitted','Declined'];
   $('admBoard').innerHTML = admissions.length ? admissions.map(a=>`<div class="todo">

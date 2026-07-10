@@ -11535,12 +11535,7 @@ app.post('/api/visits/:id/status', requireAuth, (req, res) => {
    Discharges + Projected Attrition, where attrition is the trailing 8-week
    unplanned-departure rate (AMA / administrative / transfer) as a weekly
    number. Yellow within 2 beds of capacity; red at/over → morning huddle. */
-app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {
-  const fc = facCtx(req); if (denyFac(fc, res)) return;
-  const F = fc.frag('facility_id');
-  const dfid = defaultFacilityId();
-  let licensed = +(getState('detox_bed_count') || 40);
-  if (fc.one && fc.one !== dfid) licensed = +(db.prepare(`SELECT beds FROM org_facilities WHERE id = ?`).get(fc.one)?.beds) || 0;
+function computeBedForecast(F, licensed) {
   const today = appToday();
   const census = db.prepare(`SELECT COUNT(*) n FROM clients WHERE active=1 AND discharge_status IS NULL AND merged_into IS NULL${F}`).get().n;
   // Trailing 8 weeks of unplanned departures — everything that wasn't a completion.
@@ -11565,15 +11560,80 @@ app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {
     const available = licensed - projCensus;
     days.push({ date, admits: ad, discharges: dc, projectedCensus: +projCensus.toFixed(1), available: +available.toFixed(1), flag: available <= 0 ? 'red' : available <= 2 ? 'yellow' : 'ok' });
   }
+  return { today, licensed, census, unplanned8w, weeklyAttrition: +weeklyAttrition.toFixed(2), days };
+}
+function forecastLicensedFor(fc) {
+  const dfid = defaultFacilityId();
+  if (fc.one && fc.one !== dfid) return +(db.prepare(`SELECT beds FROM org_facilities WHERE id = ?`).get(fc.one)?.beds) || 0;
+  return +(getState('detox_bed_count') || 40);
+}
+app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = fc.frag('facility_id');
+  const today = appToday();
+  const fx = computeBedForecast(F, forecastLicensedFor(fc));
   // Standard 1 fuel: who has no anticipated discharge date, and 30-day compliance.
   const missing = db.prepare(`SELECT id, pref, name, admit FROM clients WHERE active=1 AND discharge_status IS NULL AND merged_into IS NULL AND (anticipated_dc IS NULL OR anticipated_dc='')${F} ORDER BY admit`).all();
   const comp = db.prepare(`SELECT COUNT(*) t, SUM(CASE WHEN anticipated_dc IS NOT NULL AND anticipated_dc != '' THEN 1 ELSE 0 END) w FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) >= ?${F}`).get(addDays(today, -30));
   res.json({
-    licensed, census, unplanned8w, weeklyAttrition: +weeklyAttrition.toFixed(2), days,
+    ...fx,
     missingDates: missing.map((c) => ({ id: c.id, name: c.pref || c.name, admit: (c.admit || '').slice(0, 10) })),
     dateCompliance: { total: comp.t || 0, withDate: comp.w || 0, pct: comp.t ? Math.round(100 * (comp.w || 0) / comp.t) : null },
   });
 });
+// ── The standard's own measurement: forecast accuracy vs actual census. Every
+// morning the 7-day projection is snapshotted; once those dates pass, each
+// snapshot is scored against the census that actually happened.
+app.get('/api/admissions/forecast-accuracy', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = fc.frag('facility_id');
+  const dfid = defaultFacilityId();
+  const snapFid = fc.one || dfid;
+  const today = appToday();
+  const rows = db.prepare(`SELECT * FROM bed_forecast_log WHERE facility_id = ? AND for_date < ? AND made_on >= ? ORDER BY made_on DESC, for_date`).all(snapFid, today, addDays(today, -30));
+  const actualCache = {};
+  const actualOn = (d) => {
+    if (actualCache[d] == null) {
+      actualCache[d] = db.prepare(`SELECT COUNT(*) n FROM clients WHERE merged_into IS NULL AND substr(admit,1,10) <= ? AND (discharge_date IS NULL OR substr(discharge_date,1,10) > ?)${F}`).get(d, d).n;
+    }
+    return actualCache[d];
+  };
+  const scored = rows.map((r) => {
+    const actual = actualOn(r.for_date);
+    const horizon = Math.max(1, Math.round((Date.parse(r.for_date) - Date.parse(r.made_on)) / 864e5));
+    return { madeOn: r.made_on, forDate: r.for_date, horizon, projected: r.projected_census, actual, error: +(r.projected_census - actual).toFixed(1) };
+  });
+  const byHorizon = {};
+  for (const s of scored) { const g = byHorizon[s.horizon] = byHorizon[s.horizon] || { n: 0, sumAbs: 0 }; g.n++; g.sumAbs += Math.abs(s.error); }
+  res.json({
+    scored: scored.slice(0, 40),
+    mae: Object.entries(byHorizon).map(([h, g]) => ({ daysAhead: +h, n: g.n, mae: +(g.sumAbs / g.n).toFixed(2) })).sort((a, b) => a.daysAhead - b.daysAhead),
+    snapshots: rows.length,
+  });
+});
+// Snapshot the projection once each morning (per building with a bed count) so
+// the weekly audit has something honest to score.
+function snapshotBedForecasts() {
+  const today = appToday();
+  if (getState('bed_forecast_snap_' + today) === 'done') return;
+  if (hourInTz(APP_TZ) < 6) return;   // after the overnight settles
+  const dfid = defaultFacilityId();
+  const ins = db.prepare(`INSERT INTO bed_forecast_log (facility_id, made_on, for_date, projected_census, projected_available) VALUES (?,?,?,?,?)`);
+  for (const f of orgFacilities()) {
+    if (!['detox', 'residential'].includes(f.type)) continue;
+    const licensed = f.id === dfid ? +(getState('detox_bed_count') || 40) : (+f.beds || 0);
+    if (!licensed) continue;
+    const F = ` AND (facility_id = ${f.id}${f.id === dfid ? ' OR facility_id IS NULL' : ''})`;
+    try {
+      const fx = computeBedForecast(F, licensed);
+      for (const d of fx.days) ins.run(f.id, today, d.date, d.projectedCensus, d.available);
+    } catch (e) { console.error('[bed-forecast]', f.fkey, e.message); }
+  }
+  setState('bed_forecast_snap_' + today, 'done');
+  console.log('[bed-forecast] morning snapshot taken for', today);
+}
+setInterval(() => { try { snapshotBedForecasts(); } catch (e) { console.error('[bed-forecast]', e.message); } }, 15 * 60 * 1000);
+setTimeout(() => { try { snapshotBedForecasts(); } catch { /* next tick */ } }, 60 * 1000);
 app.get('/api/admissions', requireAuth, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
   res.json({ admissions: db.prepare(`SELECT * FROM admissions WHERE (status != 'Admitted' OR created_at >= datetime('now','-14 day'))${fc.frag('facility_id')} ORDER BY (status='Declined'), id DESC`).all() });

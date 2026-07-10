@@ -5602,6 +5602,9 @@ async function logWow(){
   catch(e){ alert(e.message); }
 }
 async function loadToday(){
+  // The standard: the bed forecast is presented daily at Line-Up — leadership
+  // and the front door see it right on Today.
+  if(ME&&(ME.role==='admin'||['Executive Director','Director of Operations','Clinical Director','Front Desk'].includes(ME.job_role))) loadBedForecast('bedForecastToday');
   const [t, alertsData, cc] = await Promise.all([
     api('/today'),
     api('/alerts').catch(()=>({alerts:[],newCount:0})),
@@ -8863,8 +8866,8 @@ function openFamily(id){ show('family'); setTimeout(async()=>{ await fillClientS
 /* ---- admissions + bed board ---- */
 /* Bed forecast — the Written Standard's rolling 7-day availability, live.
    Admissions schedules against PROJECTED beds, not just currently open ones. */
-async function loadBedForecast(){
-  const host=$('bedForecast'); if(!host) return;
+async function loadBedForecast(hostId='bedForecast'){
+  const host=$(hostId); if(!host) return;
   let d; try{ d=await api('/admissions/bed-forecast'); }catch(e){ host.innerHTML=''; return; }
   const dayName=(iso)=>new Date(iso+'T12:00:00').toLocaleDateString(undefined,{weekday:'short'});
   const cell=(x,i)=>`<div style="flex:1;min-width:86px;background:${x.flag==='red'?'#fdeaea':x.flag==='yellow'?'#fdf4e2':'var(--paper)'};border:1px solid ${x.flag==='red'?'#f3c4c0':x.flag==='yellow'?'#f0d9a3':'var(--line)'};border-radius:12px;padding:10px 8px;text-align:center">
@@ -8883,7 +8886,20 @@ async function loadBedForecast(){
     <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;align-items:baseline">
       <span class="hint"><strong>${d.dateCompliance.pct!=null?d.dateCompliance.pct+'%':'—'}</strong> of the last 30 days' admits have an anticipated discharge date (${d.dateCompliance.withDate}/${d.dateCompliance.total})</span>
       ${d.missingDates.length?`<details style="flex:1;min-width:220px"><summary class="hint" style="cursor:pointer;color:#9a6a1f"><strong>⚠ ${d.missingDates.length} on census with NO anticipated discharge date</strong> — the forecast is blind to them</summary>${d.missingDates.map(m=>`<div class="pc-note">• ${esc(m.name)} <span class="hint">admitted ${esc(m.admit)}</span></div>`).join('')}<div class="hint" style="margin-top:4px">Standard: date entered within 4 hours of admission (Kipu is source of truth — set it there and sync).</div></details>`:'<span class="hint" style="color:var(--good,#2f7a4f)">✓ every active client has an anticipated discharge date</span>'}
-    </div></div>`;
+    </div>
+    <details style="margin-top:8px" ontoggle="if(this.open)loadForecastAccuracy('${hostId}Acc')"><summary class="hint" style="cursor:pointer">📏 Forecast accuracy — the weekly audit</summary><div id="${hostId}Acc" class="hint" style="margin-top:6px">Open to load…</div></details></div>`;
+}
+async function loadForecastAccuracy(hostId){
+  const host=$(hostId); if(!host) return;
+  host.textContent='Scoring past snapshots…';
+  try{
+    const d=await api('/admissions/forecast-accuracy');
+    if(!d.snapshots){ host.innerHTML='No snapshots scored yet — the projection is saved every morning at 6, and each saved day gets scored once its date passes. Check back tomorrow.'; return; }
+    host.innerHTML=`<div style="display:flex;gap:10px;flex-wrap:wrap">${(d.mae||[]).map(m=>`<div class="ret-card" style="min-width:96px"><div class="n">±${m.mae}</div><div class="l">${m.daysAhead} day${m.daysAhead===1?'':'s'} out · n=${m.n}</div></div>`).join('')}</div>
+      <div style="overflow-x:auto"><table class="tbl" style="margin-top:8px"><tr><th>Forecast made</th><th>For</th><th>Projected</th><th>Actual</th><th>Error</th></tr>
+      ${(d.scored||[]).slice(0,15).map(s=>`<tr><td class="hint">${esc(s.madeOn)}</td><td>${esc(s.forDate)}</td><td>${s.projected}</td><td>${s.actual}</td><td style="color:${Math.abs(s.error)>2?'var(--danger)':'inherit'}">${s.error>0?'+':''}${s.error}</td></tr>`).join('')}</table></div>
+      <div class="hint" style="margin-top:4px">Positive error = the forecast expected more people than showed; negative = it under-called the census. The standard asks for a weekly review of this for the first 30 days.</div>`;
+  }catch(e){ host.textContent=e.message; }
 }
 async function loadAdmissions(){
   loadBedForecast();

@@ -3062,6 +3062,19 @@ if (getState('phase5_shift_backfill') !== 'done') {
   } catch (e) { console.error('[phase5 shifts]', e.message); }
 }
 
+// Morning snapshots of the 7-day bed projection, scored later against the
+// census that actually happened — the Written Standard's weekly audit.
+db.exec(`CREATE TABLE IF NOT EXISTS bed_forecast_log (
+  id INTEGER PRIMARY KEY,
+  facility_id INTEGER,
+  made_on TEXT NOT NULL,
+  for_date TEXT NOT NULL,
+  projected_census REAL,
+  projected_available REAL,
+  created TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_bed_forecast ON bed_forecast_log(facility_id, made_on);`);
+
 // Running work-log on an order request ("called vendor", "backordered 7/15") —
 // the single notes field on the order is the REQUEST note; this is the chase.
 db.exec(`CREATE TABLE IF NOT EXISTS order_request_notes (

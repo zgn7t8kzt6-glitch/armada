@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly|los-week-detail))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -8900,18 +8900,19 @@ async function loadLosView(){
   const CORE=['3.7-WM','3.2-WM','3.7','3.5'];
   const levels=[...new Set([...CORE.filter(k=>(d.levelKeys||[]).includes(k)||d.goals[k]!=null),...(d.levelKeys||[]).filter(k=>k!=='(no level)')])];
   const g=d.goals||{};
-  const cell=(v,goal,prev)=>{
-    if(!v||v.avg==null||!v.n) return '<td class="hint">—</td>';
+  const cell=(v,goal,prev,click)=>{
+    const attr=click?` style="cursor:pointer" onclick="${click}" title="Show the names behind this number"`:'';
+    if(!v||v.avg==null||!v.n) return `<td class="hint"${attr}>—</td>`;
     const met=goal!=null?v.avg>=goal:null;
     const arrow=prev&&prev.avg!=null?(v.avg>prev.avg?' <span style="font-size:10px">▲</span>':v.avg<prev.avg?' <span style="font-size:10px;color:#b3382f">▼</span>':''):'';
-    return `<td style="${met===true?'color:var(--good,#2f7a4f);font-weight:700':met===false?'color:var(--danger);font-weight:700':''}">${v.avg}d${arrow}<span class="hint" style="font-weight:400"> ·${v.n}</span></td>`;
+    return `<td ${click?`style="cursor:pointer" onclick="${click}" title="Show the names behind this number"`:''}><span style="${met===true?'color:var(--good,#2f7a4f);font-weight:700':met===false?'color:var(--danger);font-weight:700':''}">${v.avg}d${arrow}</span><span class="hint" style="font-weight:400"> ·${v.n}</span></td>`;
   };
   const weeks=[...(d.weeks||[])].reverse();   // newest first
   const rows=weeks.map((w,i)=>{
     const prev=weeks[i+1];
     return `<tr><td><strong>${esc(w.week.slice(5))}</strong><div class="hint" style="font-size:10px">wk of</div></td>
-      <td class="hint">${w.admitted||0}</td>
-      ${cell(w.overall,g.overall,prev&&prev.overall)}
+      <td class="hint" style="cursor:pointer;text-decoration:underline dotted" onclick="losWeekDrill('${w.week}','in')" title="Show everyone who admitted this week">${w.admitted||0}</td>
+      ${cell(w.overall,g.overall,prev&&prev.overall,`losWeekDrill('${w.week}','out')`)}
       ${levels.map(L=>cell(w.levels[L],g[L],prev&&prev.levels[L])).join('')}</tr>`;
   }).join('');
   const goalIn=(k,label)=>`<label class="hint" style="display:flex;flex-direction:column;gap:2px;min-width:86px">${esc(label)}<input data-losgoal="${esc(k)}" type="number" step="0.5" min="1" value="${g[k]!=null?g[k]:''}" placeholder="—" style="width:86px"/></label>`;
@@ -8924,7 +8925,21 @@ async function loadLosView(){
       <button class="btn btn-gold btn-sm sans" onclick="saveLosGoals()">Save goals</button><span id="losGoalMsg" class="hint"></span></div>`
       :`<div class="hint" style="margin-top:8px">Goals: ${Object.keys(g).length?Object.entries(g).map(([k,v])=>`<strong>${esc(k)}</strong> ${v}d`).join(' · '):'none set yet — leadership sets them here.'}</div>`}
     <div style="overflow-x:auto"><table class="tbl" style="margin-top:10px"><tr><th>Week</th><th>In</th><th>Overall${g.overall?` <span class="hint">🎯${g.overall}d</span>`:''}</th>${levels.map(L=>`<th>${esc(L)}${g[L]?` <span class="hint">🎯${g[L]}d</span>`:''}</th>`).join('')}</tr>${rows}</table></div>
-    <div class="hint" style="margin-top:6px"><strong>Every patient is accounted for:</strong> "In" counts everyone who ADMITTED that week. The LOS columns count DISCHARGED stays — a stay has no length until it ends, so ${d.stillActive||0} ${(d.stillActive||0)===1?'person':'people'} currently in a bed will land on the board the week they leave.${d.skippedNoDates?` ${d.skippedNoDates} record${d.skippedNoDates===1?'':'s'} skipped for missing admit/discharge dates — fix those in Kipu.`:''} ▲▼ vs the prior week; a cell is judged only when a goal is set for its column.</div></div>`;
+    <div class="hint" style="margin-top:6px"><strong>Every patient is accounted for:</strong> "In" counts everyone who ADMITTED that week — <strong>tap any In or Overall number to see the names behind it</strong>, with flags for duplicate casefiles, in-and-outs, and date shifts. The LOS columns count DISCHARGED stays — a stay has no length until it ends, so ${d.stillActive||0} ${(d.stillActive||0)===1?'person':'people'} currently in a bed will land on the board the week they leave.${d.skippedNoDates?` ${d.skippedNoDates} record${d.skippedNoDates===1?'':'s'} skipped for missing admit/discharge dates — fix those in Kipu.`:''}</div>
+    <div id="losDrill"></div></div>`;
+}
+async function losWeekDrill(week,kind){
+  const host=$('losDrill'); if(!host) return;
+  host.innerHTML='<div class="hint" style="margin-top:8px">Pulling the names…</div>';
+  try{
+    const d=await api('/analytics/los-week-detail?week='+week+'&kind='+kind);
+    host.innerHTML=`<div class="card" style="margin-top:10px;border-left:4px solid var(--gold)">
+      <div class="cmd-hero-row"><h3 style="margin:0">${kind==='in'?'📥 Admitted':'📤 Discharged'} — week of ${esc(week)}</h3><button class="btn btn-ghost btn-sm sans" onclick="$('losDrill').innerHTML=''">✕ Close</button></div>
+      <div class="hint" style="margin:4px 0 8px"><strong>${d.casefiles}</strong> chart${d.casefiles===1?'':'s'} counted · <strong>${d.persons}</strong> distinct ${d.persons===1?'person':'people'}${d.referredOut?` · ${d.referredOut} in-and-out`:''} — ${esc(d.readThisWay)}</div>
+      ${(d.list||[]).map(x=>`<div class="pc-note">• <strong>${esc(x.name)}</strong> <span class="hint">· ${esc(x.date)}${x.loc?' · '+esc(x.loc):''}</span>${(x.flags||[]).map(f=>` <span class="badge-idle" style="background:#fdf0e2;color:#8a5a23">${esc(f)}</span>`).join('')}</div>`).join('')||'<div class="hint">Nobody in this bucket.</div>'}
+    </div>`;
+    host.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){ host.innerHTML='<div class="hint" style="color:var(--danger)">'+esc(e.message)+'</div>'; }
 }
 async function saveLosGoals(){
   const goals={};

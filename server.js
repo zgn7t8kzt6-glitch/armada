@@ -9,7 +9,7 @@ import { buildWeeklyData, renderReportHtml, sendWeeklyReport, emailConfigured, e
 import { STANDARD_SECTIONS, NORTH_STAR, MOTTO, TAGLINE } from './src/standard.js';
 import { todaysFocus, FOCUS_TOPICS } from './src/db.js';
 import { REFERRAL_DEPARTMENTS, REFERRAL_CATEGORIES, REFERRAL_REASONS, FACILITY_TYPES, DISCHARGE_TYPES, CASE_CATEGORIES, DIRECTOR_REVIEW } from './src/db.js';
-import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ } from './src/db.js';
+import { ASAM_LEVELS, LOC_RANK, LOC_LABEL, parseLoc, rollupDailyMetrics, appToday, addDays, dayBoundsUtc, APP_TZ, localDateOf } from './src/db.js';
 import { kipuConfigured, kipuTest, kipuSyncRoster, kipuInspect, kipuPatientNotes, kipuDischargeNotes, kipuDocInspect, kipuPatientChart, kipuEvaluation, kipuPatientExtras, kipuReconcile, kipuFindRounds, kipuClientRounds, kipuFixDischargeDates, kipuOutpatientCensus, kipuGroupProbe, kipuOutpatientFieldInspect, kipuGroupAttendance, kipuUrProbe, kipuAdtProbe, kipuOutpatientAdmissions, kipuOutpatientPhpOutcomes, kipuListLocations, kipuPullAuths, kipuDayEncounters, kipuNoteAuthor, kipuListTemplates, kipuPushNote, kipuFindEvalsByName, kipuEvalSignatureScan, kipuConnConfigured, kipuDayGroupNotes, kipuGroupNotesDiag, kipuClientDayDiag } from './src/kipu.js';
 import { sfConfigured, sfTest, sfSyncInbound, sfStatus, sfDiscover, sfDescribe, sfAutomap, sfSyncArrivals, sfArrivalsDiagnose } from './src/salesforce.js';
 import { whConfigured, whTest, whColumns, whSyncRoster, whSyncNotes } from './src/warehouse.js';
@@ -11701,6 +11701,48 @@ app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
   res.json({
     weeks: out, goals: losGoals(), levelKeys, stillActive, skippedNoDates,
     canEditGoals: req.user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management'].includes(req.user.job_role),
+  });
+});
+/* ── Week drill: the NAMES behind an LOS-board number, with the flags that
+   explain every known way counts diverge from someone's mental list —
+   same-person duplicate casefiles, in-and-outs who never completed intake,
+   missing facility stamps, and evening admits date-shifted by UTC. ── */
+app.get('/api/analytics/los-week-detail', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = shiftFrag(fc, 'facility_id');
+  const wk = /^\d{4}-\d{2}-\d{2}$/.test(req.query.week || '') ? req.query.week : null;
+  if (!wk) return res.status(400).json({ error: 'week=YYYY-MM-DD (a Monday) required' });
+  const wkEnd = addDays(wk, 6);
+  const kind = req.query.kind === 'out' ? 'out' : 'in';
+  const col = kind === 'in' ? 'admit' : 'discharge_date';
+  // Widen a day each side, then bucket by the EASTERN day so UTC evening
+  // timestamps can't push someone into the wrong week.
+  const rows = db.prepare(`SELECT id, pref, name, kipu_id, admit, admit_time, discharge_date, discharge_status, discharge_reason, therapist, diagnosis, loc, facility_id, active
+    FROM clients WHERE merged_into IS NULL AND ${col} IS NOT NULL AND substr(${col},1,10) >= ? AND substr(${col},1,10) <= ?
+    AND COALESCE(discharge_status,'') NOT IN ('Merged (duplicate)')${F}`).all(addDays(wk, -1), addDays(wkEnd, 1));
+  const cnorm = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+  const personKey = (c) => (c.kipu_id ? String(c.kipu_id).split(':')[0] : '') || cnorm(c.name);
+  const inWeek = rows.filter((c) => { const d = localDateOf(c[col]) || String(c[col]).slice(0, 10); return d >= wk && d <= wkEnd; });
+  const seen = new Map();
+  for (const c of inWeek) { const k = personKey(c); seen.set(k, (seen.get(k) || 0) + 1); }
+  const list = inWeek.map((c) => {
+    const rawDay = String(c[col]).slice(0, 10), localDay = localDateOf(c[col]) || rawDay;
+    return {
+      id: c.id, name: c.pref || c.name, loc: c.loc || '', date: localDay,
+      flags: [
+        seen.get(personKey(c)) > 1 ? 'duplicate casefile (same person counted ' + seen.get(personKey(c)) + '×)' : null,
+        isReferredOut(c) ? 'in-and-out — never completed intake' : null,
+        c.facility_id == null ? 'no facility stamp (counts as default building)' : null,
+        rawDay !== localDay ? `UTC date-shift (stored ${rawDay}, really ${localDay})` : null,
+        kind === 'in' && !c.discharge_date ? 'still here' : null,
+      ].filter(Boolean),
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+  res.json({
+    week: wk, kind, casefiles: list.length, persons: new Set(inWeek.map(personKey)).size,
+    referredOut: inWeek.filter(isReferredOut).length,
+    list,
+    readThisWay: 'casefiles is what the board counts; persons dedupes re-admissions/duplicate charts. If the number you\'re comparing against is person-based (like the census email), the difference is exactly the duplicate-casefile and in-and-out flags below.',
   });
 });
 app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {

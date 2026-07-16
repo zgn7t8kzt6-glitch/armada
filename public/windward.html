@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Windward Operating Partners — If your facility doesn't improve, we don't get paid.</title>
+<meta name="description" content="Windward embeds inside struggling behavioral health and addiction treatment facilities as an operating partner. No retainers, no hourly fees — our entire compensation is a share of measured improvement against a locked baseline.">
+<style>
+  :root{
+    --ink:#1b2437;          /* deep navy — headings */
+    --ink-soft:#3d4658;     /* body text */
+    --ink-faint:#8a91a0;    /* muted */
+    --paper:#fdfcfa;        /* page background */
+    --paper-2:#f7f5f1;      /* card wash */
+    --line:#e6e2da;         /* hairlines */
+    --flame:#e8502a;        /* orange-red — the promise */
+    --gold:#d9a13d;         /* amber — labels & marks */
+    --good:#3fae6a;         /* green — board arrows */
+    --serif:"Source Serif Pro",Georgia,"Times New Roman",serif;
+    --sans:"Futura","Century Gothic","Avenir Next","Trebuchet MS",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--paper);color:var(--ink-soft);
+    font-family:var(--serif);font-size:19px;line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+
+  h1,h2,h3{font-family:var(--sans);color:var(--ink);font-weight:700;letter-spacing:.02em}
+  .kicker{
+    font-family:var(--mono);font-size:13px;font-weight:700;
+    letter-spacing:.28em;text-transform:uppercase;color:var(--gold);
+  }
+  .kicker.flame{color:var(--flame)}
+  .mono-note{font-family:var(--mono);font-size:13.5px;line-height:1.7;color:var(--ink-faint)}
+
+  /* ── header ─────────────────────────────────────────────── */
+  header{
+    position:sticky;top:0;z-index:50;
+    background:rgba(253,252,250,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav{display:flex;align-items:center;justify-content:space-between;padding:20px 28px;max-width:860px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:12px;text-decoration:none}
+  .brand svg{display:block}
+  .brand span{font-family:var(--sans);font-weight:800;font-size:19px;letter-spacing:.22em;color:var(--ink)}
+  .nav a.cta{
+    font-family:var(--sans);font-weight:700;font-size:13px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--ink-faint);text-decoration:none;transition:color .2s;
+  }
+  .nav a.cta:hover{color:var(--flame)}
+
+  /* ── hero ───────────────────────────────────────────────── */
+  .hero{padding:110px 0 70px}
+  .hero h1{font-size:clamp(38px,6.4vw,58px);line-height:1.08;margin:20px 0 30px;color:#a9aeb9}
+  .hero h1 .dark{color:var(--ink)}
+  .hero h1 .flame{color:var(--flame)}
+  .hero p{max-width:600px;font-size:20px}
+  .hero-ctas{display:flex;flex-wrap:wrap;gap:16px;margin-top:44px}
+  .btn{
+    display:inline-block;font-family:var(--sans);font-weight:700;font-size:14px;
+    letter-spacing:.18em;text-transform:uppercase;text-decoration:none;
+    padding:17px 30px;transition:all .2s;
+  }
+  .btn-primary{background:var(--ink);color:#fff}
+  .btn-primary:hover{background:var(--flame)}
+  .btn-ghost{border:1px solid var(--line);color:var(--ink-faint)}
+  .btn-ghost:hover{border-color:var(--ink);color:var(--ink)}
+
+  /* ── operating board ───────────────────────────────────── */
+  .board{border-top:1px solid var(--line);margin-top:70px;padding-top:26px}
+  .board-head{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;
+    font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+  .board-grid{display:grid;grid-template-columns:1fr 1fr;margin-top:34px;border-top:1px solid var(--line)}
+  .tile{padding:28px 26px;border-bottom:1px solid var(--line)}
+  .tile:nth-child(odd){border-right:1px solid var(--line)}
+  .tile .metric{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+  .tile .dir{display:flex;align-items:center;gap:9px;margin:12px 0 8px;
+    font-family:var(--sans);font-weight:800;font-size:30px;letter-spacing:.06em;color:var(--ink)}
+  .tile .dir .arrow{color:var(--good);font-size:16px}
+  .tile .sub{font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
+  .board-note{margin-top:26px}
+
+  /* ── sections ──────────────────────────────────────────── */
+  section{padding:90px 0}
+  section h2{font-size:clamp(28px,4.4vw,38px);line-height:1.18;margin:16px 0 22px}
+  .lede{max-width:620px;font-size:20px}
+
+  /* ── the deal ledger ───────────────────────────────────── */
+  .ledger{border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:52px;padding:56px 46px}
+  .ledger h3{font-size:26px;letter-spacing:.03em}
+  .ledger h3.earn{color:#7d8494}
+  .ledger-rows{margin:26px 0 0}
+  .lrow{display:flex;gap:22px;align-items:baseline;padding:20px 0;border-top:1px solid var(--line)}
+  .lrow .mark{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--flame);flex:0 0 42px}
+  .lrow .mark.pct{color:var(--gold)}
+  .ledger .mono-note{margin-top:30px}
+  .ledger-gap{height:64px}
+
+  /* ── model phases ──────────────────────────────────────── */
+  .phase{border-top:1px solid var(--line);padding:52px 0 14px;margin-top:44px}
+  .phase:first-of-type{margin-top:56px}
+  .phase h3{font-size:25px;margin:20px 0 16px;letter-spacing:.02em}
+  .phase p{max-width:640px}
+
+  /* ── what we fix cards ─────────────────────────────────── */
+  .fix-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:56px}
+  .fix{border:1px solid var(--line);border-radius:10px;background:#fff;padding:34px 30px}
+  .fix .kicker{font-size:11.5px;letter-spacing:.22em}
+  .fix h3{font-size:22px;line-height:1.3;margin:16px 0 14px}
+  .fix p{font-size:17px;line-height:1.6}
+
+  /* ── why windward ──────────────────────────────────────── */
+  blockquote{
+    border-left:3px solid var(--gold);margin:38px 0;padding:6px 0 6px 26px;
+    font-style:italic;font-size:21px;line-height:1.55;color:var(--ink);
+  }
+  .record{border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:56px;padding:50px 44px}
+  .record h3{font-family:var(--sans);font-size:16px;letter-spacing:.18em;text-transform:uppercase}
+  .rrow{display:flex;gap:22px;align-items:baseline;padding:20px 0;border-top:1px solid var(--line)}
+  .rrow:first-of-type{margin-top:26px}
+  .rrow .num{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--gold);flex:0 0 76px;text-align:right}
+  .rrow p{font-size:17.5px}
+  .record .mono-note{margin-top:30px}
+
+  /* ── field notes ───────────────────────────────────────── */
+  .note-card{border:1px solid var(--line);border-radius:10px;background:#fff;padding:44px 38px;margin-top:34px}
+  .note-card:first-of-type{margin-top:56px}
+  .note-card .kicker{font-size:11.5px}
+  .note-card h3{font-size:24px;line-height:1.3;margin:18px 0 18px}
+  .note-card .lesson{
+    border-top:1px solid var(--line);margin-top:28px;padding-top:22px;
+    font-family:var(--mono);font-size:13.5px;line-height:1.7;color:var(--gold);
+  }
+
+  /* ── faq ───────────────────────────────────────────────── */
+  .faq{margin-top:48px;border-bottom:1px solid var(--line)}
+  .faq details{border-top:1px solid var(--line)}
+  .faq summary{
+    display:flex;justify-content:space-between;align-items:center;gap:20px;
+    cursor:pointer;list-style:none;padding:26px 2px;
+    font-family:var(--sans);font-weight:700;font-size:19px;color:var(--ink);letter-spacing:.02em;
+  }
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary .plus{color:var(--gold);font-family:var(--mono);font-weight:700;font-size:20px;flex:0 0 auto;transition:transform .2s}
+  .faq details[open] summary .plus{transform:rotate(45deg)}
+  .faq .a{padding:0 2px 28px;max-width:660px;font-size:17.5px}
+
+  /* ── selectivity ───────────────────────────────────────── */
+  .decline{border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:52px;overflow:hidden}
+  .decline .dhead{
+    padding:22px 34px;border-bottom:1px solid var(--line);background:var(--paper-2);
+    font-family:var(--mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);
+  }
+  .drow{display:flex;gap:20px;align-items:baseline;padding:24px 34px;border-top:1px solid var(--line)}
+  .drow:first-of-type{border-top:none}
+  .drow .x{color:var(--flame);font-family:var(--mono);font-weight:700;flex:0 0 auto}
+  .drow p{font-size:17.5px}
+
+  /* ── request evaluation ────────────────────────────────── */
+  .steps{margin-top:52px}
+  .step{display:flex;gap:26px;padding:26px 0;border-top:1px solid var(--line)}
+  .step:first-child{border-top:none}
+  .step .n{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--gold);flex:0 0 34px;padding-top:3px}
+  .step p{max-width:600px;font-size:18px}
+  .step p b{color:var(--ink)}
+  .contact{margin-top:44px}
+  .contact .mono-note{margin-top:30px;font-size:14.5px;color:var(--ink-soft)}
+  .contact .mono-note a{color:var(--ink-soft)}
+
+  /* ── footer ────────────────────────────────────────────── */
+  footer{border-top:1px solid var(--line);padding:56px 0 72px}
+  footer p{font-family:var(--mono);font-size:13px;line-height:2.2;color:var(--ink-faint)}
+
+  /* ── reveal on scroll (html.js set by script; no-JS stays visible) ── */
+  html.js .rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
+  html.js .rv.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    html.js .rv{opacity:1;transform:none;transition:none}
+    html{scroll-behavior:auto}
+  }
+
+  @media (max-width:680px){
+    body{font-size:17.5px}
+    .board-grid{grid-template-columns:1fr}
+    .tile:nth-child(odd){border-right:none}
+    .fix-grid{grid-template-columns:1fr}
+    .ledger,.record{padding:36px 26px}
+    .note-card{padding:32px 24px}
+    section{padding:66px 0}
+    .rrow .num{flex-basis:60px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="nav">
+    <a class="brand" href="#top" aria-label="Windward home">
+      <svg width="30" height="22" viewBox="0 0 30 22" fill="none" aria-hidden="true">
+        <path d="M2 20 L13 2 L18 10 Z" fill="#1b2437"/>
+        <path d="M14 20 L21 8 L28 20 Z" fill="#d9a13d"/>
+      </svg>
+      <span>WINDWARD</span>
+    </a>
+    <a class="cta" href="#evaluation">Request Evaluation</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ── HERO ─────────────────────────────────────────────── -->
+  <div class="hero wrap">
+    <p class="kicker flame rv">Turnaround Operating Partners &nbsp;·&nbsp; Behavioral Health &amp; Addiction Treatment</p>
+    <h1 class="rv"><span class="dark">If your facility<br>doesn't improve,</span><br><span class="flame">we don't get paid.</span></h1>
+    <p class="rv">Windward embeds inside struggling treatment facilities as an operating partner — not a consultant. No retainers. No hourly fees. No binder left on your desk. Our entire compensation is a share of the measured improvement we create, against a baseline locked before we start.</p>
+    <div class="hero-ctas rv">
+      <a class="btn btn-primary" href="#evaluation">Request an Evaluation</a>
+      <a class="btn btn-ghost" href="#model">See How the Model Works</a>
+    </div>
+
+    <div class="board rv">
+      <div class="board-head">
+        <span>The operating board — what we're measured on</span>
+        <span>Locked baseline · independently verified</span>
+      </div>
+      <div class="board-grid">
+        <div class="tile">
+          <div class="metric">Census vs. Capacity</div>
+          <div class="dir"><span class="arrow">▲</span> UP</div>
+          <div class="sub">avg daily census, trailing 90</div>
+        </div>
+        <div class="tile">
+          <div class="metric">AMA / ACA Rate</div>
+          <div class="dir"><span class="arrow">▼</span> DOWN</div>
+          <div class="sub">incl. weekend differential</div>
+        </div>
+        <div class="tile">
+          <div class="metric">Frontline Turnover</div>
+          <div class="dir"><span class="arrow">▼</span> DOWN</div>
+          <div class="sub">clinical &amp; nursing, annualized</div>
+        </div>
+        <div class="tile">
+          <div class="metric">Net Collections / Bed</div>
+          <div class="dir"><span class="arrow">▲</span> UP</div>
+          <div class="sub">payer-mix adjusted</div>
+        </div>
+      </div>
+      <p class="mono-note board-note">Every engagement runs on a board like this one. If the board doesn't move, our invoice is zero.</p>
+    </div>
+  </div>
+
+  <!-- ── THE DEAL ─────────────────────────────────────────── -->
+  <section id="deal">
+    <div class="wrap">
+      <p class="kicker rv">The Deal</p>
+      <h2 class="rv">Consultants sell hours. We buy outcomes.</h2>
+      <p class="lede rv">Most turnaround consultants charge struggling facilities the most money at their weakest moment — then leave before the results come in. We inverted the model. Here is the entire ledger.</p>
+
+      <div class="ledger rv">
+        <h3>What you pay up front</h3>
+        <div class="ledger-rows">
+          <div class="lrow"><span class="mark">$0</span><p>No retainer, no diagnostic fee, no hourly billing</p></div>
+          <div class="lrow"><span class="mark">$0</span><p>No travel reimbursement, no expense pass-through</p></div>
+          <div class="lrow"><span class="mark">$0</span><p>No software, no licensing, no "implementation package"</p></div>
+        </div>
+        <p class="mono-note">Your only commitments: data access for verification, and a leadership team willing to do the work.</p>
+
+        <div class="ledger-gap"></div>
+
+        <h3 class="earn">What we earn</h3>
+        <div class="ledger-rows">
+          <div class="lrow"><span class="mark pct">%</span><p>A contracted share of measured improvement — census, retention, collections — above a locked baseline</p></div>
+          <div class="lrow"><span class="mark pct">%</span><p>Paid only as improvement is realized and verified, not projected</p></div>
+          <div class="lrow"><span class="mark pct">%</span><p>A tail on sustained results, because real turnarounds hold after we leave</p></div>
+        </div>
+        <p class="mono-note">If we evaluate your facility and don't believe we can move the board, we decline the engagement. Full stop.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── THE MODEL ────────────────────────────────────────── -->
+  <section id="model">
+    <div class="wrap">
+      <p class="kicker rv">The Model</p>
+      <h2 class="rv">How an engagement runs</h2>
+
+      <div class="phase rv">
+        <p class="kicker">Phase 01 &nbsp;·&nbsp; Weeks 1–2</p>
+        <h3>Evaluation &amp; locked baseline</h3>
+        <p>We come on site. We walk the units, sit with charge nurses, ride the intake calls, and pull twelve months of census, AMA, turnover, and collections data. Then the baseline is locked — in writing, with agreed metric definitions — so neither side can move the goalposts later. If we don't believe the facility can be turned, we say so and leave. No charge either way.</p>
+      </div>
+
+      <div class="phase rv">
+        <p class="kicker">Phase 02 &nbsp;·&nbsp; Months 1–3</p>
+        <h3>Embedded operating partnership</h3>
+        <p>We don't advise from a conference room. We install a daily operating rhythm, put real authority and clear ownership at the frontline, rebuild the intake-to-bed process, and start the culture work that everything else depends on — with your existing team, not a replacement one. Your staff usually has the answers already. Nobody ever asked them.</p>
+      </div>
+
+      <div class="phase rv">
+        <p class="kicker">Phase 03 &nbsp;·&nbsp; Months 3–9</p>
+        <h3>The board moves</h3>
+        <p>Results are measured monthly against the locked baseline, verified from your own source systems, and adjusted for payer-mix changes outside anyone's control. We get paid a share of realized improvement — after it shows up in your numbers, never before.</p>
+      </div>
+
+      <div class="phase rv">
+        <p class="kicker">Phase 04 &nbsp;·&nbsp; Ongoing</p>
+        <h3>Sustain and hand back</h3>
+        <p>A turnaround that collapses when the consultant leaves wasn't a turnaround. We build the system into your leadership team, document who owns what, and step back — with compensation tied to the results holding, not just appearing.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── WHAT WE FIX ──────────────────────────────────────── -->
+  <section id="fix">
+    <div class="wrap">
+      <p class="kicker rv">What We Fix</p>
+      <h2 class="rv">The problems that quietly kill treatment facilities</h2>
+      <p class="lede rv">Struggling facilities almost never have a marketing problem. In our experience, the census follows the operations — and these six failures account for most of the gap between the facility you have and the facility you built.</p>
+
+      <div class="fix-grid">
+        <div class="fix rv">
+          <p class="kicker">Culture &amp; Frontline Retention</p>
+          <h3>Your best people are interviewing elsewhere</h3>
+          <p>Turnover is the most expensive line item nobody budgets for. We build recognition, ownership, and career structure that makes your strongest clinicians stay — because census follows culture, not the other way around.</p>
+        </div>
+        <div class="fix rv">
+          <p class="kicker">AMA / Early Discharge</p>
+          <h3>Patients leaving before treatment works</h3>
+          <p>High AMA rates — especially the weekend spike almost every facility has and few measure — are a solvable operations problem: staffing patterns, engagement rhythm, and who has authority at 2 a.m. on a Saturday.</p>
+        </div>
+        <div class="fix rv">
+          <p class="kicker">Census &amp; Intake</p>
+          <h3>Beds empty while calls go unanswered</h3>
+          <p>The fastest census gains usually come from inbound demand you already have — alumni, readmits, families who called once — falling through an intake process nobody owns end to end.</p>
+        </div>
+        <div class="fix rv">
+          <p class="kicker">Referral Concentration</p>
+          <h3>One referral source owns your census</h3>
+          <p>If a third of your admissions come from a single relationship, you don't have a pipeline — you have a hostage situation. We diversify referral sources before the concentration becomes a crisis.</p>
+        </div>
+        <div class="fix rv">
+          <p class="kicker">Daily Operating Rhythm</p>
+          <h3>Leadership finds out about problems in month-end reports</h3>
+          <p>We install a daily management system — the same discipline used in the best-run hospitals — so problems surface in hours, ownership is explicit, and the numbers are known every single day.</p>
+        </div>
+        <div class="fix rv">
+          <p class="kicker">Revenue Integrity</p>
+          <h3>Doing the work, not getting paid for it</h3>
+          <p>Documentation gaps, authorization breakdowns, and billing-process failures quietly bleed facilities dry. We tighten the chain from admission to clean claim so the clinical work you're already doing turns into collections.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── WHY WINDWARD ─────────────────────────────────────── -->
+  <section id="why">
+    <div class="wrap">
+      <p class="kicker rv">Why Windward</p>
+      <h2 class="rv">Built by an operator who is still operating</h2>
+      <p class="lede rv">Windward wasn't founded by a former executive or a career consultant. It was founded by a working operator currently running a multi-site behavioral health and addiction treatment platform — detox through outpatient, hundreds of beds, Joint Commission accredited — who has personally led the turnarounds this model is built on: facilities pulled back from operating losses, clinical teams retained through direct intervention, referral pipelines rebuilt from single-source dependency.</p>
+
+      <blockquote class="rv">"Excellence isn't a training. It's a system you run every day — and the frontline can tell within a week whether leadership actually means it."</blockquote>
+
+      <p class="lede rv">Our methodology draws on the service-culture discipline of Horst Schulze, the hardwired-execution frameworks of Quint Studer, and the Baldrige Health Care Criteria — applied not academically, but in live facilities, on real censuses, with our own money at stake.</p>
+
+      <div class="record rv">
+        <h3>The Operating Record — Our Own Facilities</h3>
+        <div class="rrow"><span class="num">350+</span><p>beds operated across a multi-state platform, detox through outpatient, Joint Commission accredited</p></div>
+        <div class="rrow"><span class="num">$130K</span><p>per month in collapsed revenue traced to a single broken discharge process — diagnosed, reversed, and hardwired against recurrence</p></div>
+        <div class="rrow"><span class="num">$977K</span><p>in annualized overhead removed in one restructuring, with zero cuts to clinical staffing</p></div>
+        <div class="rrow"><span class="num">3x</span><p>weekend-vs-weekday AMA differential uncovered by our measurement system — the kind of pattern most facilities never see because nobody splits the data</p></div>
+        <div class="rrow"><span class="num">1</span><p>clinical director retained after an active recruitment attempt — because the CEO got on a plane the same week</p></div>
+        <div class="rrow"><span class="num">35+</span><p>documents in a complete management operating system, running live today, not sitting in a binder</p></div>
+        <p class="mono-note">Every number above is from facilities we own and operate. Client results will be published as engagements complete — with the client's permission and their data, not ours.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FIELD NOTES ──────────────────────────────────────── -->
+  <section id="field-notes">
+    <div class="wrap">
+      <p class="kicker rv">Field Notes</p>
+      <h2 class="rv">Three turnarounds from inside our own platform</h2>
+      <p class="lede rv">Windward's methodology wasn't developed for clients. It was developed under fire, in facilities we own. Details below are simplified for confidentiality; the numbers are real.</p>
+
+      <div class="note-card rv">
+        <p class="kicker">Revenue Collapse &nbsp;·&nbsp; Residential/PHP</p>
+        <h3>The census that was quietly costing $130K a month</h3>
+        <p>A facility's census looked healthy — but revenue was collapsing. The diagnosis: discharges were being suppressed to protect the census number, causing patients to age out of higher levels of care. The fix wasn't marketing. It was discharge integrity, level-of-care discipline, and changing what leadership measured. Revenue recovered because the operating system changed, not the ad spend.</p>
+        <p class="lesson">Lesson: a good-looking census can hide a broken P&amp;L. Measure the right thing.</p>
+      </div>
+
+      <div class="note-card rv">
+        <p class="kicker">AMA Crisis &nbsp;·&nbsp; Detox</p>
+        <h3>Weekend AMA rates running 3x weekdays</h3>
+        <p>A detox unit was bleeding patients — but only on weekends, a pattern invisible in the monthly average. Root causes: thinner weekend engagement, unclear authority after hours, and nobody empowered to solve a problem at 2 a.m. Saturday. The response: an after-hours authority charter for charge nurses, a paid on-call structure, and weekend programming built to the same standard as Tuesday's.</p>
+        <p class="lesson">Lesson: averages lie. Split the data until the problem shows itself.</p>
+      </div>
+
+      <div class="note-card rv">
+        <p class="kicker">Overhead &nbsp;·&nbsp; Multi-Site Platform</p>
+        <h3>$977K removed without touching a single clinical role</h3>
+        <p>A corporate restructuring took nearly a million dollars of annualized overhead out of the platform — while clinical staffing was protected entirely. The discipline: cut distance from the patient, never proximity to the patient. Facilities in trouble usually do the opposite, gutting the frontline to protect the org chart.</p>
+        <p class="lesson">Lesson: the frontline is the product. Overhead is the negotiable part.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FAIR QUESTIONS ───────────────────────────────────── -->
+  <section id="faq">
+    <div class="wrap">
+      <p class="kicker rv">Fair Questions</p>
+      <h2 class="rv">"This sounds too good. What's the catch?"</h2>
+      <p class="lede rv">There isn't one — but there is a structure, and you should understand it before you call us. Straight answers to the questions every serious owner asks.</p>
+
+      <div class="faq rv">
+        <details>
+          <summary>How is "improvement" actually measured?<span class="plus">+</span></summary>
+          <div class="a"><p>Against a baseline locked in writing before the engagement starts — twelve months of your own census, AMA, turnover, and collections data, with metric definitions both sides agree to. Results are then verified monthly from your source systems, not our spreadsheets, and adjusted for payer-mix changes outside anyone's control. Neither side can move the goalposts later.</p></div>
+        </details>
+        <details>
+          <summary>What percentage do you earn?<span class="plus">+</span></summary>
+          <div class="a"><p>It's contracted per engagement, because facilities differ in size, payer mix, and how far the board can move. What never changes: the share applies only to measured improvement above the locked baseline, it's paid only as results are realized, and if the board doesn't move, the invoice is zero. You'll see the exact number in the proposed terms before you commit to anything.</p></div>
+        </details>
+        <details>
+          <summary>What if census drops because of something outside anyone's control — a payer change, a regulation?<span class="plus">+</span></summary>
+          <div class="a"><p>The baseline agreement addresses this up front. Measurements are adjusted for payer-mix shifts and material external events — the same way we adjust upward movement we didn't cause. We get paid for improvement we create, not for market luck in either direction. If we disagree about an adjustment, the contract's verification process settles it from your source data.</p></div>
+        </details>
+        <details>
+          <summary>How long is the engagement?<span class="plus">+</span></summary>
+          <div class="a"><p>The evaluation and locked baseline take one to two weeks. The embedded operating phase typically runs three months, with results measured monthly through month nine. After that we hand the system back to your leadership team — with a tail on sustained results, because a turnaround that collapses when we leave wasn't a turnaround.</p></div>
+        </details>
+        <details>
+          <summary>What do you need from us?<span class="plus">+</span></summary>
+          <div class="a"><p>Two things: verified access to your census, billing, and payroll data so results can be measured honestly, and a leadership team willing to do the work. We operate with your existing team, not a replacement one. If ownership wants a report rather than a change, we're the wrong partner — and we'll say so at the evaluation.</p></div>
+        </details>
+        <details>
+          <summary>What happens if we disagree about the numbers?<span class="plus">+</span></summary>
+          <div class="a"><p>That's exactly why the baseline is locked in writing with agreed metric definitions before we start. Every measurement traces back to your own source systems, so a dispute becomes a data question, not a negotiation. The contract specifies the verification method — and if the data doesn't show improvement, we don't get paid. The structure removes the argument.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SELECTIVITY ──────────────────────────────────────── -->
+  <section id="selectivity">
+    <div class="wrap">
+      <p class="kicker rv">Selectivity</p>
+      <h2 class="rv">We decline most engagements. That's the model working.</h2>
+      <p class="lede rv">Because we only earn on results, we can only take facilities we genuinely believe we can turn — and only a few at a time, because embedded means embedded. We are not the right partner if:</p>
+
+      <div class="decline rv">
+        <div class="dhead">We will decline the engagement when</div>
+        <div class="drow"><span class="x">✕</span><p>Ownership wants a report, not a change — the binder business is well served elsewhere</p></div>
+        <div class="drow"><span class="x">✕</span><p>Leadership won't grant verified access to census, billing, and payroll data</p></div>
+        <div class="drow"><span class="x">✕</span><p>The plan is to cut clinical quality to hit numbers — we grow facilities, we don't strip them</p></div>
+        <div class="drow"><span class="x">✕</span><p>Our evaluation says the facility can't be turned — we'll tell you that for free, too</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── REQUEST AN EVALUATION ────────────────────────────── -->
+  <section id="evaluation">
+    <div class="wrap">
+      <p class="kicker flame rv">Request an Evaluation</p>
+      <h2 class="rv">The evaluation is free.<br>The honesty is included.</h2>
+      <p class="lede rv">Here is exactly what happens — and what doesn't — when you reach out:</p>
+
+      <div class="steps rv">
+        <div class="step"><span class="n">01</span><p><b>A 30-minute call.</b> Levels of care, bed count, payer mix, and what's keeping you up at night. Under NDA if you prefer — we'll send ours or sign yours.</p></div>
+        <div class="step"><span class="n">02</span><p><b>A 2-day onsite review.</b> We walk the units, sit with charge nurses and intake, and review 12 months of census, AMA, turnover, and collections data. No entourage, no slide deck.</p></div>
+        <div class="step"><span class="n">03</span><p><b>A written assessment.</b> What's broken, what it's costing you, and whether we believe it can be turned. You keep it either way.</p></div>
+        <div class="step"><span class="n">04</span><p><b>A decision — by both sides.</b> If we believe in the turnaround, you get proposed terms: metrics, baseline, share, and timeline. If we don't, we tell you plainly and part as friends. Total cost to you so far: zero.</p></div>
+      </div>
+
+      <div class="contact rv">
+        <a class="btn btn-primary" href="mailto:engage@windwardoperating.com?subject=Evaluation%20request">Start With the 30-Minute Call</a>
+        <p class="mono-note"><a href="mailto:engage@windwardoperating.com">engage@windwardoperating.com</a> &nbsp;·&nbsp; Confidential. NDA available on request.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>© 2026 Windward Operating Partners LLC<br>Performance-based turnaround partnerships for behavioral health</p>
+  </div>
+</footer>
+
+<script>
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  document.querySelectorAll('.rv').forEach(el => io.observe(el));
+</script>
+
+</body>
+</html>

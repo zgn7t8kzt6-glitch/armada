@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly|los-week-detail))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly|los-week-detail|los-whatif))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -8926,7 +8926,41 @@ async function loadLosView(){
       :`<div class="hint" style="margin-top:8px">Goals: ${Object.keys(g).length?Object.entries(g).map(([k,v])=>`<strong>${esc(k)}</strong> ${v}d`).join(' · '):'none set yet — leadership sets them here.'}</div>`}
     <div style="overflow-x:auto"><table class="tbl" style="margin-top:10px"><tr><th>Week</th><th>In</th><th>Overall${g.overall?` <span class="hint">🎯${g.overall}d</span>`:''}</th>${levels.map(L=>`<th>${esc(L)}${g[L]?` <span class="hint">🎯${g[L]}d</span>`:''}</th>`).join('')}</tr>${rows}</table></div>
     <div class="hint" style="margin-top:6px"><strong>Every patient is accounted for:</strong> "In" counts everyone who ADMITTED that week — <strong>tap any In or Overall number to see the names behind it</strong>, with flags for duplicate casefiles, in-and-outs, and date shifts. The LOS columns count DISCHARGED stays — a stay has no length until it ends, so ${d.stillActive||0} ${(d.stillActive||0)===1?'person':'people'} currently in a bed will land on the board the week they leave.${d.skippedNoDates?` ${d.skippedNoDates} record${d.skippedNoDates===1?'':'s'} skipped for missing admit/discharge dates — fix those in Kipu.`:''}</div>
-    <div id="losDrill"></div></div>`;
+    <div id="losDrill"></div>
+    <details style="margin-top:8px" ontoggle="if(this.open)losWhatif()"><summary class="hint" style="cursor:pointer"><strong>💰 What-if — what is a longer stay worth?</strong></summary><div id="losWhatif" class="hint" style="margin-top:6px">Open to load…</div></details></div>`;
+}
+/* What-if: (target avg − current avg) × per-diem × clients/week × 52. */
+let WHATIF={level:'3.7-WM',target:null,rate:null};
+async function losWhatif(){
+  const host=$('losWhatif'); if(!host) return;
+  host.textContent='Reading the last 12 weeks…';
+  try{
+    const d=await api('/analytics/los-whatif?level='+encodeURIComponent(WHATIF.level));
+    if(WHATIF.rate==null) WHATIF.rate=d.configuredRate||null;
+    if(WHATIF.target==null) WHATIF.target=d.currentAvg!=null?Math.ceil(d.currentAvg)+1:5;
+    const money=(n)=>'$'+Math.round(n).toLocaleString();
+    const calc=()=>{
+      const extra=Math.max(0,(WHATIF.target||0)-(d.currentAvg||0));
+      const rate=+WHATIF.rate||0;
+      const weekly=extra*rate*(d.perWeekClients||0);
+      return {extra,weekly,monthly:weekly*52/12,annual:weekly*52};
+    };
+    const c=calc();
+    host.innerHTML=`<div class="toolbar" style="justify-content:flex-start;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label class="hint" style="display:flex;flex-direction:column;gap:2px">Level<select style="width:auto" onchange="WHATIF.level=this.value;WHATIF.target=null;WHATIF.rate=null;losWhatif()">${['3.7-WM','3.2-WM','3.7','3.5'].map(L=>`<option ${WHATIF.level===L?'selected':''}>${L}</option>`).join('')}</select></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:2px">Target avg days<input type="number" step="0.5" min="0" value="${WHATIF.target}" style="width:90px" onchange="WHATIF.target=+this.value;losWhatif()"/></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:2px">Per-diem $${d.configuredRate?'':' (not set in Revenue → rates)'}<input type="number" step="10" min="0" value="${WHATIF.rate!=null?WHATIF.rate:''}" placeholder="e.g. 1200" style="width:100px" onchange="WHATIF.rate=+this.value;losWhatif()"/></label>
+      </div>
+      <div class="ret-cards" style="margin-top:8px">
+        <div class="ret-card"><div class="n">${d.currentAvg!=null?d.currentAvg+'d':'—'}</div><div class="l">current avg @ ${esc(d.level)}</div></div>
+        <div class="ret-card"><div class="n">${d.perWeekClients}</div><div class="l">clients/week touch it</div></div>
+        <div class="ret-card"><div class="n">+${c.extra.toFixed(1)}d</div><div class="l">extra days per client</div></div>
+        <div class="ret-card ${c.annual>0?'rc-elev':''}"><div class="n">${money(c.weekly)}</div><div class="l">per week</div></div>
+        <div class="ret-card ${c.annual>0?'rc-elev':''}"><div class="n">${money(c.monthly)}</div><div class="l">per month</div></div>
+        <div class="ret-card" style="border:2px solid var(--gold)"><div class="n">${money(c.annual)}</div><div class="l">per year</div></div>
+      </div>
+      <div class="hint" style="margin-top:6px">Math: (target ${WHATIF.target}d − current ${d.currentAvg!=null?d.currentAvg:'?'}d) × $${(+WHATIF.rate||0).toLocaleString()}/day × ${d.perWeekClients} clients/week × 52. Based on ${d.clientsTouched} clients who touched ${esc(d.level)} in the last 12 weeks (honest segment days). Reality checks: payors must authorize the added days (watch the Authorization Register), and this assumes the same client flow — it's the value of RETENTION at this level, mostly from preventing early AMAs.</div>`;
+  }catch(e){ host.textContent=e.message; }
 }
 async function losWeekDrill(week,kind){
   const host=$('losDrill'); if(!host) return;

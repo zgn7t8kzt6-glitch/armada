@@ -11703,6 +11703,47 @@ app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
     canEditGoals: req.user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management'].includes(req.user.job_role),
   });
 });
+/* ── LOS what-if: what is one more day at a level worth? Returns the honest
+   current average, throughput, and the configured per-diem so the front end
+   can do live arithmetic: (target − current) × per-diem × clients/week × 52. */
+app.get('/api/analytics/los-whatif', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = shiftFrag(fc, 'facility_id');
+  const level = String(req.query.level || '3.7-WM').slice(0, 20);
+  const nWeeks = 12;
+  const today = appToday(), since = addDays(today, -7 * nWeeks);
+  const clients = db.prepare(`SELECT id, loc, admit, discharge_date FROM clients
+    WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ?
+      AND COALESCE(discharge_status,'') NOT IN ('Merged (duplicate)')${F}`).all(since, today);
+  const evStmt = db.prepare(`SELECT kind, from_loc, to_loc, date FROM flow_events WHERE client_id = ? AND kind IN ('admit','loc_change') ORDER BY date, id`);
+  const dayDiff = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 864e5));
+  let totalDays = 0; const touched = new Set();
+  for (const c of clients) {
+    const admit = String(c.admit || '').slice(0, 10), dd = String(c.discharge_date || '').slice(0, 10);
+    if (!admit || !dd) continue;
+    const finalLoc = (c.loc && c.loc !== 'Unspecified') ? c.loc : '';
+    let loc = null, start = admit;
+    const segs = [];
+    for (const e of evStmt.all(c.id)) {
+      if (e.kind === 'admit') { loc = e.to_loc || loc; continue; }
+      if (e.kind === 'loc_change' && e.date >= admit && e.date <= dd) {
+        segs.push({ loc: loc || e.from_loc || finalLoc, days: dayDiff(start, e.date) });
+        loc = e.to_loc || loc; start = e.date;
+      }
+    }
+    segs.push({ loc: loc || finalLoc, days: dayDiff(start, dd) });
+    for (const s of segs) if (s.loc === level) { totalDays += s.days; touched.add(c.id); }
+  }
+  let rate = null;
+  try { const rates = JSON.parse(getState('loc_rates') || '{}'); rate = +rates[level] || null; } catch { /* unset */ }
+  res.json({
+    level, weeks: nWeeks,
+    clientsTouched: touched.size,
+    perWeekClients: +(touched.size / nWeeks).toFixed(2),
+    currentAvg: touched.size ? +(totalDays / touched.size).toFixed(1) : null,
+    totalDays, configuredRate: rate,
+  });
+});
 /* ── Week drill: the NAMES behind an LOS-board number, with the flags that
    explain every known way counts diverge from someone's mental list —
    same-person duplicate casefiles, in-and-outs who never completed intake,

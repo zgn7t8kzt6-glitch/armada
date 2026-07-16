@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/los-by-level)|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -207,7 +207,7 @@ const GROUP_OF={
   // Discharge — the fond farewell + continuum
   dischargepage:'handoff',continuum:'handoff',alumni:'handoff',
   // Revenue — Revenue OS: authorizations, money in
-  authreg:'revenue',billingready:'revenue',finance:'revenue',expenses:'revenue',
+  authreg:'revenue',billingready:'revenue',los:'revenue',finance:'revenue',expenses:'revenue',
   // Outpatient day programs (PHP/IOP/OP) live under Care — the facility chip
   // says WHICH program (Armada Clinical, Dayton, Spark); the sidebar stays functional.
   outpatient:'stay',
@@ -706,6 +706,7 @@ function show(v){
   if(v==='mydesk') loadMyDesk();
   if(v==='authreg') loadAuthReg();
   if(v==='billingready') loadBillingReady();
+  if(v==='los') loadLosView();
   if(v==='appts') loadAppts();
   if(v==='command') loadCommand();
   if(v==='finance') loadFinance();
@@ -8889,6 +8890,46 @@ async function loadBedForecast(hostId='bedForecast'){
     </div>
     <details style="margin-top:8px" ontoggle="if(this.open)loadForecastAccuracy('${hostId}Acc')"><summary class="hint" style="cursor:pointer">📏 Forecast accuracy — the weekly audit</summary><div id="${hostId}Acc" class="hint" style="margin-top:6px">Open to load…</div></details>
     <details style="margin-top:4px" ontoggle="if(this.open)loadLosByLevel('${hostId}Los')"><summary class="hint" style="cursor:pointer">⏱ Average LOS by level of care — honest vs. naive</summary><div id="${hostId}Los" class="hint" style="margin-top:6px">Open to load…</div></details></div>`;
+}
+/* ── Length of Stay tab: goals per level + the week-over-week scoreboard ── */
+let LOS_WEEKS=12;
+async function loadLosView(){
+  const host=$('losBody'); if(!host) return;
+  host.innerHTML='<div class="card"><div class="hint">Reconstructing stays week by week…</div></div>';
+  let d; try{ d=await api('/analytics/los-weekly?weeks='+LOS_WEEKS); }catch(e){ host.innerHTML='<div class="card"><div class="hint">'+esc(e.message)+'</div></div>'; return; }
+  const CORE=['3.7-WM','3.2-WM','3.7','3.5'];
+  const levels=[...new Set([...CORE.filter(k=>(d.levelKeys||[]).includes(k)||d.goals[k]!=null),...(d.levelKeys||[]).filter(k=>k!=='(no level)')])];
+  const g=d.goals||{};
+  const cell=(v,goal,prev)=>{
+    if(!v||v.avg==null||!v.n) return '<td class="hint">—</td>';
+    const met=goal!=null?v.avg>=goal:null;
+    const arrow=prev&&prev.avg!=null?(v.avg>prev.avg?' <span style="font-size:10px">▲</span>':v.avg<prev.avg?' <span style="font-size:10px;color:#b3382f">▼</span>':''):'';
+    return `<td style="${met===true?'color:var(--good,#2f7a4f);font-weight:700':met===false?'color:var(--danger);font-weight:700':''}">${v.avg}d${arrow}<span class="hint" style="font-weight:400"> ·${v.n}</span></td>`;
+  };
+  const weeks=[...(d.weeks||[])].reverse();   // newest first
+  const rows=weeks.map((w,i)=>{
+    const prev=weeks[i+1];
+    return `<tr><td><strong>${esc(w.week.slice(5))}</strong><div class="hint" style="font-size:10px">wk of</div></td>
+      ${cell(w.overall,g.overall,prev&&prev.overall)}
+      ${levels.map(L=>cell(w.levels[L],g[L],prev&&prev.levels[L])).join('')}</tr>`;
+  }).join('');
+  const goalIn=(k,label)=>`<label class="hint" style="display:flex;flex-direction:column;gap:2px;min-width:86px">${esc(label)}<input data-losgoal="${esc(k)}" type="number" step="0.5" min="1" value="${g[k]!=null?g[k]:''}" placeholder="—" style="width:86px"/></label>`;
+  host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">⏱ Length of Stay — goals &amp; week over week</h3>
+      <p class="sub sans" style="margin:0">Honest math: every stay is split by its level-change dates, so 3.7-WM days count as 3.7-WM even when the client finishes at 3.5. Weeks bucket by discharge date. <strong>Green = the week met the goal</strong> (average ≥ goal); red = under.</p></div>
+      <div class="itabs">${[8,12,26].map(n=>`<button class="itab ${LOS_WEEKS===n?'active':''}" onclick="LOS_WEEKS=${n};loadLosView()">${n} wks</button>`).join('')}</div></div>
+    ${d.canEditGoals?`<div class="toolbar no-print" style="justify-content:flex-start;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:flex-end;background:#faf6ee;border:1px solid var(--line);border-radius:12px;padding:10px">
+      <strong class="sans" style="font-size:13px">🎯 Goals (avg days)</strong>
+      ${goalIn('overall','Overall')}${CORE.map(L=>goalIn(L,L)).join('')}
+      <button class="btn btn-gold btn-sm sans" onclick="saveLosGoals()">Save goals</button><span id="losGoalMsg" class="hint"></span></div>`
+      :`<div class="hint" style="margin-top:8px">Goals: ${Object.keys(g).length?Object.entries(g).map(([k,v])=>`<strong>${esc(k)}</strong> ${v}d`).join(' · '):'none set yet — leadership sets them here.'}</div>`}
+    <div style="overflow-x:auto"><table class="tbl" style="margin-top:10px"><tr><th>Week</th><th>Overall${g.overall?` <span class="hint">🎯${g.overall}d</span>`:''}</th>${levels.map(L=>`<th>${esc(L)}${g[L]?` <span class="hint">🎯${g[L]}d</span>`:''}</th>`).join('')}</tr>${rows}</table></div>
+    <div class="hint" style="margin-top:6px">Numbers are average days per client (·count beside each). ▲▼ vs the prior week. A cell is judged only when a goal is set for that column.</div></div>`;
+}
+async function saveLosGoals(){
+  const goals={};
+  document.querySelectorAll('[data-losgoal]').forEach(i=>{ if(i.value) goals[i.dataset.losgoal]=+i.value; });
+  try{ await api('/analytics/los-goals',{method:'POST',body:JSON.stringify({goals})}); const m=$('losGoalMsg'); if(m)m.textContent='✓ Saved'; loadLosView(); }
+  catch(e){ alert(e.message); }
 }
 let LOS_RANGE=90;
 async function loadLosByLevel(hostId){

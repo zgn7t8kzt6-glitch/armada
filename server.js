@@ -11621,6 +11621,73 @@ app.get('/api/analytics/los-by-level', requireAuth, (req, res) => {
     })),
   });
 });
+/* ── LOS goals + the week-over-week scoreboard. Goals are org standards (one
+   number per level, like the payor rulebook); measurement follows the chip.
+   Weeks bucket by the Monday of the DISCHARGE date; day counts are the honest
+   segment reconstruction (days AT the level, not whole-stay-at-final-level). */
+function losGoals() { try { const g = JSON.parse(getState('los_goals') || 'null'); return g && typeof g === 'object' ? g : {}; } catch { return {}; } }
+app.post('/api/analytics/los-goals', requireAuth, (req, res) => {
+  if (!(req.user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management'].includes(req.user.job_role))) {
+    return res.status(403).json({ error: 'Leadership sets LOS goals.' });
+  }
+  const g = {};
+  for (const [k, v] of Object.entries(req.body?.goals || {})) {
+    const n = +v;
+    if (Number.isFinite(n) && n > 0 && n < 120) g[String(k).slice(0, 20)] = +n.toFixed(1);
+  }
+  setState('los_goals', JSON.stringify(g));
+  audit({ user: req.user, action: 'LOS_GOALS_SET', detail: JSON.stringify(g).slice(0, 200), ip: req.ip });
+  res.json({ ok: true, goals: g });
+});
+app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = fc.frag('facility_id');
+  const nWeeks = Math.min(26, Math.max(4, +req.query.weeks || 12));
+  const today = appToday();
+  const monday = (d) => { const dt = new Date(d + 'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7)); return dt.toISOString().slice(0, 10); };
+  const since = addDays(monday(today), -7 * (nWeeks - 1));
+  const clients = db.prepare(`SELECT id, loc, admit, discharge_date FROM clients
+    WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ?
+      AND COALESCE(discharge_status,'') NOT IN ('Merged (duplicate)')${F}`).all(since, today);
+  const evStmt = db.prepare(`SELECT kind, from_loc, to_loc, date FROM flow_events WHERE client_id = ? AND kind IN ('admit','loc_change') ORDER BY date, id`);
+  const dayDiff = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 864e5));
+  const weeks = {};   // monday → { overall:{sum,n}, levels: { loc → {days, clients:Set} } }
+  for (const c of clients) {
+    const admit = String(c.admit || '').slice(0, 10), dd = String(c.discharge_date || '').slice(0, 10);
+    if (!admit || !dd) continue;
+    const wk = monday(dd);
+    const w = weeks[wk] = weeks[wk] || { overall: { sum: 0, n: 0 }, levels: {} };
+    w.overall.sum += dayDiff(admit, dd); w.overall.n++;
+    const finalLoc = (c.loc && c.loc !== 'Unspecified') ? c.loc : '(no level)';
+    let loc = null, start = admit;
+    const segs = [];
+    for (const e of evStmt.all(c.id)) {
+      if (e.kind === 'admit') { loc = e.to_loc || loc; continue; }
+      if (e.kind === 'loc_change' && e.date >= admit && e.date <= dd) {
+        segs.push({ loc: loc || e.from_loc || finalLoc, days: dayDiff(start, e.date) });
+        loc = e.to_loc || loc; start = e.date;
+      }
+    }
+    segs.push({ loc: loc || finalLoc, days: dayDiff(start, dd) });
+    for (const s of segs) {
+      const key = (s.loc && s.loc !== 'Unspecified') ? s.loc : '(no level)';
+      const L = w.levels[key] = w.levels[key] || { days: 0, clients: new Set() };
+      L.days += s.days; L.clients.add(c.id);
+    }
+  }
+  const out = [];
+  for (let i = nWeeks - 1; i >= 0; i--) {
+    const wk = addDays(monday(today), -7 * i);
+    const w = weeks[wk];
+    out.push({
+      week: wk,
+      overall: w ? { avg: w.overall.n ? +(w.overall.sum / w.overall.n).toFixed(1) : null, n: w.overall.n } : { avg: null, n: 0 },
+      levels: w ? Object.fromEntries(Object.entries(w.levels).map(([k, v]) => [k, { avg: +(v.days / v.clients.size).toFixed(1), n: v.clients.size }])) : {},
+    });
+  }
+  const levelKeys = [...new Set(out.flatMap((w) => Object.keys(w.levels)))].sort();
+  res.json({ weeks: out, goals: losGoals(), levelKeys, canEditGoals: req.user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management'].includes(req.user.job_role) });
+});
 app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
   const F = fc.frag('facility_id');

@@ -11575,7 +11575,7 @@ function forecastLicensedFor(fc) {
    naive per-final-level number alongside so the distortion is visible. */
 app.get('/api/analytics/los-by-level', requireAuth, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
-  const F = fc.frag('facility_id');
+  const F = shiftFrag(fc, 'facility_id');   // default building owns unstamped legacy rows
   const days = ({ '30': 30, '90': 90, '180': 180, '365': 365 })[String(req.query.range)] || 90;
   const today = appToday(), since = addDays(today, -days);
   const clients = db.prepare(`SELECT id, pref, name, loc, admit, discharge_date, discharge_status FROM clients
@@ -11641,7 +11641,9 @@ app.post('/api/analytics/los-goals', requireAuth, (req, res) => {
 });
 app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
-  const F = fc.frag('facility_id');
+  // NULL-tolerant for the default building — a legacy row without a facility
+  // stamp is still an Akron detox patient; strict scoping silently dropped them.
+  const F = shiftFrag(fc, 'facility_id');
   const nWeeks = Math.min(26, Math.max(4, +req.query.weeks || 12));
   const today = appToday();
   const monday = (d) => { const dt = new Date(d + 'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7)); return dt.toISOString().slice(0, 10); };
@@ -11649,12 +11651,21 @@ app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
   const clients = db.prepare(`SELECT id, loc, admit, discharge_date FROM clients
     WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ?
       AND COALESCE(discharge_status,'') NOT IN ('Merged (duplicate)')${F}`).all(since, today);
+  // EVERYONE who came in, by admit week — so the board accounts for every
+  // patient, including the ones still in a bed (whose LOS isn't final yet).
+  const admitRows = db.prepare(`SELECT substr(admit,1,10) a, active, discharge_date FROM clients
+    WHERE merged_into IS NULL AND admit IS NOT NULL AND substr(admit,1,10) >= ? AND substr(admit,1,10) <= ?
+      AND COALESCE(discharge_status,'') NOT IN ('Merged (duplicate)')${F}`).all(since, today);
+  const admitsByWeek = {};
+  let stillActive = 0;
+  for (const r of admitRows) { const wk = monday(r.a); admitsByWeek[wk] = (admitsByWeek[wk] || 0) + 1; if (r.active && !r.discharge_date) stillActive++; }
+  let skippedNoDates = 0;
   const evStmt = db.prepare(`SELECT kind, from_loc, to_loc, date FROM flow_events WHERE client_id = ? AND kind IN ('admit','loc_change') ORDER BY date, id`);
   const dayDiff = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 864e5));
   const weeks = {};   // monday → { overall:{sum,n}, levels: { loc → {days, clients:Set} } }
   for (const c of clients) {
     const admit = String(c.admit || '').slice(0, 10), dd = String(c.discharge_date || '').slice(0, 10);
-    if (!admit || !dd) continue;
+    if (!admit || !dd) { skippedNoDates++; continue; }
     const wk = monday(dd);
     const w = weeks[wk] = weeks[wk] || { overall: { sum: 0, n: 0 }, levels: {} };
     w.overall.sum += dayDiff(admit, dd); w.overall.n++;
@@ -11681,16 +11692,20 @@ app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
     const w = weeks[wk];
     out.push({
       week: wk,
+      admitted: admitsByWeek[wk] || 0,
       overall: w ? { avg: w.overall.n ? +(w.overall.sum / w.overall.n).toFixed(1) : null, n: w.overall.n } : { avg: null, n: 0 },
       levels: w ? Object.fromEntries(Object.entries(w.levels).map(([k, v]) => [k, { avg: +(v.days / v.clients.size).toFixed(1), n: v.clients.size }])) : {},
     });
   }
   const levelKeys = [...new Set(out.flatMap((w) => Object.keys(w.levels)))].sort();
-  res.json({ weeks: out, goals: losGoals(), levelKeys, canEditGoals: req.user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management'].includes(req.user.job_role) });
+  res.json({
+    weeks: out, goals: losGoals(), levelKeys, stillActive, skippedNoDates,
+    canEditGoals: req.user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management'].includes(req.user.job_role),
+  });
 });
 app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
-  const F = fc.frag('facility_id');
+  const F = shiftFrag(fc, 'facility_id');   // default building owns unstamped legacy rows
   const today = appToday();
   const fx = computeBedForecast(F, forecastLicensedFor(fc));
   // Standard 1 fuel: who has no anticipated discharge date, and 30-day compliance.
@@ -11707,7 +11722,7 @@ app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {
 // snapshot is scored against the census that actually happened.
 app.get('/api/admissions/forecast-accuracy', requireAuth, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
-  const F = fc.frag('facility_id');
+  const F = shiftFrag(fc, 'facility_id');   // default building owns unstamped legacy rows
   const dfid = defaultFacilityId();
   const snapFid = fc.one || dfid;
   const today = appToday();

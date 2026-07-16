@@ -8910,6 +8910,7 @@ async function loadLosView(){
   const rows=weeks.map((w,i)=>{
     const prev=weeks[i+1];
     return `<tr><td><strong>${esc(w.week.slice(5))}</strong><div class="hint" style="font-size:10px">wk of</div></td>
+      <td class="hint">${w.admitted||0}</td>
       ${cell(w.overall,g.overall,prev&&prev.overall)}
       ${levels.map(L=>cell(w.levels[L],g[L],prev&&prev.levels[L])).join('')}</tr>`;
   }).join('');
@@ -8922,8 +8923,8 @@ async function loadLosView(){
       ${goalIn('overall','Overall')}${CORE.map(L=>goalIn(L,L)).join('')}
       <button class="btn btn-gold btn-sm sans" onclick="saveLosGoals()">Save goals</button><span id="losGoalMsg" class="hint"></span></div>`
       :`<div class="hint" style="margin-top:8px">Goals: ${Object.keys(g).length?Object.entries(g).map(([k,v])=>`<strong>${esc(k)}</strong> ${v}d`).join(' · '):'none set yet — leadership sets them here.'}</div>`}
-    <div style="overflow-x:auto"><table class="tbl" style="margin-top:10px"><tr><th>Week</th><th>Overall${g.overall?` <span class="hint">🎯${g.overall}d</span>`:''}</th>${levels.map(L=>`<th>${esc(L)}${g[L]?` <span class="hint">🎯${g[L]}d</span>`:''}</th>`).join('')}</tr>${rows}</table></div>
-    <div class="hint" style="margin-top:6px">Numbers are average days per client (·count beside each). ▲▼ vs the prior week. A cell is judged only when a goal is set for that column.</div></div>`;
+    <div style="overflow-x:auto"><table class="tbl" style="margin-top:10px"><tr><th>Week</th><th>In</th><th>Overall${g.overall?` <span class="hint">🎯${g.overall}d</span>`:''}</th>${levels.map(L=>`<th>${esc(L)}${g[L]?` <span class="hint">🎯${g[L]}d</span>`:''}</th>`).join('')}</tr>${rows}</table></div>
+    <div class="hint" style="margin-top:6px"><strong>Every patient is accounted for:</strong> "In" counts everyone who ADMITTED that week. The LOS columns count DISCHARGED stays — a stay has no length until it ends, so ${d.stillActive||0} ${(d.stillActive||0)===1?'person':'people'} currently in a bed will land on the board the week they leave.${d.skippedNoDates?` ${d.skippedNoDates} record${d.skippedNoDates===1?'':'s'} skipped for missing admit/discharge dates — fix those in Kipu.`:''} ▲▼ vs the prior week; a cell is judged only when a goal is set for its column.</div></div>`;
 }
 async function saveLosGoals(){
   const goals={};

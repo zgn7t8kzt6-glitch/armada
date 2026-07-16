@@ -11567,6 +11567,60 @@ function forecastLicensedFor(fc) {
   if (fc.one && fc.one !== dfid) return +(db.prepare(`SELECT beds FROM org_facilities WHERE id = ?`).get(fc.one)?.beds) || 0;
   return +(getState('detox_bed_count') || 40);
 }
+/* ── LOS by LEVEL, done honestly. The naive number attributes the WHOLE stay
+   to the client's final level — someone who did 4 days of 3.7-WM then 9 days
+   of 3.5 shows up as a 13-day "3.5 stay", inflating 3.5 and erasing 3.7-WM.
+   This reconstructs each stay's segments from flow_events (admit → level
+   changes → discharge) and reports average days AT each level, with the
+   naive per-final-level number alongside so the distortion is visible. */
+app.get('/api/analytics/los-by-level', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = fc.frag('facility_id');
+  const days = ({ '30': 30, '90': 90, '180': 180, '365': 365 })[String(req.query.range)] || 90;
+  const today = appToday(), since = addDays(today, -days);
+  const clients = db.prepare(`SELECT id, pref, name, loc, admit, discharge_date, discharge_status FROM clients
+    WHERE merged_into IS NULL AND discharge_date IS NOT NULL AND substr(discharge_date,1,10) >= ? AND substr(discharge_date,1,10) <= ?
+      AND COALESCE(discharge_status,'') NOT IN ('Merged (duplicate)')${F}`).all(since, today);
+  const evStmt = db.prepare(`SELECT kind, from_loc, to_loc, date FROM flow_events WHERE client_id = ? AND kind IN ('admit','loc_change') ORDER BY date, id`);
+  const dayDiff = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 864e5));
+  const atLevel = {};   // level → { totalDays, clients:Set }
+  const naive = {};     // final level → { n, sum }
+  let reconstructed = 0, noEvents = 0;
+  for (const c of clients) {
+    const admit = String(c.admit || '').slice(0, 10), dd = String(c.discharge_date || '').slice(0, 10);
+    if (!admit || !dd) continue;
+    const finalLoc = (c.loc && c.loc !== 'Unspecified') ? c.loc : '(no level)';
+    const nv = naive[finalLoc] = naive[finalLoc] || { n: 0, sum: 0 };
+    nv.n++; nv.sum += dayDiff(admit, dd);
+    const evs = evStmt.all(c.id);
+    let loc = null, start = admit;
+    const segs = [];
+    for (const e of evs) {
+      if (e.kind === 'admit') { loc = e.to_loc || loc; continue; }
+      if (e.kind === 'loc_change' && e.date >= admit && e.date <= dd) {
+        segs.push({ loc: loc || e.from_loc || finalLoc, from: start, to: e.date });
+        loc = e.to_loc || loc; start = e.date;
+      }
+    }
+    segs.push({ loc: loc || finalLoc, from: start, to: dd });
+    if (segs.length > 1) reconstructed++; else if (!evs.length) noEvents++;
+    for (const s of segs) {
+      const key = (s.loc && s.loc !== 'Unspecified') ? s.loc : '(no level)';
+      const a = atLevel[key] = atLevel[key] || { totalDays: 0, clients: new Set() };
+      a.totalDays += dayDiff(s.from, s.to);
+      a.clients.add(c.id);
+    }
+  }
+  const levels = Object.keys({ ...atLevel, ...naive }).sort();
+  res.json({
+    rangeDays: days, discharges: clients.length, reconstructed, noEvents,
+    levels: levels.map((k) => ({
+      level: k,
+      atLevel: atLevel[k] ? { clients: atLevel[k].clients.size, avgDays: +(atLevel[k].totalDays / atLevel[k].clients.size).toFixed(1), totalDays: atLevel[k].totalDays } : null,
+      naive: naive[k] ? { clients: naive[k].n, avgDays: +(naive[k].sum / naive[k].n).toFixed(1) } : null,
+    })),
+  });
+});
 app.get('/api/admissions/bed-forecast', requireAuth, (req, res) => {
   const fc = facCtx(req); if (denyFac(fc, res)) return;
   const F = fc.frag('facility_id');

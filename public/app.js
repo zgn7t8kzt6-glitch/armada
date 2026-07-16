@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?)|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/los-by-level)|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -8887,7 +8887,23 @@ async function loadBedForecast(hostId='bedForecast'){
       <span class="hint"><strong>${d.dateCompliance.pct!=null?d.dateCompliance.pct+'%':'—'}</strong> of the last 30 days' admits have an anticipated discharge date (${d.dateCompliance.withDate}/${d.dateCompliance.total})</span>
       ${d.missingDates.length?`<details style="flex:1;min-width:220px"><summary class="hint" style="cursor:pointer;color:#9a6a1f"><strong>⚠ ${d.missingDates.length} on census with NO anticipated discharge date</strong> — the forecast is blind to them</summary>${d.missingDates.map(m=>`<div class="pc-note">• ${esc(m.name)} <span class="hint">admitted ${esc(m.admit)}</span></div>`).join('')}<div class="hint" style="margin-top:4px">Standard: date entered within 4 hours of admission (Kipu is source of truth — set it there and sync).</div></details>`:'<span class="hint" style="color:var(--good,#2f7a4f)">✓ every active client has an anticipated discharge date</span>'}
     </div>
-    <details style="margin-top:8px" ontoggle="if(this.open)loadForecastAccuracy('${hostId}Acc')"><summary class="hint" style="cursor:pointer">📏 Forecast accuracy — the weekly audit</summary><div id="${hostId}Acc" class="hint" style="margin-top:6px">Open to load…</div></details></div>`;
+    <details style="margin-top:8px" ontoggle="if(this.open)loadForecastAccuracy('${hostId}Acc')"><summary class="hint" style="cursor:pointer">📏 Forecast accuracy — the weekly audit</summary><div id="${hostId}Acc" class="hint" style="margin-top:6px">Open to load…</div></details>
+    <details style="margin-top:4px" ontoggle="if(this.open)loadLosByLevel('${hostId}Los')"><summary class="hint" style="cursor:pointer">⏱ Average LOS by level of care — honest vs. naive</summary><div id="${hostId}Los" class="hint" style="margin-top:6px">Open to load…</div></details></div>`;
+}
+let LOS_RANGE=90;
+async function loadLosByLevel(hostId){
+  const host=$(hostId); if(!host) return;
+  host.textContent='Reconstructing stays from level-change history…';
+  try{
+    const d=await api('/analytics/los-by-level?range='+LOS_RANGE);
+    const row=(l)=>`<tr><td><strong>${esc(l.level)}</strong></td>
+      <td>${l.atLevel?`<strong>${l.atLevel.avgDays}d</strong> <span class="hint">· ${l.atLevel.clients} client${l.atLevel.clients===1?'':'s'}</span>`:'<span class="hint">—</span>'}</td>
+      <td class="hint">${l.naive?`${l.naive.avgDays}d · ${l.naive.clients}`:'—'}</td></tr>`;
+    host.innerHTML=`<div class="toolbar" style="justify-content:flex-start;gap:6px">${[30,90,180,365].map(n=>`<button class="itab ${LOS_RANGE===n?'active':''}" onclick="LOS_RANGE=${n};loadLosByLevel('${hostId}')">${n}d</button>`).join('')}</div>
+      <div style="overflow-x:auto"><table class="tbl" style="margin-top:6px"><tr><th>Level</th><th>Days AT this level (honest)</th><th>Whole stay by final level (naive)</th></tr>${(d.levels||[]).map(row).join('')}</table></div>
+      <div class="hint" style="margin-top:6px">${d.discharges} discharges in the window · ${d.reconstructed} stays had level changes reconstructed${d.noEvents?` · ${d.noEvents} had no movement history (their whole stay counts at their final level)`:''}.
+      The naive column charges the ENTIRE stay to the final level — that's the number that "doesn't add up": a 4-day 3.7-WM + 9-day 3.5 stay shows there as a 13-day 3.5. The honest column splits every stay by the level-change dates from Kipu.</div>`;
+  }catch(e){ host.textContent=e.message; }
 }
 async function loadForecastAccuracy(hostId){
   const host=$(hostId); if(!host) return;

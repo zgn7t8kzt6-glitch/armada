@@ -13710,6 +13710,7 @@ const PROFORMA_SITES = {
       ['June revenue (actual)', '$235,417'], ['June expenses (actual)', '$301,039'], ['June net (actual)', '–$65,622'],
       ['Fixed cost base (ex-mgmt fee)', '$256,039'], ['PHP $253 × 26 · IOP $168 × 22', ''], ['TBS $42 × 22 (billed on top)', ''],
       ['IND $60 ×1/wk · CM $22 · Peer $17', ''], ['Weeks per month', '4.3'], ['Evening program cost', '$26,645/mo'],
+      ['Med mgmt per visit', '99212 $53.87 · 99213 $91.14 · 99214 $134.50 · 99215 $181.67 · 99203 $135.22 · 99204 $207.36'],
     ],
   },
   akron: {
@@ -13725,6 +13726,7 @@ const PROFORMA_SITES = {
       ['PHP $253 × 26 · IOP $168 × 22', ''], ['TBS $42 × 22 (billed on top)', ''],
       ['IND $60 ×1/wk · CM $22 · Peer $17', ''], ['Weeks per month', '4.3'],
       ['Fixed cost base', 'set with the lever'], ['Evening program cost (if used)', '$26,645/mo'],
+      ['Med mgmt per visit', '99212 $53.87 · 99213 $91.14 · 99214 $134.50 · 99215 $181.67 · 99203 $135.22 · 99204 $207.36'],
     ],
   },
 };

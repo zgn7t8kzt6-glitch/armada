@@ -180,6 +180,51 @@
   </div>
 </div>
 
+<div class="card" style="margin-top:22px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2>Med management — prescriber visits</h2>
+      <p class="hint" style="margin-bottom:0">Psychiatric E/M visits billed on top of the group revenue. Set visits per month for each code; leave at 0 to keep it out of the model.</p>
+    </div>
+    <div style="text-align:right">
+      <div class="val mono" id="medRev" style="font-size:24px;color:var(--sage-d)">$0</div>
+      <div class="sans" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);font-weight:700">monthly med mgmt revenue</div>
+    </div>
+  </div>
+  <div class="svc-grid">
+    <div class="svc">
+      <div class="control-head"><label>99212 — established, brief<span class="rate">$53.87 / visit · visits/mo</span></label><span class="val" id="vMm99212">0</span></div>
+      <input type="range" id="mm99212" min="0" max="250" value="0" step="5">
+      <div class="svc-amt" id="aMm99212">$0</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>99213 — established, low<span class="rate">$91.14 / visit · visits/mo</span></label><span class="val" id="vMm99213">0</span></div>
+      <input type="range" id="mm99213" min="0" max="250" value="0" step="5">
+      <div class="svc-amt" id="aMm99213">$0</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>99214 — established, moderate<span class="rate">$134.50 / visit · visits/mo</span></label><span class="val" id="vMm99214">0</span></div>
+      <input type="range" id="mm99214" min="0" max="250" value="0" step="5">
+      <div class="svc-amt" id="aMm99214">$0</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>99215 — established, high<span class="rate">$181.67 / visit · visits/mo</span></label><span class="val" id="vMm99215">0</span></div>
+      <input type="range" id="mm99215" min="0" max="250" value="0" step="5">
+      <div class="svc-amt" id="aMm99215">$0</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>99203 — new patient, low<span class="rate">$135.22 / visit · visits/mo</span></label><span class="val" id="vMm99203">0</span></div>
+      <input type="range" id="mm99203" min="0" max="250" value="0" step="5">
+      <div class="svc-amt" id="aMm99203">$0</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>99204 — new patient, moderate<span class="rate">$207.36 / visit · visits/mo</span></label><span class="val" id="vMm99204">0</span></div>
+      <input type="range" id="mm99204" min="0" max="250" value="0" step="5">
+      <div class="svc-amt" id="aMm99204">$0</div>
+    </div>
+  </div>
+</div>
+
 <div class="grid" style="margin-top:22px">
   <div class="card">
     <h2>The levers</h2>
@@ -228,6 +273,8 @@
   const HAS_ACTUALS=!!S.has_actuals;
   const RATE={php:253,iop:168,tbs:42,ind:60,cm:22,peer:17};
   const DAYS={php:26,iop:22,tbs:22};
+  const MMRATE={'99212':53.87,'99213':91.14,'99214':134.50,'99215':181.67,'99203':135.22,'99204':207.36};
+  const MMC=Object.keys(MMRATE);
 
   const $=id=>document.getElementById(id);
   const money=n=>(n<0?'–$':'$')+Math.abs(Math.round(n)).toLocaleString();
@@ -241,11 +288,12 @@
   if(S.baseline_label) $('plHint').textContent='Your built revenue against '+S.baseline_label+'.';
   document.title=S.title||document.title;
   if(!HAS_ACTUALS){ $('swingWrap').style.display='none'; $('vsJuneChip').style.display='none'; $('baseCtl').style.display=''; }
-  if(S.defaults){ for(const k of ['php','iop','tbs','ind','cm','peer','mgmt','evening','base']){ const el=$(k); if(el&&S.defaults[k]!=null) el.value=S.defaults[k]; } }
+  if(S.defaults){ for(const k of ['php','iop','tbs','ind','cm','peer','mgmt','evening','base'].concat(MMC.map(c=>'mm'+c))){ const el=$(k); if(el&&S.defaults[k]!=null) el.value=S.defaults[k]; } }
   $('assumpBody').innerHTML=(S.assumptions||[]).map(r=>'<tr><td>'+r[0]+'</td><td>'+(r[1]||'')+'</td></tr>').join('');
 
   const els={php:$('php'),iop:$('iop'),tbs:$('tbs'),ind:$('ind'),cm:$('cm'),peer:$('peer'),
              evening:$('evening'),mgmt:$('mgmt'),base:$('base')};
+  MMC.forEach(c=>{els['mm'+c]=$('mm'+c);});
   function setTrack(el){const mn=+el.min,mx=+el.max,v=+el.value;el.style.setProperty('--pct',((v-mn)/(mx-mn)*100)+'%');}
 
   function calc(){
@@ -259,7 +307,9 @@
       cm:g.cm*WK*RATE.cm,
       peer:g.peer*WK*RATE.peer
     };
-    const clinRev=amt.php+amt.iop+amt.tbs+amt.ind+amt.cm+amt.peer;
+    const mmUnits={},mmAmt={};let mmRev=0;
+    MMC.forEach(c=>{const u=+els['mm'+c].value;mmUnits[c]=u;mmAmt[c]=u*MMRATE[c];mmRev+=mmAmt[c];});
+    const clinRev=amt.php+amt.iop+amt.tbs+amt.ind+amt.cm+amt.peer+mmRev;
     const eveningOn=+els.evening.value===1;
     const mgmt=+els.mgmt.value;
     const eveningCost=eveningOn?EVENING:0;
@@ -273,6 +323,8 @@
     $('aPhp').textContent=money0(amt.php); $('aIop').textContent=money0(amt.iop);
     $('aTbs').textContent=money0(amt.tbs); $('aInd').textContent=money0(amt.ind);
     $('aCm').textContent=money0(amt.cm); $('aPeer').textContent=money0(amt.peer);
+    MMC.forEach(c=>{$('vMm'+c).textContent=mmUnits[c];$('aMm'+c).textContent=money0(mmAmt[c]);});
+    $('medRev').textContent=money0(mmRev);
     $('clinRev').textContent=money0(clinRev);
 
     const unique=g.php+g.iop;
@@ -307,6 +359,7 @@
       ['IND · '+g.ind+' clients × wk × $60', amt.ind,'',true,false,false],
       ['Case mgmt · '+g.cm+' units/wk', amt.cm,'',true,false,false],
       ['Peer · '+g.peer+' units/wk', amt.peer,'',true,false,false],
+      ...MMC.filter(c=>mmUnits[c]>0).map(c=>['Med mgmt '+c+' · '+mmUnits[c]+' × $'+MMRATE[c].toFixed(2), mmAmt[c],'',true,false,false]),
       ['Expenses', -expenses,'neg',false,false,false],
       [S.base_row_label||'Fixed cost base (June)', -FIXED_BASE,'neg',true,false,false],
       ['Management fee', -mgmt,'neg',true, HAS_ACTUALS&&mgmt<JUNE_MGMT,false],

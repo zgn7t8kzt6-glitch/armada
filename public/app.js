@@ -8924,7 +8924,8 @@ async function loadLosView(){
   const goalIn=(k,label)=>`<label class="hint" style="display:flex;flex-direction:column;gap:2px;min-width:86px">${esc(label)}<input data-losgoal="${esc(k)}" type="number" step="0.5" min="1" value="${g[k]!=null?g[k]:''}" placeholder="—" style="width:86px"/></label>`;
   host.innerHTML=`<div class="card"><div class="cmd-hero-row"><div><h3 style="margin:0">⏱ Length of Stay — goals &amp; week over week</h3>
       <p class="sub sans" style="margin:0">Honest math: every stay is split by its level-change dates, so 3.7-WM days count as 3.7-WM even when the client finishes at 3.5. Weeks bucket by discharge date. <strong>Green = the week met the goal</strong> (average ≥ goal); red = under.</p></div>
-      <div class="itabs">${[8,12,26].map(n=>`<button class="itab ${LOS_WEEKS===n?'active':''}" onclick="LOS_WEEKS=${n};loadLosView()">${n} wks</button>`).join('')}</div></div>
+      <div style="display:flex;gap:8px;align-items:center" class="no-print"><div class="itabs">${[8,12,26].map(n=>`<button class="itab ${LOS_WEEKS===n?'active':''}" onclick="LOS_WEEKS=${n};loadLosView()">${n} wks</button>`).join('')}</div>
+      <a class="btn btn-ghost btn-sm sans" href="/api/analytics/los-export?weeks=${LOS_WEEKS}${typeof FAC_SCOPE==='string'&&FAC_SCOPE?'&facility='+encodeURIComponent(FAC_SCOPE):''}" download title="Download this table as a spreadsheet (CSV — opens in Excel)">⬇ Download</a></div></div>
     ${d.canEditGoals?`<div class="toolbar no-print" style="justify-content:flex-start;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:flex-end;background:#faf6ee;border:1px solid var(--line);border-radius:12px;padding:10px">
       <strong class="sans" style="font-size:13px">🎯 Goals (avg days)</strong>
       ${goalIn('overall','Overall')}${CORE.map(L=>goalIn(L,L)).join('')}

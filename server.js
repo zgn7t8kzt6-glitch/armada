@@ -11640,12 +11640,7 @@ app.post('/api/analytics/los-goals', requireAuth, (req, res) => {
   audit({ user: req.user, action: 'LOS_GOALS_SET', detail: JSON.stringify(g).slice(0, 200), ip: req.ip });
   res.json({ ok: true, goals: g });
 });
-app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
-  const fc = facCtx(req); if (denyFac(fc, res)) return;
-  // NULL-tolerant for the default building — a legacy row without a facility
-  // stamp is still an Akron detox patient; strict scoping silently dropped them.
-  const F = shiftFrag(fc, 'facility_id');
-  const nWeeks = Math.min(26, Math.max(4, +req.query.weeks || 12));
+function computeLosWeekly(F, nWeeks) {
   const today = appToday();
   const monday = (d) => { const dt = new Date(d + 'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7)); return dt.toISOString().slice(0, 10); };
   const since = addDays(monday(today), -7 * (nWeeks - 1));
@@ -11699,10 +11694,41 @@ app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
     });
   }
   const levelKeys = [...new Set(out.flatMap((w) => Object.keys(w.levels)))].sort();
+  return { weeks: out, levelKeys, stillActive, skippedNoDates };
+}
+app.get('/api/analytics/los-weekly', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  // NULL-tolerant for the default building — a legacy row without a facility
+  // stamp is still an Akron detox patient; strict scoping silently dropped them.
+  const F = shiftFrag(fc, 'facility_id');
+  const nWeeks = Math.min(26, Math.max(4, +req.query.weeks || 12));
+  const d = computeLosWeekly(F, nWeeks);
   res.json({
-    weeks: out, goals: losGoals(), levelKeys, stillActive, skippedNoDates,
+    ...d, goals: losGoals(),
     canEditGoals: req.user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management'].includes(req.user.job_role),
   });
+});
+// CSV of the same board — one row per week, goals in the header, opens in Excel.
+app.get('/api/analytics/los-export', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = shiftFrag(fc, 'facility_id');
+  const nWeeks = Math.min(26, Math.max(4, +req.query.weeks || 12));
+  const d = computeLosWeekly(F, nWeeks);
+  const g = losGoals();
+  const CORE = ['3.7-WM', '3.2-WM', '3.7', '3.5'];
+  const levels = [...new Set([...CORE.filter((k) => d.levelKeys.includes(k) || g[k] != null), ...d.levelKeys.filter((k) => k !== '(no level)')])];
+  const q = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+  const head = ['Week of', 'Admitted', `Overall avg days${g.overall ? ' (goal ' + g.overall + ')' : ''}`, 'Overall discharges',
+    ...levels.flatMap((L) => [`${L} avg days${g[L] ? ' (goal ' + g[L] + ')' : ''}`, `${L} clients`])];
+  const rows = d.weeks.map((w) => [   // computeLosWeekly is already oldest-first
+    w.week, w.admitted || 0, w.overall.avg != null ? w.overall.avg : '', w.overall.n,
+    ...levels.flatMap((L) => { const v = w.levels[L]; return [v ? v.avg : '', v ? v.n : 0]; }),
+  ]);
+  const meta = [`# Length of Stay — honest days-at-level, week over week`, `# Exported ${appToday()} · last ${nWeeks} weeks · ${d.stillActive} still in a bed (not yet scored)${d.skippedNoDates ? ` · ${d.skippedNoDates} records skipped for missing dates` : ''}`];
+  const csv = meta.join('\n') + '\n' + head.map(q).join(',') + '\n' + rows.map((r) => r.map(q).join(',')).join('\n') + '\n';
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="los-weekly-${appToday()}.csv"`);
+  res.send(csv);
 });
 /* ── LOS what-if: what is one more day at a level worth? Returns the honest
    current average, throughput, and the configured per-diem so the front end

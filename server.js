@@ -11730,6 +11730,70 @@ app.get('/api/analytics/los-export', requireAuth, (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="los-weekly-${appToday()}.csv"`);
   res.send(csv);
 });
+/* ── Referral sources by level of care: who sends us the clients that pass
+   through a given level (3.7-WM by default). Membership is honest — a client
+   counts if ANY segment of their stay was at the level (reconstructed from
+   flow_events), not just whoever happens to sit there now. All-time. */
+app.get('/api/analytics/level-sources', requireAuth, (req, res) => {
+  const fc = facCtx(req); if (denyFac(fc, res)) return;
+  const F = shiftFrag(fc, 'facility_id');
+  const level = String(req.query.level || '3.7-WM');
+  const today = appToday();
+  const clients = db.prepare(`SELECT id, name, pref, referral_source, admit, discharge_date, active, loc FROM clients
+    WHERE merged_into IS NULL AND admit IS NOT NULL
+      AND COALESCE(discharge_status,'') NOT IN ('Merged (duplicate)')${F}`).all();
+  const evStmt = db.prepare(`SELECT kind, from_loc, to_loc, date FROM flow_events WHERE client_id = ? AND kind IN ('admit','loc_change') ORDER BY date, id`);
+  const dayDiff = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 864e5));
+  const allLevels = new Set();
+  const bySource = {};   // source → { n, daysSum, still, names: [] }
+  let total = 0, noSource = 0;
+  for (const c of clients) {
+    const admit = String(c.admit).slice(0, 10);
+    const end = c.discharge_date ? String(c.discharge_date).slice(0, 10) : today;
+    if (end < admit) continue;
+    const finalLoc = (c.loc && c.loc !== 'Unspecified') ? c.loc : '(no level)';
+    let loc = null, start = admit;
+    const segs = [];
+    for (const e of evStmt.all(c.id)) {
+      if (e.kind === 'admit') { loc = e.to_loc || loc; continue; }
+      if (e.kind === 'loc_change' && e.date >= admit && e.date <= end) {
+        segs.push({ loc: loc || e.from_loc || finalLoc, days: dayDiff(start, e.date) });
+        loc = e.to_loc || loc; start = e.date;
+      }
+    }
+    segs.push({ loc: loc || finalLoc, days: dayDiff(start, end) });
+    let daysAt = 0, member = false;
+    for (const s of segs) {
+      const key = (s.loc && s.loc !== 'Unspecified') ? s.loc : '(no level)';
+      allLevels.add(key);
+      if (key === level) { member = true; daysAt += s.days; }
+    }
+    if (!member) continue;
+    total++;
+    const src = (c.referral_source || '').trim() || '(no source recorded)';
+    if (src === '(no source recorded)') noSource++;
+    const still = !!c.active && !c.discharge_date;
+    const b = bySource[src] = bySource[src] || { n: 0, daysSum: 0, still: 0, names: [] };
+    b.n++; b.daysSum += daysAt; if (still) b.still++;
+    b.names.push({ name: c.pref || c.name, admit, out: c.discharge_date ? end : '', days: daysAt, still });
+  }
+  const sources = Object.entries(bySource).map(([source, b]) => ({
+    source, n: b.n, still: b.still,
+    avgDays: b.n ? +(b.daysSum / b.n).toFixed(1) : null,
+    names: b.names.sort((a, z) => z.admit.localeCompare(a.admit)),
+  })).sort((a, z) => z.n - a.n || a.source.localeCompare(z.source));
+  if (req.query.format === 'csv') {
+    const q = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+    const lines = [`# Referral sources — everyone who went through ${level} (all-time) · exported ${today}`,
+      ['Referral source', 'Client', 'Admitted', 'Discharged', `Days at ${level}`, 'Still in house'].map(q).join(',')];
+    for (const s of sources) for (const p of s.names)
+      lines.push([s.source, p.name, p.admit, p.out, p.days, p.still ? 'yes' : ''].map(q).join(','));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="referral-sources-${level.replace(/[^\w.-]+/g, '_')}-${today}.csv"`);
+    return res.send(lines.join('\n') + '\n');
+  }
+  res.json({ level, total, noSource, levelKeys: [...allLevels].sort(), sources });
+});
 /* ── LOS what-if: what is one more day at a level worth? Returns the honest
    current average, throughput, and the configured per-diem so the front end
    can do live arithmetic: (target − current) × per-diem × clients/week × 52. */

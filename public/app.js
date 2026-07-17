@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly|los-week-detail|los-whatif))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly|los-week-detail|los-whatif|level-sources))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -8934,7 +8934,28 @@ async function loadLosView(){
     <div style="overflow-x:auto"><table class="tbl" style="margin-top:10px"><tr><th>Week</th><th>In</th><th>Overall${g.overall?` <span class="hint">🎯${g.overall}d</span>`:''}</th>${levels.map(L=>`<th>${esc(L)}${g[L]?` <span class="hint">🎯${g[L]}d</span>`:''}</th>`).join('')}</tr>${rows}</table></div>
     <div class="hint" style="margin-top:6px"><strong>Every patient is accounted for:</strong> "In" counts everyone who ADMITTED that week — <strong>tap any In or Overall number to see the names behind it</strong>, with flags for duplicate casefiles, in-and-outs, and date shifts. The LOS columns count DISCHARGED stays — a stay has no length until it ends, so ${d.stillActive||0} ${(d.stillActive||0)===1?'person':'people'} currently in a bed will land on the board the week they leave.${d.skippedNoDates?` ${d.skippedNoDates} record${d.skippedNoDates===1?'':'s'} skipped for missing admit/discharge dates — fix those in Kipu.`:''}</div>
     <div id="losDrill"></div>
-    <details style="margin-top:8px" ontoggle="if(this.open)losWhatif()"><summary class="hint" style="cursor:pointer"><strong>💰 What-if — what is a longer stay worth?</strong></summary><div id="losWhatif" class="hint" style="margin-top:6px">Open to load…</div></details></div>`;
+    <details style="margin-top:8px" ontoggle="if(this.open)losWhatif()"><summary class="hint" style="cursor:pointer"><strong>💰 What-if — what is a longer stay worth?</strong></summary><div id="losWhatif" class="hint" style="margin-top:6px">Open to load…</div></details>
+    <details style="margin-top:8px" ontoggle="if(this.open&&!this.dataset.loaded){this.dataset.loaded=1;loadLevelSources()}"><summary class="hint" style="cursor:pointer"><strong>📣 Referral sources — who sends us clients at each level</strong></summary><div id="losSources" class="hint" style="margin-top:6px">Open to load…</div></details></div>`;
+}
+/* ── Referral sources by level: ranked list of who sent everyone that ever
+   passed through the picked level (default 3.7-WM), with the names behind it ── */
+let LVLSRC='3.7-WM';
+async function loadLevelSources(){
+  const host=$('losSources'); if(!host) return;
+  host.innerHTML='Tracing every stay back to its referral source…';
+  let d; try{ d=await api('/analytics/level-sources?level='+encodeURIComponent(LVLSRC)); }catch(e){ host.innerHTML=esc(e.message); return; }
+  const CORE=['3.7-WM','3.2-WM','3.7','3.5'];
+  const chips=[...new Set([...CORE.filter(k=>(d.levelKeys||[]).includes(k)),...(d.levelKeys||[]).filter(k=>k!=='(no level)')])];
+  const dl='/api/analytics/level-sources?level='+encodeURIComponent(LVLSRC)+'&format=csv'+(typeof FAC_SCOPE==='string'&&FAC_SCOPE?'&facility='+encodeURIComponent(FAC_SCOPE):'');
+  const rows=(d.sources||[]).map(s=>`<tr><td><strong class="sans">${esc(s.source)}</strong></td>
+    <td><strong>${s.n}</strong></td><td>${s.still?s.still+' 🛏':'—'}</td><td>${s.avgDays!=null?s.avgDays+'d':'—'}</td>
+    <td><details><summary class="hint" style="cursor:pointer">${s.names.length} name${s.names.length===1?'':'s'}</summary>
+      <div class="hint" style="margin-top:4px">${s.names.map(p=>`${esc(p.name)} <span style="opacity:.7">(${esc(p.admit)}${p.still?' · still here':p.out?' → '+esc(p.out):''} · ${p.days}d)</span>`).join('<br>')}</div></details></td></tr>`).join('');
+  host.innerHTML=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" class="no-print">
+      <div class="itabs">${chips.map(L=>`<button class="itab ${LVLSRC===L?'active':''}" onclick="LVLSRC='${esc(L)}';loadLevelSources()">${esc(L)}</button>`).join('')}</div>
+      <a class="btn btn-ghost btn-sm sans" href="${dl}" download title="Download the full client-by-client list as a spreadsheet">⬇ Download</a></div>
+    <div class="hint" style="margin:6px 0"><strong>${d.total}</strong> client${d.total===1?'':'s'} have gone through ${esc(d.level)} all-time — anyone whose stay touched the level counts, not just who sits there today.${d.noSource?` <strong style="color:var(--danger)">${d.noSource}</strong> of them have no referral source recorded — those land in the "(no source recorded)" bucket; fill them in Kipu or the patient card to sharpen this list.`:''}</div>
+    ${d.total?`<div style="overflow-x:auto"><table class="tbl"><tr><th>Referral source</th><th>Clients</th><th>Still here</th><th>Avg days at ${esc(d.level)}</th><th>Who</th></tr>${rows}</table></div>`:'<div>No stays have touched this level yet.</div>'}`;
 }
 /* Pro formas: the interactive models embedded in-app (same-origin iframe). */
 function pfShow(site,btn){

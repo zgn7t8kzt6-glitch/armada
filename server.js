@@ -13594,6 +13594,7 @@ app.get('/proforma', (req, res) => {
     if (!_proformaTmpl) _proformaTmpl = readFileSync(path.join(__dirname, 'src', 'proforma.html'), 'utf8');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');   // embedded in the app's Pro Formas view
     res.send(_proformaTmpl.replace('{{TITLE}}', site.title).replace('{{SITE_JSON}}', JSON.stringify(site)));
   } catch (e) { res.status(500).send('Pro forma unavailable: ' + e.message); }
 });

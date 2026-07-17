@@ -218,7 +218,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',staffsignins:'facility',
   // Enterprise — the parent company: corporate, people, leadership programs
-  ownership:'enterprise',corphub:'enterprise',hcos:'enterprise',plan:'enterprise',excellence:'enterprise',onboarding:'enterprise',playbook:'enterprise',leadership:'enterprise',
+  ownership:'enterprise',proformas:'enterprise',corphub:'enterprise',hcos:'enterprise',plan:'enterprise',excellence:'enterprise',onboarding:'enterprise',playbook:'enterprise',leadership:'enterprise',
   // Insight — why it happened (Analytics answers "why"; Home answers "now")
   outcomes:'insight',analytics:'insight',scorecard:'insight','report-view':'insight',admitcheck:'insight',askai:'insight',
   // Admin — configuration & governance
@@ -707,6 +707,7 @@ function show(v){
   if(v==='authreg') loadAuthReg();
   if(v==='billingready') loadBillingReady();
   if(v==='los') loadLosView();
+  if(v==='proformas') pfShow(window.PF_SITE||'dayton');
   if(v==='appts') loadAppts();
   if(v==='command') loadCommand();
   if(v==='finance') loadFinance();
@@ -8933,6 +8934,13 @@ async function loadLosView(){
     <div class="hint" style="margin-top:6px"><strong>Every patient is accounted for:</strong> "In" counts everyone who ADMITTED that week — <strong>tap any In or Overall number to see the names behind it</strong>, with flags for duplicate casefiles, in-and-outs, and date shifts. The LOS columns count DISCHARGED stays — a stay has no length until it ends, so ${d.stillActive||0} ${(d.stillActive||0)===1?'person':'people'} currently in a bed will land on the board the week they leave.${d.skippedNoDates?` ${d.skippedNoDates} record${d.skippedNoDates===1?'':'s'} skipped for missing admit/discharge dates — fix those in Kipu.`:''}</div>
     <div id="losDrill"></div>
     <details style="margin-top:8px" ontoggle="if(this.open)losWhatif()"><summary class="hint" style="cursor:pointer"><strong>💰 What-if — what is a longer stay worth?</strong></summary><div id="losWhatif" class="hint" style="margin-top:6px">Open to load…</div></details></div>`;
+}
+/* Pro formas: the interactive models embedded in-app (same-origin iframe). */
+function pfShow(site,btn){
+  window.PF_SITE=site;
+  const f=$('pfFrame'); if(f&&!f.src.endsWith('site='+site)) f.src='/proforma?site='+site;
+  const a=$('pfOpen'); if(a) a.href='/proforma?site='+site;
+  document.querySelectorAll('#pfTabs .itab').forEach(b=>b.classList.toggle('active', btn?b===btn:b.textContent.toLowerCase().includes(site==='dayton'?'dayton':'akron')));
 }
 /* What-if: (target avg − current avg) × per-diem × clients/week × 52. */
 let WHATIF={level:'3.7-WM',target:null,rate:null};

@@ -29,6 +29,7 @@
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^3.9.2",
+    "server-only": "^0.0.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

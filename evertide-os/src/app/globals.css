@@ -2,26 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/* EverTide OS — professional healthcare-operations tool. Always light. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+}
+
+/* Visible focus for keyboard navigation (spec §10). */
+:focus-visible {
+  outline: 2px solid #1f3864;
+  outline-offset: 2px;
+}
+
+/* Print styles for reports and huddle history (spec §7.12). */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+  .print-page {
+    box-shadow: none !important;
+    border: none !important;
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  /* Data tables that intentionally scroll keep a sticky first column (§10). */
+  .table-sticky-col th:first-child,
+  .table-sticky-col td:first-child {
+    position: sticky;
+    left: 0;
+    background: inherit;
+    z-index: 1;
   }
 }

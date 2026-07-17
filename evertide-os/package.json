@@ -1,12 +1,21 @@
 {
   "name": "evertide-os",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "description": "EverTide OS — the operating system for EverTide Infusion: execution, huddles, scorecards, decisions, documents, and institutional memory.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:rls": "RLS_TESTS=1 vitest run tests/rls",
+    "test:e2e": "playwright test",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:seed:reset": "tsx scripts/seed.ts --reset",
+    "db:verify": "tsx scripts/verify-seed.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -2,6 +2,7 @@
 import express from 'express';
 import QRCode from 'qrcode';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { db, audit, getState, setState, publishEvent, nameInitials, defaultFacilityId, MODULE_CATALOG, TYPE_MODULES, defaultModulesFor, facilityModules, todayInTz, hourInTz } from './src/db.js';
@@ -13548,6 +13549,54 @@ setTimeout(() => { try { const s = linkPeople(); if (s.linked || s.created) cons
 setInterval(() => { try { linkPeople(); } catch { /* next sweep */ } }, 3600e3);
 
 /* ---------------- static ---------------- */
+/* ── Interactive pro formas (owner's group-throughput model). Real financials
+   live in these pages, so they are served BEHIND login — never from /public. */
+const PROFORMA_SITES = {
+  dayton: {
+    title: 'Dayton Turnaround Pro Forma',
+    eyebrow: 'Armada Recovery Dayton · Turnaround Pro Forma',
+    subline: "Revenue is group throughput: how many people sit in each group, times the days you bill, times the rate. Set the groups, then work the levers, and watch June's loss move toward black. Built on June 2026 actuals.",
+    footer: 'Armada Recovery Dayton · v2.0 · Group-throughput model on June 2026 actuals · All behind you.',
+    has_actuals: true, baseline_rev: 235416.86, baseline_exp: 301038.79, baseline_mgmt: 45000,
+    baseline_label: "June's cost base", base_row_label: 'Fixed cost base (June)',
+    evening_cost: 26645, beds: 90,
+    defaults: { php: 22, iop: 18, tbs: 12, ind: 30, cm: 70, peer: 50, mgmt: 45000, evening: 1 },
+    assumptions: [
+      ['June revenue (actual)', '$235,417'], ['June expenses (actual)', '$301,039'], ['June net (actual)', '–$65,622'],
+      ['Fixed cost base (ex-mgmt fee)', '$256,039'], ['PHP $253 × 26 · IOP $168 × 22', ''], ['TBS $42 × 22 (billed on top)', ''],
+      ['IND $60 ×1/wk · CM $22 · Peer $17', ''], ['Weeks per month', '4.3'], ['Evening program cost', '$26,645/mo'],
+    ],
+  },
+  akron: {
+    title: 'Akron Clinical Pro Forma',
+    eyebrow: 'Armada Clinical of Akron · Pro Forma',
+    subline: 'Same group-throughput model as Dayton: heads in each group × billing days × rate. Akron actuals are not loaded yet, so set the fixed cost base with its lever and the model prices your mix live.',
+    footer: 'Armada Clinical of Akron · Group-throughput model · set the cost base to your actuals · All behind you.',
+    has_actuals: false, baseline_rev: 0, baseline_exp: 0, baseline_mgmt: 0,
+    baseline_label: 'the cost base you set', base_row_label: 'Fixed cost base (lever)',
+    evening_cost: 26645, beds: 90,
+    defaults: { php: 20, iop: 15, tbs: 10, ind: 25, cm: 60, peer: 40, mgmt: 0, evening: 0, base: 250000 },
+    assumptions: [
+      ['PHP $253 × 26 · IOP $168 × 22', ''], ['TBS $42 × 22 (billed on top)', ''],
+      ['IND $60 ×1/wk · CM $22 · Peer $17', ''], ['Weeks per month', '4.3'],
+      ['Fixed cost base', 'set with the lever'], ['Evening program cost (if used)', '$26,645/mo'],
+    ],
+  },
+};
+let _proformaTmpl = null;
+app.get('/proforma', (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.redirect('/');
+  const allowed = user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Director of Revenue Cycle Management'].includes(user.job_role);
+  if (!allowed) return res.redirect('/');
+  const site = PROFORMA_SITES[String(req.query.site || 'dayton')] || PROFORMA_SITES.dayton;
+  try {
+    if (!_proformaTmpl) _proformaTmpl = readFileSync(path.join(__dirname, 'src', 'proforma.html'), 'utf8');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(_proformaTmpl.replace('{{TITLE}}', site.title).replace('{{SITE_JSON}}', JSON.stringify(site)));
+  } catch (e) { res.status(500).send('Pro forma unavailable: ' + e.message); }
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

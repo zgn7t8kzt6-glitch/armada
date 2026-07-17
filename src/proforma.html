@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<style>
+  :root{
+    --ink:#14202e; --paper:#f5f2ea; --panel:#ffffff; --line:#d9d3c4;
+    --sage:#5e7461; --sage-d:#3f5a44; --gold:#8a6d3b; --red:#9b2c2c;
+    --red-bg:#f3e4e4; --green:#2e6b2e; --green-bg:#e7eee6; --slate:#5a6472;
+    --shadow:0 1px 3px rgba(20,32,46,.08),0 8px 24px rgba(20,32,46,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--paper);color:var(--ink);font-family:"Georgia","Iowan Old Style",serif;
+    line-height:1.5;padding:clamp(16px,4vw,44px);max-width:1180px;margin:0 auto}
+  .sans{font-family:-apple-system,"Segoe UI",system-ui,sans-serif}
+  .mono{font-family:"SFMono-Regular",ui-monospace,"Menlo",monospace}
+
+  header{margin-bottom:28px;border-bottom:2px solid var(--ink);padding-bottom:18px}
+  .eyebrow{font-family:-apple-system,system-ui,sans-serif;font-size:11px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--sage);font-weight:700;margin-bottom:8px}
+  h1{font-size:clamp(26px,5vw,40px);line-height:1.05;letter-spacing:-.01em;font-weight:700}
+  .sub{color:var(--slate);font-size:15px;margin-top:8px;max-width:62ch}
+
+  .verdict{margin:26px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);overflow:hidden}
+  .verdict-top{padding:26px clamp(18px,4vw,34px) 10px;display:flex;flex-wrap:wrap;
+    align-items:flex-end;gap:8px 28px;justify-content:space-between}
+  .verdict-label{font-family:-apple-system,system-ui,sans-serif;font-size:12px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--slate);font-weight:700}
+  #netMonthly{font-size:clamp(38px,9vw,72px);font-weight:700;line-height:1;letter-spacing:-.02em;
+    font-family:"SFMono-Regular",ui-monospace,Menlo,monospace;transition:color .25s}
+  #netAnnual{font-size:15px;color:var(--slate);margin-top:6px}
+  .swing{font-family:-apple-system,system-ui,sans-serif;text-align:right}
+  .swing .n{font-size:22px;font-weight:700;font-family:"SFMono-Regular",ui-monospace,Menlo,monospace}
+  .swing .l{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);font-weight:700}
+  .bar-wrap{padding:6px clamp(18px,4vw,34px) 24px}
+  .bar-track{position:relative;height:18px;background:linear-gradient(90deg,var(--red-bg),#f0ede4 50%,var(--green-bg));
+    border-radius:10px;border:1px solid var(--line);overflow:visible}
+  .bar-zero{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--ink);opacity:.5}
+  .bar-zero::after{content:"break-even";position:absolute;top:-16px;left:50%;transform:translateX(-50%);
+    font-family:-apple-system,system-ui,sans-serif;font-size:9px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--slate);white-space:nowrap}
+  #barFill{position:absolute;top:0;bottom:0;border-radius:9px;transition:all .25s ease}
+
+  .grid{display:grid;grid-template-columns:1fr 1.1fr;gap:22px}
+  @media(max-width:840px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);padding:clamp(18px,3vw,26px)}
+  .card h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink);
+    font-family:-apple-system,system-ui,sans-serif;font-weight:700;margin-bottom:4px}
+  .card .hint{font-size:12.5px;color:var(--slate);margin-bottom:20px;font-family:-apple-system,system-ui,sans-serif}
+
+  .control{margin-bottom:22px}
+  .control:last-child{margin-bottom:4px}
+  .control-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px;gap:10px}
+  .control-head label{font-family:-apple-system,system-ui,sans-serif;font-size:13.5px;font-weight:600}
+  .control-head .val{font-family:"SFMono-Regular",ui-monospace,Menlo,monospace;font-size:16px;font-weight:700;color:var(--sage-d)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:6px;
+    background:linear-gradient(90deg,var(--sage) var(--pct,50%),#e4dfd2 var(--pct,50%));outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;
+    border-radius:50%;background:var(--panel);border:2.5px solid var(--sage-d);cursor:pointer;
+    box-shadow:0 1px 4px rgba(0,0,0,.2);transition:transform .1s}
+  input[type=range]::-webkit-slider-thumb:active{transform:scale(1.15)}
+  input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--panel);
+    border:2.5px solid var(--sage-d);cursor:pointer}
+  .scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--slate);margin-top:5px;
+    font-family:-apple-system,system-ui,sans-serif}
+
+  .pl-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;
+    border-bottom:1px solid #ece7db;font-family:-apple-system,system-ui,sans-serif;font-size:13.5px}
+  .pl-row:last-child{border-bottom:none}
+  .pl-row .amt{font-family:"SFMono-Regular",ui-monospace,Menlo,monospace;font-weight:600}
+  .pl-row.sub{color:var(--slate);font-size:12px;padding:5px 0 5px 14px}
+  .pl-row.total{border-top:2px solid var(--ink);margin-top:6px;padding-top:12px;font-weight:700;font-size:15px}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .tag{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+    background:var(--red-bg);color:var(--red);padding:2px 7px;border-radius:5px;margin-left:8px;font-weight:700}
+
+  .readout{margin-top:18px;padding:16px 18px;border-radius:11px;background:var(--paper);
+    border:1px solid var(--line);font-family:-apple-system,system-ui,sans-serif;font-size:13.5px;line-height:1.55}
+  .readout b{color:var(--ink)}
+  .chips{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .chip{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px 14px;
+    font-family:-apple-system,system-ui,sans-serif;flex:1;min-width:110px}
+  .chip .k{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);font-weight:700}
+  .chip .v{font-size:20px;font-weight:700;font-family:"SFMono-Regular",ui-monospace,Menlo,monospace;margin-top:3px}
+
+  .svc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px 26px;margin-top:20px}
+  @media(max-width:840px){.svc-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:520px){.svc-grid{grid-template-columns:1fr}}
+  .svc .control-head{margin-bottom:8px;align-items:flex-start}
+  .svc label .rate{font-family:"SFMono-Regular",ui-monospace,Menlo,monospace;font-size:10.5px;color:var(--slate);font-weight:400;display:block;margin-top:3px}
+  .svc-amt{font-family:"SFMono-Regular",ui-monospace,Menlo,monospace;font-size:14px;font-weight:700;color:var(--gold);text-align:right;margin-top:6px}
+
+  footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);
+    font-family:-apple-system,system-ui,sans-serif;font-size:11.5px;color:var(--slate);line-height:1.6}
+  .assump-toggle{cursor:pointer;color:var(--sage-d);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+  .assump{display:none;margin-top:10px}
+  .assump.open{display:block}
+  .assump table{width:100%;border-collapse:collapse;font-size:12px}
+  .assump td{padding:4px 8px;border-bottom:1px solid #ece7db}
+  .assump td:last-child{text-align:right;font-family:"SFMono-Regular",ui-monospace,Menlo,monospace}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<script>window.__SITE__={{SITE_JSON}};</script>
+<header>
+  <div class="eyebrow" id="eyebrow">Armada Recovery Dayton · Turnaround Pro Forma</div>
+  <h1>Build the revenue from the groups up</h1>
+  <p class="sub" id="subline">Revenue is group throughput: how many people sit in each group, times the days you bill, times the rate. Set the groups, then work the levers, and watch June's loss move toward black. Built on June 2026 actuals.</p>
+</header>
+
+<div class="verdict">
+  <div class="verdict-top">
+    <div>
+      <div class="verdict-label">Net operating income — monthly</div>
+      <div id="netMonthly">–$65,622</div>
+      <div id="netAnnual">–$787,463 annualized</div>
+    </div>
+    <div class="swing" id="swingWrap">
+      <div class="l">Swing vs. June actual</div>
+      <div class="n" id="swing">$0</div>
+    </div>
+  </div>
+  <div class="bar-wrap"><div class="bar-track"><div class="bar-zero"></div><div id="barFill"></div></div></div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2>The groups &amp; services</h2>
+      <p class="hint" style="margin-bottom:0">Daily group census and weekly service volume. This is your monthly clinical revenue.</p>
+    </div>
+    <div style="text-align:right">
+      <div class="val mono" id="clinRev" style="font-size:24px;color:var(--sage-d)">$240,349</div>
+      <div class="sans" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);font-weight:700">monthly clinical revenue</div>
+    </div>
+  </div>
+
+  <div class="svc-grid">
+    <div class="svc">
+      <div class="control-head"><label>PHP — people in group<span class="rate">26 days/mo · $253/day</span></label><span class="val" id="vPhp">22</span></div>
+      <input type="range" id="php" min="0" max="60" value="22" step="1">
+      <div class="svc-amt" id="aPhp">$144,716</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>IOP — people in group<span class="rate">22 days/mo · $168/day</span></label><span class="val" id="vIop">18</span></div>
+      <input type="range" id="iop" min="0" max="60" value="18" step="1">
+      <div class="svc-amt" id="aIop">$66,528</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>TBS — people in group<span class="rate">22 days/mo · $42/day · on top</span></label><span class="val" id="vTbs">12</span></div>
+      <input type="range" id="tbs" min="0" max="60" value="12" step="1">
+      <div class="svc-amt" id="aTbs">$11,088</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>IND — clients getting individual<span class="rate">1/week · $60 · × 4.3 wks</span></label><span class="val" id="vInd">30</span></div>
+      <input type="range" id="ind" min="0" max="90" value="30" step="1">
+      <div class="svc-amt" id="aInd">$7,740</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>Case mgmt — units/week<span class="rate">$22 / 15 min · × 4.3 wks · facility</span></label><span class="val" id="vCm">70</span></div>
+      <input type="range" id="cm" min="0" max="300" value="70" step="5">
+      <div class="svc-amt" id="aCm">$6,622</div>
+    </div>
+    <div class="svc">
+      <div class="control-head"><label>Peer — units/week<span class="rate">$17 / 15 min · × 4.3 wks · facility</span></label><span class="val" id="vPeer">50</span></div>
+      <input type="range" id="peer" min="0" max="300" value="50" step="5">
+      <div class="svc-amt" id="aPeer">$3,655</div>
+    </div>
+  </div>
+  <div class="chips">
+    <div class="chip"><div class="k">Unique clients (PHP+IOP)</div><div class="v" id="cUnique">40</div></div>
+    <div class="chip"><div class="k" id="cBedsLabel">vs. 90 beds</div><div class="v" id="cBeds">50 open</div></div>
+    <div class="chip" id="vsJuneChip"><div class="k">vs. June actual rev</div><div class="v" id="cVsJune">+$5k</div></div>
+  </div>
+</div>
+
+<div class="grid" style="margin-top:22px">
+  <div class="card">
+    <h2>The levers</h2>
+    <p class="hint">Adjust the operation around the revenue you built.</p>
+    <div class="control" id="baseCtl" style="display:none">
+      <div class="control-head"><label>Fixed monthly cost base</label><span class="val" id="vBase">$250,000</span></div>
+      <input type="range" id="base" min="0" max="450000" value="250000" step="5000">
+      <div class="scale"><span>$0</span><span>$450k</span></div>
+    </div>
+    <div class="control">
+      <div class="control-head"><label>Evening environment program</label><span class="val" id="vEvening">On</span></div>
+      <input type="range" id="evening" min="0" max="1" value="1" step="1">
+      <div class="scale"><span>Off — $0</span><span id="eveningMax">On — $26.6k/mo</span></div>
+    </div>
+    <div class="control">
+      <div class="control-head"><label>Management fee</label><span class="val" id="vMgmt">$45,000</span></div>
+      <input type="range" id="mgmt" min="0" max="45000" value="45000" step="2500">
+      <div class="scale"><span>$0</span><span id="mgmtMax">$45k (current)</span></div>
+    </div>
+    <div class="readout" id="readout"></div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly P&amp;L</h2>
+    <p class="hint" id="plHint">Your built revenue against June's cost base.</p>
+    <div id="pl"></div>
+    <div style="margin-top:14px">
+      <span class="assump-toggle sans" id="assumpToggle">Show assumptions ▾</span>
+      <div class="assump" id="assump">
+        <table><tbody id="assumpBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <b>How to read it.</b> Revenue is built from group throughput — heads in each group times billing days times rate — so growing a group or adding a service raises revenue directly. Costs are the fixed base, adjusted only by the evening program and the management fee. TBS bills on top of clients already in PHP/IOP, so it isn't double-counting beds. "Unique clients" (PHP + IOP heads) is the census to sanity-check against your beds. The management fee is the fastest single lever.<br>
+  <span id="footerTag">Armada Recovery Dayton · v2.0 · Group-throughput model on June 2026 actuals · All behind you.</span>
+</footer>
+
+<script>
+(function(){
+  const S=window.__SITE__||{};
+  const JUNE_REV=S.baseline_rev, JUNE_EXP=S.baseline_exp, JUNE_MGMT=S.baseline_mgmt, EVENING=S.evening_cost, WK=4.3;
+  const BEDS=S.beds||90;
+  const HAS_ACTUALS=!!S.has_actuals;
+  const RATE={php:253,iop:168,tbs:42,ind:60,cm:22,peer:17};
+  const DAYS={php:26,iop:22,tbs:22};
+
+  const $=id=>document.getElementById(id);
+  const money=n=>(n<0?'–$':'$')+Math.abs(Math.round(n)).toLocaleString();
+  const money0=n=>'$'+Math.round(n).toLocaleString();
+
+  // Site skin
+  $('eyebrow').textContent=S.eyebrow;
+  if(S.subline) $('subline').textContent=S.subline;
+  $('cBedsLabel').textContent='vs. '+BEDS+' beds';
+  $('footerTag').textContent=S.footer;
+  if(S.baseline_label) $('plHint').textContent='Your built revenue against '+S.baseline_label+'.';
+  document.title=S.title||document.title;
+  if(!HAS_ACTUALS){ $('swingWrap').style.display='none'; $('vsJuneChip').style.display='none'; $('baseCtl').style.display=''; }
+  if(S.defaults){ for(const k of ['php','iop','tbs','ind','cm','peer','mgmt','evening','base']){ const el=$(k); if(el&&S.defaults[k]!=null) el.value=S.defaults[k]; } }
+  $('assumpBody').innerHTML=(S.assumptions||[]).map(r=>'<tr><td>'+r[0]+'</td><td>'+(r[1]||'')+'</td></tr>').join('');
+
+  const els={php:$('php'),iop:$('iop'),tbs:$('tbs'),ind:$('ind'),cm:$('cm'),peer:$('peer'),
+             evening:$('evening'),mgmt:$('mgmt'),base:$('base')};
+  function setTrack(el){const mn=+el.min,mx=+el.max,v=+el.value;el.style.setProperty('--pct',((v-mn)/(mx-mn)*100)+'%');}
+
+  function calc(){
+    const g={php:+els.php.value,iop:+els.iop.value,tbs:+els.tbs.value,
+             ind:+els.ind.value,cm:+els.cm.value,peer:+els.peer.value};
+    const amt={
+      php:g.php*DAYS.php*RATE.php,
+      iop:g.iop*DAYS.iop*RATE.iop,
+      tbs:g.tbs*DAYS.tbs*RATE.tbs,
+      ind:g.ind*WK*RATE.ind,
+      cm:g.cm*WK*RATE.cm,
+      peer:g.peer*WK*RATE.peer
+    };
+    const clinRev=amt.php+amt.iop+amt.tbs+amt.ind+amt.cm+amt.peer;
+    const eveningOn=+els.evening.value===1;
+    const mgmt=+els.mgmt.value;
+    const eveningCost=eveningOn?EVENING:0;
+    const FIXED_BASE = HAS_ACTUALS ? (JUNE_EXP - JUNE_MGMT) : +els.base.value;
+    const expenses=FIXED_BASE+mgmt+eveningCost;
+    const net=clinRev-expenses;
+    const annual=net*12;
+
+    $('vPhp').textContent=g.php; $('vIop').textContent=g.iop; $('vTbs').textContent=g.tbs;
+    $('vInd').textContent=g.ind; $('vCm').textContent=g.cm; $('vPeer').textContent=g.peer;
+    $('aPhp').textContent=money0(amt.php); $('aIop').textContent=money0(amt.iop);
+    $('aTbs').textContent=money0(amt.tbs); $('aInd').textContent=money0(amt.ind);
+    $('aCm').textContent=money0(amt.cm); $('aPeer').textContent=money0(amt.peer);
+    $('clinRev').textContent=money0(clinRev);
+
+    const unique=g.php+g.iop;
+    $('cUnique').textContent=unique;
+    $('cBeds').textContent=unique>BEDS?(unique-BEDS)+' over':(BEDS-unique)+' open';
+    if(HAS_ACTUALS){
+      const vs=clinRev-JUNE_REV;
+      $('cVsJune').textContent=(vs>=0?'+':'–')+'$'+Math.abs(Math.round(vs/1000))+'k';
+      const swing=net-(JUNE_REV-JUNE_EXP);
+      const sw=$('swing'); sw.textContent=(swing>=0?'+':'')+money(swing).replace('–','-');
+      sw.style.color=swing>=0?'var(--green)':'var(--red)';
+    }
+
+    $('vEvening').textContent=eveningOn?'On':'Off';
+    $('vMgmt').textContent=money0(mgmt);
+    if(!HAS_ACTUALS) $('vBase').textContent=money0(FIXED_BASE);
+
+    const nm=$('netMonthly'); nm.textContent=money(net);
+    nm.style.color=net>=0?'var(--green)':'var(--red)';
+    $('netAnnual').textContent=money(annual)+' annualized';
+
+    const lo=-150000,hi=150000, zero=(0-lo)/(hi-lo)*100, pos=Math.max(0,Math.min(100,(net-lo)/(hi-lo)*100));
+    const bf=$('barFill');
+    if(net>=0){bf.style.left=zero+'%';bf.style.width=(pos-zero)+'%';bf.style.background='var(--sage-d)';}
+    else{bf.style.left=pos+'%';bf.style.width=(zero-pos)+'%';bf.style.background='var(--red)';}
+
+    const pl=[
+      ['Clinical revenue', clinRev,'pos',false,false,false],
+      ['PHP · '+g.php+' × 26 × $253', amt.php,'',true,false,false],
+      ['IOP · '+g.iop+' × 22 × $168', amt.iop,'',true,false,false],
+      ['TBS · '+g.tbs+' × 22 × $42', amt.tbs,'',true,false,false],
+      ['IND · '+g.ind+' clients × wk × $60', amt.ind,'',true,false,false],
+      ['Case mgmt · '+g.cm+' units/wk', amt.cm,'',true,false,false],
+      ['Peer · '+g.peer+' units/wk', amt.peer,'',true,false,false],
+      ['Expenses', -expenses,'neg',false,false,false],
+      [S.base_row_label||'Fixed cost base (June)', -FIXED_BASE,'neg',true,false,false],
+      ['Management fee', -mgmt,'neg',true, HAS_ACTUALS&&mgmt<JUNE_MGMT,false],
+      ['Evening program', -eveningCost,'neg',true,false,false],
+      ['Net operating income', net, net>=0?'pos':'neg',false,false,true],
+    ];
+    let html='';
+    pl.forEach(r=>{
+      const [label,a,cls,sub,tag,total]=r;
+      html+='<div class="pl-row '+(sub?'sub':'')+' '+(total?'total':'')+'">'+
+        '<span>'+label+(tag?'<span class="tag">reduced</span>':'')+'</span>'+
+        '<span class="amt '+cls+'">'+money(a)+'</span></div>';
+    });
+    $('pl').innerHTML=html;
+
+    let msg;
+    if(net>=0){
+      msg='<b>Black.</b> This group mix clears <b>'+money(net)+'/month</b>'+(HAS_ACTUALS&&mgmt<JUNE_MGMT?' with the management fee at '+money0(mgmt):'')+'. Revenue '+money0(clinRev)+' against '+money0(expenses)+' in costs.';
+    }else{
+      const needRev=expenses-clinRev;
+      msg='<b>Red by '+money(net)+'.</b> You need '+money(needRev)+' more monthly revenue — about '+Math.ceil(needRev/(DAYS.php*RATE.php))+' more heads in PHP group, or '+Math.ceil(needRev/(DAYS.iop*RATE.iop))+' more in IOP'+(mgmt>0?', or pull the management fee down.':'.');
+    }
+    $('readout').innerHTML=msg;
+
+    Object.values(els).forEach(setTrack);
+  }
+  Object.values(els).forEach(el=>{el.addEventListener('input',calc);setTrack(el);});
+  $('assumpToggle').addEventListener('click',()=>{
+    const a=$('assump');a.classList.toggle('open');
+    $('assumpToggle').textContent=a.classList.contains('open')?'Hide assumptions ▴':'Show assumptions ▾';
+  });
+  calc();
+})();
+</script>
+</body>
+</html>

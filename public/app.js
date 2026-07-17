@@ -6043,6 +6043,11 @@ async function loadOwnership(){
       <div class="ret-cards" style="margin-top:8px">${box(t.census||0,'Total census',(t.census?'rc-elev':''))}${box(t.admits||0,'Admits in window')}${box(t.discharges||0,'Discharges')}${box(t.facilities||0,'Live facilities')}</div>
       ${(d.byBrand||[]).length>1?`<div class="hint" style="margin-top:6px">${(d.byBrand||[]).map(b=>`<strong>${esc(b.brand)}</strong>: ${b.census} census · ${b.admits} admits · ${b.discharges} disch.`).join(' &nbsp;|&nbsp; ')}</div>`:''}</div>
     <div id="ownPortfolio"></div>
+    <div class="card" style="padding:14px 18px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <strong class="sans" style="font-size:13px">📈 Interactive pro formas</strong>
+      <a class="btn btn-gold btn-sm sans" href="/proforma?site=dayton" target="_blank" rel="noopener">Dayton — turnaround model</a>
+      <a class="btn btn-ghost btn-sm sans" href="/proforma?site=akron" target="_blank" rel="noopener">Akron Clinical</a>
+      <span class="hint">group-throughput: heads × billing days × rate, with live levers</span></div></div>
     <div class="corp-tabs" style="margin:2px 0 0">${mods.map(m=>`<button ${m[1]==='ownership'?'class="active"':''} onclick="${m[2]||'void(0)'}">${m[0]}</button>`).join('')}</div>
     <div class="card"><h3 style="margin-top:0">Armada — Kipu <span class="hint" style="font-weight:400">· live</span></h3>${tbl(armada)}</div>
     <div class="card"><h3 style="margin-top:0">Spark${d.sparkPending?' <span class="hint" style="font-weight:400;color:#a60">· connection pending</span>':''}</h3>${d.sparkPending?'<div class="pc-note" style="color:#a60;margin-bottom:6px">These come online the moment you give me the Spark Kipu credentials — the rows are already wired.</div>':''}${tbl(spark)}</div>

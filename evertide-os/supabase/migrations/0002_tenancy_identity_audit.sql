@@ -184,24 +184,27 @@ $$;
 create or replace function app.audit_row()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
-  v_org uuid;
-  v_site uuid;
+  v_new jsonb := to_jsonb(new);
+  v_old jsonb;
+  v_org uuid := (v_new->>'organization_id')::uuid;
+  -- Tables without their own site_id (e.g. sites) fall back sensibly.
+  v_site uuid := coalesce((v_new->>'site_id')::uuid,
+                          case when tg_table_name = 'sites' then (v_new->>'id')::uuid end);
   v_event text;
 begin
   if tg_op = 'INSERT' then
-    v_org := new.organization_id; v_site := new.site_id; v_event := 'created';
     insert into public.audit_events (organization_id, site_id, actor_id, entity_type, entity_id, event_type, new_values)
-    values (v_org, v_site, auth.uid(), tg_table_name, new.id::text, v_event, to_jsonb(new));
+    values (v_org, v_site, auth.uid(), tg_table_name, new.id::text, 'created', v_new);
     return new;
   elsif tg_op = 'UPDATE' then
-    v_org := new.organization_id; v_site := new.site_id;
+    v_old := to_jsonb(old);
     v_event := case
-      when old.archived_at is null and new.archived_at is not null then 'archived'
-      when old.archived_at is not null and new.archived_at is null then 'restored'
+      when v_old->>'archived_at' is null and v_new->>'archived_at' is not null then 'archived'
+      when v_old->>'archived_at' is not null and v_new->>'archived_at' is null then 'restored'
       else 'updated'
     end;
     insert into public.audit_events (organization_id, site_id, actor_id, entity_type, entity_id, event_type, old_values, new_values)
-    values (v_org, v_site, auth.uid(), tg_table_name, new.id::text, v_event, to_jsonb(old), to_jsonb(new));
+    values (v_org, v_site, auth.uid(), tg_table_name, new.id::text, v_event, v_old, v_new);
     return new;
   end if;
   return null;
@@ -226,16 +229,21 @@ create trigger profiles_updated_at before update on public.profiles
 -- Audit membership and site changes (ownership of config matters).
 create or replace function app.audit_membership()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_new jsonb := to_jsonb(new);
+  -- org memberships carry organization_id; site memberships only site_id.
+  v_org uuid := coalesce(
+    (v_new->>'organization_id')::uuid,
+    (select organization_id from public.sites where id = (v_new->>'site_id')::uuid)
+  );
 begin
   if tg_op = 'INSERT' then
     insert into public.audit_events (organization_id, actor_id, entity_type, entity_id, event_type, new_values)
-    values (coalesce(new.organization_id, (select organization_id from public.sites where id = new.site_id)),
-            auth.uid(), tg_table_name, new.id::text, 'created', to_jsonb(new));
+    values (v_org, auth.uid(), tg_table_name, new.id::text, 'created', v_new);
     return new;
   elsif tg_op = 'UPDATE' then
     insert into public.audit_events (organization_id, actor_id, entity_type, entity_id, event_type, old_values, new_values)
-    values (coalesce(new.organization_id, (select organization_id from public.sites where id = new.site_id)),
-            auth.uid(), tg_table_name, new.id::text, 'updated', to_jsonb(old), to_jsonb(new));
+    values (v_org, auth.uid(), tg_table_name, new.id::text, 'updated', to_jsonb(old), v_new);
     return new;
   end if;
   return null;

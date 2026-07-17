@@ -94,12 +94,19 @@ npm run db:verify    # fails loudly unless all counts/relationships match
 
 This creates: EverTide Infusion, Jacksonville Site 1
 (7880 Gate Parkway, Suite 201 · America/New_York · opens 2027-01-04),
-6 placeholder users, 10 projects, **60 tasks**, **12 milestones**,
+6 placeholder users, 15 projects (one per phase/workstream combination),
+**60 tasks**, **12 milestones**,
 **11 KPIs**, 12 document folders, the annual goal, and the RACI reference.
 
 `npm run db:seed:reset` explains the development reset procedure — audit
 events and update feeds are append-only *by design*, so the reset path is
 `supabase db reset` + re-seed, never row deletes.
+
+**No Supabase yet?** `npm run db:validate:local` boots an embedded
+PostgreSQL (downloaded via npm — no Docker or account needed), applies every
+migration, loads the full seed, verifies all counts, and exercises the core
+database rules under simulated user sessions. It's a full offline dry-run of
+the SQL layer; Auth/Realtime/Storage behavior still needs the real stack.
 
 ### Auth (magic links) and redirect URLs
 

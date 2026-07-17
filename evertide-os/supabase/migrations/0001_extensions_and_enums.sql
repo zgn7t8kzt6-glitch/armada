@@ -2,8 +2,11 @@
 
 create extension if not exists pgcrypto;
 
--- Private schema for helper/authorization functions. Not exposed over the API.
+-- Private schema for helper/authorization functions. Not exposed over the
+-- API (only schemas listed in the API config are), but RLS policies invoke
+-- these functions as the requesting role, so API roles need schema USAGE.
 create schema if not exists app;
+grant usage on schema app to anon, authenticated, service_role;
 
 -- ── Enums ───────────────────────────────────────────────────────────────────
 create type public.membership_role as enum ('org_admin', 'site_admin', 'member', 'viewer');

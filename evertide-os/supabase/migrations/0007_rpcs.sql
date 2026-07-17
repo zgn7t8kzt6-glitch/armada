@@ -246,11 +246,13 @@ $$;
 
 -- Admin correction of an approved decision: the one sanctioned bypass of
 -- immutability. Requires a reason and writes an explicit audit event (§6.7).
+-- SECURITY DEFINER because clients may not insert audit events directly;
+-- the explicit is_admin_scoped check below is the authorization gate.
 create or replace function public.admin_correct_decision(
   p_decision uuid, p_reason text, p_fields jsonb
 )
 returns uuid
-language plpgsql volatile as $$
+language plpgsql volatile security definer set search_path = public as $$
 declare
   d public.decisions%rowtype;
 begin

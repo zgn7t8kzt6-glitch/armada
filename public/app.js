@@ -10,7 +10,7 @@ const today = () => new Date().toISOString().slice(0,10);
 
 // Which API paths honor ?facility= (server-side facCtx). Kept as an explicit
 // allowlist so an unscoped endpoint never silently ignores the chip.
-const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly|los-week-detail|los-whatif|level-sources))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
+const FAC_SCOPED_API=/^\/(clients($|[?/]\d)|dashboard|arrivals?($|\?|\/)|incidents($|\?)|billingready($|\?|\/(run|export))|appts($|\?)|inventory($|\?|\/reorders)|maintenance($|\?|\/history)|requests($|\?|\/(count|stats))|command\/(overview|since|discharge-debug|census\/email)|retention|opscenter|diag\/admit(s|-discharge)|outpatient($|\?|\/(analytics|php-outcomes|group-attendance|php-plan|refresh|field-inspect))|housing\/|case-management|workforce\/summary|rounds($|\?|\/(today|board))|duties($|\?)|onshift\/manual|staffing\/?|roster($|\?|\/)|schedule($|\?|\/(week|\d))|clock\/status|care-team\/onshift|shift-crew|shift-briefing|assistant|records\/search|search($|\?)|property($|\?|\/\d)|sendouts($|\?)|alerts($|\?|\/scorecard)|carecards|dignity($|\?)|engagement($|\?|\/staff)|continuum|discharges\/incomplete|discharge-learnings|followups|alumni($|\?)|admissions($|\?|\/(\d|bed-forecast))|auth-register($|\?)|finance\/revenue|analytics($|\?|\/(los-by-level|los-weekly|los-week-detail|los-whatif|level-sources))|compliance($|\?)|bedboard($|\?|\/(sync|total))|beds($|\?|\/\d)|referrals($|\?|\/(\d|summary|insights))|inbound-referrals($|\?)|client-voice($|\?|\/unseen)|voice($|\?)|surveys\/(due|overview|\d+\/(results|clear))|detox-watch|behavior-contracts($|\?|\/active)|concerns($|\?)|delights($|\?)|saves($|\?)|goals($|\?)|moments($|\?)|notes\/flagged|today($|\?))/;
 async function api(path, opts={}) {
   // Rebuild Phase 2: the topbar facility chip scopes every facility-aware
   // endpoint automatically — one lever instead of 90 loaders remembering to.
@@ -8187,10 +8187,86 @@ async function loadOutpatient(){
       <div class="toolbar" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="hint">From <input type="date" id="op_since" value="${esc(OP_PERIOD.since)}" onchange="opPeriodChange()"/></label><label class="hint">To <input type="date" id="op_end" value="${esc(OP_PERIOD.end)}" onchange="opPeriodChange()"/></label></div>
       <div id="opAnalytics"><div class="hint">Loading…</div></div></div>
     ${roster.length?group('PHP')+group('IOP')+(other.length?`<div class="card"><h3 style="margin-top:0">Other / unclassified <span class="hint" style="font-weight:400">· ${other.length}</span></h3><table class="tbl"><tr><th>Client</th><th>Payer</th><th>Level (raw)</th><th>Admit</th></tr>${other.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="hint">${esc(x.payer||'—')}</td><td class="hint">${esc(x.level||'(blank)')}</td><td>${esc(x.admit||'—')}</td></tr>`).join('')}</table></div>`:''):'<div class="card"><div class="hint">No outpatient census yet — tap “Refresh from Kipu” to pull from '+esc(d.location||'your outpatient location')+'.</div></div>'}
+    ${d.isAdmin?phpPlanHtml(c.PHP||0):''}
     ${d.isAdmin?opSettingsHtml(d):''}`;
   loadOutpatientAnalytics();
   loadOutpatientGroups();
   loadOutpatientPhp();
+  if(d.isAdmin) phpPlanCalc();
+}
+/* ── PHP group planner: admits → census → groups → staffing → revenue, with
+   Ohio's 12-per-SUD-group cap and an 8–10 clinical target. Pure math on your
+   inputs (saved on this device); live Kipu PHP census shown as a reality check. ── */
+function phpPlanIn(){ try{ return JSON.parse(localStorage.getItem('phpplan')||'{}'); }catch{ return {}; } }
+function phpPlanHtml(liveCensus){
+  const s=phpPlanIn();
+  const f=(id,label,ph,step)=>`<label class="hint" style="display:flex;flex-direction:column;gap:2px;min-width:96px">${label}<input id="pp_${id}" type="number" step="${step||1}" min="0" value="${s[id]!=null?s[id]:''}" placeholder="${ph}" style="width:96px" oninput="phpPlanCalc()"/></label>`;
+  return `<div class="card" style="border-left:4px solid var(--aqua)"><div class="cmd-hero-row"><div><h3 style="margin:0">🧮 PHP group planner — does the group structure match the admit volume?</h3>
+      <p class="sub sans" style="margin:0">Enter what you know; anything left blank runs scenarios (ALOS 10/12/14 days, show rate 75/85/95%). Kipu says <strong>${liveCensus}</strong> in PHP right now — compare that to the expected census below.</p></div></div>
+    <div class="toolbar no-print" style="justify-content:flex-start;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:flex-end;background:#f4fafb;border:1px solid var(--line);border-radius:12px;padding:10px">
+      ${f('admits','Admits / period','e.g. 40')}${f('days','Program days','22')}${f('alos','ALOS (days)','blank = 10/12/14','0.5')}${f('show','Show rate %','blank = 75/85/95')}${f('rate','Per diem $','e.g. 250')}
+      ${f('actatt','Actual daily attendance','optional','0.5')}${f('actbilled','Actual billed days','optional')}${f('groupsnow','Groups you run now','optional')}
+      <button class="btn btn-gold btn-sm sans" onclick="phpPlanPull(this)">⚡ Pull from Kipu</button></div>
+    <div id="phpPlanMsg" class="hint" style="margin-top:4px"></div>
+    <div id="phpPlanOut" class="hint" style="margin-top:8px"></div></div>`;
+}
+async function phpPlanPull(btn){
+  const msg=$('phpPlanMsg'); if(btn){btn.disabled=true;btn.textContent='Pulling…';}
+  if(msg) msg.textContent='Reading admits, episode lengths, and the last 5 weekdays of group sessions from Kipu…';
+  try{
+    const d=await api('/outpatient/php-plan?days=30');
+    const set=(id,val)=>{ const el=$('pp_'+id); if(el&&val!=null) el.value=val; };
+    set('admits',d.admits); set('days',d.weekdays); set('alos',d.alos);
+    set('show',d.showRate); set('actatt',d.avgAttendance);
+    if(d.rate&&!($('pp_rate')||{}).value) set('rate',d.rate);
+    const missing=[];
+    if(d.alos==null) missing.push('ALOS (no completed PHP episodes in the window — scenarios 10/12/14 run instead)');
+    if(d.showRate==null) missing.push('show rate (no group sessions found in the sample — scenarios 75/85/95 run instead)');
+    if(!d.rate&&!($('pp_rate')||{}).value) missing.push('per diem $ (set a PHP rate in Settings → rates, or type it)');
+    if(msg) msg.innerHTML=`Pulled last <strong>${d.days}</strong> days (${esc(d.source)}): <strong>${d.admits}</strong> admits · ${d.phpNow} in PHP now · ${d.episodes} completed PHP episode${d.episodes===1?'':'s'}${d.alos!=null?' averaging <strong>'+d.alos+'d</strong>':''}${d.avgAttendance!=null?' · attendance sampled over '+d.sampledDays+' weekday'+(d.sampledDays===1?'':'s')+': <strong>'+d.avgAttendance+'</strong>/day ('+d.showRate+'%)':''}.${missing.length?' <span style="color:var(--danger)">Couldn’t fill: '+missing.join('; ')+'.</span>':''} Billed days still come from your billing system — enter those by hand to see leakage.`;
+    phpPlanCalc();
+  }catch(e){ if(msg) msg.innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
+  if(btn){btn.disabled=false;btn.textContent='⚡ Pull from Kipu';}
+}
+function phpPlanCalc(){
+  const out=$('phpPlanOut'); if(!out) return;
+  const v=(id)=>{ const el=$('pp_'+id); const x=el&&el.value!==''?+el.value:null; return x!=null&&isFinite(x)?x:null; };
+  const s={admits:v('admits'),days:v('days'),alos:v('alos'),show:v('show'),rate:v('rate'),actatt:v('actatt'),actbilled:v('actbilled'),groupsnow:v('groupsnow')};
+  try{ localStorage.setItem('phpplan',JSON.stringify(s)); }catch{}
+  const A=s.admits, D=s.days||22, R=s.rate;
+  if(!A){ out.innerHTML='Enter your PHP admits per period to see the math.'; return; }
+  const ALOS=s.alos!=null?[s.alos]:[10,12,14];
+  const SHOW=s.show!=null?[s.show/100]:[.75,.85,.95];
+  const money=(n)=>'$'+Math.round(n).toLocaleString();
+  const rows=[]; let mid=null;
+  for(const al of ALOS) for(const sh of SHOW){
+    const census=A*al/D, att=census*sh, gCap=Math.max(1,Math.ceil(att/12)), gLo=Math.max(1,Math.ceil(att/10)), gHi=Math.max(1,Math.ceil(att/8));
+    const billable=A*al, attended=billable*sh;
+    const r={al,sh,census,att,gCap,gLo,gHi,billable,attended};
+    rows.push(r);
+    if((s.alos!=null||al===12)&&(s.show!=null||Math.abs(sh-.85)<.01)) mid=r;
+  }
+  mid=mid||rows[Math.floor(rows.length/2)];
+  const tbl=`<div style="overflow-x:auto"><table class="tbl"><tr><th>ALOS</th><th>Show</th><th>Avg daily census</th><th>Daily attendance</th><th>Groups (12 cap)</th><th>Groups (8–10 target)</th><th>Billable days</th>${R?'<th>Revenue @ '+money(R)+'/day</th>':''}</tr>
+    ${rows.map(r=>`<tr${r===mid?' style="background:#f4fafb;font-weight:600"':''}><td>${r.al}d</td><td>${Math.round(r.sh*100)}%</td><td>${r.census.toFixed(1)}</td><td>${r.att.toFixed(1)}</td><td>${r.gCap}</td><td>${r.gLo===r.gHi?r.gLo:r.gLo+'–'+r.gHi}</td><td>${Math.round(r.billable)}</td>${R?'<td>'+money(r.billable*R)+'</td>':''}</tr>`).join('')}</table></div>`;
+  const flags=[];
+  if(s.groupsnow!=null&&s.groupsnow>0){
+    const per=mid.att/s.groupsnow;
+    if(per>12) flags.push(`<div style="color:var(--danger)"><strong>⚠️ Compliance risk:</strong> ${s.groupsnow} group${s.groupsnow===1?'':'s'} for ~${mid.att.toFixed(1)} attendees = ${per.toFixed(1)} per group — over Ohio's 12-client SUD group max. You need at least ${mid.gCap} groups to stay legal, ${mid.gLo===mid.gHi?mid.gLo:mid.gLo+'–'+mid.gHi} to stay clinical.</div>`);
+    else if(per<6) flags.push(`<div><strong>Underfilled:</strong> ~${per.toFixed(1)} per group across ${s.groupsnow} groups — consider consolidating toward 8–10 per group.</div>`);
+    else flags.push(`<div style="color:var(--good,#2f7a4f)"><strong>✓ Group structure fits:</strong> ~${per.toFixed(1)} per group across ${s.groupsnow} groups — inside the 8–10 clinical target${per>10?' (running full — one more admit wave tips it over)':''}.</div>`);
+  }
+  if(s.actatt!=null){
+    const gap=(mid.att-s.actatt)/mid.att;
+    if(gap>0.15) flags.push(`<div style="color:var(--danger)"><strong>⚠️ Attendance ${Math.round(gap*100)}% below expected</strong> (${s.actatt} actual vs ${mid.att.toFixed(1)} expected). Most likely causes, in order: <strong>1) ALOS collapse</strong> — early step-downs or AMA cutting episodes short (check the PHP completion card above: "left during PHP"); <strong>2) attendance non-compliance</strong> — enrolled but not showing (check Group attendance today vs census); <strong>3) admit clustering</strong> — admits bunched so census sags between waves (check Movement &amp; LOS admit dates).</div>`);
+    else flags.push(`<div><strong>Attendance on track:</strong> ${s.actatt} actual vs ${mid.att.toFixed(1)} expected daily.</div>`);
+  }
+  if(R&&s.actbilled!=null&&s.actbilled<mid.billable){
+    const miss=mid.billable-s.actbilled;
+    flags.push(`<div style="color:var(--danger)"><strong>💸 Revenue leakage:</strong> ${Math.round(miss)} billed days below expected (${s.actbilled} vs ${Math.round(mid.billable)}) = <strong>${money(miss*R)}</strong> left on the table this period.</div>`);
+  }
+  const staffing=`<div style="margin-top:6px"><strong>Staffing for the highlighted scenario:</strong> ${mid.gLo===mid.gHi?mid.gLo:mid.gLo+'–'+mid.gHi} concurrent group${mid.gHi===1?'':'s'} → ${mid.gLo===mid.gHi?mid.gLo:mid.gLo+'–'+mid.gHi} facilitator${mid.gHi===1?'':'s'} and ${mid.gLo===mid.gHi?mid.gLo:mid.gLo+'–'+mid.gHi} room${mid.gHi===1?'':'s'} per session block (staggering blocks halves the rooms, not the facilitator hours). Absolute floor at the 12-cap: ${mid.gCap}.</div>`;
+  out.innerHTML=tbl+staffing+(flags.length?'<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">'+flags.join('')+'</div>':'');
 }
 async function loadOutpatientPhp(){
   const host=$('opPhp'); if(!host) return;

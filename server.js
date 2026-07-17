@@ -6524,6 +6524,61 @@ app.get('/api/outpatient/group-attendance', requireAuth, requireOutpatient, asyn
   });
 });
 
+/* ── PHP planner inputs, pulled live from Kipu: admits + blended PHP ALOS from
+   the admissions record & snapshot, show rate sampled from the last 5 weekdays
+   of group sessions. One tap instead of hand-typing what Kipu already knows. ── */
+app.get('/api/outpatient/php-plan', requireAuth, requireOutpatient, async (req, res) => {
+  const sc = outpatientScope(req, res); if (!sc) return;
+  const today = appToday();
+  const days = Math.min(92, Math.max(7, +req.query.days || 30));
+  const since = addDays(today, -(days - 1));
+  const inR = (d, s, e) => { const x = d ? String(d).slice(0, 10) : ''; return x && x >= s && x <= e; };
+  const all = db.prepare(`SELECT * FROM outpatient_clients${sc.fid ? ` WHERE 1=1${sc.frag()}` : ''}`).all();
+  const phpNow = all.filter((c) => c.active && c.loc_class === 'PHP').length;
+  const liveAdm = sc.fid && !sc.isDefault
+    ? await outpatientAllAdmissions(sc.fid, sc.fac, sc.conn)
+    : await outpatientAllAdmissions(0, null, null);
+  const admits = liveAdm ? liveAdm.filter((a) => inR(a.admit, since, today)).length
+    : all.filter((c) => inR(c.admit, since, today)).length;
+  // PHP episode length, blended: stepped down (admit→IOP start) + left during PHP
+  // (admit→discharge, never reached IOP) — both count as completed PHP episodes.
+  const moverDays = all.filter((c) => inR(c.iop_start, since, today) && c.admit).map((c) => opDays(c.admit, c.iop_start)).filter((n) => n != null);
+  const leaverDays = all.filter((c) => !c.iop_start && inR(c.discharged_at, since, today) && c.admit).map((c) => opDays(c.admit, c.discharged_at)).filter((n) => n != null);
+  const alos = avg1([...moverDays, ...leaverDays]);
+  let weekdays = 0;
+  for (let i = 0; i < days; i++) { const dow = new Date(addDays(since, i) + 'T12:00:00Z').getUTCDay(); if (dow >= 1 && dow <= 5) weekdays++; }
+  // show rate: sample the most recent weekdays' group sessions (bounded Kipu cost)
+  const sampleDates = [];
+  for (let d = today; sampleDates.length < 5 && opDays(d, today) <= 14; d = addDays(d, -1)) {
+    const dow = new Date(d + 'T12:00:00Z').getUTCDay();
+    if (dow >= 1 && dow <= 5) sampleDates.push(d);
+  }
+  const locName = sc.fid && !sc.isDefault ? (sc.fac.kipu_location_name || '') : outpatientLocationName();
+  const connOk = sc.fid && !sc.isDefault ? !!sc.conn : kipuConfigured();
+  const phpIds = all.filter((c) => c.active && c.loc_class === 'PHP').map((c) => String(c.kipu_id));
+  const daily = [];
+  if (connOk && phpIds.length) for (const dte of sampleDates) {
+    try {
+      const g = await kipuGroupAttendance(locName, dte, dte, sc.fid && !sc.isDefault ? sc.conn : null);
+      if (g && !g.error && g.sessionsConsidered) {
+        const anyFlag = Object.values(g.patients).some((p) => p.attended > 0);
+        const present = phpIds.filter((k) => anyFlag ? (g.patients[k] && g.patients[k].attended > 0) : !!g.patients[k]).length;
+        daily.push({ date: dte, attended: present });
+      }
+    } catch (e) { /* kipu hiccup — sample what we can */ }
+  }
+  const avgAttendance = daily.length ? +(daily.reduce((s, x) => s + x.attended, 0) / daily.length).toFixed(1) : null;
+  const showRate = avgAttendance != null && phpNow ? Math.min(100, Math.round(avgAttendance / phpNow * 100)) : null;
+  let rate = null;
+  try { const rts = JSON.parse(getState('loc_rates') || '{}'); rate = +rts.PHP || +rts.php || null; } catch (e) { /* unset */ }
+  res.json({
+    since, end: today, days, weekdays, admits, alos, phpNow,
+    episodes: moverDays.length + leaverDays.length,
+    avgAttendance, showRate, sampledDays: daily.length, rate,
+    source: liveAdm ? 'kipu-admissions' : 'snapshot',
+  });
+});
+
 // ── 90-Day Belonging & Service Excellence plan (Horst Schulze model) ──────────
 // The curriculum lives here; plan_progress records what's done. Each task carries
 // the day it becomes active so the dashboard can tell leadership what to do today.

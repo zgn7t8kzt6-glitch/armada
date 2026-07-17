@@ -83,7 +83,7 @@ export async function fetchProjects(supabase: SupabaseClient, siteId: string): P
   return (data ?? []) as unknown as Project[];
 }
 
-export async function fetchSiteProfiles(supabase: SupabaseClient, siteId: string): Promise<Profile[]> {
+export async function fetchSiteProfiles(supabase: SupabaseClient): Promise<Profile[]> {
   // Profiles visible via RLS are exactly the org's members.
   const { data, error } = await supabase.from("profiles").select("id,name,email,title,avatar_color").order("name");
   if (error) throw new Error(error.message);

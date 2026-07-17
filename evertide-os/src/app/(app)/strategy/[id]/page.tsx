@@ -5,7 +5,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { Card, OwnerChip, PageHeader, StatusPill } from "@/components/ui";
 import { GoalProgressForm } from "@/components/strategy/goal-forms";
 import { formatDate, formatDateTime } from "@/lib/format";
-import type { Goal, Profile } from "@/lib/types";
+import type { Goal } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 

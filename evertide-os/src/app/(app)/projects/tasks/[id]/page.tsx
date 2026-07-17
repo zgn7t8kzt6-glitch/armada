@@ -46,7 +46,7 @@ export default async function TaskDetailPage({ params }: { params: { id: string 
         .select("id, dependency_type, successor:tasks!task_dependencies_successor_task_id_fkey(id,title,status)")
         .eq("predecessor_task_id", t.id),
       supabase.from("tasks").select("id,title").eq("site_id", ctx.site.id).is("archived_at", null).order("sort_order").limit(500),
-      fetchSiteProfiles(supabase, ctx.site.id),
+      fetchSiteProfiles(supabase),
       supabase.from("issues").select("id,title,status,priority").eq("task_id", t.id).limit(20),
       supabase
         .from("document_links")

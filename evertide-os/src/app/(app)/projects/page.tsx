@@ -25,7 +25,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Sea
   const [tasks, projects, profiles] = await Promise.all([
     fetchTasks(supabase, ctx.site.id, ctx.site.timezone, filters, ctx.userId),
     fetchProjects(supabase, ctx.site.id),
-    fetchSiteProfiles(supabase, ctx.site.id),
+    fetchSiteProfiles(supabase),
   ]);
 
   const phases = [...new Set(tasks.map((t) => t.phase).filter((p): p is string => !!p))].sort();

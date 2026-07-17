@@ -123,7 +123,8 @@ export function KanbanBoard({ tasks, timezone, canWrite }: { tasks: Task[]; time
       const res = await changeTaskStatus(fd);
       if (!res.ok) {
         setOverrides((o) => {
-          const { [task.id]: _dropped, ...rest } = o;
+          const rest = { ...o };
+          delete rest[task.id];
           return rest;
         });
         push(res.error, "error");

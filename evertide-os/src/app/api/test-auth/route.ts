@@ -3,6 +3,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { testAuthEnabled } from "@/lib/env";
+import { publicSupabaseAnonKey, publicSupabaseUrl } from "@/lib/public-env";
 
 // Password-less test sign-in for Playwright (spec §14). Enabled ONLY when
 // NODE_ENV=test or ALLOW_TEST_AUTH=1, and NEVER in production builds — both
@@ -24,8 +25,8 @@ export async function POST(request: NextRequest) {
   const cookieStore = cookies();
   const response = NextResponse.json({ ok: true });
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    publicSupabaseUrl(),
+    publicSupabaseAnonKey(),
     {
       cookies: {
         getAll() {

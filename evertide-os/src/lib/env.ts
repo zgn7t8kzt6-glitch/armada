@@ -2,12 +2,18 @@ import { z } from "zod";
 
 // Server-side environment validation. Fails fast with a readable message
 // instead of mysterious runtime errors. Never import this in client code.
+// Values arrive from dashboard copy-paste; strip stray whitespace, wrapping
+// quotes, and trailing slashes before validating.
+const clean = (s: string) => s.trim().replace(/^["']|["']$/g, "").replace(/\/+$/, "");
+const urlVar = z.string().transform(clean).pipe(z.string().url());
+const keyVar = (min: number) => z.string().transform(clean).pipe(z.string().min(min));
+
 const serverSchema = z.object({
-  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(20),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
-  CRON_SECRET: z.string().min(16).optional(),
-  NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+  NEXT_PUBLIC_SUPABASE_URL: urlVar,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: keyVar(20),
+  SUPABASE_SERVICE_ROLE_KEY: keyVar(20).optional(),
+  CRON_SECRET: keyVar(16).optional(),
+  NEXT_PUBLIC_APP_URL: z.string().default("http://localhost:3000").transform(clean).pipe(z.string().url()),
 });
 
 let cached: z.infer<typeof serverSchema> | null = null;

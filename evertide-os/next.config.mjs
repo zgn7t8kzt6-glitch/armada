@@ -4,9 +4,9 @@
 // host (REST, Auth, Storage, and Realtime websockets).
 const supabaseOrigin = (() => {
   try {
-    return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://placeholder.supabase.co").origin;
+    return new URL((process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim().replace(/^["']|["']$/g, "")).origin;
   } catch {
-    return "https://placeholder.supabase.co";
+    return "";
   }
 })();
 const supabaseWs = supabaseOrigin.replace(/^https/, "wss").replace(/^http:/, "ws:");
@@ -17,7 +17,9 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data:",
   "font-src 'self' data:",
-  `connect-src 'self' ${supabaseOrigin} ${supabaseWs}`,
+  // Wildcard *.supabase.co keeps a mis-set env var from bricking auth; the
+  // env-derived origin is still listed for self-hosted/custom domains.
+  `connect-src 'self' https://*.supabase.co wss://*.supabase.co ${supabaseOrigin} ${supabaseWs}`.replace(/\s+/g, " ").trim(),
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

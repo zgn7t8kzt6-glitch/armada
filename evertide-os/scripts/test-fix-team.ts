@@ -28,14 +28,20 @@ const SHIM_SQL = `
   create table auth.users (
     id uuid primary key default gen_random_uuid(),
     email text unique,
+    email_confirmed_at timestamptz,
     raw_user_meta_data jsonb default '{}'::jsonb,
     created_at timestamptz default now()
   );
   create table auth.identities (
     id uuid primary key default gen_random_uuid(),
+    provider_id text not null,
     user_id uuid references auth.users(id) on delete cascade,
     provider text not null default 'email',
-    identity_data jsonb not null default '{}'::jsonb
+    identity_data jsonb not null default '{}'::jsonb,
+    last_sign_in_at timestamptz,
+    created_at timestamptz default now(),
+    updated_at timestamptz default now(),
+    unique (provider, provider_id)
   );
   create function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
@@ -73,7 +79,7 @@ async function main() {
       const { rows } = await q(
         "insert into auth.users (email) values ($1) returning id", [email]);
       const id = rows[0].id as string;
-      await q("insert into auth.identities (user_id, provider, identity_data) values ($1::uuid,'email',jsonb_build_object('email',$2::text,'sub',$1::text))", [id, email]);
+      await q("insert into auth.identities (provider_id, user_id, provider, identity_data) values ($1::text,$1::uuid,'email',jsonb_build_object('email',$2::text,'sub',$1::text))", [id, email]);
       await q("insert into public.profiles (id, name, email) values ($1,$2,$3) on conflict (id) do update set name = excluded.name, email = excluded.email", [id, name, email]);
       return id;
     };
@@ -84,6 +90,10 @@ async function main() {
     const mord = await mkUser("mordechai@evertide.example", "Mordechai Neurwith");
     const aaron = await mkUser("aaron@evertide.example", "Aaron Jacobs");
     const rich = await mkUser("richard@evertide.example", "Richard Hunt");
+    // Strays auto-created by magic-link attempts with the new addresses
+    // (the production 23505 collision): no memberships, no work.
+    const strayS = await mkUser("shlomo@evertideinfusion.com", "shlomo");
+    const strayJ = await mkUser("jfriedman@evertideinfusion.com", "jfriedman");
 
     const { rows: orgR } = await q(
       "insert into public.organizations (name, slug) values ('EverTide Infusion','evertide') returning id");
@@ -102,7 +112,7 @@ async function main() {
     const t1 = await task(ph, "Placeholder task");
     const t2 = await task(rich, "Richard task");
     const t3 = await task(rich, "Richard task 2");
-    await q("insert into public.task_helpers (task_id, user_id) values ($1,$2),($1,$3),($4,$5),($6,$7)", [t1, real, jared, t2, mord, t3, aaron]);
+    await q("insert into public.task_helpers (task_id, user_id) values ($1,$2),($1,$3),($1,$8),($4,$5),($6,$7)", [t1, real, jared, t2, mord, t3, aaron, strayS]);
 
     // The exact production failure: huddles referencing the placeholder, one frozen.
     const h1 = (await q("insert into public.huddles (organization_id, site_id, huddle_date, facilitator_id, created_by) values ($1,$2,'2026-07-14',$3,$3) returning id", [org, site, ph])).rows[0].id as string;
@@ -149,6 +159,10 @@ async function main() {
     await own("mordechai tasks (richard's)", "select count(*) c from public.tasks where owner_id=$1", mord, 2);
     await own("placeholder profile gone", "select count(*) c from public.profiles where id=$1", ph, 0);
     await own("richard profile gone", "select count(*) c from public.profiles where id=$1", rich, 0);
+    await own("stray shlomo account merged away", "select count(*) c from public.profiles where id=$1", strayS, 0);
+    await own("stray jfriedman account merged away", "select count(*) c from public.profiles where id=$1", strayJ, 0);
+    await own("keeper for shlomo is the real login", "select count(*) c from auth.users where id=$1 and email='shlomo@evertideinfusion.com'", real, 1);
+    await own("keeper for jared is the seed account", "select count(*) c from auth.users where id=$1 and email='jfriedman@evertideinfusion.com'", jared, 1);
     await own("huddles now facilitated by real shlomo", "select count(*) c from public.huddles where facilitator_id=$1", real, 2);
     await own("task_updates re-authored", "select count(*) c from public.task_updates where author_id=$1", real, 1);
     await own("decision owned by real shlomo", "select count(*) c from public.decisions where owner_id=$1", real, 1);
@@ -162,6 +176,8 @@ async function main() {
     if (!("Richard Hunt" in raci)) ok("richard out of RACI"); else fail("richard still in RACI");
     const ident = (await q("select count(*) c from auth.identities i join auth.users u on u.id=i.user_id where i.identity_data->>'email' is distinct from u.email")).rows[0].c;
     if (Number(ident) === 0) ok("identities synced to new emails"); else fail(`stale identities: ${ident}`);
+    const loginReady = (await q("select count(*) c from auth.users u where u.email_confirmed_at is not null and exists (select 1 from auth.identities i where i.user_id=u.id and i.provider='email')")).rows[0].c;
+    if (Number(loginReady) === 5) ok("all 5 accounts confirmed with an email identity (password-login ready)"); else fail(`login-ready accounts: ${loginReady}/5`);
     const trig = (await q("select count(*) c from pg_trigger where tgname in ('task_updates_immutable','issue_updates_immutable','document_versions_immutable','reports_guard') and tgenabled='O'")).rows[0].c;
     if (Number(trig) === 4) ok("immutability triggers re-enabled"); else fail(`re-enabled triggers: ${trig}/4`);
   } catch (e) {

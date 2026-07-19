@@ -8,7 +8,7 @@ import { getAppContext, requireAdmin, requireWrite } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { decisionCreateSchema, decisionEditSchema, uuid } from "@/lib/schemas";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 
 function revalidate(id?: string) {
   revalidatePath("/decisions");
@@ -43,7 +43,7 @@ export async function createDecision(formData: FormData): Promise<ActionResult &
       })
       .select("id")
       .single();
-    if (dbErr || !row) return err(dbErr?.message ?? "Failed to create decision");
+    if (dbErr || !row) return err(dbMsg(dbErr));
     revalidate(row.id);
     return { ok: true, decisionId: row.id };
   } catch (e) {
@@ -72,7 +72,7 @@ export async function editDecision(formData: FormData): Promise<ActionResult> {
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("decisions").update(patch).eq("id", data.decisionId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(data.decisionId);
     return OK;
   } catch (e) {
@@ -87,7 +87,7 @@ export async function approveDecision(decisionId: string): Promise<ActionResult>
     uuid.parse(decisionId);
     const supabase = supabaseServer();
     const { error: rpcErr } = await supabase.rpc("approve_decision", { p_decision: decisionId });
-    if (rpcErr) return err(rpcErr.message);
+    if (rpcErr) return err(dbMsg(rpcErr));
     revalidate(decisionId);
     return OK;
   } catch (e) {
@@ -107,7 +107,7 @@ export async function supersedeDecision(oldId: string, formData: FormData): Prom
 
     const supabase = supabaseServer();
     const { error: rpcErr } = await supabase.rpc("supersede_decision", { p_old: oldId, p_new: created.decisionId });
-    if (rpcErr) return err(rpcErr.message);
+    if (rpcErr) return err(dbMsg(rpcErr));
     revalidate(oldId);
     revalidate(created.decisionId);
     return { ok: true, decisionId: created.decisionId };
@@ -130,7 +130,7 @@ export async function adminCorrectDecision(decisionId: string, reason: string, f
       p_reason: reason.trim(),
       p_fields: safeFields,
     });
-    if (rpcErr) return err(rpcErr.message);
+    if (rpcErr) return err(dbMsg(rpcErr));
     revalidate(decisionId);
     return OK;
   } catch (e) {
@@ -151,7 +151,7 @@ export async function linkDecision(decisionId: string, linkedType: string, linke
     const { error: dbErr } = await supabase
       .from("decision_links")
       .insert({ decision_id: decisionId, linked_type: linkedType, linked_id: linkedId });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(decisionId);
     return OK;
   } catch (e) {

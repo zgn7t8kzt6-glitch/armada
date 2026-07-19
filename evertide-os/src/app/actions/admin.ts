@@ -8,7 +8,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { inviteUserSchema, membershipSchema, setPasswordSchema, uuid } from "@/lib/schemas";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 import { z } from "zod";
 
 const siteSettingsSchema = z.object({
@@ -34,7 +34,7 @@ export async function updateSiteSettings(formData: FormData): Promise<ActionResu
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("sites").update(patch).eq("id", ctx.site.id);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/admin");
     revalidatePath("/");
     return OK;
@@ -53,7 +53,7 @@ export async function setOpeningRisk(declared: boolean, reason: string): Promise
       p_declared: declared,
       p_reason: reason || null,
     });
-    if (rpcErr) return err(rpcErr.message);
+    if (rpcErr) return err(dbMsg(rpcErr));
     revalidatePath("/");
     revalidatePath("/admin");
     return OK;
@@ -99,12 +99,12 @@ export async function inviteUser(formData: FormData): Promise<ActionResult> {
       { organization_id: ctx.organization.id, user_id: userId!, role: data.role, active: true },
       { onConflict: "organization_id,user_id" }
     );
-    if (omErr) return err(omErr.message);
+    if (omErr) return err(dbMsg(omErr));
     const { error: smErr } = await admin.from("site_memberships").upsert(
       { site_id: ctx.site.id, user_id: userId!, active: true },
       { onConflict: "site_id,user_id" }
     );
-    if (smErr) return err(smErr.message);
+    if (smErr) return err(dbMsg(smErr));
 
     revalidatePath("/admin/members");
     return OK;
@@ -168,7 +168,7 @@ export async function updateMembership(formData: FormData): Promise<ActionResult
       .update({ role: data.role, active: data.active })
       .eq("organization_id", ctx.organization.id)
       .eq("user_id", data.userId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/admin/members");
     return OK;
   } catch (e) {
@@ -201,7 +201,7 @@ export async function removeUser(formData: FormData): Promise<RemoveUserResult> 
           .from(table)
           .select("id", { count: "exact", head: true })
           .eq("owner_id", userId);
-        if (cErr) throw new Error(cErr.message);
+        if (cErr) throw new Error(dbMsg(cErr));
         return { table, count: count ?? 0 };
       })
     );
@@ -263,7 +263,7 @@ export async function saveFolder(formData: FormData): Promise<ActionResult> {
     if (typeof folderId === "string" && folderId) {
       uuid.parse(folderId);
       const { error: dbErr } = await supabase.from("document_folders").update({ name: name.trim() }).eq("id", folderId);
-      if (dbErr) return err(dbErr.message);
+      if (dbErr) return err(dbMsg(dbErr));
     } else {
       const { error: dbErr } = await supabase.from("document_folders").insert({
         organization_id: ctx.organization.id,
@@ -271,7 +271,7 @@ export async function saveFolder(formData: FormData): Promise<ActionResult> {
         parent_folder_id: typeof parentId === "string" && parentId ? parentId : null,
         sort_order: 99,
       });
-      if (dbErr) return err(dbErr.message);
+      if (dbErr) return err(dbMsg(dbErr));
     }
     revalidatePath("/admin/folders");
     revalidatePath("/documents");

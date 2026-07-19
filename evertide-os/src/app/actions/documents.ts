@@ -8,7 +8,7 @@ import { getAppContext, requireAdmin, requireWrite } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { documentCreateSchema, uuid } from "@/lib/schemas";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 
 function revalidate(id?: string) {
   revalidatePath("/documents");
@@ -40,7 +40,7 @@ export async function createDocument(formData: FormData): Promise<ActionResult &
       })
       .select("id")
       .single();
-    if (dbErr || !row) return err(dbErr?.message ?? "Failed to create document");
+    if (dbErr || !row) return err(dbMsg(dbErr));
     revalidate(row.id);
     return { ok: true, documentId: row.id };
   } catch (e) {
@@ -68,7 +68,7 @@ export async function updateDocumentMeta(formData: FormData): Promise<ActionResu
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("documents").update(patch).eq("id", documentId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(documentId);
     return OK;
   } catch (e) {
@@ -90,12 +90,12 @@ export async function toggleDocumentGrant(documentId: string, userId: string): P
     if (existing) {
       const { error: dbErr } = await supabase
         .from("document_access_grants").delete().eq("document_id", documentId).eq("user_id", userId);
-      if (dbErr) return err(dbErr.message);
+      if (dbErr) return err(dbMsg(dbErr));
     } else {
       const { error: dbErr } = await supabase
         .from("document_access_grants")
         .insert({ document_id: documentId, user_id: userId, granted_by: ctx.userId });
-      if (dbErr) return err(dbErr.message);
+      if (dbErr) return err(dbMsg(dbErr));
     }
     revalidate(documentId);
     return OK;
@@ -117,7 +117,7 @@ export async function linkDocument(documentId: string, linkedType: string, linke
     const { error: dbErr } = await supabase
       .from("document_links")
       .insert({ document_id: documentId, linked_type: linkedType, linked_id: linkedId });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(documentId);
     return OK;
   } catch (e) {

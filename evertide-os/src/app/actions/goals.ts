@@ -6,7 +6,7 @@ import { getAppContext, requireWrite } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { goalCreateSchema, goalUpdateSchema, uuid } from "@/lib/schemas";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 
 export async function createGoal(formData: FormData): Promise<ActionResult> {
   try {
@@ -31,7 +31,7 @@ export async function createGoal(formData: FormData): Promise<ActionResult> {
       created_by: ctx.userId,
       updated_by: ctx.userId,
     });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/strategy");
     return OK;
   } catch (e) {
@@ -55,7 +55,7 @@ export async function updateGoal(formData: FormData): Promise<ActionResult> {
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("goals").update(patch).eq("id", data.goalId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/strategy");
     revalidatePath(`/strategy/${data.goalId}`);
     return OK;
@@ -75,7 +75,7 @@ export async function linkGoal(goalId: string, linkedType: string, linkedId: str
     const { error: dbErr } = await supabase
       .from("goal_links")
       .insert({ goal_id: goalId, linked_type: linkedType, linked_id: linkedId });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/strategy");
     revalidatePath(`/strategy/${goalId}`);
     return OK;

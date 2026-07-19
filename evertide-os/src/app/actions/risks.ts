@@ -6,7 +6,7 @@ import { getAppContext, requireWrite } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { riskCreateSchema, riskUpdateSchema, uuid } from "@/lib/schemas";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 
 function revalidate(riskId?: string) {
   revalidatePath("/risks");
@@ -37,7 +37,7 @@ export async function createRisk(formData: FormData): Promise<ActionResult> {
       created_by: ctx.userId,
       updated_by: ctx.userId,
     });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate();
     return OK;
   } catch (e) {
@@ -71,7 +71,7 @@ export async function updateRisk(formData: FormData): Promise<ActionResult> {
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("risks").update(patch).eq("id", data.riskId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(data.riskId);
     return OK;
   } catch (e) {
@@ -87,7 +87,7 @@ export async function convertRiskToIssue(riskId: string): Promise<ActionResult &
     uuid.parse(riskId);
     const supabase = supabaseServer();
     const { data, error: rpcErr } = await supabase.rpc("convert_risk_to_issue", { p_risk: riskId });
-    if (rpcErr) return err(rpcErr.message);
+    if (rpcErr) return err(dbMsg(rpcErr));
     revalidate(riskId);
     revalidatePath("/issues");
     return { ok: true, issueId: data as string };

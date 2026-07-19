@@ -7,7 +7,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { buildReportSnapshot } from "@/lib/reports";
 import { priorWeekRange, priorMonthRange, weeklyPeriodStart, weeklyPeriodEnd } from "@/lib/logic/dates";
 import { uuid } from "@/lib/schemas";
-import { err, OK, messageOf, type ActionResult } from "./helpers";
+import { err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 
 export async function generateReport(reportType: "weekly" | "monthly", period: "current" | "prior"): Promise<ActionResult & { reportId?: string }> {
   try {
@@ -47,11 +47,11 @@ export async function generateReport(reportType: "weekly" | "monthly", period: "
     let reportId: string;
     if (existing) {
       const { error: upErr } = await supabase.from("reports").update(row).eq("id", existing.id);
-      if (upErr) return err(upErr.message);
+      if (upErr) return err(dbMsg(upErr));
       reportId = existing.id;
     } else {
       const { data: created, error: insErr } = await supabase.from("reports").insert(row).select("id").single();
-      if (insErr || !created) return err(insErr?.message ?? "Failed");
+      if (insErr || !created) return err(dbMsg(insErr));
       reportId = created.id;
     }
     revalidatePath("/reports");
@@ -71,7 +71,7 @@ export async function finalizeReport(reportId: string, narrative: string): Promi
       .from("reports")
       .update({ status: "final", narrative: narrative.slice(0, 10000) || null })
       .eq("id", reportId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/reports");
     revalidatePath(`/reports/${reportId}`);
     return OK;

@@ -10,7 +10,7 @@ import {
   commentSchema, dependencySchema, helperSchema, taskCreateSchema,
   taskReassignSchema, taskStatusChangeSchema, taskUpdateFieldsSchema, archiveSchema,
 } from "@/lib/schemas";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 
 function revalidateTaskPaths(taskId?: string) {
   revalidatePath("/projects");
@@ -44,7 +44,7 @@ export async function createTask(formData: FormData): Promise<ActionResult> {
       created_by: ctx.userId,
       updated_by: ctx.userId,
     });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths();
     return OK;
   } catch (e) {
@@ -73,7 +73,7 @@ export async function changeTaskStatus(formData: FormData): Promise<ActionResult
     else if (data.percentDone !== undefined) patch.percent_done = data.percentDone;
 
     const { error: dbErr } = await supabase.from("tasks").update(patch).eq("id", data.taskId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths(data.taskId);
     return OK;
   } catch (e) {
@@ -100,7 +100,7 @@ export async function updateTaskFields(formData: FormData): Promise<ActionResult
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("tasks").update(patch).eq("id", data.taskId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths(data.taskId);
     return OK;
   } catch (e) {
@@ -124,7 +124,7 @@ export async function reassignTask(formData: FormData): Promise<ActionResult> {
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("tasks").update(patch).eq("id", data.taskId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths(data.taskId);
     return OK;
   } catch (e) {
@@ -148,7 +148,7 @@ export async function addTaskComment(formData: FormData): Promise<ActionResult> 
       update_type: "comment",
       body: data.body,
     });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths(data.taskId);
     return OK;
   } catch (e) {
@@ -168,11 +168,11 @@ export async function toggleTaskHelper(formData: FormData): Promise<ActionResult
     if (existing) {
       const { error: dbErr } = await supabase
         .from("task_helpers").delete().eq("task_id", data.taskId).eq("user_id", data.userId);
-      if (dbErr) return err(dbErr.message);
+      if (dbErr) return err(dbMsg(dbErr));
     } else {
       const { error: dbErr } = await supabase
         .from("task_helpers").insert({ task_id: data.taskId, user_id: data.userId });
-      if (dbErr) return err(dbErr.message);
+      if (dbErr) return err(dbMsg(dbErr));
     }
     revalidateTaskPaths(data.taskId);
     return OK;
@@ -195,7 +195,7 @@ export async function addDependency(formData: FormData): Promise<ActionResult> {
       dependency_type: data.dependencyType,
       lag_days: data.lagDays,
     });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths(data.successorId);
     return OK;
   } catch (e) {
@@ -209,7 +209,7 @@ export async function removeDependency(dependencyId: string, taskId: string): Pr
     requireWrite(ctx);
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("task_dependencies").delete().eq("id", dependencyId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths(taskId);
     return OK;
   } catch (e) {
@@ -230,7 +230,7 @@ export async function archiveRecord(formData: FormData): Promise<ActionResult> {
       .from(data.entity)
       .update({ archived_at: data.restore ? null : new Date().toISOString() })
       .eq("id", data.id);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths();
     revalidatePath("/admin/archive");
     return OK;
@@ -254,7 +254,7 @@ export async function bulkReassign(taskIds: string[], ownerId: string | null, du
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("tasks").update(patch).in("id", taskIds);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidateTaskPaths();
     return OK;
   } catch (e) {

@@ -7,7 +7,7 @@ import { getAppContext, requireWrite } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { commitmentCreateSchema, commitmentResolveSchema, huddleCreateSchema, uuid } from "@/lib/schemas";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 
 function revalidate(huddleId?: string) {
   revalidatePath("/huddles");
@@ -23,6 +23,19 @@ export async function createHuddle(formData: FormData): Promise<ActionResult & {
     const data = parseForm(huddleCreateSchema, formData);
 
     const supabase = supabaseServer();
+    // One huddle per site per date: if it already exists, open it rather than
+    // failing on the unique constraint.
+    const { data: existing } = await supabase
+      .from("huddles")
+      .select("id")
+      .eq("site_id", ctx.site.id)
+      .eq("huddle_date", data.huddleDate)
+      .maybeSingle();
+    if (existing) {
+      revalidate(existing.id);
+      return { ok: true, huddleId: existing.id };
+    }
+
     const { data: row, error: dbErr } = await supabase
       .from("huddles")
       .insert({
@@ -34,7 +47,7 @@ export async function createHuddle(formData: FormData): Promise<ActionResult & {
       })
       .select("id")
       .single();
-    if (dbErr || !row) return err(dbErr?.message ?? "Failed to create huddle");
+    if (dbErr || !row) return err(dbMsg(dbErr));
     revalidate(row.id);
     return { ok: true, huddleId: row.id };
   } catch (e) {
@@ -49,7 +62,7 @@ export async function startHuddle(huddleId: string): Promise<ActionResult> {
     uuid.parse(huddleId);
     const supabase = supabaseServer();
     const { error: rpcErr } = await supabase.rpc("start_huddle", { p_huddle: huddleId });
-    if (rpcErr) return err(rpcErr.message);
+    if (rpcErr) return err(dbMsg(rpcErr));
     revalidate(huddleId);
     return OK;
   } catch (e) {
@@ -64,7 +77,7 @@ export async function endHuddle(huddleId: string): Promise<ActionResult> {
     uuid.parse(huddleId);
     const supabase = supabaseServer();
     const { error: rpcErr } = await supabase.rpc("end_huddle", { p_huddle: huddleId });
-    if (rpcErr) return err(rpcErr.message);
+    if (rpcErr) return err(dbMsg(rpcErr));
     revalidate(huddleId);
     return OK;
   } catch (e) {
@@ -80,7 +93,7 @@ export async function saveHuddleNotes(huddleId: string, field: "wins" | "notes" 
     if (value.length > 10000) return err("Too long");
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("huddles").update({ [field]: value }).eq("id", huddleId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(huddleId);
     return OK;
   } catch (e) {
@@ -99,7 +112,7 @@ export async function setAgendaDisposition(itemId: string, disposition: string):
       .from("huddle_agenda_items")
       .update({ disposition: disposition || null })
       .eq("id", itemId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     return OK;
   } catch (e) {
     return err(messageOf(e));
@@ -122,7 +135,7 @@ export async function addCommitment(formData: FormData): Promise<ActionResult> {
       owner_id: data.ownerId,
       due_date: data.dueDate,
     });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(data.huddleId);
     return OK;
   } catch (e) {
@@ -146,20 +159,20 @@ export async function resolveCommitment(formData: FormData): Promise<ActionResul
         p_new_huddle: data.newHuddleId,
         p_due: data.newDueDate,
       });
-      if (rpcErr) return err(rpcErr.message);
+      if (rpcErr) return err(dbMsg(rpcErr));
     } else if (data.action === "done") {
       const { error: dbErr } = await supabase
         .from("huddle_commitments")
         .update({ status: "done", completed_at: new Date().toISOString(), completion_note: data.note ?? null })
         .eq("id", data.commitmentId);
-      if (dbErr) return err(dbErr.message);
+      if (dbErr) return err(dbMsg(dbErr));
     } else {
       if (!data.note) return err("A reason is required to cancel a commitment.");
       const { error: dbErr } = await supabase
         .from("huddle_commitments")
         .update({ status: "cancelled", completion_note: data.note })
         .eq("id", data.commitmentId);
-      if (dbErr) return err(dbErr.message);
+      if (dbErr) return err(dbMsg(dbErr));
     }
     revalidate(data.newHuddleId);
     return OK;

@@ -8,7 +8,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { kpiDefinitionSchema, kpiEntrySchema, kpiOverrideSchema } from "@/lib/schemas";
 import { computeKpiStatus } from "@/lib/logic/kpi";
 import { isoAddDays } from "@/lib/logic/dates";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 import type { Kpi } from "@/lib/types";
 
 // Enter (or update) a KPI value for a period. Only the KPI owner or an admin
@@ -43,7 +43,7 @@ export async function saveKpiEntry(formData: FormData): Promise<ActionResult> {
       },
       { onConflict: "kpi_id,period_start" }
     );
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/scoreboard");
     revalidatePath("/");
     return OK;
@@ -64,7 +64,7 @@ export async function overrideKpiStatus(formData: FormData): Promise<ActionResul
       .from("kpi_entries")
       .update({ status: data.status, status_override_note: data.note })
       .eq("id", data.entryId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/scoreboard");
     return OK;
   } catch (e) {
@@ -100,7 +100,7 @@ export async function saveKpiDefinition(formData: FormData): Promise<ActionResul
     const { error: dbErr } = data.kpiId
       ? await supabase.from("kpis").update(row).eq("id", data.kpiId)
       : await supabase.from("kpis").insert(row);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidatePath("/scoreboard");
     revalidatePath("/admin/kpis");
     return OK;

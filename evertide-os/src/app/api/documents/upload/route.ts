@@ -3,6 +3,7 @@ import { getAppContext } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { dbMsg } from "@/app/actions/helpers";
 import crypto from "node:crypto";
 
 export const dynamic = "force-dynamic";
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
     if (rpcErr) {
       // Roll the orphaned object back so storage stays consistent.
       await admin.storage.from("evertide-documents").remove([storagePath]);
-      return NextResponse.json({ error: rpcErr.message }, { status: 400 });
+      return NextResponse.json({ error: dbMsg(rpcErr) }, { status: 400 });
     }
 
     return NextResponse.json({ ok: true, versionId });

@@ -6,7 +6,7 @@ import { getAppContext, requireWrite } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { issueCommentSchema, issueCreateSchema, issueUpdateSchema, uuid } from "@/lib/schemas";
-import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
 
 function revalidate(issueId?: string) {
   revalidatePath("/issues");
@@ -35,7 +35,7 @@ export async function createIssue(formData: FormData): Promise<ActionResult> {
       reported_by: ctx.userId,
       due_date: data.dueDate ?? null,
     });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate();
     return OK;
   } catch (e) {
@@ -75,7 +75,7 @@ export async function updateIssue(formData: FormData): Promise<ActionResult> {
     if (data.relatedIssueId !== undefined) patch.related_issue_id = data.relatedIssueId;
 
     const { error: dbErr } = await supabase.from("issues").update(patch).eq("id", data.issueId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(data.issueId);
     return OK;
   } catch (e) {
@@ -96,7 +96,7 @@ export async function addIssueComment(formData: FormData): Promise<ActionResult>
       author_id: ctx.userId,
       body: data.body,
     });
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(data.issueId);
     return OK;
   } catch (e) {
@@ -115,13 +115,13 @@ export async function reopenIssue(issueId: string, reason: string): Promise<Acti
 
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("issues").update({ status: "open" }).eq("id", issueId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     const { error: cErr } = await supabase.from("issue_updates").insert({
       issue_id: issueId,
       author_id: ctx.userId,
       body: `Reopen reason: ${reason.trim()}`,
     });
-    if (cErr) return err(cErr.message);
+    if (cErr) return err(dbMsg(cErr));
     revalidate(issueId);
     return OK;
   } catch (e) {
@@ -136,7 +136,7 @@ export async function sendIssueToHuddle(issueId: string): Promise<ActionResult> 
     uuid.parse(issueId);
     const supabase = supabaseServer();
     const { error: dbErr } = await supabase.from("issues").update({ huddle_required: true }).eq("id", issueId);
-    if (dbErr) return err(dbErr.message);
+    if (dbErr) return err(dbMsg(dbErr));
     revalidate(issueId);
     return OK;
   } catch (e) {

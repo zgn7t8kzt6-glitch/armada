@@ -132,6 +132,80 @@ export async function updateMembership(formData: FormData): Promise<ActionResult
   }
 }
 
+// Every object has exactly one DRI, so a user who still owns records cannot be
+// hard-deleted — their work must be reassigned first. Until then we deactivate
+// the account (they can no longer sign in or appear as assignable).
+const OWNER_TABLES = [
+  "tasks", "projects", "milestones", "kpis", "goals", "issues", "risks",
+  "decisions", "huddle_commitments", "documents", "people", "vendors",
+] as const;
+
+export type RemoveUserResult = { ok: true; message: string } | { ok: false; error: string };
+
+export async function removeUser(formData: FormData): Promise<RemoveUserResult> {
+  try {
+    const ctx = await getAppContext();
+    requireAdmin(ctx);
+    if (ctx.role !== "org_admin") return { ok: false, error: "Only organization admins can remove users." };
+    const userId = uuid.parse(formData.get("userId"));
+    if (userId === ctx.userId) return { ok: false, error: "You cannot remove your own account." };
+
+    const admin = supabaseAdmin();
+    const counts = await Promise.all(
+      OWNER_TABLES.map(async (table) => {
+        const { count, error: cErr } = await admin
+          .from(table)
+          .select("id", { count: "exact", head: true })
+          .eq("owner_id", userId);
+        if (cErr) throw new Error(cErr.message);
+        return { table, count: count ?? 0 };
+      })
+    );
+    const owned = counts.filter((c) => c.count > 0);
+
+    if (owned.length > 0) {
+      await admin.from("organization_memberships").update({ active: false })
+        .eq("organization_id", ctx.organization.id).eq("user_id", userId);
+      await admin.from("site_memberships").update({ active: false }).eq("user_id", userId);
+      revalidatePath("/admin/members");
+      const detail = owned.map((c) => `${c.count} ${c.table.replace(/_/g, " ")}`).join(", ");
+      return {
+        ok: true,
+        message: `Account deactivated. They still own ${detail} — reassign that work, then remove again to delete the account fully.`,
+      };
+    }
+
+    // Nothing owned: clear junction rows, memberships, then the auth account
+    // (which cascades the profile).
+    await admin.from("task_helpers").delete().eq("user_id", userId);
+    await admin.from("huddle_attendees").delete().eq("user_id", userId);
+    await admin.from("document_access_grants").delete().eq("user_id", userId);
+    await admin.from("notifications").delete().eq("user_id", userId);
+    await admin.from("site_memberships").delete().eq("user_id", userId);
+    await admin.from("organization_memberships").delete().eq("user_id", userId);
+
+    const { error: delErr } = await admin.auth.admin.deleteUser(userId);
+    if (delErr) {
+      // Referenced by history (e.g. authored updates) — leave the account but
+      // make sure it cannot sign in or act.
+      await admin.from("organization_memberships").upsert(
+        { organization_id: ctx.organization.id, user_id: userId, role: "viewer", active: false },
+        { onConflict: "organization_id,user_id" }
+      );
+      revalidatePath("/admin/members");
+      return {
+        ok: true,
+        message: "This user is referenced by historical records, so the account was deactivated instead of deleted.",
+      };
+    }
+
+    revalidatePath("/admin/members");
+    return { ok: true, message: "User removed." };
+  } catch (e) {
+    return { ok: false, error: messageOf(e) };
+  }
+}
+
 export async function saveFolder(formData: FormData): Promise<ActionResult> {
   try {
     const ctx = await getAppContext();

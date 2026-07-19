@@ -4,11 +4,11 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  inviteUser, saveFolder, setOpeningRisk, updateMembership, updateSiteSettings,
+  inviteUser, removeUser, saveFolder, setOpeningRisk, updateMembership, updateSiteSettings,
 } from "@/app/actions/admin";
 import { saveKpiDefinition } from "@/app/actions/kpis";
 import { archiveRecord } from "@/app/actions/tasks";
-import { Modal } from "@/components/modal";
+import { ConfirmDialog, Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import type { Kpi, Profile, Site } from "@/lib/types";
 
@@ -127,30 +127,70 @@ export function MembershipRow({
   profile, role, active, isSelf,
 }: { profile: Profile; role: string; active: boolean; isSelf: boolean }) {
   const { pending, act } = useAct();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { push } = useToast();
+  const router = useRouter();
+  const [removing, startRemove] = useTransition();
+
+  const doRemove = () =>
+    startRemove(async () => {
+      const fd = new FormData();
+      fd.set("userId", profile.id);
+      const res = await removeUser(fd);
+      if (!res.ok) push(res.error, "error");
+      else {
+        push(res.message, "success");
+        router.refresh();
+      }
+    });
+
   return (
-    <form
-      className="flex flex-wrap items-center gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const fd = new FormData(e.currentTarget);
-        fd.set("userId", profile.id);
-        act(() => updateMembership(fd), "Membership updated");
-      }}
-    >
-      <select name="role" aria-label={`Role for ${profile.name}`} className="input !min-h-9 !w-auto !py-1 text-xs" defaultValue={role} disabled={isSelf}>
-        <option value="org_admin">Org admin</option>
-        <option value="site_admin">Site admin</option>
-        <option value="member">Member</option>
-        <option value="viewer">Viewer</option>
-      </select>
-      <select name="active" aria-label={`Status for ${profile.name}`} className="input !min-h-9 !w-auto !py-1 text-xs" defaultValue={active ? "true" : "false"} disabled={isSelf}>
-        <option value="true">Active</option>
-        <option value="false">Inactive</option>
-      </select>
+    <div className="flex flex-wrap items-center gap-2">
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          fd.set("userId", profile.id);
+          act(() => updateMembership(fd), "Membership updated");
+        }}
+      >
+        <select name="role" aria-label={`Role for ${profile.name}`} className="input !min-h-9 !w-auto !py-1 text-xs" defaultValue={role} disabled={isSelf}>
+          <option value="org_admin">Org admin</option>
+          <option value="site_admin">Site admin</option>
+          <option value="member">Member</option>
+          <option value="viewer">Viewer</option>
+        </select>
+        <select name="active" aria-label={`Status for ${profile.name}`} className="input !min-h-9 !w-auto !py-1 text-xs" defaultValue={active ? "true" : "false"} disabled={isSelf}>
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+        {!isSelf && (
+          <button type="submit" className="btn-secondary !min-h-9 !px-3 !py-1 text-xs" disabled={pending}>Save</button>
+        )}
+      </form>
       {!isSelf && (
-        <button type="submit" className="btn-secondary !min-h-9 !px-3 !py-1 text-xs" disabled={pending}>Save</button>
+        <>
+          <button
+            type="button"
+            className="btn-danger !min-h-9 !px-3 !py-1 text-xs"
+            disabled={removing}
+            onClick={() => setConfirmOpen(true)}
+          >
+            {removing ? "Removing…" : "Remove"}
+          </button>
+          <ConfirmDialog
+            open={confirmOpen}
+            onClose={() => setConfirmOpen(false)}
+            onConfirm={doRemove}
+            title={`Remove ${profile.name}?`}
+            message={`This removes ${profile.name} from the organization. If they still own tasks or other records, the account is deactivated until that work is reassigned; otherwise it is deleted permanently.`}
+            confirmLabel="Remove user"
+            destructive
+          />
+        </>
       )}
-    </form>
+    </div>
   );
 }
 

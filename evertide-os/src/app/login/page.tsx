@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { TideMark } from "@/components/brand";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 function LoginForm() {
@@ -30,13 +31,31 @@ function LoginForm() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-2xl font-black tracking-tight text-navy-600">EverTide OS</h1>
-          <p className="mt-1 text-sm text-slate-500">The operating system for EverTide Infusion</p>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-navy-700 px-4">
+      {/* tide swell backdrop */}
+      <svg
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-64 w-full text-teal-200/20"
+        viewBox="0 0 1440 320"
+        preserveAspectRatio="none"
+        aria-hidden
+      >
+        <path
+          fill="currentColor"
+          d="M0,192 C240,128 480,96 720,128 C960,160 1200,256 1440,224 L1440,320 L0,320 Z"
+        />
+        <path
+          fill="currentColor"
+          opacity="0.6"
+          d="M0,256 C280,200 520,180 760,208 C1000,236 1240,288 1440,272 L1440,320 L0,320 Z"
+        />
+      </svg>
+      <div className="relative w-full max-w-sm">
+        <div className="mb-8 text-center">
+          <TideMark className="mx-auto h-16 w-16 text-teal-200" />
+          <h1 className="font-brand mt-3 text-4xl lowercase leading-none tracking-tight text-teal-100">evertide</h1>
+          <p className="mt-2 text-sm text-teal-200/80">The operating system for EverTide Infusion</p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border border-white/10 bg-white p-6 shadow-2xl">
           {sent ? (
             <div className="text-center" role="status">
               <p className="text-3xl" aria-hidden>📬</p>

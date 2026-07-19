@@ -28,7 +28,7 @@ body {
 
 /* Visible focus for keyboard navigation (spec §10). */
 :focus-visible {
-  outline: 2px solid #1f3864;
+  outline: 2px solid #14544a;
   outline-offset: 2px;
 }
 

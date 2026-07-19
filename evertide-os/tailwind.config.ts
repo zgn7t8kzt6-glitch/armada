@@ -1,39 +1,55 @@
 import type { Config } from "tailwindcss";
 
-// EverTide design system (spec §10): white/light background, navy primary,
-// teal accent. Red is reserved for overdue/blocked/critical/missing/failed,
-// amber for at-risk, green for on-track.
+// EverTide brand system. The scale keys keep their original names ("navy" =
+// primary, "teal" = accent) so every component restyles from here alone:
+//  - primary "deep tide": dark sea-green drawn from the logo's world
+//  - accent "sea glass": the logo's soft green (#AFD8C2 family)
+// Red stays reserved for overdue/blocked/critical/missing, amber for at-risk,
+// green for on-track (§10) — status colors are untouched.
 const config: Config = {
   content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
   theme: {
     extend: {
       colors: {
         navy: {
-          DEFAULT: "#1F3864",
-          50: "#EEF2F8",
-          100: "#D9E1EF",
-          200: "#AEC0DC",
-          300: "#7D97C2",
-          400: "#4F6C9E",
-          500: "#2E4C7E",
-          600: "#1F3864",
-          700: "#182C4F",
-          800: "#12213B",
-          900: "#0C1628",
+          DEFAULT: "#14544A",
+          50: "#EFF7F3",
+          100: "#DCEFE6",
+          200: "#BCDFD0",
+          300: "#8FC7B1",
+          400: "#4F977F",
+          500: "#1E6B5C",
+          600: "#14544A",
+          700: "#0F3D34",
+          800: "#0A2B25",
+          900: "#061C18",
         },
         teal: {
-          DEFAULT: "#2E7D6B",
-          50: "#ECF6F3",
-          100: "#D2EAE4",
-          200: "#A3D4C8",
-          300: "#6FB9A7",
-          400: "#459B87",
-          500: "#2E7D6B",
-          600: "#256557",
-          700: "#1C4D42",
-          800: "#14362E",
-          900: "#0C201C",
+          DEFAULT: "#3FA381",
+          50: "#F0F8F4",
+          100: "#DFF0E7",
+          200: "#AFD8C2",
+          300: "#8CC9AC",
+          400: "#57B892",
+          500: "#3FA381",
+          600: "#2F8A6B",
+          700: "#256C55",
+          800: "#1A4C3C",
+          900: "#0F2E24",
         },
+      },
+      fontFamily: {
+        brand: [
+          "Century Gothic",
+          "Futura",
+          "Avenir Next",
+          "Avenir",
+          "Poppins",
+          "ui-rounded",
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif",
+        ],
       },
       fontSize: {
         "2xs": ["0.6875rem", { lineHeight: "1rem" }],

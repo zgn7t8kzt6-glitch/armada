@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { BrandWordmark } from "@/components/brand";
 
 export interface NavItem {
   href: string;
@@ -38,8 +39,8 @@ export function Sidebar({ isAdmin, siteName, daysToOpen }: { isAdmin: boolean; s
   return (
     <nav className="no-print hidden w-56 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex" aria-label="Primary">
       <div className="border-b border-slate-100 px-4 py-4">
-        <p className="text-base font-black tracking-tight text-navy-600">EverTide OS</p>
-        <p className="mt-0.5 truncate text-2xs text-slate-500">{siteName}</p>
+        <BrandWordmark className="text-navy-600" markClass="h-7 w-7 text-teal-400" textClass="text-xl font-semibold" />
+        <p className="mt-1.5 truncate text-2xs text-slate-500">{siteName}</p>
         {daysToOpen !== null && (
           <p className={`mt-1 text-2xs font-bold ${daysToOpen < 0 ? "text-red-700" : "text-teal-600"}`}>
             {daysToOpen >= 0 ? `${daysToOpen} days to opening` : `${-daysToOpen} days past target`}

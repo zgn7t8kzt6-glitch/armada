@@ -3,6 +3,7 @@
 // Top bar: site name (mobile), notifications bell, user menu / sign out.
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { BrandWordmark } from "@/components/brand";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
 import type { Notification, Profile } from "@/lib/types";
@@ -59,7 +60,7 @@ export function TopBar({ profile, siteName }: { profile: Profile; siteName: stri
   return (
     <header className="no-print sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4">
       <div className="lg:hidden">
-        <p className="text-sm font-black text-navy-600">EverTide OS</p>
+        <BrandWordmark className="text-navy-600" markClass="h-5 w-5 text-teal-400" textClass="text-base font-semibold" />
         <p className="text-2xs text-slate-500">{siteName}</p>
       </div>
       <div className="hidden lg:block" />

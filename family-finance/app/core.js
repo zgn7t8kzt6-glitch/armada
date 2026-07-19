@@ -95,3 +95,19 @@ export const fmtMoney = cents => {
   const v = Number(cents || 0), a = Math.abs(v);
   return (v < 0 ? '-$' : '$') + (a / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+
+/** Plaid account type -> our account.type */
+export function mapPlaidType(type, subtype) {
+  if (type === 'depository') return subtype === 'savings' ? 'savings' : 'checking';
+  if (type === 'credit') return 'credit';
+  if (type === 'loan') return 'loan';
+  if (type === 'investment') return subtype === 'ira' || subtype === '401k' ? 'retirement' : 'brokerage';
+  return 'cash';
+}
+
+/** Plaid balances are dollars; credit/loan balances are amounts OWED -> negative. */
+export function plaidAmountToCents(dollars, type) {
+  const cents = Math.round(Number(dollars || 0) * 100);
+  if (type === 'credit' || type === 'loan') return -Math.abs(cents);
+  return cents;
+}

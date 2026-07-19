@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   allocate, dedupeHashes, ruleChangeEffectiveAt, LOOSEN_DELAY_MS,
   parseCsv, parseMoney, normalizeMerchant,
+  mapPlaidType, plaidAmountToCents,
 } from '../core.js';
 
 // ---------- allocator ----------
@@ -116,4 +117,16 @@ test('money: formats, parens negatives, garbage rejected', () => {
   assert.equal(parseMoney('12.5'), 1250);
   assert.equal(parseMoney('abc'), null);
   assert.equal(parseMoney(''), null);
+});
+
+// ---------- plaid mapping ----------
+test('plaid: account types map; credit/loan balances become negative', () => {
+  assert.equal(mapPlaidType('depository', 'checking'), 'checking');
+  assert.equal(mapPlaidType('depository', 'savings'), 'savings');
+  assert.equal(mapPlaidType('credit', 'credit card'), 'credit');
+  assert.equal(mapPlaidType('investment', '401k'), 'retirement');
+  assert.equal(mapPlaidType('investment', 'brokerage'), 'brokerage');
+  assert.equal(plaidAmountToCents(1234.56, 'checking'), 123456);
+  assert.equal(plaidAmountToCents(842.19, 'credit'), -84219);
+  assert.equal(plaidAmountToCents(310000, 'loan'), -31000000);
 });

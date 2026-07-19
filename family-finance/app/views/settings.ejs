@@ -1,5 +1,13 @@
 <%- include('header', {title:'Settings'}) %>
 <h1>Settings</h1>
+<% if (typeof revoked !== 'undefined' && revoked) { %><div class="banner">🛑 Kill switch used: <%= revoked %> bank connection(s) revoked at Plaid and forgotten.</div><% } %>
+<% if (plaid) { %>
+<div class="card">
+  <h2>🛑 Kill switch</h2>
+  <p class="dim small">Instantly revokes every bank connection at Plaid and deletes the tokens. Either owner can pull it; neither can disable it for the other. Re-linking later is easy.</p>
+  <form method="post" action="/plaid/revoke" onsubmit="return confirm('Revoke ALL bank connections now?')"><button>Revoke all bank connections</button></form>
+</div>
+<% } %>
 <div class="card">
   <h2>Security</h2>
   <form method="post" action="/settings/recovery"><button>Regenerate recovery codes</button></form>

@@ -15,6 +15,7 @@ import {
 import { allocate, dedupeHashes, ruleChangeEffectiveAt, parseCsv, parseMoney, fmtMoney } from './core.js';
 import { computeKpis, weakestKpi } from './kpi.js';
 import { buildDigest, sendDigest } from './digest.js';
+import { plaidEnabled, createLinkToken, exchangePublicToken, syncAll, revokeAll, itemsOverview } from './plaid.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -326,10 +327,35 @@ app.post('/income/:id/allocate', async (req, res) => {
 
 // ================= Accounts, CSV import, transactions =================
 app.get('/accounts', async (req, res) => {
-  const accounts = await q(`SELECT a.*, (a.valued_at < CURRENT_DATE - 90) stale
+  const accounts = await q(`SELECT a.*, (a.is_manual AND a.valued_at < CURRENT_DATE - 90) stale
     FROM accounts a WHERE NOT archived ORDER BY a.valuation DESC`);
   const snaps = await q(`SELECT as_of, sum(value) net FROM account_snapshots GROUP BY as_of ORDER BY as_of DESC LIMIT 12`);
-  res.render('accounts', { accounts: accounts.rows, snaps: snaps.rows });
+  const banks = plaidEnabled() ? await itemsOverview() : [];
+  res.render('accounts', { accounts: accounts.rows, snaps: snaps.rows,
+    plaid: plaidEnabled(), banks, plaidEnv: process.env.PLAID_ENV || 'sandbox' });
+});
+
+// ---- Plaid (activates when PLAID_CLIENT_ID/PLAID_SECRET are set) ----
+app.get('/plaid/link-token', async (req, res) => {
+  if (!plaidEnabled()) return res.status(400).json({ error: 'plaid not configured' });
+  try { res.json({ link_token: await createLinkToken(req.user.id) }); }
+  catch (e) { res.status(500).json({ error: e?.response?.data?.error_message || 'link token failed' }); }
+});
+app.post('/plaid/exchange', express.json(), async (req, res) => {
+  if (!plaidEnabled()) return res.status(400).json({ error: 'plaid not configured' });
+  try {
+    await exchangePublicToken(req.body.public_token, req.body.institution || '', req.user.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e?.response?.data?.error_message || 'exchange failed' }); }
+});
+app.post('/plaid/sync', async (req, res) => {
+  if (plaidEnabled()) await syncAll(req.user.id).catch(() => {});
+  res.redirect('/accounts');
+});
+app.post('/plaid/revoke', async (req, res) => {
+  if (!requireReauth(req, res)) return;
+  const n = plaidEnabled() ? await revokeAll(req.user.id) : 0;
+  res.redirect('/settings?revoked=' + n);
 });
 
 app.post('/accounts', async (req, res) => {
@@ -565,7 +591,8 @@ app.post('/library/:id', async (req, res) => {
 // ================= Settings, audit, export, digest =================
 app.get('/settings', async (req, res) => {
   const kpis = await computeKpis();
-  res.render('settings', { kpis, smtp: !!process.env.SMTP_URL });
+  res.render('settings', { kpis, smtp: !!process.env.SMTP_URL, plaid: plaidEnabled(),
+    revoked: req.query.revoked });
 });
 
 app.post('/settings/recovery', async (req, res) => {

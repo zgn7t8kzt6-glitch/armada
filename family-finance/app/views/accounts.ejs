@@ -1,5 +1,40 @@
 <%- include('header', {title:'Accounts'}) %>
 <h1>Accounts &amp; net worth</h1>
+<% if (plaid) { %>
+<div class="card">
+  <h2>Connected banks</h2>
+  <% for (const b of banks) { %>
+    <p><b><%= b.institution || 'Bank' %></b> —
+      <% if (b.status === 'error') { %><span class="warn">connection error — relink below</span>
+      <% } else if (b.stale) { %><span class="warn">⚠ stale: last synced <%= b.last_synced_at ? new Date(b.last_synced_at).toLocaleString() : 'never' %></span>
+      <% } else { %><span class="good">synced <%= new Date(b.last_synced_at).toLocaleString() %></span><% } %>
+    </p>
+  <% } %>
+  <% if (!banks.length) { %><p class="dim">No banks connected yet.</p><% } %>
+  <div class="row">
+    <button id="plaidLink" class="btn">🔗 Connect a bank<%= plaidEnv === 'sandbox' ? ' (sandbox)' : '' %></button>
+    <form method="post" action="/plaid/sync"><button>Sync now</button></form>
+  </div>
+  <p class="dim small">You log in on your bank's own screen inside Plaid — FamilyOS never sees the password, only read-only balances and transactions. Balances show “as of” their last sync; anything older than 48 hours is flagged, never silent.</p>
+</div>
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script>
+document.getElementById('plaidLink').addEventListener('click', async () => {
+  const r = await fetch('/plaid/link-token'); const d = await r.json();
+  if (d.error) return alert(d.error);
+  Plaid.create({ token: d.link_token, onSuccess: async (public_token, meta) => {
+    await fetch('/plaid/exchange', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ public_token, institution: meta.institution && meta.institution.name }) });
+    location.reload();
+  }}).open();
+});
+</script>
+<% } else { %>
+<div class="banner">🔗 <b>Bank sync is ready to switch on.</b> Create a free account at plaid.com, then add
+<code>PLAID_CLIENT_ID</code>, <code>PLAID_SECRET</code>, and <code>PLAID_ENV</code> to the server environment —
+the “Connect a bank” button appears here automatically. Until then, CSV import below works today.</div>
+<% } %>
 <div class="card">
   <table>
     <tr><th>Account</th><th>Type</th><th class="num">Value</th><th>As of</th><th></th></tr>

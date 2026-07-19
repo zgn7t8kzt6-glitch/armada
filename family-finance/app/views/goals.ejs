@@ -1,0 +1,68 @@
+<%- include('header', {title:'Goals'}) %>
+<h1>Goals — every dollar gets a job</h1>
+
+<% if (inbox.length) { %>
+<div class="banner">
+  <% for (const ev of inbox) { %>
+    <div>💰 <%= fmt(ev.amount) %> (<%= ev.source || 'income' %>, <%= new Date(ev.received_on).toLocaleDateString() %>) is unassigned —
+      <a href="/income/<%= ev.id %>/allocate"><b>run the waterfall</b></a></div>
+  <% } %>
+</div>
+<% } %>
+
+<div class="card">
+  <h2>Log income</h2>
+  <form method="post" action="/income" class="row">
+    <label>Amount <input name="amount" placeholder="$20,000" required></label>
+    <label>Source <select name="source_id"><% for (const s of sources) { %><option value="<%= s.id %>"><%= s.name %></option><% } %></select></label>
+    <label>Received <input name="received_on" type="date" value="<%= new Date().toISOString().slice(0,10) %>"></label>
+    <button>Log &amp; allocate</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>The waterfall</h2>
+  <table>
+    <tr><th>#</th><th>Goal</th><th>Bucket</th><th class="num">Share</th><th class="num">Balance</th><th class="num">Target</th><th class="num">Funded</th><th></th></tr>
+    <% for (const g of goals) { %>
+      <% const step = steps.find(s => s.mission_id === g.id); %>
+      <tr>
+        <td class="dim"><%= g.sort_order/10 %></td>
+        <td><b><%= g.name %></b><% if (g.person) { %> <span class="pill"><%= g.person %></span><% } %></td>
+        <td class="dim"><%= g.bucket %></td>
+        <td class="num">
+          <% if (step) { %>
+            <% if (step.rule_kind === 'remainder') { %><span class="dim">remainder</span>
+            <% } else { %>
+            <form method="post" action="/waterfall/<%= step.id %>" class="inline">
+              <input class="tiny" name="pct" value="<%= (step.amount_or_pct/100).toFixed(1) %>">%<button class="mini">set</button>
+            </form>
+            <% } %>
+          <% } %>
+        </td>
+        <td class="num"><%= fmt(g.balance) %></td>
+        <td class="num dim"><%= g.target_amount ? fmt(g.target_amount) : '—' %></td>
+        <td class="num"><% if (g.target_amount > 0) { %><b><%= Math.min(100, Math.round(g.balance/g.target_amount*100)) %>%</b><% } else { %>—<% } %></td>
+        <td>
+          <form method="post" action="/goals/<%= g.id %>/deposit" class="inline">
+            <input class="tiny" name="amount" placeholder="$0"><button class="mini">deposit</button>
+          </form>
+        </td>
+      </tr>
+    <% } %>
+  </table>
+  <p class="dim small">Shares are % of each income event (draft split — tune together, decision D6). The remainder lands in the Opportunity fund.</p>
+</div>
+
+<div class="card">
+  <h2>New goal</h2>
+  <form method="post" action="/goals" class="row">
+    <label>Name <input name="name" placeholder="Judah — First car" required></label>
+    <label>For <select name="person_id"><option value="">household</option><% for (const p of people) { %><option value="<%= p.id %>"><%= p.name %></option><% } %></select></label>
+    <label>Bucket <select name="bucket"><option>save</option><option>invest</option><option>fixed</option><option>fun</option><option>give</option></select></label>
+    <label>Target <input name="target" placeholder="$25,000"></label>
+    <label>By <input name="target_date" type="date"></label>
+    <button>Add goal</button>
+  </form>
+</div>
+<%- include('footer') %>

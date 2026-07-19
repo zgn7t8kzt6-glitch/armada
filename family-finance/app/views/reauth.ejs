@@ -1,0 +1,12 @@
+<%- include('header', {title:'Confirm'}) %>
+<div class="card narrow">
+  <h1>Confirm it's you</h1>
+  <p class="dim">This action is sensitive — re-enter your password.</p>
+  <% if (error) { %><p class="err"><%= error %></p><% } %>
+  <form method="post" action="/reauth">
+    <input type="hidden" name="next" value="<%= next %>">
+    <label>Password <input name="password" type="password" required autofocus></label>
+    <button>Confirm</button>
+  </form>
+</div>
+<%- include('footer') %>

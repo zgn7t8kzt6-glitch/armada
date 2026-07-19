@@ -1,0 +1,14 @@
+<%- include('header', {title:'Setup'}) %>
+<div class="card narrow">
+  <h1>Welcome to FamilyOS</h1>
+  <p class="dim">Owner account <%= n + 1 %> of 2. Shlomo and Rachel each create their own.</p>
+  <% if (error) { %><p class="err"><%= error %></p><% } %>
+  <form method="post" action="/setup">
+    <label>Name <input name="name" required></label>
+    <label>Email <input name="email" type="email" required></label>
+    <label>Password (10+ characters) <input name="password" type="password" minlength="10" required></label>
+    <label>Repeat password <input name="password2" type="password" required></label>
+    <button>Create owner account</button>
+  </form>
+</div>
+<%- include('footer') %>

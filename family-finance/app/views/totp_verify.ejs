@@ -1,0 +1,12 @@
+<%- include('header', {title:'Two-factor'}) %>
+<div class="card narrow">
+  <h1>Second factor</h1>
+  <p class="dim">Enter the 6-digit code from your authenticator app — or a recovery code.</p>
+  <% if (error) { %><p class="err"><%= error %></p><% } %>
+  <form method="post" action="/totp/verify">
+    <input type="hidden" name="token" value="<%= token %>">
+    <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus></label>
+    <button>Sign in</button>
+  </form>
+</div>
+<%- include('footer') %>

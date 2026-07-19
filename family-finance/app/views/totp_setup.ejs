@@ -1,0 +1,13 @@
+<%- include('header', {title:'Enable 2FA'}) %>
+<div class="card narrow">
+  <h1>Set up your second factor</h1>
+  <p class="dim">Scan with any authenticator app (1Password, Google Authenticator, Authy), then enter the current code. Required — no skipping.</p>
+  <img src="<%= qr %>" alt="TOTP QR" width="200" height="200">
+  <p class="dim mono">Manual key: <%= secret %></p>
+  <% if (error) { %><p class="err"><%= error %></p><% } %>
+  <form method="post" action="/totp/setup">
+    <label>Code <input name="code" inputmode="numeric" required autofocus></label>
+    <button>Enable</button>
+  </form>
+</div>
+<%- include('footer') %>

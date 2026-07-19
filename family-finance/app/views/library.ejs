@@ -1,0 +1,18 @@
+<%- include('header', {title:'Library'}) %>
+<h1>The Library</h1>
+<p class="dim">One book a month, together. Notes stay here.</p>
+<% for (const b of books) { %>
+  <div class="card row-card <%= b.done_at ? 'done' : '' %>">
+    <form method="post" action="/library/<%= b.id %>" class="inline">
+      <button class="mini" name="toggle" value="1"><%= b.done_at ? '✅' : '☐' %></button>
+    </form>
+    <div class="grow">
+      <b><%= b.sort_order %>. <%= b.title %></b> <span class="pill"><%= b.author %></span>
+      <div class="dim small"><%= b.blurb %></div>
+      <form method="post" action="/library/<%= b.id %>" class="row">
+        <input name="notes" value="<%= b.notes %>" placeholder="our notes"><button class="mini">save</button>
+      </form>
+    </div>
+  </div>
+<% } %>
+<%- include('footer') %>

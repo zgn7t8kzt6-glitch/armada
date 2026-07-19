@@ -1,0 +1,10 @@
+<%- include('header', {title:'Recovery codes'}) %>
+<div class="card narrow">
+  <h1>Your recovery codes</h1>
+  <p class="err">Shown once. Print or write them down and store them safely (the Vault envelope — decision D14). Each works one time if you lose your authenticator.</p>
+  <ul class="mono cols2">
+    <% for (const c of codes) { %><li><%= c %></li><% } %>
+  </ul>
+  <a class="btn" href="/">I stored them — continue</a>
+</div>
+<%- include('footer') %>

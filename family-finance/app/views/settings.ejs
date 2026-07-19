@@ -1,0 +1,30 @@
+<%- include('header', {title:'Settings'}) %>
+<h1>Settings</h1>
+<div class="card">
+  <h2>Security</h2>
+  <form method="post" action="/settings/recovery"><button>Regenerate recovery codes</button></form>
+  <p class="dim small">Requires password confirmation. Old unused codes are revoked.</p>
+</div>
+<div class="card">
+  <h2>Your data (never hostage)</h2>
+  <p><a class="btn" href="/export.json">Export everything (JSON)</a>
+     <a class="btn" href="/export.csv">Export transactions (CSV)</a>
+     <a class="btn" href="/audit">Audit log</a></p>
+</div>
+<div class="card">
+  <h2>Weekly digest</h2>
+  <p><a class="btn" href="/digest/preview">Preview this week's digest</a></p>
+  <% if (smtp) { %>
+    <form method="post" action="/digest/send"><button>Send now to both owners</button></form>
+  <% } else { %>
+    <p class="dim small">Email sending is off — set <code>SMTP_URL</code> (and <code>SMTP_FROM</code>) in the environment to enable.</p>
+  <% } %>
+</div>
+<div class="card">
+  <h2>KPIs</h2>
+  <table><tr><th></th><th>Metric</th><th>Now</th><th>Target</th></tr>
+  <% for (const k of kpis) { %>
+    <tr><td><%= k.ok === null ? '·' : (k.ok ? '✅' : '🔶') %></td><td><%= k.name %></td><td><%= k.value %></td><td class="dim"><%= k.target %></td></tr>
+  <% } %></table>
+</div>
+<%- include('footer') %>

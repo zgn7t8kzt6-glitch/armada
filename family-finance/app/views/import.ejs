@@ -1,0 +1,30 @@
+<%- include('header', {title:'Import'}) %>
+<h1>Import CSV — <%= account.name %></h1>
+<% if (result) { %>
+  <div class="banner">
+    <% if (result.error) { %><b class="err"><%= result.error %></b>
+    <% } else { %>✅ Imported <b><%= result.imported %></b> · suspected duplicates <b><%= result.suspects %></b> · skipped rows <b><%= result.skipped %></b>.
+      <a href="/transactions">Review &amp; categorize →</a><% } %>
+  </div>
+<% } %>
+<div class="card">
+  <p class="dim">Download a CSV from your bank, open it, and paste it below (or choose the file — it loads into the box). Set which columns hold date / description / amount (0-indexed). Re-importing the same file is safe: duplicates are caught, reviewed, never silently merged.</p>
+  <form method="post" action="/accounts/<%= account.id %>/import">
+    <input type="file" id="file" accept=".csv,text/csv">
+    <label>CSV contents <textarea name="csv" id="csv" rows="10" placeholder="Date,Description,Amount&#10;07/01/2026,GROCERY STORE,-182.44"></textarea></label>
+    <div class="row">
+      <label>Date col <input class="tiny" name="date_col" value="0"></label>
+      <label>Description col <input class="tiny" name="desc_col" value="1"></label>
+      <label>Amount col <input class="tiny" name="amount_col" value="2"></label>
+      <label class="check"><input type="checkbox" name="skip_header" value="1" checked> first row is a header</label>
+    </div>
+    <button>Import</button>
+  </form>
+</div>
+<script>
+document.getElementById('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => document.getElementById('csv').value = t);
+});
+</script>
+<%- include('footer') %>

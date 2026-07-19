@@ -1,0 +1,76 @@
+<%- include('header', {title:'Today'}) %>
+<h1>Today</h1>
+<% if (pending.length) { %>
+<div class="banner">
+  <% for (const c of pending) { %>
+    <div>⏳ <b><%= c.code %></b> loosening to “<%= c.new_value %>” takes effect <%= new Date(c.effective_at).toLocaleString() %> (proposed change is visible to both owners).</div>
+  <% } %>
+</div>
+<% } %>
+<div class="grid3">
+  <div class="card"><div class="dim">Net worth</div><div class="big"><%= fmt(nw.net) %></div>
+    <div class="dim small">assets <%= fmt(nw.assets) %> · debts <%= fmt(nw.debts) %></div></div>
+  <div class="card"><div class="dim">Unassigned income</div>
+    <div class="big <%= Number(unassigned.c) ? 'warn' : 'good' %>"><%= unassigned.c %></div>
+    <div class="dim small"><%= Number(unassigned.c) ? fmt(unassigned.s) + ' waiting — ' : 'every dollar assigned — ' %><a href="/goals">goals</a></div></div>
+  <div class="card"><div class="dim">Needs attention</div>
+    <div class="small">
+      <% let any=false %>
+      <% if (stale) { any=true %><div class="warn">⚠ <%= stale %> account value(s) stale &gt;90 days — <a href="/accounts">update</a></div><% } %>
+      <% if (dupes) { any=true %><div class="warn">⚠ <%= dupes %> suspected duplicate txn(s) — <a href="/transactions">review</a></div><% } %>
+      <% if (weakest) { any=true %><div class="warn">⚠ Weakest KPI: <%= weakest.name %> (<%= weakest.value %>, target <%= weakest.target %>)</div><% } %>
+      <% if (!any) { %><div class="good">All clear.</div><% } %>
+    </div></div>
+</div>
+
+<div class="card">
+  <h2>This month — spending by bucket</h2>
+  <% if (!buckets.length) { %><p class="dim">No categorized transactions yet. <a href="/accounts">Import a CSV</a>, then tag buckets on the <a href="/transactions">Spending</a> page.</p>
+  <% } else { %>
+  <table><tr><th>Bucket</th><th class="num">Spent</th></tr>
+    <% for (const b of buckets) { %>
+      <tr><td><%= b.bucket || 'uncategorized' %></td><td class="num"><%= fmt(b.spent) %></td></tr>
+    <% } %>
+  </table>
+  <% } %>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <h2>Weekly check-in (R10)</h2>
+    <% const me1 = checkin && checkin.completed_by_1, me2 = checkin && checkin.completed_by_2; %>
+    <p class="dim small">Week of <%= weekOf %> — owner 1: <%= me1 ? '✓' : '—' %> · owner 2: <%= me2 ? '✓' : '—' %></p>
+    <form method="post" action="/checkin">
+      <input type="hidden" name="week_of" value="<%= weekOf %>"><input type="hidden" name="kind" value="weekly">
+      <label>Note (optional) <input name="notes" placeholder="what did money do for us this week?"></label>
+      <div class="row">
+        <button name="slot" value="1">Check in as owner 1</button>
+        <button name="slot" value="2">Check in as owner 2</button>
+      </div>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Monthly close</h2>
+    <% const c1 = close && close.completed_by_1, c2 = close && close.completed_by_2; %>
+    <p class="dim small">Month of <%= monthOf %> — owner 1: <%= c1 ? '✓' : '—' %> · owner 2: <%= c2 ? '✓' : '—' %></p>
+    <form method="post" action="/checkin">
+      <input type="hidden" name="week_of" value="<%= monthOf %>"><input type="hidden" name="kind" value="monthly">
+      <label>Close note <input name="notes" placeholder="one lesson from this month"></label>
+      <div class="row">
+        <button name="slot" value="1">Close as owner 1</button>
+        <button name="slot" value="2">Close as owner 2</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>How are we doing with the app? (K1–K7)</h2>
+  <table><tr><th></th><th>Metric</th><th>Now</th><th>Target</th></tr>
+  <% for (const k of kpis) { %>
+    <tr><td><%= k.ok === null ? '·' : (k.ok ? '✅' : '🔶') %></td>
+        <td><%= k.name %></td><td><%= k.value %></td><td class="dim"><%= k.target %></td></tr>
+  <% } %>
+  </table>
+</div>
+<%- include('footer') %>

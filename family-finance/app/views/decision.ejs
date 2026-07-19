@@ -1,0 +1,36 @@
+<%- include('header', {title:'Decision'}) %>
+<h1><%= d.title %></h1>
+<p class="dim"><%= d.amount ? fmt(d.amount) + ' · ' : '' %>asked by <%= d.asked_by_name %> · <%= new Date(d.created_at).toLocaleDateString() %> · <b><%= d.status %></b><%= d.outcome ? ' — ' + d.outcome : '' %></p>
+<% for (const [key, label] of LENSES) { %>
+  <div class="card">
+    <h2><%= label %></h2>
+    <% if (key === 'rulebook') { %>
+      <details><summary class="dim">The Rulebook (reference)</summary>
+        <table><% for (const r of rules) { %><tr><td class="dim"><%= r.code %></td><td><%= r.title %></td><td><b><%= r.value_text %></b></td></tr><% } %></table>
+      </details>
+    <% } %>
+    <% if (key === 'constitution') { %>
+      <details><summary class="dim">The Constitution (reference)</summary>
+        <% for (const c of constitution) { %><p><b><%= c.question %></b><br><%= c.answer || '(unanswered — see Constitution page)' %></p><% } %>
+      </details>
+    <% } %>
+    <form method="post" action="/decisions/<%= d.id %>/lens">
+      <input type="hidden" name="lens" value="<%= key %>">
+      <textarea name="content" rows="3" placeholder="Write the honest answer…"><%= lensMap[key] || '' %></textarea>
+      <button class="mini">Save lens</button>
+    </form>
+  </div>
+<% } %>
+<% if (d.status === 'open') { %>
+<div class="card">
+  <h2>Decide (two-key: talk first, then record)</h2>
+  <form method="post" action="/decisions/<%= d.id %>/decide" class="row">
+    <label>Outcome <select name="outcome"><option>proceed</option><option>wait</option><option>decline</option></select></label>
+    <label>Why <input name="outcome_notes" placeholder="the reasoning we'll want to remember"></label>
+    <button>Record the decision</button>
+  </form>
+</div>
+<% } else if (d.outcome_notes) { %>
+<div class="card"><h2>Why</h2><p><%= d.outcome_notes %></p></div>
+<% } %>
+<%- include('footer') %>

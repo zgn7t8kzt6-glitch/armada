@@ -1,0 +1,27 @@
+<%- include('header', {title:'Rulebook'}) %>
+<h1>The Rulebook</h1>
+<p class="dim">Tightening applies instantly. Loosening waits 72 hours and both owners see it coming — Ulysses tied himself to the mast <i>before</i> the sirens.</p>
+<div class="card">
+  <table><tr><th>#</th><th>Rule</th><th>Value</th><th>Change</th></tr>
+  <% for (const r of rules) { %>
+    <tr><td class="dim"><%= r.code %></td><td><%= r.title %></td><td><b><%= r.value_text %></b></td>
+      <td><form method="post" action="/rules/<%= r.id %>/change" class="row inline">
+        <input class="tiny" name="new_value" placeholder="new value">
+        <select name="direction"><option value="tighten">tighten (instant)</option><option value="loosen">loosen (+72h)</option></select>
+        <button class="mini">propose</button>
+      </form></td></tr>
+  <% } %></table>
+</div>
+<div class="card">
+  <h2>Change history</h2>
+  <table><tr><th>When</th><th>Rule</th><th>From → to</th><th>Direction</th><th>Status</th></tr>
+  <% for (const c of changes) { %>
+    <tr><td class="dim"><%= new Date(c.proposed_at).toLocaleString() %></td><td><%= c.code %></td>
+      <td><%= c.old_value %> → <b><%= c.new_value %></b></td>
+      <td><%= c.direction %> <span class="dim">by <%= c.proposed_by_name %></span></td>
+      <td><%= c.applied_at ? 'applied' : ('pending until ' + new Date(c.effective_at).toLocaleString()) %></td></tr>
+  <% } %>
+  <% if (!changes.length) { %><tr><td colspan="5" class="dim">No changes yet — the rules you never broke get celebrated in January.</td></tr><% } %>
+  </table>
+</div>
+<%- include('footer') %>

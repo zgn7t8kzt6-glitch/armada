@@ -1,0 +1,22 @@
+<%- include('header', {title:'Constitution'}) %>
+<h1>The Family Constitution</h1>
+<p class="dim">One page, six answers, signed by both. Lens 2 of every decision. The question is never only “can we afford it?” — it's “is this us?”</p>
+<% for (const c of qs) { %>
+  <div class="card">
+    <h2><%= c.question %></h2>
+    <form method="post" action="/constitution/<%= c.id %>">
+      <textarea name="answer" rows="2" placeholder="Write it together, in your own words."><%= c.answer %></textarea>
+      <button class="mini">Save</button>
+      <% if (c.updated_at) { %><span class="dim small">saved <%= new Date(c.updated_at).toLocaleDateString() %></span><% } %>
+    </form>
+  </div>
+<% } %>
+<div class="card">
+  <h2>Signatures</h2>
+  <% for (const s of sigs) { %><p>✍️ <b><%= s.name %></b> — <%= new Date(s.signed_at).toLocaleString() %> <span class="dim"><%= s.note %></span></p><% } %>
+  <form method="post" action="/constitution/sign" class="row">
+    <label>Note <input name="note" placeholder="signed at the first Summit"></label>
+    <button>Sign as <%= user.name %></button>
+  </form>
+</div>
+<%- include('footer') %>

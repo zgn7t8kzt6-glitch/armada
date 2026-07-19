@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><%= typeof title !== 'undefined' ? title + ' · FamilyOS' : 'FamilyOS' %></title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<meta name="theme-color" content="#b07d1e">
+</head>
+<body>
+<% if (user && user.totp_enabled) { %>
+<nav>
+  <a href="/" class="brand">Family<span>OS</span></a>
+  <% const links = [['/','Today'],['/goals','Goals'],['/accounts','Accounts'],['/transactions','Spending'],['/decisions','Decisions'],['/rules','Rulebook'],['/constitution','Constitution'],['/family','Family'],['/library','Library'],['/settings','Settings']]; %>
+  <% for (const [href,label] of links) { %>
+    <a href="<%= href %>" class="<%= path === href ? 'on' : '' %>"><%= label %></a>
+  <% } %>
+  <form method="post" action="/logout" class="inline"><button class="linkish"><%= user.name %> · out</button></form>
+</nav>
+<% } %>
+<main>

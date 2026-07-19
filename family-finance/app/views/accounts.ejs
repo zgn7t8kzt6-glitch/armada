@@ -1,0 +1,43 @@
+<%- include('header', {title:'Accounts'}) %>
+<h1>Accounts &amp; net worth</h1>
+<div class="card">
+  <table>
+    <tr><th>Account</th><th>Type</th><th class="num">Value</th><th>As of</th><th></th></tr>
+    <% for (const a of accounts) { %>
+      <tr class="<%= a.stale ? 'stale' : '' %>">
+        <td><b><%= a.name %></b><% if (!a.liquidity_flag) { %> <span class="pill">illiquid</span><% } %></td>
+        <td class="dim"><%= a.type %></td>
+        <td class="num"><%= fmt(a.valuation) %></td>
+        <td class="dim"><%= new Date(a.valued_at).toLocaleDateString() %><%= a.stale ? ' ⚠' : '' %></td>
+        <td class="row">
+          <form method="post" action="/accounts/<%= a.id %>" class="inline">
+            <input class="tiny" name="valuation" placeholder="new value">
+            <input type="hidden" name="is_debt" value="<%= a.valuation < 0 ? '1' : '' %>">
+            <button class="mini">revalue</button>
+          </form>
+          <a class="mini btn" href="/accounts/<%= a.id %>/import">import CSV</a>
+          <form method="post" action="/accounts/<%= a.id %>" class="inline"><button class="mini" name="archive" value="1">archive</button></form>
+        </td>
+      </tr>
+    <% } %>
+  </table>
+</div>
+<div class="card">
+  <h2>Add account</h2>
+  <form method="post" action="/accounts" class="row">
+    <label>Name <input name="name" required placeholder="Chase checking"></label>
+    <label>Type <select name="type"><option>checking</option><option>savings</option><option>credit</option><option>loan</option><option>brokerage</option><option>retirement</option><option>realestate</option><option>business</option><option>cash</option></select></label>
+    <label>Value <input name="valuation" placeholder="$12,000"></label>
+    <label class="check"><input type="checkbox" name="is_debt" value="1"> debt (negative)</label>
+    <label class="check"><input type="checkbox" name="illiquid" value="1"> illiquid</label>
+    <button>Add</button>
+  </form>
+</div>
+<% if (snaps.length) { %>
+<div class="card"><h2>Net worth history</h2>
+  <table><tr><th>Date</th><th class="num">Snapshot total</th></tr>
+  <% for (const s of snaps) { %><tr><td><%= new Date(s.as_of).toLocaleDateString() %></td><td class="num"><%= fmt(s.net) %></td></tr><% } %>
+  </table>
+</div>
+<% } %>
+<%- include('footer') %>

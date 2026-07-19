@@ -1,0 +1,24 @@
+<%- include('header', {title:'Decisions'}) %>
+<h1>The Decision Engine</h1>
+<p class="dim">Every important decision, five lenses, archived forever. Anything over the two-key threshold (R8) must run through here — that's R15.</p>
+<div class="card">
+  <h2>New decision</h2>
+  <form method="post" action="/decisions" class="row">
+    <label>Question <input name="title" placeholder="Should we buy this SUV?" required></label>
+    <label>Amount (if known) <input name="amount" placeholder="$41,000"></label>
+    <button>Open the five lenses</button>
+  </form>
+</div>
+<div class="card">
+  <h2>The archive</h2>
+  <table><tr><th>Asked</th><th>Decision</th><th class="num">Amount</th><th>Status</th><th>Outcome</th></tr>
+  <% for (const d of decisions) { %>
+    <tr><td class="dim"><%= new Date(d.created_at).toLocaleDateString() %></td>
+      <td><a href="/decisions/<%= d.id %>"><b><%= d.title %></b></a> <span class="dim small">by <%= d.asked_by_name %></span></td>
+      <td class="num"><%= d.amount ? fmt(d.amount) : '—' %></td>
+      <td><%= d.status %></td><td class="dim"><%= d.outcome || '' %></td></tr>
+  <% } %>
+  <% if (!decisions.length) { %><tr><td colspan="5" class="dim">No decisions yet. The archive is the family's decision journal — someday the kids inherit how you decided.</td></tr><% } %>
+  </table>
+</div>
+<%- include('footer') %>

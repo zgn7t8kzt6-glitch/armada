@@ -1,0 +1,28 @@
+<%- include('header', {title:'Family'}) %>
+<h1>Family</h1>
+<div class="grid2">
+<% for (const o of owners) { %>
+  <div class="card"><h2><%= o.name %></h2><p class="dim">Owner · <%= o.email %></p></div>
+<% } %>
+<% for (const p of people) { %>
+  <div class="card">
+    <h2><%= p.name %></h2>
+    <p class="dim"><%= p.kind === 'future' ? 'expected — the pre-arrival checklist opens when a birthday is set' : (p.born_on ? 'born ' + new Date(p.born_on).toLocaleDateString() : 'birthday not set') %></p>
+    <p><b><%= p.goal_count %></b> goal(s) · funded <b><%= fmt(p.funded) %></b> — <a href="/goals">manage goals</a></p>
+    <form method="post" action="/family/<%= p.id %>" class="row">
+      <label>Birthday <input type="date" name="born_on" value="<%= p.born_on ? new Date(p.born_on).toISOString().slice(0,10) : '' %>"></label>
+      <button class="mini">save</button>
+    </form>
+  </div>
+<% } %>
+</div>
+<div class="card">
+  <h2>Add a person</h2>
+  <form method="post" action="/family" class="row">
+    <label>Name <input name="name" required></label>
+    <label>Kind <select name="kind"><option>child</option><option>future</option></select></label>
+    <label>Born <input type="date" name="born_on"></label>
+    <button>Add</button>
+  </form>
+</div>
+<%- include('footer') %>

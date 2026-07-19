@@ -1,0 +1,35 @@
+<%- include('header', {title:'Spending'}) %>
+<h1>Spending</h1>
+<% if (suspects.length) { %>
+<div class="card">
+  <h2 class="warn">Suspected duplicates — decide each one</h2>
+  <table><tr><th>Date</th><th>Account</th><th>Merchant</th><th class="num">Amount</th><th></th></tr>
+  <% for (const t of suspects) { %>
+    <tr><td><%= new Date(t.occurred_on).toLocaleDateString() %></td><td class="dim"><%= t.account %></td>
+      <td><%= t.merchant %></td><td class="num"><%= fmt(t.amount) %></td>
+      <td class="row">
+        <form method="post" action="/transactions/<%= t.id %>/resolve" class="inline"><button class="mini" name="action" value="keep">not a dupe — keep</button></form>
+        <form method="post" action="/transactions/<%= t.id %>/resolve" class="inline"><button class="mini" name="action" value="dismiss">dupe — dismiss</button></form>
+      </td></tr>
+  <% } %></table>
+</div>
+<% } %>
+<div class="card">
+  <form method="get" action="/transactions" class="row">
+    <label>Month <input type="month" name="month" value="<%= month %>"></label><button>Show</button>
+  </form>
+  <table><tr><th>Date</th><th>Account</th><th>Merchant</th><th class="num">Amount</th><th>Bucket</th></tr>
+  <% for (const t of txns) { %>
+    <tr><td><%= new Date(t.occurred_on).toLocaleDateString() %></td><td class="dim"><%= t.account %></td>
+      <td><%= t.merchant %></td><td class="num <%= t.amount < 0 ? '' : 'good' %>"><%= fmt(t.amount) %></td>
+      <td><form method="post" action="/transactions/<%= t.id %>/bucket" class="inline">
+        <select name="bucket" onchange="this.form.submit()">
+          <% for (const b of ['','fixed','invest','save','fun','give']) { %>
+            <option value="<%= b %>" <%= (t.bucket||'')===b ? 'selected' : '' %>><%= b || '—' %></option>
+          <% } %>
+        </select></form></td></tr>
+  <% } %>
+  <% if (!txns.length) { %><tr><td colspan="5" class="dim">No transactions this month yet — import a CSV from an account.</td></tr><% } %>
+  </table>
+</div>
+<%- include('footer') %>

@@ -1,0 +1,20 @@
+<%- include('header', {title:'Allocate income'}) %>
+<h1>Route <%= fmt(ev.amount) %> — <%= ev.source || 'income' %></h1>
+<p class="dim">The waterfall proposes; you confirm. Totals must equal the income — nothing floats.</p>
+<div class="card">
+  <form method="post" action="/income/<%= ev.id %>/allocate">
+    <table>
+      <tr><th>Goal</th><th class="num">Proposed</th><th class="num">Allocate</th></tr>
+      <% for (const s of steps) { %>
+        <% const a = plan.allocations.find(x => x.mission_id === s.mission_id); %>
+        <tr><td><%= s.goal_name %></td>
+            <td class="num dim"><%= a ? fmt(a.amount) : '—' %></td>
+            <td class="num"><input class="tiny" name="alloc_<%= s.mission_id %>"
+                 value="<%= a ? (a.amount/100).toFixed(2) : '' %>"></td></tr>
+      <% } %>
+    </table>
+    <% if (plan.leftover > 0) { %><p class="warn">Leftover after steps: <%= fmt(plan.leftover) %> — add it to a goal above.</p><% } %>
+    <button>Assign every dollar</button>
+  </form>
+</div>
+<%- include('footer') %>

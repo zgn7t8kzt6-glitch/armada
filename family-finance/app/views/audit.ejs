@@ -1,0 +1,12 @@
+<%- include('header', {title:'Audit log'}) %>
+<h1>Audit log</h1>
+<p class="dim">Append-only. Readable by both owners, deletable by neither — enforced in the database itself.</p>
+<div class="card">
+  <table><tr><th>When</th><th>Who</th><th>Action</th><th>Entity</th><th>Detail</th></tr>
+  <% for (const r of rows) { %>
+    <tr><td class="dim small"><%= new Date(r.at).toLocaleString() %></td><td><%= r.name || '—' %></td>
+      <td><b><%= r.action %></b></td><td class="dim"><%= r.entity || '' %> <%= r.entity_id || '' %></td>
+      <td class="dim small mono"><%= JSON.stringify(r.detail_json) %></td></tr>
+  <% } %></table>
+</div>
+<%- include('footer') %>

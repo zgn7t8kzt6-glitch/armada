@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { publicSupabaseAnonKey, publicSupabaseUrl } from "@/lib/public-env";
 
-const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/api/cron", "/api/test-auth"];
+const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/api/cron", "/api/test-auth", "/api/bootstrap-login"];
 
 // Session refresh + route protection. Every non-public path requires a
 // signed-in user; unauthenticated requests are redirected to /login.

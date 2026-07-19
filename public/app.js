@@ -279,6 +279,12 @@ const VIEW_ROLES = {
   partners:    ['Front Desk','Case Manager','Clinical Director'],
   // Concierge requests — front desk + hands-on care
   concierge:   ['Front Desk','BHT / Tech','Nurse','Clinical Director','House Supervisor'],
+  // Phase 2: gate the pages that became hub tabs so tabs never surface a page
+  // the role couldn't already act on (broad leadership + admin pass above).
+  command:     ['Executive Director','Director of Operations'],
+  finance:     ['Director of Revenue Cycle Management'],
+  expenses:    ['Director of Revenue Cycle Management'],
+  leadership:  ['Executive Director','Director of Operations','Clinical Director'],
 };
 // Recovery Housing is a separate world from clinical detox. Only housing staff
 // (and the owner/admin) ever see it; nobody on the detox/clinical side does.
@@ -292,6 +298,16 @@ const HUBS = {
   team:      {label:'Team & Ops',items:[['housingstaff','Staffing'],['shiftreports','Shift Reports'],['hincidents','Incident Reports'],['hstaffdev','Staff Growth']]},
   insight:   {label:'Insight',   items:[['housingoutcomes','Outcomes'],['orh','ORH Compliance'],['movement','Daily Movement'],['coordination','Clinical Coordination']]},
   billing:   {label:'Billing',   items:[['rentrun','Rent Run'],['ledger','Rent & Funding']]},
+  // ── Phase 2 hubs (Workflow Blueprint): the detox/corporate side gets the same
+  // one-destination-with-tabs consolidation the housing suite proved out. The
+  // first item is the host (what the sidebar opens); tabs filter by role.
+  home:      {label:'Home',      items:[['opscenter','Live Board'],['today','Today'],['command','Flow & Trends']]},
+  arrival:   {label:'Arrivals',  items:[['arrivals','Front Door'],['arrivalcheck','Intake Checklist'],['admissions','Pipeline'],['referrals','Referrals'],['partners','Partners']]},
+  clienthub: {label:'Clients',   items:[['clients','Care Cards'],['records','Clinical Record']]},
+  revenue:   {label:'Revenue',   items:[['authreg','Authorizations'],['billingready','Billing Readiness'],['los','Length of Stay'],['finance','Revenue'],['expenses','Budget']]},
+  staffing:  {label:'Staffing',  items:[['schedule','Schedule'],['coverage','Coverage'],['weekgrid','Week Grid'],['assign','Assign'],['staffmodel','Model'],['roster','Roster']]},
+  building:  {label:'Supplies & Maintenance', items:[['inventory','Supplies'],['maintenance','Maintenance'],['operations','Ops Checklists']]},
+  armadaway: {label:'The Armada Way', items:[['plan','90-Day Plan'],['excellence','Standards'],['playbook','Scorecard'],['leadership','Leadership'],['onboarding','Onboarding'],['wave1','Wave 1 · Akron']]},
 };
 const HUB_OF = {};
 Object.entries(HUBS).forEach(([k,h])=>h.items.forEach(([v])=>{ HUB_OF[v]=k; }));
@@ -350,14 +366,14 @@ const ROLE_MENU = {
   // tab), Intake (the full arrival checklist — dignity bag lives there, no standalone
   // Dignity tab), then the day's work. My Tasks lives ON My Shift, not as a tab.
   // My Role is folded into My Shift (its own collapsible at the bottom) — no tab.
-  'BHT / Tech': ['dashboard','mystats','mygrowth','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','messages','team','training','handbook','library'],
-  'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','messages','team','training','handbook','library'],
-  'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','messages','team','training','handbook','library'],
+  'BHT / Tech': ['dashboard','mystats','mygrowth','rounds','arrivalcheck','property','meals','bedboard','laundry','engagement','clients','incidents','concierge','wave1','messages','team','training','handbook','library'],
+  'Nurse':      ['dashboard','mystats','mygrowth','rounds','arrivalcheck','clients','records','incidents','bedmap','inventory','compliance','concierge','wave1','messages','team','training','handbook','library'],
+  'Front Desk': ['dashboard','mystats','mygrowth','arrivals','arrivalcheck','admissions','referrals','partners','clients','concierge','clientvoice','family','bedmap','property','inventory','wave1','messages','team','training','handbook','library'],
   // Housing staff don't use the detox My Shift, so they keep a My Role tab.
   'Executive Assistant': ['corphub','inventory','maintenance','myrole','mygrowth','handbook','messages'],
   // The Case Manager's day, in order: home → meeting queue → caseload → the exits
   // (discharge/continuum) → the money guardrails (auths, billing readiness) → circle.
-  'Case Manager': ['dashboard','appts','casemgmt','clients','records','dischargepage','continuum','authreg','billingready','family','referrals','alumni','incidents','messages','team','training','handbook','library'],
+  'Case Manager': ['dashboard','appts','casemgmt','clients','records','dischargepage','continuum','authreg','billingready','family','referrals','alumni','incidents','wave1','messages','team','training','handbook','library'],
   // Revenue lane — the money side of care, in the order the day flows:
   // what expires (auths) → what bills today (readiness) → the charts behind it.
   'Director of Revenue Cycle Management': ['dashboard','authreg','billingready','outpatient','clients','records','continuum','messages','team','training','handbook','library'],
@@ -370,7 +386,7 @@ const ROLE_MENU = {
   // ── Phase 1 lanes (Workflow Blueprint): the seven roles that used to fall
   // through to the full ~100-item sidebar each get a focused lane, ordered by
   // how the day flows. Leadership gets a lane too — "All pages" is one tap away.
-  'Therapist': ['dashboard','mystats','mygrowth','casemgmt','clients','records','program','engagement','retention','compliance','incidents','messages','team','training','handbook','library'],
+  'Therapist': ['dashboard','mystats','mygrowth','casemgmt','clients','records','program','engagement','retention','compliance','incidents','wave1','messages','team','training','handbook','library'],
   'Catering / Dietary': ['dashboard','mystats','mygrowth','meals','inventory','messages','team','training','handbook','library'],
   'Housekeeping': ['dashboard','mystats','mygrowth','bedboard','maintenance','laundry','bedmap','inventory','messages','team','training','handbook','library'],
   'HR': ['dashboard','hcos','hiring','employees','leadmirror','mystats','mygrowth','messages','team','training','handbook','library'],
@@ -378,11 +394,12 @@ const ROLE_MENU = {
   // The Wave 1 leader roles (Akron pilot): home + their Leader Standard Work.
   'Director of Nursing': ['dashboard','rounds','clients','records','compliance','retention','incidents','wave1','messages','team','training','handbook','library'],
   'House Supervisor': ['dashboard','rounds','roundscan','bedmap','bedboard','clients','property','concierge','incidents','wave1','messages','team','training','handbook','library'],
-  'Executive Director': ['opscenter','dashboard','clients','wave1','lineup','outcomes','plan','employees','hiring','ownership','corphub','messages','team','training','handbook','library'],
-  'Director of Operations': ['opscenter','dashboard','schedule','coverage','weekgrid','roster','staffmodel','inventory','maintenance','operations','bedmap','outcomes','employees','hiring','messages','team','training','handbook','library'],
+  'Executive Director': ['opscenter','dashboard','clients','wave1','lineup','outcomes','employees','hiring','ownership','corphub','messages','team','training','handbook','library'],
+  'Director of Operations': ['opscenter','dashboard','schedule','inventory','bedmap','outcomes','employees','hiring','messages','team','training','handbook','library'],
 };
 // The owner/admin lane — the decision cockpit, not the codebase map.
-const ADMIN_LANE = ['opscenter','dashboard','mydesk','command','clients','wave1','outcomes','ownership','proformas','corphub','hcos','plan','settings','users','messages','team','training','handbook','library'];
+// (Hub members — command, plan, finance… — live behind their hub host's tabs.)
+const ADMIN_LANE = ['opscenter','dashboard','mydesk','clients','wave1','outcomes','ownership','proformas','corphub','hcos','settings','users','messages','team','training','handbook','library'];
 // Who may flip between their focused lane and the full grouped sidebar.
 const LANE_TOGGLE_ROLES = ['Executive Director','Director of Operations','Clinical Director'];
 function navFull(){ try{ return localStorage.getItem('navFull')==='1'; }catch(_e){ return false; } }

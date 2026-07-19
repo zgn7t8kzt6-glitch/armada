@@ -13,13 +13,19 @@ begin
   -- user: Shlomo
   select id into v_user from auth.users where email = 'shlomo@evertide.example';
   if v_user is null then
+    -- GoTrue scans these token/change columns as non-null strings; leaving
+    -- them NULL breaks every later admin-API operation on the account.
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
                             email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                            confirmation_token, recovery_token, email_change,
+                            email_change_token_new, email_change_token_current,
+                            phone_change, phone_change_token, reauthentication_token,
                             created_at, updated_at)
     values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated',
             'authenticated', 'shlomo@evertide.example', '', now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
-            jsonb_build_object('name', 'Shlomo'), now(), now())
+            jsonb_build_object('name', 'Shlomo'), '', '', '', '', '', '', '', '',
+            now(), now())
     returning id into v_user;
   end if;
   insert into public.profiles (id, name, email, title, avatar_color)
@@ -29,13 +35,19 @@ begin
   -- user: Jared Friedman
   select id into v_user from auth.users where email = 'jared@evertide.example';
   if v_user is null then
+    -- GoTrue scans these token/change columns as non-null strings; leaving
+    -- them NULL breaks every later admin-API operation on the account.
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
                             email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                            confirmation_token, recovery_token, email_change,
+                            email_change_token_new, email_change_token_current,
+                            phone_change, phone_change_token, reauthentication_token,
                             created_at, updated_at)
     values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated',
             'authenticated', 'jared@evertide.example', '', now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
-            jsonb_build_object('name', 'Jared Friedman'), now(), now())
+            jsonb_build_object('name', 'Jared Friedman'), '', '', '', '', '', '', '', '',
+            now(), now())
     returning id into v_user;
   end if;
   insert into public.profiles (id, name, email, title, avatar_color)
@@ -45,13 +57,19 @@ begin
   -- user: Dr. Zev Neurwith
   select id into v_user from auth.users where email = 'zev@evertide.example';
   if v_user is null then
+    -- GoTrue scans these token/change columns as non-null strings; leaving
+    -- them NULL breaks every later admin-API operation on the account.
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
                             email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                            confirmation_token, recovery_token, email_change,
+                            email_change_token_new, email_change_token_current,
+                            phone_change, phone_change_token, reauthentication_token,
                             created_at, updated_at)
     values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated',
             'authenticated', 'zev@evertide.example', '', now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
-            jsonb_build_object('name', 'Dr. Zev Neurwith'), now(), now())
+            jsonb_build_object('name', 'Dr. Zev Neurwith'), '', '', '', '', '', '', '', '',
+            now(), now())
     returning id into v_user;
   end if;
   insert into public.profiles (id, name, email, title, avatar_color)
@@ -61,13 +79,19 @@ begin
   -- user: Mordechai Neurwith
   select id into v_user from auth.users where email = 'mordechai@evertide.example';
   if v_user is null then
+    -- GoTrue scans these token/change columns as non-null strings; leaving
+    -- them NULL breaks every later admin-API operation on the account.
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
                             email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                            confirmation_token, recovery_token, email_change,
+                            email_change_token_new, email_change_token_current,
+                            phone_change, phone_change_token, reauthentication_token,
                             created_at, updated_at)
     values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated',
             'authenticated', 'mordechai@evertide.example', '', now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
-            jsonb_build_object('name', 'Mordechai Neurwith'), now(), now())
+            jsonb_build_object('name', 'Mordechai Neurwith'), '', '', '', '', '', '', '', '',
+            now(), now())
     returning id into v_user;
   end if;
   insert into public.profiles (id, name, email, title, avatar_color)
@@ -77,13 +101,19 @@ begin
   -- user: Aaron Jacobs
   select id into v_user from auth.users where email = 'aaron@evertide.example';
   if v_user is null then
+    -- GoTrue scans these token/change columns as non-null strings; leaving
+    -- them NULL breaks every later admin-API operation on the account.
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
                             email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                            confirmation_token, recovery_token, email_change,
+                            email_change_token_new, email_change_token_current,
+                            phone_change, phone_change_token, reauthentication_token,
                             created_at, updated_at)
     values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated',
             'authenticated', 'aaron@evertide.example', '', now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
-            jsonb_build_object('name', 'Aaron Jacobs'), now(), now())
+            jsonb_build_object('name', 'Aaron Jacobs'), '', '', '', '', '', '', '', '',
+            now(), now())
     returning id into v_user;
   end if;
   insert into public.profiles (id, name, email, title, avatar_color)
@@ -93,13 +123,19 @@ begin
   -- user: Richard Hunt
   select id into v_user from auth.users where email = 'richard@evertide.example';
   if v_user is null then
+    -- GoTrue scans these token/change columns as non-null strings; leaving
+    -- them NULL breaks every later admin-API operation on the account.
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
                             email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                            confirmation_token, recovery_token, email_change,
+                            email_change_token_new, email_change_token_current,
+                            phone_change, phone_change_token, reauthentication_token,
                             created_at, updated_at)
     values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated',
             'authenticated', 'richard@evertide.example', '', now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
-            jsonb_build_object('name', 'Richard Hunt'), now(), now())
+            jsonb_build_object('name', 'Richard Hunt'), '', '', '', '', '', '', '', '',
+            now(), now())
     returning id into v_user;
   end if;
   insert into public.profiles (id, name, email, title, avatar_color)

@@ -53,13 +53,19 @@ for (const u of USERS) {
   L.push(`  -- user: ${u.name}
   select id into v_user from auth.users where email = ${q(u.email)};
   if v_user is null then
+    -- GoTrue scans these token/change columns as non-null strings; leaving
+    -- them NULL breaks every later admin-API operation on the account.
     insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
                             email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+                            confirmation_token, recovery_token, email_change,
+                            email_change_token_new, email_change_token_current,
+                            phone_change, phone_change_token, reauthentication_token,
                             created_at, updated_at)
     values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated',
             'authenticated', ${q(u.email)}, '', now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
-            jsonb_build_object('name', ${q(u.name)}), now(), now())
+            jsonb_build_object('name', ${q(u.name)}), '', '', '', '', '', '', '', '',
+            now(), now())
     returning id into v_user;
   end if;
   insert into public.profiles (id, name, email, title, avatar_color)

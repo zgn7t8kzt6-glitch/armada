@@ -48,6 +48,14 @@ const UNIQUE_HINTS: Array<[string, string]> = [
   ["_linked_type_linked_id", "That link already exists."],
 ];
 
+// Auth (GoTrue) errors sometimes arrive with an empty body — most famously
+// when an account row is missing internal string fields. Never show "{}".
+export function authMsg(e: { message?: string | null; status?: number | null } | null | undefined): string {
+  const raw = e?.message?.trim();
+  if (raw && raw !== "{}") return raw;
+  return `The sign-in service returned an unexpected error${e?.status ? ` (status ${e.status})` : ""}. This usually means the account record needs repair — tell your developer.`;
+}
+
 export function dbMsg(e: { code?: string | null; message?: string | null } | null | undefined): string {
   if (!e?.message) return "The change could not be saved. Please try again.";
   const code = e.code ?? "";

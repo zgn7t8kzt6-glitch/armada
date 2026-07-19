@@ -8,7 +8,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { inviteUserSchema, membershipSchema, setPasswordSchema, uuid } from "@/lib/schemas";
-import { parseForm, err, OK, dbMsg, messageOf, type ActionResult } from "./helpers";
+import { parseForm, err, OK, authMsg, dbMsg, messageOf, type ActionResult } from "./helpers";
 import { z } from "zod";
 
 const siteSettingsSchema = z.object({
@@ -83,12 +83,12 @@ export async function inviteUser(formData: FormData): Promise<ActionResult> {
       // Already registered → look the user up, reset their password, add memberships.
       const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
       userId = list?.users.find((u) => u.email?.toLowerCase() === data.email.toLowerCase())?.id;
-      if (!userId) return err(createErr.message);
+      if (!userId) return err(authMsg(createErr));
       const { error: pwErr } = await admin.auth.admin.updateUserById(userId, {
         password: data.password,
         email_confirm: true,
       });
-      if (pwErr) return err(pwErr.message);
+      if (pwErr) return err(authMsg(pwErr));
     }
 
     await admin.from("profiles").upsert(
@@ -136,7 +136,7 @@ export async function setUserPassword(formData: FormData): Promise<ActionResult>
       password: data.password,
       email_confirm: true,
     });
-    if (pwErr) return err(pwErr.message);
+    if (pwErr) return err(authMsg(pwErr));
 
     await admin.from("audit_events").insert({
       organization_id: ctx.organization.id,

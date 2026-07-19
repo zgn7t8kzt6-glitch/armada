@@ -19,7 +19,7 @@ function useAct() {
   const act = (fn: () => Promise<{ ok: boolean; error?: string }>, success: string) =>
     startTransition(async () => {
       const res = await fn();
-      if (!res.ok) push(res.error ?? "Failed", "error");
+      if (!res.ok) push(res.error?.trim() || "Something went wrong — please try again.", "error");
       else {
         push(success, "success");
         router.refresh();

@@ -974,6 +974,9 @@ input:focus,select:focus,textarea:focus{box-shadow:0 0 0 3px rgba(95,176,194,.18
 .nav-filtering .side-sechead{display:none}
 .nav-filtering .side-sec:not(.open)>.side-secbody{display:flex}
 .side-build{margin-top:auto;padding:10px 14px 8px;font-size:10.5px;color:var(--muted);opacity:.65;font-family:var(--sans)}
+/* Lane ↔ full-map switch (leadership/owner): quiet, at the bottom of the nav. */
+.nav-modebtn{display:block;width:calc(100% - 24px);margin:10px 12px;padding:8px 12px;border:1px dashed var(--line);border-radius:9px;background:transparent;color:var(--muted);font-size:12.5px;cursor:pointer;text-align:center}
+.nav-modebtn:hover{color:var(--ink);border-color:var(--ink)}
 [data-theme="dark"] .side-filter input{background:#16202a;border-color:#28323c}
 
 /* ── Mobile bottom bar: four tabs + Menu — the phone's whole nav ─────────── */

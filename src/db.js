@@ -723,6 +723,56 @@ CREATE TABLE IF NOT EXISTS lineup_log (
   UNIQUE(date, shift)
 );
 
+-- Wave 1 (Akron pilot) — Leader Standard Work: one row per leader per day (per
+-- shift for the House Supervisor). "Nothing optional": an incomplete day needs
+-- a one-line reason, visible to the leader's leader.
+CREATE TABLE IF NOT EXISTS wave1_lsw (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL,
+  role TEXT NOT NULL,                 -- Executive Director | Director of Nursing | House Supervisor
+  shift TEXT NOT NULL DEFAULT '',     -- House Supervisor only: Day | Evening | Night
+  user_id INTEGER REFERENCES users(id),
+  items TEXT NOT NULL DEFAULT '[]',   -- JSON array of completed item ids
+  close_note TEXT DEFAULT '',         -- end-of-day close: what moved · what's stuck · tomorrow's #1
+  miss_reason TEXT DEFAULT '',        -- one-line reason for an incomplete day
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(date, role, shift, user_id)
+);
+-- Wave 1 — 8:30 flash huddle log (one per day, weekends included).
+CREATE TABLE IF NOT EXISTS wave1_huddle (
+  id INTEGER PRIMARY KEY,
+  date TEXT NOT NULL UNIQUE,
+  facilitator TEXT DEFAULT '',
+  on_time INTEGER NOT NULL DEFAULT 1, -- started at 8:30:00 sharp
+  attendance INTEGER,
+  stuck TEXT DEFAULT '',              -- stuck items / escalations named at :09–:11
+  by_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Wave 1 — Armada Reliability Index audit instances. q1–q7 binary equal weight
+-- (1 = yes, 0 = no, NULL = not applicable); every question is phrased so 1 is
+-- the good answer (q6 = "defect has NOT recurred in 90 days"). q8 is the
+-- unscored error-proofing review that feeds the improvement backlog.
+CREATE TABLE IF NOT EXISTS wave1_ari (
+  id INTEGER PRIMARY KEY,
+  month TEXT NOT NULL,                -- YYYY-MM
+  dept TEXT NOT NULL,                 -- Nursing | Clinical | Admissions | Milieu/Dietary | EOC/Facilities
+  workflow TEXT DEFAULT '',
+  q1 INTEGER, q2 INTEGER, q3 INTEGER, q4 INTEGER, q5 INTEGER, q6 INTEGER, q7 INTEGER,
+  variation_reason TEXT DEFAULT '',   -- required in spirit when q2 scores a justified variation
+  q8_note TEXT DEFAULT '',
+  auditor_id INTEGER REFERENCES users(id), auditor_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Wave 1 — 90-day playbook + gate criteria check-offs.
+CREATE TABLE IF NOT EXISTS wave1_progress (
+  id INTEGER PRIMARY KEY,
+  item_id TEXT NOT NULL UNIQUE,
+  note TEXT DEFAULT '',
+  by_id INTEGER REFERENCES users(id), by_name TEXT,
+  done_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Proactive alerts: surfaced the moment a client's signals turn.
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY,
@@ -1238,6 +1288,7 @@ addColumn('followups', 'assignee_id', 'INTEGER');
 addColumn('followups', 'assignee_name', 'TEXT');
 addColumn('users', 'mfa_secret', 'TEXT');
 addColumn('users', 'mfa_enabled', 'INTEGER');
+addColumn('users', 'hr_employee_id', 'INTEGER');   // one person: login ↔ HR-roster row (Blueprint Phase 3)
 // Invite-based signup + approved-domain accounts.
 addColumn('users', 'email', 'TEXT');
 addColumn('users', 'pending', 'INTEGER');         // 1 = invited, hasn't set a password yet

@@ -132,7 +132,7 @@ function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
 setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management', 'Director of Billing Compliance', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant', 'HR'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Nursing', 'House Supervisor', 'Director of Revenue Cycle Management', 'Director of Billing Compliance', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant', 'HR'];
 // ── Phase 2 access control: the role_permissions matrix is LIVE for the corporate
 // and HR modules (first per the rebuild order; clinical switches LAST). Grant paths
 // are additive per the Constitution (Evolve Without Breaking): a matrix row can
@@ -422,7 +422,7 @@ function facilityForEntity(name) {
 // ── OPERATIONS CENTER: "what's happening right now" — one drillable board ──────
 // Layer-5 architecture: Executive answers "right now"; Analytics answers "why".
 // Every tile is a count + a drill target; tiles that can't compute are skipped.
-function canSeeOps(user) { return !!user && (user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR', 'Executive Assistant'].includes(user.job_role)); }
+function canSeeOps(user) { return !!user && (user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Nursing', 'House Supervisor', 'HR', 'Executive Assistant'].includes(user.job_role)); }
 app.get('/api/opscenter', requireAuth, (req, res) => {
   if (!canSeeOps(req.user)) return res.status(403).json({ error: 'Leadership only.' });
   if (req.query.facility && !facilityAllowed(req.user, +req.query.facility)) return res.status(403).json({ error: 'No access to that facility.' });
@@ -7072,8 +7072,10 @@ function getOrCreateShift(date, name) {
   return s;
 }
 
-// The Shift Playbook: clients + the tasks for this shift/role, with completion state
-app.get('/api/playbook', requireAuth, (req, res) => {
+// The Shift Playbook: clients + the tasks for this shift/role, with completion state.
+// (Own path — this used to share '/api/playbook' with the leadership scorecard above,
+// which shadowed it: the everyone-facing Shift Playbook 403'd for non-leadership.)
+app.get('/api/shift-playbook', requireAuth, (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0, 10);
   const name = SHIFTS.includes(req.query.shift) ? req.query.shift : 'Morning';
   const role = req.query.role || 'All';
@@ -8024,6 +8026,68 @@ app.get('/api/my-tasks', requireAuth, (req, res) => {
     WHERE t.assigned_by_id = ? AND (t.status = 'Open' OR t.done_at >= datetime('now','-21 day')) ORDER BY (t.status='Open') DESC, (t.due_date IS NULL), t.due_date, t.id`).all(req.user.id).map(decorate);
   res.json({ calls, tasks, assignedByMe, today: new Date().toISOString().slice(0, 10) });
 });
+/* ── My Work: ONE inbox over the app's task stores (Blueprint Phase 3).
+   Adapters read each store in place — nothing moves, no tables merge (Master
+   App Map A5). Teammate tasks + aftercare calls keep their richer sections in
+   the same view; this endpoint carries the stores that had no inbox at all. */
+app.get('/api/mywork', requireAuth, (req, res) => {
+  const me = req.user, items = [];
+  const push = (source, id, title, detail, due, client, view) => items.push({ source, id, title, detail: detail || '', due: due || '', client: client || '', view: view || null });
+  db.prepare(`SELECT co.id, co.text, co.created_at, c.pref, c.name FROM concerns co JOIN clients c ON c.id = co.client_id WHERE co.status = 'Open' AND co.owner_id = ?`).all(me.id)
+    .forEach((r) => push('concern', r.id, r.text, 'Concern you own — yours until resolved', String(r.created_at).slice(0, 10), r.pref || r.name, 'clients'));
+  db.prepare(`SELECT t.id, t.item, t.category, c.pref, c.name FROM case_tasks t JOIN clients c ON c.id = t.client_id
+              WHERE t.status = 'open' AND c.active = 1 AND (lower(COALESCE(c.case_manager,'')) = lower(?) OR lower(COALESCE(c.therapist,'')) = lower(?))`).all(me.name || '', me.name || '')
+    .forEach((r) => push('case', r.id, r.item, `Case need${r.category ? ' · ' + r.category : ''}`, '', r.pref || r.name, 'casemgmt'));
+  db.prepare(`SELECT id, title, detail, due_date, priority, status FROM corp_tasks WHERE status IN ('todo','doing','blocked') AND (lower(COALESCE(assignee,'')) = lower(?) OR requested_by_id = ?)`).all(me.name || '', me.id)
+    .forEach((r) => push('corp', r.id, r.title, `Corporate · ${r.status}${r.priority && r.priority !== 'Normal' ? ' · ' + r.priority : ''}`, r.due_date, '', 'corphub'));
+  db.prepare(`SELECT t.id, t.task, t.due_date, e.first_name, e.last_name FROM hr_onboard_tasks t JOIN hr_employees e ON e.id = t.employee_id WHERE t.done = 0 AND lower(COALESCE(t.assigned_to,'')) = lower(?)`).all(me.name || '')
+    .forEach((r) => push('onboard', r.id, r.task, `Onboarding — ${r.first_name} ${r.last_name}`, r.due_date, '', 'hcos'));
+  items.sort((a, b) => ((a.due || '9999') < (b.due || '9999') ? -1 : 1));
+  res.json({ items, today: new Date().toISOString().slice(0, 10) });
+});
+app.post('/api/mywork/done', requireAuth, (req, res) => {
+  const { source, id } = req.body || {}; const me = req.user;
+  const adapters = {
+    concern: () => db.prepare(`UPDATE concerns SET status = 'Resolved', resolution = COALESCE(resolution, 'Resolved from My Work'), resolved_at = datetime('now') WHERE id = ? AND owner_id = ? AND status = 'Open'`).run(id, me.id),
+    case: () => db.prepare(`UPDATE case_tasks SET status = 'done', done_by = ?, done_at = datetime('now') WHERE id = ? AND status = 'open'`).run(me.name, id),
+    corp: () => db.prepare(`UPDATE corp_tasks SET status = 'done', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status != 'done' AND (lower(COALESCE(assignee,'')) = lower(?) OR requested_by_id = ? OR ? = 'admin')`).run(id, me.name || '', me.id, me.role),
+    onboard: () => db.prepare(`UPDATE hr_onboard_tasks SET done = 1, done_at = datetime('now') WHERE id = ? AND done = 0 AND lower(COALESCE(assigned_to,'')) = lower(?)`).run(id, me.name || ''),
+  };
+  if (!adapters[source]) return res.status(400).json({ error: 'Unknown task source.' });
+  if (!adapters[source]().changes) return res.status(403).json({ error: 'Not yours to complete (or already done).' });
+  res.json({ ok: true });
+});
+
+/* ── People linkage: one person = one login + one HR-roster row (Phase 3).
+   Suggestions are exact-name matches only, and every link is a human click —
+   never guessed silently. */
+app.get('/api/people/links', requireAuth, requireHR, (req, res) => {
+  const users = db.prepare(`SELECT id, name, username, job_role, hr_employee_id FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`).all();
+  const emps = db.prepare(`SELECT id, first_name, last_name, entity, job_title FROM hr_employees ORDER BY last_name COLLATE NOCASE, first_name`).all();
+  const linkedEmp = new Set(users.map((u) => u.hr_employee_id).filter(Boolean));
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+  const byName = new Map();
+  emps.forEach((e) => { const k = norm(e.first_name + e.last_name); byName.set(k, byName.has(k) ? null : e); });   // null = ambiguous name
+  const rows = users.map((u) => {
+    const linked = u.hr_employee_id ? emps.find((e) => e.id === u.hr_employee_id) : null;
+    const cand = !linked ? (byName.get(norm(u.name)) || null) : null;
+    return {
+      id: u.id, name: u.name, username: u.username, job_role: u.job_role,
+      linked: linked ? { id: linked.id, name: `${linked.first_name} ${linked.last_name}`, entity: linked.entity } : null,
+      suggestion: cand && !linkedEmp.has(cand.id) ? { id: cand.id, name: `${cand.first_name} ${cand.last_name}`, entity: cand.entity } : null,
+    };
+  });
+  res.json({ users: rows, employees: emps.map((e) => ({ id: e.id, name: `${e.first_name} ${e.last_name}`, entity: e.entity, title: e.job_title || '', linked: linkedEmp.has(e.id) })) });
+});
+app.post('/api/people/links', requireAuth, requireHR, (req, res) => {
+  const { user_id, hr_employee_id } = req.body || {};
+  if (!user_id) return res.status(400).json({ error: 'user_id required.' });
+  if (hr_employee_id && !db.prepare(`SELECT id FROM hr_employees WHERE id = ?`).get(hr_employee_id)) return res.status(400).json({ error: 'Unknown roster employee.' });
+  db.prepare(`UPDATE users SET hr_employee_id = ? WHERE id = ?`).run(hr_employee_id || null, user_id);
+  audit({ user: req.user, action: 'PEOPLE_LINK', entity: 'user', entity_id: +user_id, detail: hr_employee_id ? `→ hr#${hr_employee_id}` : 'unlinked', ip: req.ip });
+  res.json({ ok: true });
+});
+
 app.get('/api/all-tasks', requireAuth, requireAdmin, (req, res) => {
   res.json({
     calls: db.prepare(`SELECT f.id, f.type, f.due_date, f.assignee_name, c.pref FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' ORDER BY f.due_date`).all(),
@@ -10071,7 +10135,11 @@ app.get('/api/referrals/meta', requireAuth, (req, res) => res.json({
   salesforce: sfConfigured(),
 }));
 
-app.get('/api/facilities', requireAuth, (req, res) => {
+// Referral-partner directory (the `facilities` table = EXTERNAL partner orgs).
+// Own path — these used to share '/api/facilities' with the outpatient facility-
+// config routes defined earlier, which shadowed them (Express first-match): the
+// partners list 403'd for Front Desk/CM and admins saw config rows as partners.
+app.get('/api/referral-partners', requireAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT f.*,
       (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id) AS sent,
@@ -10079,7 +10147,7 @@ app.get('/api/facilities', requireAuth, (req, res) => {
     FROM facilities f WHERE f.active = 1 ORDER BY f.name COLLATE NOCASE`).all();
   res.json({ facilities: rows });
 });
-app.post('/api/facilities', requireAuth, (req, res) => {
+app.post('/api/referral-partners', requireAuth, (req, res) => {
   const b = req.body || {}; const name = (b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Facility name required.' });
   const existing = db.prepare(`SELECT id FROM facilities WHERE name = ? COLLATE NOCASE`).get(name);
@@ -13635,6 +13703,115 @@ app.post('/api/saves/:id/outcome', requireAuth, (req, res) => {
 });
 app.post('/api/lineup-log', requireAuth, (req, res) => {
   db.prepare(`INSERT OR IGNORE INTO lineup_log (date, shift, by_id) VALUES (?, ?, ?)`).run(new Date().toISOString().slice(0, 10), req.body?.shift || 'Day', req.user.id);
+  res.json({ ok: true });
+});
+
+/* ---------------- Wave 1 (Akron pilot) — the five assets on the floor ----------------
+   Content (the card, the huddle script, LSW guides, ARI spec, the 90-day plan)
+   lives client-side in app.js; these routes carry the completion data: huddle
+   log, LSW check-offs, ARI audit instances, and playbook progress. */
+const WAVE1_LEADER_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Nursing', 'House Supervisor'];
+const wave1CanManage = (u) => u.role === 'admin' || WAVE1_LEADER_ROLES.includes(u.job_role);
+const requireWave1Leader = (req, res, next) => { if (!wave1CanManage(req.user)) return res.status(403).json({ error: 'Leadership only.' }); next(); };
+const WAVE1_LSW_ROLES = ['Executive Director', 'Director of Nursing', 'House Supervisor'];
+const WAVE1_DEPTS = ['Nursing', 'Clinical', 'Admissions', 'Milieu/Dietary', 'EOC/Facilities'];
+
+app.get('/api/wave1', requireAuth, (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const start = getState('wave1_start') || null;
+  const day = start ? Math.floor((Date.parse(today) - Date.parse(start)) / 86400000) + 1 : null;
+  // Flash huddle: today + the trailing 30 days (count, on-time %, streak incl. weekends).
+  const hToday = db.prepare(`SELECT * FROM wave1_huddle WHERE date = ?`).get(today) || null;
+  const h30 = db.prepare(`SELECT date, on_time FROM wave1_huddle WHERE date >= date('now','-30 day') ORDER BY date DESC`).all();
+  let streak = 0;
+  { // consecutive calendar days logged, ending today or yesterday
+    const have = new Set(h30.map((r) => r.date));
+    let d = have.has(today) ? new Date(today) : new Date(Date.parse(today) - 86400000);
+    while (have.has(d.toISOString().slice(0, 10))) { streak++; d = new Date(d.getTime() - 86400000); }
+  }
+  const huddle = {
+    today: hToday,
+    last30: h30.length,
+    onTimePct: h30.length ? Math.round(h30.filter((r) => r.on_time).length / h30.length * 100) : null,
+    streak,
+  };
+  // LSW: my rows today + (leaders) everyone's rows today.
+  const mine = db.prepare(`SELECT * FROM wave1_lsw WHERE date = ? AND user_id = ?`).all(today, req.user.id);
+  const team = wave1CanManage(req.user)
+    ? db.prepare(`SELECT l.*, u.name FROM wave1_lsw l LEFT JOIN users u ON u.id = l.user_id WHERE l.date = ? ORDER BY l.role, l.shift`).all(today)
+    : [];
+  // ARI: month summary (?month=YYYY-MM, default current) — yes ÷ applicable per department.
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : today.slice(0, 7);
+  const ariRows = db.prepare(`SELECT * FROM wave1_ari WHERE month = ? ORDER BY created_at DESC`).all(month);
+  const ari = WAVE1_DEPTS.map((dept) => {
+    const rows = ariRows.filter((r) => r.dept === dept);
+    let yes = 0, applicable = 0;
+    rows.forEach((r) => { for (const q of ['q1','q2','q3','q4','q5','q6','q7']) { if (r[q] != null) { applicable++; if (r[q]) yes++; } } });
+    return { dept, instances: rows.length, yes, applicable, ari: applicable ? Math.round(yes / applicable * 1000) / 10 : null };
+  });
+  const progress = db.prepare(`SELECT item_id, note, by_name, done_at FROM wave1_progress`).all();
+  res.json({ start, day, huddle, lsw: { mine, team }, ari: { month, depts: ari, recent: ariRows.slice(0, 10) }, progress, canManage: wave1CanManage(req.user) });
+});
+
+// Log today's flash huddle (upsert — re-logging updates the details).
+app.post('/api/wave1/huddle', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const today = new Date().toISOString().slice(0, 10);
+  db.prepare(`INSERT INTO wave1_huddle (date, facilitator, on_time, attendance, stuck, by_id) VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT(date) DO UPDATE SET facilitator = excluded.facilitator, on_time = excluded.on_time, attendance = excluded.attendance, stuck = excluded.stuck, by_id = excluded.by_id`)
+    .run(today, String(b.facilitator || req.user.name || '').slice(0, 120), b.on_time ? 1 : 0,
+         Number.isFinite(+b.attendance) && b.attendance !== '' && b.attendance != null ? Math.max(0, Math.round(+b.attendance)) : null,
+         String(b.stuck || '').slice(0, 2000), req.user.id);
+  // One daily ritual, one compliance number (Phase 3): completing the 8:30
+  // flash huddle also counts as the day's lineup on the Excellence Scorecard.
+  db.prepare(`INSERT OR IGNORE INTO lineup_log (date, shift, by_id) VALUES (?, 'Day', ?)`).run(today, req.user.id);
+  res.json({ ok: true });
+});
+
+// Save my LSW day (check-offs + end-of-day close + reason if incomplete).
+app.post('/api/wave1/lsw', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!WAVE1_LSW_ROLES.includes(b.role)) return res.status(400).json({ error: 'Unknown LSW role.' });
+  const shift = b.role === 'House Supervisor' ? (['Day', 'Evening', 'Night'].includes(b.shift) ? b.shift : 'Day') : '';
+  const items = JSON.stringify(Array.isArray(b.items) ? b.items.map(String).slice(0, 30) : []);
+  db.prepare(`INSERT INTO wave1_lsw (date, role, shift, user_id, items, close_note, miss_reason) VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(date, role, shift, user_id) DO UPDATE SET items = excluded.items, close_note = excluded.close_note, miss_reason = excluded.miss_reason, updated_at = datetime('now')`)
+    .run(new Date().toISOString().slice(0, 10), b.role, shift, req.user.id, items, String(b.close_note || '').slice(0, 2000), String(b.miss_reason || '').slice(0, 500));
+  res.json({ ok: true });
+});
+
+// Score an ARI audit instance (leaders; q1–q7: 1 yes / 0 no / null n-a).
+app.post('/api/wave1/ari', requireAuth, requireWave1Leader, (req, res) => {
+  const b = req.body || {};
+  if (!WAVE1_DEPTS.includes(b.dept)) return res.status(400).json({ error: 'Unknown department.' });
+  const q = (v) => (v === 1 || v === true || v === '1' ? 1 : v === 0 || v === false || v === '0' ? 0 : null);
+  db.prepare(`INSERT INTO wave1_ari (month, dept, workflow, q1, q2, q3, q4, q5, q6, q7, variation_reason, q8_note, auditor_id, auditor_name)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(new Date().toISOString().slice(0, 7), b.dept, String(b.workflow || '').slice(0, 300),
+         q(b.q1), q(b.q2), q(b.q3), q(b.q4), q(b.q5), q(b.q6), q(b.q7),
+         String(b.variation_reason || '').slice(0, 500), String(b.q8_note || '').slice(0, 500), req.user.id, req.user.name);
+  audit({ user: req.user, action: 'WAVE1_ARI', entity: 'wave1_ari', detail: `${b.dept}: ${b.workflow || ''}`.slice(0, 200), ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Check / uncheck a 90-day playbook item or gate criterion (leaders).
+app.post('/api/wave1/progress', requireAuth, requireWave1Leader, (req, res) => {
+  const id = String(req.body?.item_id || '').slice(0, 80);
+  if (!id) return res.status(400).json({ error: 'item_id required.' });
+  if (req.body?.done) {
+    db.prepare(`INSERT INTO wave1_progress (item_id, note, by_id, by_name) VALUES (?, ?, ?, ?)
+                ON CONFLICT(item_id) DO UPDATE SET note = excluded.note`).run(id, String(req.body?.note || '').slice(0, 500), req.user.id, req.user.name);
+  } else {
+    db.prepare(`DELETE FROM wave1_progress WHERE item_id = ?`).run(id);
+  }
+  res.json({ ok: true });
+});
+
+// Set (or clear) the Wave 1 start date — Day 1 of the 90 days.
+app.post('/api/wave1/start', requireAuth, requireWave1Leader, (req, res) => {
+  const d = String(req.body?.date || '');
+  if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ error: 'Date must be YYYY-MM-DD.' });
+  setState('wave1_start', d);
   res.json({ ok: true });
 });
 

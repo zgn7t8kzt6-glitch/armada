@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&display=swap" />
-<link rel="stylesheet" href="/styles.css?v=20260719C" />
+<link rel="stylesheet" href="/styles.css?v=20260719D" />
 <link rel="manifest" href="/manifest.webmanifest" />
 <meta name="theme-color" content="#235056" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -111,7 +111,7 @@
     <button data-view="assign" data-admin data-subview>Assign Staff</button>
     <button data-view="staffmodel" data-admin data-subview>Staffing Model</button>
     <!-- TEAM — culture, growth, communication -->
-    <button data-view="mytasks">My Tasks</button>
+    <button data-view="mytasks">My Work</button>
     <button data-view="messages">Messages <span id="msgBadge" class="badge-danger" style="display:none"></span></button>
     <button data-view="team">Team</button>
     <button data-view="mystats">How I'm doing</button>
@@ -1262,7 +1262,7 @@
 
     <!-- MY TASKS -->
     <section id="mytasks" class="view">
-      <div class="card"><h3>My Tasks</h3><p class="sub sans">Your required to-dos — aftercare calls you own and anything a teammate assigned you. Reply to follow up; mark done when complete.</p><div id="myTasksList"></div></div>
+      <div class="card"><h3>My Work</h3><p class="sub sans">Everything waiting on you, from every corner of the app — aftercare calls, teammate tasks, concerns you own, case needs, corporate to-dos, onboarding steps. One list, one place.</p><div id="myTasksList"></div><div id="myWorkList"></div></div>
       <div class="card" id="byMeCard" style="display:none">
         <h3>Tasks I assigned</h3><p class="sub sans">Tasks you handed to teammates — see their responses and follow up here.</p><div id="byMeList"></div>
       </div>
@@ -2376,6 +2376,11 @@
         <div class="toolbar no-print" style="margin-top:8px"><button class="btn btn-gold btn-sm sans" onclick="saveDomains()">Save domains</button><span id="u_dommsg" class="hint" style="align-self:center"></span></div>
       </div>
       <div class="card"><h3>Staff</h3><div id="userList"></div></div>
+      <div class="card">
+        <h3>Link logins to the HR roster</h3>
+        <p class="sub sans">One person, one record: connect each login to their row on the 154-person HR roster. Exact-name matches are suggested — every link is your click, never guessed. Titles imported from payroll land on the roster side and decide each person's lane.</p>
+        <div id="peopleLinks"></div>
+      </div>
     </section>
 
     <!-- REPORT -->
@@ -2766,7 +2771,7 @@
 
 
 <script src="/jsqr.js"></script>
-<script src="/app.js?v=20260719C"></script>
+<script src="/app.js?v=20260719D"></script>
 <script src="/housing.js?v=20260708N"></script>
 </body>
 </html>

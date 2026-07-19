@@ -844,7 +844,7 @@ function show(v){
   if(v==='admissions') loadAdmissions();
   if(v==='team') loadTeam();
   if(v==='report') loadPlaybook();
-  if(v==='users') loadUsers();
+  if(v==='users'){ loadUsers(); loadPeopleLinks(); }
   if(v==='hiring') loadHiring('detox','hiringBody');
   if(v==='audit') loadAudit();
   if(v==='report-view') loadReport();
@@ -1322,7 +1322,25 @@ async function replyTask(id){
   try{ await api('/assigned-tasks/'+id+'/comment',{method:'POST',body:JSON.stringify({text})}); if(inp) inp.value=''; loadTaskThread(id); }
   catch(e){ alert(e.message); }
 }
+/* ── My Work (Phase 3): the inbox items from the stores that had none —
+   concerns I own, case needs on my caseload, corporate to-dos, onboarding
+   steps. Aftercare calls + teammate tasks keep their richer rows above. */
+const MYWORK_ICON = { concern:'🫴', case:'📋', corp:'🏢', onboard:'🌱' };
+async function loadMyWork(){
+  const host=$('myWorkList'); if(!host) return;
+  let d; try{ d=await api('/mywork'); }catch(_e){ host.innerHTML=''; return; }
+  host.innerHTML = d.items.map(i=>`<div class="todo"><div class="txt">${MYWORK_ICON[i.source]||'•'} <strong>${esc(i.title)}</strong>${i.client?` — ${esc(i.client)}`:''}
+      <div class="hint">${esc(i.detail)}${i.due?` · due ${esc(i.due)} ${i.due<=d.today?'<span class="risk risk-high">due</span>':''}`:''}</div></div>
+    ${i.view?`<button class="btn btn-ghost btn-sm sans" onclick="show('${i.view}')">Open</button>`:''}
+    <button class="btn btn-gold btn-sm sans" onclick="myWorkDone('${i.source}',${i.id},this)">✓ Done</button></div>`).join('');
+}
+async function myWorkDone(source,id,btn){
+  if(btn) btn.disabled=true;
+  try{ await api('/mywork/done',{method:'POST',body:JSON.stringify({source,id})}); loadMyWork(); }
+  catch(e){ alert(e.message); if(btn) btn.disabled=false; }
+}
 async function loadMyTasks(){
+  loadMyWork();
   const { calls, tasks, assignedByMe, today } = await api('/my-tasks');
   const callRows = calls.map(c=>`<div class="todo"><div class="txt">🤝 <strong>${esc(c.pref||c.name)}</strong> — ${esc(c.type)} aftercare call · due ${esc(c.due_date)} ${c.due_date<=today?'<span class="risk risk-high">due</span>':''}</div>
     <button class="btn btn-ghost btn-sm sans" onclick="doneCall(${c.id},'Done')">Done</button><button class="btn btn-ghost btn-sm sans" onclick="doneCall(${c.id},'Unreachable')">No answer</button></div>`).join('');
@@ -4335,8 +4353,34 @@ async function loadLineupRecog(){
 async function removeLineupRecog(type,id){
   try{ await api('/lineup/recognition/'+type+'/'+id,{method:'DELETE'}); loadLineupRecog(); }catch(e){ alert(e.message); }
 }
+/* People-links panel (Phase 3): logins ↔ HR roster, every link a human click. */
+async function loadPeopleLinks(){
+  const host=$('peopleLinks'); if(!host) return;
+  let d; try{ d=await api('/people/links'); }catch(e){ host.innerHTML=`<div class="hint">${esc(e.message)}</div>`; return; }
+  const empOpts=(sel)=>['<option value="">— pick roster row —</option>',...d.employees.map(e=>`<option value="${e.id}" ${sel===e.id?'selected':''}>${esc(e.name)} · ${esc(e.entity)}${e.linked&&sel!==e.id?' (linked)':''}</option>`)].join('');
+  const linked=d.users.filter(u=>u.linked).length;
+  host.innerHTML = `<p class="hint">${linked} of ${d.users.length} logins linked · ${d.employees.length} people on the roster</p>
+    <table class="tbl"><tr><th>Login</th><th>Role</th><th>Roster row</th><th></th></tr>${d.users.map(u=>`
+      <tr><td><strong>${esc(u.name)}</strong> <span class="hint">${esc(u.username)}</span></td><td class="hint">${esc(u.job_role||'')}</td>
+        <td>${u.linked?`✓ ${esc(u.linked.name)} <span class="hint">· ${esc(u.linked.entity)}</span>`:`<select id="pl_${u.id}" class="sans" style="max-width:260px">${empOpts(u.suggestion?.id)}</select>${u.suggestion?' <span class="hint">suggested</span>':''}`}</td>
+        <td>${u.linked?`<button class="btn btn-ghost btn-sm sans" onclick="peopleLink(${u.id},null)">Unlink</button>`:`<button class="btn btn-gold btn-sm sans" onclick="peopleLink(${u.id},+($('pl_${u.id}').value)||null)">Link</button>`}</td></tr>`).join('')}</table>`;
+}
+async function peopleLink(user_id, hr_employee_id){
+  if(!hr_employee_id && !confirm('Unlink / no roster row selected — continue?')) return;
+  try{ await api('/people/links',{method:'POST',body:JSON.stringify({user_id, hr_employee_id})}); loadPeopleLinks(); }
+  catch(e){ alert(e.message); }
+}
 async function loadLineup(){
   if($('lineupEmailCard')) $('lineupEmailCard').style.display = canSendLineup() ? '' : 'none';
+  // One daily ritual: the 8:30 flash huddle IS the lineup at Akron — run it
+  // from here and it logs lineup compliance automatically.
+  const pb=$('purposeBanner');
+  if(pb && !$('lineupHuddleGo')){
+    pb.insertAdjacentHTML('beforebegin', `<div class="card no-print" id="lineupHuddleGo" style="border-left:4px solid var(--gold)">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><strong>⏱ 8:30 Flash Huddle</strong>
+      <span class="hint">12 minutes, standing, phones down — completing it logs today's lineup.</span>
+      <button class="btn btn-gold btn-sm sans" style="margin-left:auto" onclick="W1.tab='huddle'; show('wave1')">▶ Run the flash huddle</button></div></div>`);
+  }
   // Leaders read the week's reflections — four questions, every voice.
   if($('reflectionsCard')){ $('reflectionsCard').style.display = canSendLineup() ? '' : 'none';
     if(canSendLineup()) api('/reflections').then(d=>{

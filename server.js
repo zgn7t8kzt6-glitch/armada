@@ -8026,6 +8026,68 @@ app.get('/api/my-tasks', requireAuth, (req, res) => {
     WHERE t.assigned_by_id = ? AND (t.status = 'Open' OR t.done_at >= datetime('now','-21 day')) ORDER BY (t.status='Open') DESC, (t.due_date IS NULL), t.due_date, t.id`).all(req.user.id).map(decorate);
   res.json({ calls, tasks, assignedByMe, today: new Date().toISOString().slice(0, 10) });
 });
+/* ── My Work: ONE inbox over the app's task stores (Blueprint Phase 3).
+   Adapters read each store in place — nothing moves, no tables merge (Master
+   App Map A5). Teammate tasks + aftercare calls keep their richer sections in
+   the same view; this endpoint carries the stores that had no inbox at all. */
+app.get('/api/mywork', requireAuth, (req, res) => {
+  const me = req.user, items = [];
+  const push = (source, id, title, detail, due, client, view) => items.push({ source, id, title, detail: detail || '', due: due || '', client: client || '', view: view || null });
+  db.prepare(`SELECT co.id, co.text, co.created_at, c.pref, c.name FROM concerns co JOIN clients c ON c.id = co.client_id WHERE co.status = 'Open' AND co.owner_id = ?`).all(me.id)
+    .forEach((r) => push('concern', r.id, r.text, 'Concern you own — yours until resolved', String(r.created_at).slice(0, 10), r.pref || r.name, 'clients'));
+  db.prepare(`SELECT t.id, t.item, t.category, c.pref, c.name FROM case_tasks t JOIN clients c ON c.id = t.client_id
+              WHERE t.status = 'open' AND c.active = 1 AND (lower(COALESCE(c.case_manager,'')) = lower(?) OR lower(COALESCE(c.therapist,'')) = lower(?))`).all(me.name || '', me.name || '')
+    .forEach((r) => push('case', r.id, r.item, `Case need${r.category ? ' · ' + r.category : ''}`, '', r.pref || r.name, 'casemgmt'));
+  db.prepare(`SELECT id, title, detail, due_date, priority, status FROM corp_tasks WHERE status IN ('todo','doing','blocked') AND (lower(COALESCE(assignee,'')) = lower(?) OR requested_by_id = ?)`).all(me.name || '', me.id)
+    .forEach((r) => push('corp', r.id, r.title, `Corporate · ${r.status}${r.priority && r.priority !== 'Normal' ? ' · ' + r.priority : ''}`, r.due_date, '', 'corphub'));
+  db.prepare(`SELECT t.id, t.task, t.due_date, e.first_name, e.last_name FROM hr_onboard_tasks t JOIN hr_employees e ON e.id = t.employee_id WHERE t.done = 0 AND lower(COALESCE(t.assigned_to,'')) = lower(?)`).all(me.name || '')
+    .forEach((r) => push('onboard', r.id, r.task, `Onboarding — ${r.first_name} ${r.last_name}`, r.due_date, '', 'hcos'));
+  items.sort((a, b) => ((a.due || '9999') < (b.due || '9999') ? -1 : 1));
+  res.json({ items, today: new Date().toISOString().slice(0, 10) });
+});
+app.post('/api/mywork/done', requireAuth, (req, res) => {
+  const { source, id } = req.body || {}; const me = req.user;
+  const adapters = {
+    concern: () => db.prepare(`UPDATE concerns SET status = 'Resolved', resolution = COALESCE(resolution, 'Resolved from My Work'), resolved_at = datetime('now') WHERE id = ? AND owner_id = ? AND status = 'Open'`).run(id, me.id),
+    case: () => db.prepare(`UPDATE case_tasks SET status = 'done', done_by = ?, done_at = datetime('now') WHERE id = ? AND status = 'open'`).run(me.name, id),
+    corp: () => db.prepare(`UPDATE corp_tasks SET status = 'done', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status != 'done' AND (lower(COALESCE(assignee,'')) = lower(?) OR requested_by_id = ? OR ? = 'admin')`).run(id, me.name || '', me.id, me.role),
+    onboard: () => db.prepare(`UPDATE hr_onboard_tasks SET done = 1, done_at = datetime('now') WHERE id = ? AND done = 0 AND lower(COALESCE(assigned_to,'')) = lower(?)`).run(id, me.name || ''),
+  };
+  if (!adapters[source]) return res.status(400).json({ error: 'Unknown task source.' });
+  if (!adapters[source]().changes) return res.status(403).json({ error: 'Not yours to complete (or already done).' });
+  res.json({ ok: true });
+});
+
+/* ── People linkage: one person = one login + one HR-roster row (Phase 3).
+   Suggestions are exact-name matches only, and every link is a human click —
+   never guessed silently. */
+app.get('/api/people/links', requireAuth, requireHR, (req, res) => {
+  const users = db.prepare(`SELECT id, name, username, job_role, hr_employee_id FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE`).all();
+  const emps = db.prepare(`SELECT id, first_name, last_name, entity, job_title FROM hr_employees ORDER BY last_name COLLATE NOCASE, first_name`).all();
+  const linkedEmp = new Set(users.map((u) => u.hr_employee_id).filter(Boolean));
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+  const byName = new Map();
+  emps.forEach((e) => { const k = norm(e.first_name + e.last_name); byName.set(k, byName.has(k) ? null : e); });   // null = ambiguous name
+  const rows = users.map((u) => {
+    const linked = u.hr_employee_id ? emps.find((e) => e.id === u.hr_employee_id) : null;
+    const cand = !linked ? (byName.get(norm(u.name)) || null) : null;
+    return {
+      id: u.id, name: u.name, username: u.username, job_role: u.job_role,
+      linked: linked ? { id: linked.id, name: `${linked.first_name} ${linked.last_name}`, entity: linked.entity } : null,
+      suggestion: cand && !linkedEmp.has(cand.id) ? { id: cand.id, name: `${cand.first_name} ${cand.last_name}`, entity: cand.entity } : null,
+    };
+  });
+  res.json({ users: rows, employees: emps.map((e) => ({ id: e.id, name: `${e.first_name} ${e.last_name}`, entity: e.entity, title: e.job_title || '', linked: linkedEmp.has(e.id) })) });
+});
+app.post('/api/people/links', requireAuth, requireHR, (req, res) => {
+  const { user_id, hr_employee_id } = req.body || {};
+  if (!user_id) return res.status(400).json({ error: 'user_id required.' });
+  if (hr_employee_id && !db.prepare(`SELECT id FROM hr_employees WHERE id = ?`).get(hr_employee_id)) return res.status(400).json({ error: 'Unknown roster employee.' });
+  db.prepare(`UPDATE users SET hr_employee_id = ? WHERE id = ?`).run(hr_employee_id || null, user_id);
+  audit({ user: req.user, action: 'PEOPLE_LINK', entity: 'user', entity_id: +user_id, detail: hr_employee_id ? `→ hr#${hr_employee_id}` : 'unlinked', ip: req.ip });
+  res.json({ ok: true });
+});
+
 app.get('/api/all-tasks', requireAuth, requireAdmin, (req, res) => {
   res.json({
     calls: db.prepare(`SELECT f.id, f.type, f.due_date, f.assignee_name, c.pref FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.status = 'Pending' ORDER BY f.due_date`).all(),
@@ -13694,11 +13756,15 @@ app.get('/api/wave1', requireAuth, (req, res) => {
 // Log today's flash huddle (upsert — re-logging updates the details).
 app.post('/api/wave1/huddle', requireAuth, (req, res) => {
   const b = req.body || {};
+  const today = new Date().toISOString().slice(0, 10);
   db.prepare(`INSERT INTO wave1_huddle (date, facilitator, on_time, attendance, stuck, by_id) VALUES (?, ?, ?, ?, ?, ?)
               ON CONFLICT(date) DO UPDATE SET facilitator = excluded.facilitator, on_time = excluded.on_time, attendance = excluded.attendance, stuck = excluded.stuck, by_id = excluded.by_id`)
-    .run(new Date().toISOString().slice(0, 10), String(b.facilitator || req.user.name || '').slice(0, 120), b.on_time ? 1 : 0,
+    .run(today, String(b.facilitator || req.user.name || '').slice(0, 120), b.on_time ? 1 : 0,
          Number.isFinite(+b.attendance) && b.attendance !== '' && b.attendance != null ? Math.max(0, Math.round(+b.attendance)) : null,
          String(b.stuck || '').slice(0, 2000), req.user.id);
+  // One daily ritual, one compliance number (Phase 3): completing the 8:30
+  // flash huddle also counts as the day's lineup on the Excellence Scorecard.
+  db.prepare(`INSERT OR IGNORE INTO lineup_log (date, shift, by_id) VALUES (?, 'Day', ?)`).run(today, req.user.id);
   res.json({ ok: true });
 });
 

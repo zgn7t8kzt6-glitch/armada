@@ -1288,6 +1288,7 @@ addColumn('followups', 'assignee_id', 'INTEGER');
 addColumn('followups', 'assignee_name', 'TEXT');
 addColumn('users', 'mfa_secret', 'TEXT');
 addColumn('users', 'mfa_enabled', 'INTEGER');
+addColumn('users', 'hr_employee_id', 'INTEGER');   // one person: login ↔ HR-roster row (Blueprint Phase 3)
 // Invite-based signup + approved-domain accounts.
 addColumn('users', 'email', 'TEXT');
 addColumn('users', 'pending', 'INTEGER');         // 1 = invited, hasn't set a password yet

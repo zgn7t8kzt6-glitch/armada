@@ -31,6 +31,29 @@ export async function GET() {
     .select("site_id,active").eq("user_id", uid);
   out.memberships = { organization: oms ?? [], site: sms ?? [] };
 
+  // What can the SESSION (RLS-filtered) client actually see vs. ground truth?
+  // If the session sees 0 where truth is >0, auth.uid() inside RLS is not
+  // resolving to this user.
+  const [tUser, tAdmin, dUser, dAdmin, mUser] = await Promise.all([
+    supabase.from("tasks").select("id", { count: "exact", head: true }),
+    admin.from("tasks").select("id", { count: "exact", head: true }),
+    supabase.from("documents").select("id", { count: "exact", head: true }),
+    admin.from("documents").select("id", { count: "exact", head: true }),
+    supabase.from("organization_memberships").select("role").eq("user_id", uid),
+  ]);
+  out.rls_visibility = {
+    tasks_session_sees: tUser.count ?? `err: ${tUser.error?.message}`,
+    tasks_actual: tAdmin.count,
+    documents_session_sees: dUser.count ?? `err: ${dUser.error?.message}`,
+    documents_actual: dAdmin.count,
+    own_membership_session_sees: mUser.data?.length ?? `err: ${mUser.error?.message}`,
+  };
+
+  // Direct question to the database: what does auth.uid() evaluate to inside
+  // an RLS check for this request? (Requires the debug_uid helper function.)
+  const { data: dbgUid, error: dbgErr } = await supabase.rpc("debug_uid");
+  out.auth_uid_inside_database = dbgErr ? `unavailable: ${dbgErr.message}` : (dbgUid ?? "NULL");
+
   try {
     const ctx = await getAppContext();
     out.app_context = {

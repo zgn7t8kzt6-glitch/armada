@@ -1,46 +1,49 @@
-// EverTide brand assets, recreated as vector art from the supplied logo:
-// a lowercase "e" whose crossbar flows through as a tide wave, plus the
-// lowercase geometric wordmark. Drawn with currentColor so the same mark
-// works in sea-glass, deep tide, or white.
+// EverTide brand assets — the exact supplied artwork (wave-e mark and
+// lowercase wordmark), background removed, in the two official colorways:
+// sage (sea glass) for light surfaces and cream for deep-tide surfaces.
+import Image from "next/image";
+import markSage from "@/assets/brand/mark-sage.png";
+import markCream from "@/assets/brand/mark-cream.png";
+import wordmarkSage from "@/assets/brand/wordmark-sage.png";
+import wordmarkCream from "@/assets/brand/wordmark-cream.png";
 
-export function TideMark({ className = "h-8 w-8" }: { className?: string }) {
+type Colorway = "sage" | "cream";
+
+export function TideMark({
+  className = "h-8 w-auto",
+  variant = "sage",
+}: { className?: string; variant?: Colorway }) {
   return (
-    <svg viewBox="0 0 100 100" className={className} aria-hidden fill="none">
-      {/* ring with the "e" opening at the lower right */}
-      <circle
-        cx="50"
-        cy="52"
-        r="30"
-        stroke="currentColor"
-        strokeWidth="13"
-        strokeLinecap="round"
-        strokeDasharray="154 34.5"
-        transform="rotate(28 50 52)"
-      />
-      {/* tide crossbar flowing beyond the ring on both sides */}
-      <path
-        d="M2 60 C 20 46, 34 43, 52 49 C 70 55, 82 52, 98 38"
-        stroke="currentColor"
-        strokeWidth="13"
-        strokeLinecap="round"
-      />
-    </svg>
+    <Image
+      src={variant === "cream" ? markCream : markSage}
+      alt=""
+      aria-hidden
+      priority
+      className={className}
+    />
   );
 }
 
 export function BrandWordmark({
   className = "",
-  markClass = "h-7 w-7",
-  textClass = "text-xl",
+  markClass = "h-7 w-auto",
+  textClass = "h-4 w-auto",
+  variant = "sage",
 }: {
   className?: string;
   markClass?: string;
   textClass?: string;
+  variant?: Colorway;
 }) {
   return (
     <span className={`inline-flex items-center gap-2 ${className}`}>
-      <TideMark className={markClass} />
-      <span className={`font-brand lowercase leading-none tracking-tight ${textClass}`}>evertide</span>
+      <TideMark className={markClass} variant={variant} />
+      <Image
+        src={variant === "cream" ? wordmarkCream : wordmarkSage}
+        alt="evertide"
+        priority
+        className={textClass}
+      />
     </span>
   );
 }

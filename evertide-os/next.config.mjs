@@ -35,6 +35,9 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Brand images are small static PNGs; skip the runtime optimizer so they
+  // render identically on any host without a sharp install.
+  images: { unoptimized: true },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

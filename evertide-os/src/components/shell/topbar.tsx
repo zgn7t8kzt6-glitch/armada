@@ -61,7 +61,7 @@ export function TopBar({ profile, siteName }: { profile: Profile; siteName: stri
   return (
     <header className="no-print sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4">
       <div className="lg:hidden">
-        <BrandWordmark className="text-navy-600" markClass="h-5 w-5 text-teal-400" textClass="text-base font-semibold" />
+        <BrandWordmark markClass="h-6 w-auto" textClass="h-3.5 w-auto" />
         <p className="text-2xs text-slate-500">{siteName}</p>
       </div>
       <div className="hidden lg:block" />

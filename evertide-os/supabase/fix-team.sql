@@ -77,6 +77,15 @@ begin
 
   -- Remove Richard from the static RACI reference
   update public.raci_entries set assignments = assignments - 'Richard Hunt';
+
+  -- Keep GoTrue identities in sync with the new emails — sign-in lookups read
+  -- these, so a changed auth.users.email alone can break login.
+  update auth.identities i
+     set identity_data = i.identity_data || jsonb_build_object('email', u.email)
+    from auth.users u
+   where i.user_id = u.id
+     and i.provider = 'email'
+     and i.identity_data->>'email' is distinct from u.email;
 end
 $fix$;
 

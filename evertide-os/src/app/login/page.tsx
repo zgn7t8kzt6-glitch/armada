@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { TideMark } from "@/components/brand";
+import { BrandWordmark } from "@/components/brand";
 import { MailIcon } from "@/components/icons";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
@@ -52,9 +52,13 @@ function LoginForm() {
       </svg>
       <div className="relative w-full max-w-sm">
         <div className="mb-8 text-center">
-          <TideMark className="mx-auto h-16 w-16 text-teal-200" />
-          <h1 className="font-brand mt-3 text-4xl lowercase leading-none tracking-tight text-teal-100">evertide</h1>
-          <p className="mt-2 text-sm text-teal-200/80">The operating system for EverTide Infusion</p>
+          <BrandWordmark
+            className="flex-col !gap-4"
+            markClass="mx-auto h-20 w-auto"
+            textClass="mx-auto h-9 w-auto"
+            variant="cream"
+          />
+          <p className="mt-4 text-sm text-teal-200/80">The operating system for EverTide Infusion</p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white p-6 shadow-2xl">
           {sent ? (
@@ -84,7 +88,7 @@ function LoginForm() {
                 required
                 autoComplete="email"
                 className="input"
-                placeholder="you@evertide.com"
+                placeholder="you@evertideinfusion.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />

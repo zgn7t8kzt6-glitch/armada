@@ -44,7 +44,7 @@ export function Sidebar({ isAdmin, siteName, daysToOpen }: { isAdmin: boolean; s
   return (
     <nav className="no-print hidden w-56 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex" aria-label="Primary">
       <div className="border-b border-slate-100 px-4 py-4">
-        <BrandWordmark className="text-navy-600" markClass="h-7 w-7 text-teal-400" textClass="text-xl font-semibold" />
+        <BrandWordmark markClass="h-8 w-auto" textClass="h-4 w-auto" />
         <p className="mt-1.5 truncate text-2xs text-slate-500">{siteName}</p>
         {daysToOpen !== null && (
           <p className={`mt-1 text-2xs font-bold ${daysToOpen < 0 ? "text-red-700" : "text-teal-600"}`}>

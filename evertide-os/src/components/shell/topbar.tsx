@@ -5,14 +5,59 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { BrandWordmark } from "@/components/brand";
 import { BellIcon } from "@/components/icons";
+import { Modal } from "@/components/modal";
+import { useToast } from "@/components/toast";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
 import type { Notification, Profile } from "@/lib/types";
+
+function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { push } = useToast();
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    const { error } = await supabaseBrowser().auth.updateUser({ password });
+    setBusy(false);
+    if (error) push(error.message, "error");
+    else {
+      push("Password changed", "success");
+      setPassword("");
+      onClose();
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Change my password">
+      <form onSubmit={save}>
+        <label className="label" htmlFor="own-pw">New password (8+ characters)</label>
+        <input
+          id="own-pw"
+          type="password"
+          required
+          minLength={8}
+          className="input"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+        />
+        <div className="mt-4 flex justify-end">
+          <button type="submit" className="btn-primary" disabled={busy || password.length < 8}>
+            {busy ? "Saving…" : "Change password"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 export function TopBar({ profile, siteName }: { profile: Profile; siteName: string }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -129,6 +174,13 @@ export function TopBar({ profile, siteName }: { profile: Profile; siteName: stri
             <Link href="/admin" className="block px-3 py-2 text-xs text-slate-700 hover:bg-slate-50" onClick={() => setMenuOpen(false)}>
               Settings
             </Link>
+            <button
+              type="button"
+              className="block w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+              onClick={() => { setPwOpen(true); setMenuOpen(false); }}
+            >
+              Change password
+            </button>
             <form action="/auth/signout" method="post">
               <button type="submit" className="block w-full px-3 py-2 text-left text-xs text-red-700 hover:bg-red-50">
                 Sign out
@@ -137,6 +189,7 @@ export function TopBar({ profile, siteName }: { profile: Profile; siteName: stri
           </div>
         )}
       </div>
+      <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />
     </header>
   );
 }

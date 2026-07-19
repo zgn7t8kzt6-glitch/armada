@@ -7,8 +7,7 @@ import { getAppContext, requireAdmin } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { inviteUserSchema, membershipSchema, uuid } from "@/lib/schemas";
-import { serverEnv } from "@/lib/env";
+import { inviteUserSchema, membershipSchema, setPasswordSchema, uuid } from "@/lib/schemas";
 import { parseForm, err, OK, messageOf, type ActionResult } from "./helpers";
 import { z } from "zod";
 
@@ -63,8 +62,8 @@ export async function setOpeningRisk(declared: boolean, reason: string): Promise
   }
 }
 
-// Invite a real user (README: replacing placeholder users). Uses the Supabase
-// admin API to send a magic-link invite, then creates memberships.
+// Add a real user with a password set by the admin — no email delivery
+// involved (the hosted email service rate-limits magic links hard).
 export async function inviteUser(formData: FormData): Promise<ActionResult> {
   try {
     const ctx = await getAppContext();
@@ -73,17 +72,23 @@ export async function inviteUser(formData: FormData): Promise<ActionResult> {
     const data = parseForm(inviteUserSchema, formData);
 
     const admin = supabaseAdmin();
-    const redirectTo = `${serverEnv().NEXT_PUBLIC_APP_URL}/auth/callback`;
-    const { data: invited, error: invErr } = await admin.auth.admin.inviteUserByEmail(data.email, {
-      redirectTo,
-      data: { name: data.name },
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email: data.email,
+      password: data.password,
+      email_confirm: true,
+      user_metadata: { name: data.name },
     });
-    let userId = invited?.user?.id;
-    if (invErr) {
-      // Already registered → look the user up and just add memberships.
+    let userId = created?.user?.id;
+    if (createErr) {
+      // Already registered → look the user up, reset their password, add memberships.
       const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
       userId = list?.users.find((u) => u.email?.toLowerCase() === data.email.toLowerCase())?.id;
-      if (!userId) return err(invErr.message);
+      if (!userId) return err(createErr.message);
+      const { error: pwErr } = await admin.auth.admin.updateUserById(userId, {
+        password: data.password,
+        email_confirm: true,
+      });
+      if (pwErr) return err(pwErr.message);
     }
 
     await admin.from("profiles").upsert(
@@ -102,6 +107,45 @@ export async function inviteUser(formData: FormData): Promise<ActionResult> {
     if (smErr) return err(smErr.message);
 
     revalidatePath("/admin/members");
+    return OK;
+  } catch (e) {
+    return err(messageOf(e));
+  }
+}
+
+// Org admins set/reset sign-in passwords directly — the once-and-for-all
+// replacement for rate-limited magic-link emails.
+export async function setUserPassword(formData: FormData): Promise<ActionResult> {
+  try {
+    const ctx = await getAppContext();
+    requireAdmin(ctx);
+    if (ctx.role !== "org_admin") return err("Only organization admins can set passwords.");
+    checkRateLimit(ctx.userId, "set-password", 20);
+    const data = parseForm(setPasswordSchema, formData);
+
+    const admin = supabaseAdmin();
+    const { data: membership } = await admin
+      .from("organization_memberships")
+      .select("user_id")
+      .eq("organization_id", ctx.organization.id)
+      .eq("user_id", data.userId)
+      .maybeSingle();
+    if (!membership) return err("That user is not a member of this organization.");
+
+    const { error: pwErr } = await admin.auth.admin.updateUserById(data.userId, {
+      password: data.password,
+      email_confirm: true,
+    });
+    if (pwErr) return err(pwErr.message);
+
+    await admin.from("audit_events").insert({
+      organization_id: ctx.organization.id,
+      actor_id: ctx.userId,
+      entity_type: "auth_password",
+      entity_id: data.userId,
+      event_type: "update",
+      metadata: { via: "admin set password" },
+    });
     return OK;
   } catch (e) {
     return err(messageOf(e));

@@ -4,7 +4,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  inviteUser, removeUser, saveFolder, setOpeningRisk, updateMembership, updateSiteSettings,
+  inviteUser, removeUser, saveFolder, setOpeningRisk, setUserPassword, updateMembership, updateSiteSettings,
 } from "@/app/actions/admin";
 import { saveKpiDefinition } from "@/app/actions/kpis";
 import { archiveRecord } from "@/app/actions/tasks";
@@ -101,25 +101,72 @@ export function InviteUserForm() {
   const { pending, act } = useAct();
   return (
     <form
-      className="grid grid-cols-1 gap-2 sm:grid-cols-4"
+      className="grid grid-cols-1 gap-2 sm:grid-cols-5"
       onSubmit={(e) => {
         e.preventDefault();
         const form = e.currentTarget;
         const fd = new FormData(form);
-        act(() => inviteUser(fd), "Invite sent");
+        act(() => inviteUser(fd), "User added — share the password with them directly");
         form.reset();
       }}
     >
       <input name="name" required placeholder="Full name" aria-label="Full name" className="input" />
-      <input name="email" required type="email" placeholder="email@company.com" aria-label="Email" className="input" />
+      <input name="email" required type="email" placeholder="email@evertideinfusion.com" aria-label="Email" className="input" />
+      <input name="password" required type="text" minLength={8} placeholder="Password (8+ chars)" aria-label="Password" className="input" autoComplete="off" />
       <select name="role" aria-label="Role" className="input" defaultValue="member">
         <option value="org_admin">Org admin</option>
         <option value="site_admin">Site admin</option>
         <option value="member">Member</option>
         <option value="viewer">Viewer</option>
       </select>
-      <button type="submit" className="btn-primary" disabled={pending}>Invite</button>
+      <button type="submit" className="btn-primary" disabled={pending}>Add user</button>
     </form>
+  );
+}
+
+export function SetPasswordButton({ profile }: { profile: Profile }) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const { pending, act } = useAct();
+  return (
+    <>
+      <button type="button" className="btn-secondary !min-h-9 !px-3 !py-1 text-xs" onClick={() => setOpen(true)}>
+        Password
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} title={`Set password for ${profile.name}`}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const fd = new FormData();
+            fd.set("userId", profile.id);
+            fd.set("password", password);
+            act(() => setUserPassword(fd), `Password set for ${profile.name}`);
+            setPassword("");
+            setOpen(false);
+          }}
+        >
+          <label className="label" htmlFor={`pw-${profile.id}`}>New password (8+ characters)</label>
+          <input
+            id={`pw-${profile.id}`}
+            type="text"
+            required
+            minLength={8}
+            className="input"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="off"
+          />
+          <p className="mt-2 text-2xs text-slate-400">
+            Takes effect immediately. Share it with {profile.name} directly — no email is sent.
+          </p>
+          <div className="mt-4 flex justify-end">
+            <button type="submit" className="btn-primary" disabled={pending || password.length < 8}>
+              {pending ? "Saving…" : "Set password"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </>
   );
 }
 

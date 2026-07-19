@@ -1,7 +1,7 @@
 import { getAppContext } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { Card, OwnerChip, PageHeader } from "@/components/ui";
-import { InviteUserForm, MembershipRow } from "@/components/admin/admin-forms";
+import { InviteUserForm, MembershipRow, SetPasswordButton } from "@/components/admin/admin-forms";
 import type { Profile } from "@/lib/types";
 
 export const metadata = { title: "Members" };
@@ -21,9 +21,9 @@ export default async function MembersPage() {
     <div className="space-y-4">
       <PageHeader title="Admin — Members" subtitle="Membership and roles. Roles gate what RLS lets each person do." />
 
-      <Card title="Invite a user">
+      <Card title="Add a user">
         <p className="mb-3 text-xs text-slate-500">
-          Sends a Supabase magic-link invite. Use this to replace the placeholder seed accounts with real emails (see README).
+          Creates the account instantly with the password you choose — nothing is emailed. Share the password with them directly; they can change it from their account menu.
         </p>
         <InviteUserForm />
       </Card>
@@ -38,6 +38,7 @@ export default async function MembersPage() {
                   <OwnerChip profile={profile} size="md" />
                   <p className="ml-9 text-2xs text-slate-400">{profile.email}{profile.title ? ` · ${profile.title}` : ""}</p>
                 </div>
+                <SetPasswordButton profile={profile} />
                 <MembershipRow profile={profile} role={m.role} active={m.active} isSelf={m.user_id === ctx.userId} />
               </li>
             );

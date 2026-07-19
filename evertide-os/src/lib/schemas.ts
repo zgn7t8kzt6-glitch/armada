@@ -274,6 +274,12 @@ export const inviteUserSchema = z.object({
   name: trimmed(150),
   title: optionalText(150),
   role: z.enum(["org_admin", "site_admin", "member", "viewer"]),
+  password: z.string().min(8, "Password must be at least 8 characters").max(72),
+});
+
+export const setPasswordSchema = z.object({
+  userId: uuid,
+  password: z.string().min(8, "Password must be at least 8 characters").max(72),
 });
 
 export const archiveSchema = z.object({

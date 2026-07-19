@@ -43,9 +43,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "No active org_admin account with that email" }, { status: 403 });
   }
 
-  const { data, error } = await admin.auth.admin.generateLink({ type: "magiclink", email });
-  if (error || !data.properties) {
-    return NextResponse.json({ error: error?.message ?? "could not generate link" }, { status: 500 });
+  // Set a one-time random password server-side and sign in with it — no
+  // email, no OTP tokens, no expiry semantics. The password is never shown
+  // to anyone and replaces nothing (accounts here are passwordless).
+  const oneTimePassword = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+  const { error: pwError } = await admin.auth.admin.updateUserById(match.user_id, {
+    password: oneTimePassword,
+  });
+  if (pwError) {
+    return NextResponse.json({ error: pwError.message }, { status: 500 });
   }
 
   const cookieStore = cookies();
@@ -60,12 +66,12 @@ export async function GET(request: NextRequest) {
       },
     },
   });
-  const { error: verifyError } = await supabase.auth.verifyOtp({
-    type: "magiclink",
-    token_hash: data.properties.hashed_token,
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email,
+    password: oneTimePassword,
   });
-  if (verifyError) {
-    return NextResponse.json({ error: verifyError.message }, { status: 500 });
+  if (signInError) {
+    return NextResponse.json({ error: signInError.message }, { status: 500 });
   }
 
   await admin.from("audit_events").insert({

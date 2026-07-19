@@ -1,7 +1,7 @@
 # FamilyOS — Phase 1 Build Specification ("The Cockpit")
 
 **Status:** Draft 1 · governs the Phase 1 build
-**Companion:** `BLUEPRINT.pdf` v3.0 (approved) — the vision document. This spec is
+**Companion:** `BLUEPRINT.pdf` v3.1 (approved) — the vision document. This spec is
 deliberately free of philosophy; where a "why" is needed, it cites a Blueprint
 section. If this spec and the Blueprint conflict on *what to build*, the Blueprint
 wins; on *how to build it*, this spec wins.

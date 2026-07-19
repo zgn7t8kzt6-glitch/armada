@@ -107,7 +107,7 @@ def on_page(canvas, doc):
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(DIM)
         canvas.drawString(0.9 * inch, 0.55 * inch,
-                          "FamilyOS — the operating system for our family's financial life  ·  Blueprint v3.0  ·  Private")
+                          "FamilyOS — the operating system for our family's financial life  ·  Blueprint v3.1  ·  Private")
         canvas.drawRightString(W - 0.9 * inch, 0.55 * inch, f"Page {doc.page}")
         canvas.setStrokeColor(LINE)
         canvas.setLineWidth(0.5)
@@ -123,7 +123,7 @@ def on_page(canvas, doc):
 doc = BaseDocTemplate(OUT, pagesize=letter,
                       leftMargin=0.9 * inch, rightMargin=0.9 * inch,
                       topMargin=0.9 * inch, bottomMargin=0.95 * inch,
-                      title="FamilyOS — Blueprint v3.0",
+                      title="FamilyOS — Blueprint v3.1",
                       author="Shlomo & Rachel")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
 doc.addPageTemplates([PageTemplate(id="all", frames=[frame], onPage=on_page)])
@@ -133,7 +133,7 @@ story = []
 # ================================================================ COVER
 story += [
     Spacer(1, 1.8 * inch),
-    Paragraph("PRIVATE &nbsp;·&nbsp; VERSION 3.0 — APPROVED &nbsp;·&nbsp; JULY 2026",
+    Paragraph("PRIVATE &nbsp;·&nbsp; VERSION 3.1 — APPROVED &nbsp;·&nbsp; JULY 2026",
               S["cover_kicker"]),
     Spacer(1, 14),
     Paragraph("FamilyOS", S["cover_title"]),
@@ -151,7 +151,8 @@ story += [
     Spacer(1, 0.9 * inch),
     Paragraph("v3.0 is the freeze — approved with minor revisions.<br/>"
               "The revisions (KPIs, AI boundaries, edge cases, threat model)<br/>"
-              "live in the Phase 1 build spec: SPEC-PHASE1.md.", S["cover_sub"]),
+              "live in the Phase 1 build spec: SPEC-PHASE1.md.<br/>"
+              "v3.1 adds only Appendix A — the hypothesis register.", S["cover_sub"]),
     PageBreak(),
 ]
 
@@ -785,7 +786,7 @@ story.append(tbl([
     ["D3", "Alert thresholds & quiet hours", "no pings on Shabbos — define the window"],
     ["D4", "Witness-level wording", "exactly what Rachel's alert says — dignity matters"],
     ["D5", "Money dials", "the 1-2 categories we spend lavishly on, guilt-free"],
-    ["D6", "Waterfall order & amounts, and starting stage (A/B/C)", "Section 6"],
+    ["D6", "Waterfall order, amounts, starting stage", "Section 6"],
     ["D7", "Estate checklist owner & deadline", "who books the attorney, by when"],
     ["D8", "Outside support", "therapist / DA meeting cadence — named, scheduled"],
     ["D9", "Confirm the name: FamilyOS — and the domain", "adopted as working title in v3.0"],
@@ -797,6 +798,57 @@ story.append(tbl([
     ["D15", "Summit date", "same week every year — pick the anchor"],
 ], [0.5 * inch, 2.9 * inch, 3.3 * inch]))
 
+# ================================================================ APPENDIX A
+story += sec("A", "Appendix A — design decisions vs. hypotheses",
+    "An honest register. Most of this blueprint is settled design. Five concepts "
+    "are hypotheses: coherent, but unproven until this family uses them for real. "
+    "Each is reviewed at the Annual Summit against its signal. A disproven "
+    "hypothesis gets removed or shrunk, not patched — the freeze blocks additions, "
+    "never deletions.")
+story.append(tbl([
+    ["#", "Hypothesis", "Validated by", "If real use disproves it"],
+    ["H1", P("The Decision Engine works as the front door for major "
+             "decisions, not just purchases.", "small"),
+     P("K3 = 100% and K5 at target for two quarters; runs feel useful, "
+       "not like homework.", "small"),
+     P("Shrink scope to two-key purchases only. The archive stays — it "
+       "earns its keep regardless.", "small")],
+    ["H2", P("The Family Constitution actually changes decisions "
+             "(lens 2 is load-bearing).", "small"),
+     P("Engine archives cite it; either owner can quote it unprompted "
+       "by year one.", "small"),
+     P("Fold the six answers into the Rulebook page as preamble; drop "
+       "the separate ritual.", "small")],
+    ["H3", P("The Annual Summit happens and is worth its weight.", "small"),
+     P("It occurs, from the app's report pack, two years running.", "small"),
+     P("Merge into a year-end monthly meeting plus the letters. Keep "
+       "the report pack.", "small")],
+    ["H4", P("The Strength Score surfaces weakness without gamifying "
+             "the family.", "small"),
+     P("Weakest-category recommendations get acted on; nobody chases "
+       "the number. Weights (D13) re-fit after year one.", "small"),
+     P("Drop the composite score; keep the ten-category checklist and "
+       "the monthly weakest-area nudge.", "small")],
+    ["H5", P("The AI CFO cadence adds value at every tier without "
+             "notification fatigue.", "small"),
+     P("Notification budget holds (spec 3.2); digests are read; at "
+       "least one recommendation per month gets acted on.", "small"),
+     P("Cut to weekly digest + January Lessons Learned; other tiers "
+       "earn their way back one at a time (below).", "small")],
+], [0.4 * inch, 1.95 * inch, 2.35 * inch, 2.0 * inch]))
+story.append(Spacer(1, 6))
+story.append(P("On H5: the CFO concept is strong precisely because it can "
+               "shrink gracefully — the guardrail ladder and the waterfall "
+               "never depended on it. Execution quality, not the concept, "
+               "decides whether it's exceptional or merely good; the execution "
+               "bar is the spec's standing AI policy (three modes, hard lines, "
+               "a notification budget).", "lead"))
+story.append(P("Everything not listed here — the waterfall, the guardrail "
+               "ladder, self-binding, two-key, the Rulebook, per-child Goals, "
+               "the Vault, quiet hours, the freeze itself — is settled design, "
+               "grounded in established behavioral research and this family's "
+               "explicit agreements, and is not up for re-validation.", "lead"))
+
 story += [
     Spacer(1, 16),
     HRFlowable(width="100%", thickness=1.2, color=GOLD),
@@ -806,7 +858,7 @@ story += [
       "edge cases, the threat model — lives in SPEC-PHASE1.md, which governs the "
       "build. This document governs the vision, and it is frozen.",
       "lead"),
-    Paragraph("FamilyOS · Blueprint v3.0 (approved) · Prepared July 2026 · "
+    Paragraph("FamilyOS · Blueprint v3.1 (approved) · Prepared July 2026 · "
               "Education and planning document — not legal, tax, or investment advice.",
               S["small"]),
 ]

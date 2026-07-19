@@ -133,7 +133,7 @@ story = []
 # ================================================================ COVER
 story += [
     Spacer(1, 1.8 * inch),
-    Paragraph("PRIVATE &nbsp;·&nbsp; VERSION 3.0 — FREEZE CANDIDATE &nbsp;·&nbsp; JULY 2026",
+    Paragraph("PRIVATE &nbsp;·&nbsp; VERSION 3.0 — APPROVED &nbsp;·&nbsp; JULY 2026",
               S["cover_kicker"]),
     Spacer(1, 14),
     Paragraph("FamilyOS", S["cover_title"]),
@@ -149,9 +149,9 @@ story += [
     Paragraph("“It doesn't just answer: where did our money go?<br/>"
               "It answers: are we building the life we said we wanted?”", S["quote"]),
     Spacer(1, 0.9 * inch),
-    Paragraph("v3.0 is the freeze. Nothing more gets added.<br/>"
-              "From here the work is execution and polish —<br/>"
-              "making the experience feel calm and inevitable.", S["cover_sub"]),
+    Paragraph("v3.0 is the freeze — approved with minor revisions.<br/>"
+              "The revisions (KPIs, AI boundaries, edge cases, threat model)<br/>"
+              "live in the Phase 1 build spec: SPEC-PHASE1.md.", S["cover_sub"]),
     PageBreak(),
 ]
 
@@ -801,11 +801,12 @@ story += [
     Spacer(1, 16),
     HRFlowable(width="100%", thickness=1.2, color=GOLD),
     Spacer(1, 10),
-    P("<b>Next step:</b> answer the D-list together and sign this page. v3.0 is "
-      "the freeze — after the signatures, nothing gets added, and Phase 1 starts. "
-      "The next document anyone writes about FamilyOS is the Phase 1 build spec.",
+    P("<b>Status: approved for transition to build.</b> Answer the D-list together "
+      "and sign this page. Implementation detail — success metrics, AI boundaries, "
+      "edge cases, the threat model — lives in SPEC-PHASE1.md, which governs the "
+      "build. This document governs the vision, and it is frozen.",
       "lead"),
-    Paragraph("FamilyOS · Blueprint v3.0 (freeze candidate) · Prepared July 2026 · "
+    Paragraph("FamilyOS · Blueprint v3.0 (approved) · Prepared July 2026 · "
               "Education and planning document — not legal, tax, or investment advice.",
               S["small"]),
 ]

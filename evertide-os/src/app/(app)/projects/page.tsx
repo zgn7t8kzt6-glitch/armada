@@ -8,6 +8,7 @@ import { TaskRow } from "@/components/tasks/task-row";
 import { KanbanBoard } from "@/components/tasks/kanban";
 import { RoadmapTable } from "@/components/tasks/roadmap";
 import { NewTaskButton } from "@/components/tasks/new-task";
+import { DownloadIcon } from "@/components/icons";
 
 export const metadata = { title: "Projects" };
 export const dynamic = "force-dynamic";
@@ -62,7 +63,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Sea
         action={
           <div className="flex items-center gap-2">
             <a href={`/projects/export?${exportParams.toString()}`} className="btn-secondary text-xs" download>
-              ⬇ CSV
+              <DownloadIcon className="h-4 w-4" /> CSV
             </a>
             {ctx.canWrite && (
               <NewTaskButton siteId={ctx.site.id} profiles={profiles} projects={projects} defaultOwnerId={ctx.userId} />

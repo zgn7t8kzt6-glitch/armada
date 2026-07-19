@@ -3,6 +3,7 @@ import { getAppContext } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { Card, CarryBadge, DueDate, OwnerChip, PageHeader, StatusPill } from "@/components/ui";
 import { NewHuddleButton } from "@/components/huddles/new-huddle";
+import { PlayIcon, TrophyIcon } from "@/components/icons";
 import { formatDate } from "@/lib/format";
 import { todayInTz } from "@/lib/logic/dates";
 import type { Commitment, Huddle, Profile } from "@/lib/types";
@@ -48,8 +49,8 @@ export default async function HuddlesPage() {
       />
 
       {active && (
-        <Link href={`/huddles/${active.id}`} className="block rounded-lg border-2 border-teal-400 bg-teal-50 px-4 py-3 text-sm font-bold text-teal-800 hover:bg-teal-100">
-          ▶ A huddle is in progress ({formatDate(active.huddle_date)}) — tap to join Huddle Mode
+        <Link href={`/huddles/${active.id}`} className="flex items-center gap-2 rounded-lg border-2 border-teal-400 bg-teal-50 px-4 py-3 text-sm font-bold text-teal-800 hover:bg-teal-100">
+          <PlayIcon className="h-4 w-4" /> A huddle is in progress ({formatDate(active.huddle_date)}) — tap to join Huddle Mode
         </Link>
       )}
 
@@ -80,7 +81,7 @@ export default async function HuddlesPage() {
                 <Link href={`/huddles/${h.id}`} className="flex min-h-touch flex-wrap items-center gap-2 py-2.5 hover:bg-slate-50">
                   <span className="w-28 text-sm font-semibold tabular-nums text-navy-700">{formatDate(h.huddle_date)}</span>
                   <StatusPill status={h.status} />
-                  {h.wins && <span className="min-w-0 flex-1 truncate text-xs text-slate-500">🏆 {h.wins}</span>}
+                  {h.wins && <span className="flex min-w-0 flex-1 items-center gap-1 truncate text-xs text-slate-500"><TrophyIcon className="h-3.5 w-3.5 shrink-0" /> {h.wins}</span>}
                 </Link>
               </li>
             ))}

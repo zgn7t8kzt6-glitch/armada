@@ -5,6 +5,7 @@ import { fetchDashboard } from "@/lib/queries/dashboard";
 import { daysToOpening } from "@/lib/data";
 import { Card, CarryBadge, EmptyState, OwnerChip, PageHeader, Stat, StatusPill, DueDate } from "@/components/ui";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { FlagIcon, ScaleIcon } from "@/components/icons";
 import { isOverdue } from "@/lib/logic/tasks";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export default async function HomePage() {
       {/* Waiting on You — required actions first (§2.12) */}
       <Card title={`Waiting on You (${waitingCount})`} className={waitingCount > 0 ? "border-amber-300" : ""}>
         {waitingCount === 0 ? (
-          <p className="text-sm text-slate-500">Nothing needs your attention right now. 🎉</p>
+          <p className="text-sm text-slate-500">Nothing needs your attention right now.</p>
         ) : (
           <ul className="space-y-2 text-sm">
             {w.overdueTasks.map((t) => (
@@ -113,7 +114,7 @@ export default async function HomePage() {
                 const overdue = isOverdue(t, ctx.site.timezone);
                 return (
                   <li key={t.id} className="flex flex-wrap items-center gap-2 text-sm">
-                    <span aria-hidden className={overdue || t.status === "blocked" ? "text-red-600" : "text-teal-600"}>⛳</span>
+                    <FlagIcon className={`h-4 w-4 shrink-0 ${overdue || t.status === "blocked" ? "text-red-600" : "text-teal-600"}`} />
                     <Link href={`/projects/tasks/${t.id}`} className="min-w-0 flex-1 truncate font-medium text-slate-800 hover:underline">{t.title}</Link>
                     <StatusPill status={t.status} />
                     <DueDate date={t.due_date} overdue={overdue} />
@@ -170,7 +171,7 @@ export default async function HomePage() {
               <ul className="space-y-1.5">
                 {data.recentDecisions.map((d) => (
                   <li key={d.id} className="flex items-center gap-2 text-sm">
-                    <span aria-hidden>⚖️</span>
+                    <ScaleIcon className="h-4 w-4 shrink-0 text-slate-400" />
                     <Link href={`/decisions/${d.id}`} className="min-w-0 flex-1 truncate font-medium text-slate-800 hover:underline">{d.title}</Link>
                     <StatusPill status={d.status} />
                   </li>

@@ -5,6 +5,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { fetchSiteProfiles } from "@/lib/queries/tasks";
 import { Card, DueDate, OwnerChip, PageHeader, StatusPill } from "@/components/ui";
 import { TaskStatusControl } from "@/components/tasks/status-control";
+import { AlertIcon, FileTextIcon } from "@/components/icons";
 import {
   AdminReassign, CommentForm, DependencyEditor, HelperEditor, ProgressAndNotes,
 } from "@/components/tasks/detail-forms";
@@ -201,8 +202,8 @@ export default async function TaskDetailPage({ params }: { params: { id: string 
             <ul className="space-y-1.5 text-xs">
               {(issuesQ.data ?? []).map((i) => (
                 <li key={i.id}>
-                  <Link href={`/issues/${i.id}`} className="text-navy-600 hover:underline">
-                    ⚠️ {i.title}
+                  <Link href={`/issues/${i.id}`} className="inline-flex items-center gap-1 text-navy-600 hover:underline">
+                    <AlertIcon className="h-3.5 w-3.5" /> {i.title}
                   </Link>{" "}
                   <StatusPill status={i.status} />
                 </li>
@@ -211,7 +212,7 @@ export default async function TaskDetailPage({ params }: { params: { id: string 
                 const doc = l.document as unknown as { id: string; title: string } | null;
                 return doc ? (
                   <li key={doc.id}>
-                    <Link href={`/documents/${doc.id}`} className="text-navy-600 hover:underline">📄 {doc.title}</Link>
+                    <Link href={`/documents/${doc.id}`} className="inline-flex items-center gap-1 text-navy-600 hover:underline"><FileTextIcon className="h-3.5 w-3.5" /> {doc.title}</Link>
                   </li>
                 ) : null;
               })}

@@ -93,8 +93,8 @@ export default async function IssuesPage({ searchParams }: { searchParams: Recor
                       <span className="ml-2 text-2xs text-slate-400">
                         {i.category && `${i.category} · `}age {age}d
                         {overdue && i.due_date && ` · ${daysBetween(i.due_date, today)}d past due`}
-                        {i.huddle_required && open && " · 📣 huddle"}
-                        {i.related_issue_id && " · 🔁 recurring"}
+                        {i.huddle_required && open && " · next huddle"}
+                        {i.related_issue_id && " · recurring"}
                       </span>
                     </span>
                     <StatusPill status={i.priority} />

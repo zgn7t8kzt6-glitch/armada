@@ -110,7 +110,7 @@ export default async function MyWorkPage() {
       )}
       {tasks.length === 0 && (
         <Card title="Tasks">
-          <p className="text-sm text-slate-500">You own no open tasks. 🎉</p>
+          <p className="text-sm text-slate-500">You own no open tasks.</p>
         </Card>
       )}
 

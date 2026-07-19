@@ -8,12 +8,13 @@ import { createDocument, toggleDocumentGrant, updateDocumentMeta } from "@/app/a
 import { Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { OwnerChip } from "@/components/ui";
+import { AlertIcon, UploadIcon } from "@/components/icons";
 import type { DocumentFolder, DocumentRow, Profile } from "@/lib/types";
 
 export function PhiWarning({ text }: { text: string }) {
   return (
-    <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800" role="alert">
-      ⚠️ {text}
+    <p className="flex items-start gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800" role="alert">
+      <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" /> {text}
     </p>
   );
 }
@@ -144,7 +145,7 @@ export function UploadVersionButton({ documentId, phiWarning }: { documentId: st
 
   return (
     <>
-      <button type="button" className="btn-teal text-xs" onClick={() => setOpen(true)}>⬆ Upload new version</button>
+      <button type="button" className="btn-teal text-xs" onClick={() => setOpen(true)}><UploadIcon className="h-4 w-4" /> Upload new version</button>
       <Modal open={open} onClose={() => setOpen(false)} title="Upload new version">
         <form
           onSubmit={async (e) => {

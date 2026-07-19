@@ -13,6 +13,7 @@ import { changeTaskStatus } from "@/app/actions/tasks";
 import { useToast } from "@/components/toast";
 import { Modal } from "@/components/modal";
 import { OwnerChip, DueDate, StatusPill } from "@/components/ui";
+import { FlagIcon } from "@/components/icons";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isOverdue } from "@/lib/logic/tasks";
 import type { Task, TaskStatus } from "@/lib/types";
@@ -33,7 +34,7 @@ function KanbanCard({ task, timezone, dragging = false }: { task: Task; timezone
       }`}
     >
       <Link href={`/projects/tasks/${task.id}`} className="block text-xs font-medium text-slate-800 hover:underline">
-        {task.critical && <span className="mr-1 text-red-600" title="Critical path">⛳</span>}
+        {task.critical && <FlagIcon className="mr-1 inline h-3.5 w-3.5 text-red-600" aria-label="Critical path" />}
         {task.title}
       </Link>
       {task.status === "blocked" && task.blocker_reason && (

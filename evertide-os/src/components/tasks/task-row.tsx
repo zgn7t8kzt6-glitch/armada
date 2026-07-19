@@ -1,6 +1,7 @@
 // Server-renderable task row shared by the list view and My Work.
 import Link from "next/link";
 import { StatusPill, OwnerChip, DueDate } from "@/components/ui";
+import { FlagIcon } from "@/components/icons";
 import { TaskStatusControl } from "@/components/tasks/status-control";
 import { isOverdue, isStale } from "@/lib/logic/tasks";
 import type { Task } from "@/lib/types";
@@ -12,7 +13,7 @@ export function TaskRow({ task, timezone, canWrite }: { task: Task; timezone: st
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-100 px-3 py-2.5 last:border-0 hover:bg-slate-50">
       <div className="min-w-0 flex-1 basis-64">
         <Link href={`/projects/tasks/${task.id}`} className="block text-sm font-medium text-slate-800 hover:text-navy-600 hover:underline">
-          {task.critical && <span className="mr-1 text-red-600" title="Critical path">⛳</span>}
+          {task.critical && <FlagIcon className="mr-1 inline h-3.5 w-3.5 text-red-600" aria-label="Critical path" />}
           {task.title}
         </Link>
         <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-2xs text-slate-400">

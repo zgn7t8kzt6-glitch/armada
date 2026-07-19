@@ -53,7 +53,7 @@ export default async function IssueDetailPage({ params }: { params: { id: string
           <span className="flex flex-wrap items-center gap-2">
             <StatusPill status={issue.priority} />
             <StatusPill status={issue.status} />
-            {issue.huddle_required && open && <StatusPill status="at_risk" label="📣 Next huddle" />}
+            {issue.huddle_required && open && <StatusPill status="at_risk" label="Next huddle" />}
             <span className="text-xs text-slate-500">
               reported {formatDate(issue.reported_at.slice(0, 10))} · age {age}d
               {open && issue.due_date && issue.due_date < today && (

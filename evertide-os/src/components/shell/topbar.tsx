@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { BrandWordmark } from "@/components/brand";
+import { BellIcon } from "@/components/icons";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { initials } from "@/lib/format";
 import type { Notification, Profile } from "@/lib/types";
@@ -72,7 +73,7 @@ export function TopBar({ profile, siteName }: { profile: Profile; siteName: stri
           aria-label={`Notifications (${notifications.length} unread)`}
           aria-expanded={open}
         >
-          🔔
+          <BellIcon className="h-5 w-5 text-slate-500" />
           {notifications.length > 0 && (
             <span className="absolute right-1.5 top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-2xs font-bold text-white">
               {notifications.length}

@@ -5,29 +5,34 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { BrandWordmark } from "@/components/brand";
+import {
+  AlertIcon, BoardIcon, ChartIcon, ChecklistIcon, ContactsIcon, FileTextIcon,
+  FolderIcon, HomeIcon, MenuIcon, ScaleIcon, SettingsIcon, ShieldIcon,
+  TableIcon, TargetIcon, UsersIcon, type IconProps,
+} from "@/components/icons";
 
 export interface NavItem {
   href: string;
   label: string;
-  icon: string;
+  icon: (p: IconProps) => JSX.Element;
   adminOnly?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Home", icon: "🏠" },
-  { href: "/my-work", label: "My Work", icon: "✅" },
-  { href: "/strategy", label: "Strategy", icon: "🎯" },
-  { href: "/projects", label: "Projects", icon: "📋" },
-  { href: "/scoreboard", label: "Scoreboard", icon: "📊" },
-  { href: "/huddles", label: "Huddles", icon: "👥" },
-  { href: "/issues", label: "Issues", icon: "⚠️" },
-  { href: "/risks", label: "Risks", icon: "🛡️" },
-  { href: "/decisions", label: "Decisions", icon: "⚖️" },
-  { href: "/documents", label: "Documents", icon: "📁" },
-  { href: "/people", label: "People & Vendors", icon: "🤝" },
-  { href: "/reports", label: "Reports", icon: "📄" },
-  { href: "/raci", label: "RACI Reference", icon: "🗂️" },
-  { href: "/admin", label: "Admin", icon: "⚙️", adminOnly: true },
+  { href: "/", label: "Home", icon: HomeIcon },
+  { href: "/my-work", label: "My Work", icon: ChecklistIcon },
+  { href: "/strategy", label: "Strategy", icon: TargetIcon },
+  { href: "/projects", label: "Projects", icon: BoardIcon },
+  { href: "/scoreboard", label: "Scoreboard", icon: ChartIcon },
+  { href: "/huddles", label: "Huddles", icon: UsersIcon },
+  { href: "/issues", label: "Issues", icon: AlertIcon },
+  { href: "/risks", label: "Risks", icon: ShieldIcon },
+  { href: "/decisions", label: "Decisions", icon: ScaleIcon },
+  { href: "/documents", label: "Documents", icon: FolderIcon },
+  { href: "/people", label: "People & Vendors", icon: ContactsIcon },
+  { href: "/reports", label: "Reports", icon: FileTextIcon },
+  { href: "/raci", label: "RACI Reference", icon: TableIcon },
+  { href: "/admin", label: "Admin", icon: SettingsIcon, adminOnly: true },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -59,7 +64,7 @@ export function Sidebar({ isAdmin, siteName, daysToOpen }: { isAdmin: boolean; s
               }`}
               aria-current={isActive(pathname, item.href) ? "page" : undefined}
             >
-              <span aria-hidden className="text-base leading-none">{item.icon}</span>
+              <item.icon className="h-[18px] w-[18px] shrink-0 opacity-80" />
               {item.label}
             </Link>
           </li>
@@ -70,9 +75,9 @@ export function Sidebar({ isAdmin, siteName, daysToOpen }: { isAdmin: boolean; s
 }
 
 const MOBILE_PRIMARY: NavItem[] = [
-  { href: "/", label: "Home", icon: "🏠" },
-  { href: "/my-work", label: "My Work", icon: "✅" },
-  { href: "/huddles", label: "Huddle", icon: "👥" },
+  { href: "/", label: "Home", icon: HomeIcon },
+  { href: "/my-work", label: "My Work", icon: ChecklistIcon },
+  { href: "/huddles", label: "Huddle", icon: UsersIcon },
 ];
 
 export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
@@ -103,7 +108,7 @@ export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
                       isActive(pathname, item.href) ? "bg-navy-50 text-navy-700" : "text-slate-700 hover:bg-slate-50"
                     }`}
                   >
-                    <span aria-hidden>{item.icon}</span>
+                    <item.icon className="h-[18px] w-[18px] shrink-0 opacity-80" />
                     {item.label}
                   </Link>
                 </li>
@@ -125,7 +130,7 @@ export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
             }`}
             aria-current={isActive(pathname, item.href) ? "page" : undefined}
           >
-            <span aria-hidden className="text-lg leading-none">{item.icon}</span>
+            <item.icon className="h-5 w-5" />
             {item.label}
           </Link>
         ))}
@@ -135,7 +140,7 @@ export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
           className={`flex min-h-touch flex-1 flex-col items-center justify-center gap-0.5 py-2 text-2xs font-semibold ${moreOpen ? "text-navy-700" : "text-slate-500"}`}
           aria-expanded={moreOpen}
         >
-          <span aria-hidden className="text-lg leading-none">☰</span>
+          <MenuIcon className="h-5 w-5" />
           More
         </button>
       </nav>

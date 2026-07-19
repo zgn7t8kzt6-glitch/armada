@@ -4,6 +4,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { daysToOpening } from "@/lib/data";
 import { HuddleMode } from "@/components/huddles/huddle-mode";
 import { PrintButton } from "@/components/print-button";
+import { TrophyIcon } from "@/components/icons";
 import { StatusPill } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 import { todayInTz, weeklyPeriodStart } from "@/lib/logic/dates";
@@ -64,7 +65,7 @@ export default async function HuddleDetailPage({ params }: { params: { id: strin
         </div>
         {huddle.wins && (
           <section className="print-page rounded-lg border border-slate-200 bg-white p-4">
-            <h2 className="text-sm font-bold text-navy-700">🏆 Wins</h2>
+            <h2 className="flex items-center gap-1.5 text-sm font-bold text-navy-700"><TrophyIcon className="h-4 w-4 text-teal-500" /> Wins</h2>
             <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{huddle.wins}</p>
           </section>
         )}

@@ -4,6 +4,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { Card, OwnerChip, PageHeader, StatusPill } from "@/components/ui";
 import { SimpleFilters } from "@/components/simple-filters";
 import { NewDocumentButton, PhiWarning } from "@/components/documents/document-forms";
+import { FileTextIcon, FolderIcon, FolderOpenIcon, LockIcon } from "@/components/icons";
 import { formatDate } from "@/lib/format";
 import type { DocumentFolder, DocumentRow, Profile } from "@/lib/types";
 
@@ -76,9 +77,9 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Re
             <li>
               <Link
                 href="/documents"
-                className={`block rounded-lg px-3 py-2 text-sm font-medium ${!activeFolder ? "bg-navy-50 text-navy-700" : "text-slate-600 hover:bg-slate-50"}`}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${!activeFolder ? "bg-navy-50 text-navy-700" : "text-slate-600 hover:bg-slate-50"}`}
               >
-                📁 All documents
+                <FolderIcon className="h-4 w-4 shrink-0 opacity-70" /> All documents
               </Link>
             </li>
             {folders
@@ -87,9 +88,9 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Re
                 <li key={f.id}>
                   <Link
                     href={`/documents?folder=${f.id}`}
-                    className={`block rounded-lg px-3 py-2 text-sm font-medium ${activeFolder === f.id ? "bg-navy-50 text-navy-700" : "text-slate-600 hover:bg-slate-50"}`}
+                    className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${activeFolder === f.id ? "bg-navy-50 text-navy-700" : "text-slate-600 hover:bg-slate-50"}`}
                   >
-                    📁 {f.name}
+                    <FolderIcon className="h-4 w-4 shrink-0 opacity-70" /> {f.name}
                   </Link>
                   {folders
                     .filter((c) => c.parent_folder_id === f.id)
@@ -97,9 +98,9 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Re
                       <Link
                         key={c.id}
                         href={`/documents?folder=${c.id}`}
-                        className={`ml-4 block rounded-lg px-3 py-1.5 text-xs font-medium ${activeFolder === c.id ? "bg-navy-50 text-navy-700" : "text-slate-500 hover:bg-slate-50"}`}
+                        className={`ml-4 flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${activeFolder === c.id ? "bg-navy-50 text-navy-700" : "text-slate-500 hover:bg-slate-50"}`}
                       >
-                        📂 {c.name}
+                        <FolderOpenIcon className="h-3.5 w-3.5 shrink-0 opacity-70" /> {c.name}
                       </Link>
                     ))}
                 </li>
@@ -126,7 +127,9 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Re
                 {docs.map((d) => (
                   <li key={d.id}>
                     <Link href={`/documents/${d.id}`} className="flex min-h-touch flex-wrap items-center gap-2 py-2.5 hover:bg-slate-50">
-                      <span aria-hidden>{d.confidentiality === "restricted" ? "🔒" : "📄"}</span>
+                      {d.confidentiality === "restricted"
+                        ? <LockIcon className="h-4 w-4 shrink-0 text-slate-400" />
+                        : <FileTextIcon className="h-4 w-4 shrink-0 text-slate-400" />}
                       <span className="min-w-0 flex-1 basis-64 text-sm font-medium text-slate-800">
                         {d.title}
                         {d.document_type && <span className="ml-2 text-2xs text-slate-400">{d.document_type}</span>}

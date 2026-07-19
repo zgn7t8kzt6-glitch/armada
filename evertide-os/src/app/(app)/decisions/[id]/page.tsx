@@ -4,6 +4,7 @@ import { getAppContext } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { Card, OwnerChip, PageHeader, StatusPill } from "@/components/ui";
 import { DecisionActions } from "@/components/decisions/decision-forms";
+import { LockIcon } from "@/components/icons";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { Decision, Profile } from "@/lib/types";
 
@@ -94,8 +95,9 @@ export default async function DecisionDetailPage({ params }: { params: { id: str
             )}
           </dl>
           {(decision.status === "approved" || decision.status === "implemented") && (
-            <p className="mt-3 rounded-lg bg-teal-50 px-3 py-2 text-2xs text-teal-800">
-              🔒 Approved decision — substance is immutable. It can be superseded, or corrected by an admin with an audited reason.
+            <p className="mt-3 flex items-start gap-1.5 rounded-lg bg-teal-50 px-3 py-2 text-2xs text-teal-800">
+              <LockIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Approved decision — substance is immutable. It can be superseded, or corrected by an admin with an audited reason.
             </p>
           )}
         </Card>

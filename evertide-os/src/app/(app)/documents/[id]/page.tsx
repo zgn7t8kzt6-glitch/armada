@@ -7,6 +7,7 @@ import {
   DocumentMetaForm, GrantEditor, PhiWarning, UploadVersionButton,
 } from "@/components/documents/document-forms";
 import { formatDateTime } from "@/lib/format";
+import { DownloadIcon } from "@/components/icons";
 import type { DocumentFolder, DocumentRow, DocumentVersion, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -50,10 +51,11 @@ export default async function DocumentDetailPage({ params }: { params: { id: str
         <Link href="/documents" className="hover:underline">Documents</Link> / Detail
       </nav>
       <PageHeader
-        title={`${doc.confidentiality === "restricted" ? "🔒 " : ""}${doc.title}`}
+        title={doc.title}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <StatusPill status={doc.status} />
+            {doc.confidentiality === "restricted" && <StatusPill status="at_risk" label="Restricted" />}
             {doc.source_of_truth && <StatusPill status="active" label="Source of truth" />}
             <OwnerChip profile={doc.owner} />
           </span>
@@ -89,7 +91,7 @@ export default async function DocumentDetailPage({ params }: { params: { id: str
                     </span>
                   </span>
                   <a href={`/api/documents/download/${v.id}`} className="btn-secondary !min-h-9 !px-3 !py-1 text-xs">
-                    ⬇ Download
+                    <DownloadIcon className="h-3.5 w-3.5" /> Download
                   </a>
                 </li>
               ))}

@@ -3,6 +3,7 @@ import { getAppContext } from "@/lib/context";
 import { supabaseServer } from "@/lib/supabase/server";
 import { Card, OwnerChip, PageHeader, StatusPill } from "@/components/ui";
 import { PersonModalButton, VendorModalButton } from "@/components/people/people-forms";
+import { DownloadIcon } from "@/components/icons";
 import { formatDate } from "@/lib/format";
 import { todayInTz, isoAddDays } from "@/lib/logic/dates";
 import { statusLabel } from "@/lib/format";
@@ -78,7 +79,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Recor
         >
           Vendors ({vendors.length})
         </Link>
-        <a href={`/people/export?tab=${tab}`} className="btn-secondary !min-h-touch text-xs" download>⬇ CSV</a>
+        <a href={`/people/export?tab=${tab}`} className="btn-secondary !min-h-touch text-xs" download><DownloadIcon className="h-4 w-4" /> CSV</a>
       </div>
 
       {renewalAlerts.length > 0 && (

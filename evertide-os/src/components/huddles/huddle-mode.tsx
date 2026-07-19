@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { Modal } from "@/components/modal";
 import { CarryBadge, OwnerChip, StatusPill } from "@/components/ui";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { PlayIcon, PrinterIcon, StopIcon, TrophyIcon } from "@/components/icons";
 import { formatDate } from "@/lib/format";
 import { isoAddDays } from "@/lib/logic/dates";
 import type { Commitment, Huddle, HuddleAgendaItem, Kpi, KpiEntry, Profile } from "@/lib/types";
@@ -120,7 +121,7 @@ export function HuddleMode(props: HuddleModeProps) {
             <StatusPill status={huddle.status} />
             {isDraft && canWrite && (
               <button type="button" className="btn-teal" disabled={pending} onClick={() => act(() => startHuddle(huddle.id), "Huddle started — agenda frozen")}>
-                ▶ Start huddle
+                <PlayIcon className="h-4 w-4" /> Start huddle
               </button>
             )}
             {isLive && canWrite && (
@@ -136,11 +137,11 @@ export function HuddleMode(props: HuddleModeProps) {
                   act(() => endHuddle(huddle.id), "Huddle ended — snapshot saved");
                 }}
               >
-                ■ End huddle
+                <StopIcon className="h-4 w-4" /> End huddle
               </button>
             )}
             {huddle.status === "completed" && (
-              <button type="button" className="btn-secondary no-print" onClick={() => window.print()}>🖨 Print</button>
+              <button type="button" className="btn-secondary no-print" onClick={() => window.print()}><PrinterIcon className="h-4 w-4" /> Print</button>
             )}
           </div>
         </div>
@@ -155,7 +156,7 @@ export function HuddleMode(props: HuddleModeProps) {
 
       {/* 2. Wins */}
       <section className="print-page rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-bold text-navy-700">🏆 Wins</h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-bold text-navy-700"><TrophyIcon className="h-4 w-4 text-teal-500" /> Wins</h2>
         {isLive && canWrite ? (
           <div className="mt-2 flex gap-2">
             <textarea

@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { TideMark } from "@/components/brand";
+import { MailIcon } from "@/components/icons";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 function LoginForm() {
@@ -58,7 +59,7 @@ function LoginForm() {
         <div className="rounded-2xl border border-white/10 bg-white p-6 shadow-2xl">
           {sent ? (
             <div className="text-center" role="status">
-              <p className="text-3xl" aria-hidden>📬</p>
+              <MailIcon className="mx-auto h-10 w-10 text-teal-500" />
               <h2 className="mt-2 text-sm font-bold text-navy-700">Check your email</h2>
               <p className="mt-1 text-xs text-slate-500">
                 We sent a magic sign-in link to <strong>{email}</strong>. It expires shortly — open it on this device.

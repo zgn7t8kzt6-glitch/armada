@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Generates BLUEPRINT.pdf — the master plan for the Family Money HQ app.
+"""Generates BLUEPRINT.pdf — the master plan for FamilyOS.
 Edit the CONTENT below, run `python3 blueprint.py`, and the PDF regenerates.
 
-v2.0 — revised after Shlomo's review: the app optimizes the family's future,
-not money. Legacy is the destination; money is the operating system under it.
+v3.0 — the freeze candidate. Changes from v2.0, per Shlomo's product-CEO pass:
+  1. Operating-system framing: one promise up front — every important financial
+     decision happens inside FamilyOS. Working name adopted: FamilyOS.
+  2. New core feature: the Decision Engine (five lenses, same flow every time).
+  3. The product gets wiser every year: the January "Lessons Learned" job.
+  4. "Mission" removed from screen vocabulary — users see Goals. (The data
+     model keeps Mission internally.)
+  5. Family Board Meeting deliberately parked as the version-3 horizon.
+  6. Feature freeze written into the document itself.
 
 NOTE: only WinAnsi-safe characters (base Helvetica). No arrows or math glyphs —
 use ›, "max/min", "~".
@@ -24,7 +31,6 @@ DIM = HexColor("#5D6B74")
 CREAM = HexColor("#F5F2EC")
 LINE = HexColor("#D9D2C2")
 PANEL = HexColor("#FAF7F0")
-GREEN = HexColor("#1E8E5A")
 
 W, H = letter
 OUT = "BLUEPRINT.pdf"
@@ -38,7 +44,7 @@ def st(name, **kw):
 S = {
     "cover_kicker": st("ck", fontName="Helvetica-Bold", fontSize=11, textColor=GOLD,
                         alignment=TA_CENTER),
-    "cover_title": st("ct", fontName="Helvetica-Bold", fontSize=30, leading=36,
+    "cover_title": st("ct", fontName="Helvetica-Bold", fontSize=32, leading=38,
                        alignment=TA_CENTER, textColor=INK),
     "cover_sub": st("cs", fontSize=13, leading=19, alignment=TA_CENTER, textColor=DIM),
     "h1": st("h1", fontName="Helvetica-Bold", fontSize=17, leading=21,
@@ -53,6 +59,8 @@ S = {
     "small": st("sm", fontSize=9, leading=13, textColor=DIM),
     "quote": st("q", fontSize=12, leading=18, textColor=DIM, leftIndent=24,
                  rightIndent=24, spaceBefore=6, spaceAfter=10),
+    "promise": st("pr", fontName="Helvetica-Bold", fontSize=14, leading=20,
+                   alignment=TA_CENTER, textColor=INK, spaceBefore=8, spaceAfter=8),
 }
 
 def bullet(text):
@@ -99,7 +107,7 @@ def on_page(canvas, doc):
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(DIM)
         canvas.drawString(0.9 * inch, 0.55 * inch,
-                          "Family Money HQ — A Family Operating System  ·  Blueprint v2.0  ·  Private")
+                          "FamilyOS — the operating system for our family's financial life  ·  Blueprint v3.0  ·  Private")
         canvas.drawRightString(W - 0.9 * inch, 0.55 * inch, f"Page {doc.page}")
         canvas.setStrokeColor(LINE)
         canvas.setLineWidth(0.5)
@@ -115,7 +123,7 @@ def on_page(canvas, doc):
 doc = BaseDocTemplate(OUT, pagesize=letter,
                       leftMargin=0.9 * inch, rightMargin=0.9 * inch,
                       topMargin=0.9 * inch, bottomMargin=0.95 * inch,
-                      title="Family Money HQ — Blueprint v2.0",
+                      title="FamilyOS — Blueprint v3.0",
                       author="Shlomo & Rachel")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
 doc.addPageTemplates([PageTemplate(id="all", frames=[frame], onPage=on_page)])
@@ -124,49 +132,61 @@ story = []
 
 # ================================================================ COVER
 story += [
-    Spacer(1, 1.9 * inch),
-    Paragraph("PRIVATE &nbsp;·&nbsp; VERSION 2.0 &nbsp;·&nbsp; JULY 2026", S["cover_kicker"]),
+    Spacer(1, 1.8 * inch),
+    Paragraph("PRIVATE &nbsp;·&nbsp; VERSION 3.0 — FREEZE CANDIDATE &nbsp;·&nbsp; JULY 2026",
+              S["cover_kicker"]),
     Spacer(1, 14),
-    Paragraph("Family Money HQ", S["cover_title"]),
+    Paragraph("FamilyOS", S["cover_title"]),
     Spacer(1, 8),
-    Paragraph("A Family Operating System", S["cover_sub"]),
-    Spacer(1, 16),
-    Paragraph("The app does not optimize money. It optimizes our family's future.<br/>"
-              "Money is the operating system that funds it.", S["cover_sub"]),
-    Spacer(1, 24),
+    Paragraph("The operating system for our family's financial life", S["cover_sub"]),
+    Spacer(1, 22),
     HRFlowable(width=2.2 * inch, thickness=1.5, color=GOLD, hAlign="CENTER"),
-    Spacer(1, 24),
+    Spacer(1, 22),
+    Paragraph("One promise:", S["cover_sub"]),
+    Paragraph("Every important financial decision our family ever makes<br/>"
+              "happens inside FamilyOS.", S["promise"]),
+    Spacer(1, 22),
     Paragraph("“It doesn't just answer: where did our money go?<br/>"
               "It answers: are we building the life we said we wanted?”", S["quote"]),
-    Spacer(1, 1.1 * inch),
-    Paragraph("v2.0 — revised after Shlomo's review of v1.0.<br/>"
-              "Legacy is now the destination. Every dollar gets a name on it.<br/>"
-              "We perfect this document first — then we build exactly what it says.",
-              S["cover_sub"]),
+    Spacer(1, 0.9 * inch),
+    Paragraph("v3.0 is the freeze. Nothing more gets added.<br/>"
+              "From here the work is execution and polish —<br/>"
+              "making the experience feel calm and inevitable.", S["cover_sub"]),
     PageBreak(),
 ]
 
-# ================================================================ 1. VISION
-story += sec(1, "Vision — the six-step progression",
-    "One private app where Shlomo and Rachel sign in and run the family — every "
-    "account, every child, every goal, every document — with a system that makes "
-    "the right thing automatic and the wrong thing hard. The end state is not a "
-    "number. It is a family whose future is funded and whose values transfer with "
-    "the assets.")
+# ================================================================ 1. THE PROMISE
+story += sec(1, "The promise — an operating system, not an app",
+    "Apple doesn't sell hardware; it sells the place where your digital life "
+    "happens. FamilyOS is not software with features. It is the place where our "
+    "family's financial life happens — and every screen in this blueprint exists "
+    "to keep that one promise:")
+story.append(Paragraph("Every important financial decision our family ever makes "
+                       "happens inside FamilyOS.", S["promise"]))
+story.append(tbl([
+    ["Life brings...", "It starts in FamilyOS as..."],
+    ["Buying a car", P("A Decision Engine run (Section 8) — five lenses, one archive entry.", "small")],
+    ["Accepting a new job", P("An income change: the waterfall re-plans, every Goal re-projects.", "small")],
+    ["Buying a rental", P("A deal card on the Desk — analyzed before it's wanted.", "small")],
+    ["Having another child", P("A new profile; the pre-arrival checklist opens itself.", "small")],
+    ["Updating a will", P("An estate task with a deadline, filed to the Vault when done.", "small")],
+], [1.6 * inch, 5.1 * inch]))
+story += [
+    Spacer(1, 8),
+    Paragraph("The six-step progression", S["h2"]),
+    P("The end state is not a number. It is a family whose future is funded and "
+      "whose values transfer with the assets. Each step rests on the one before "
+      "it, and the ladder — not the account balance — is the real scoreboard."),
+]
 story.append(tbl([
     ["Step", "Stage", "What it means"],
     ["1", "Control spending", P("Guardrails, the alert ladder, self-binding rules — Section 5.", "small")],
     ["2", "Automate saving", P("The income waterfall: every dollar assigned the day it arrives — Section 6.", "small")],
-    ["3", "Build wealth", P("Boring automatic investing plus the disciplined real-estate desk — Section 9.", "small")],
-    ["4", "Protect wealth", P("Insurance, estate documents, the Legacy Vault, kill switches — Sections 10-11.", "small")],
+    ["3", "Build wealth", P("Boring automatic investing plus the disciplined real-estate desk — Section 10.", "small")],
+    ["4", "Protect wealth", P("Insurance, estate documents, the Legacy Vault, kill switches — Sections 11-12.", "small")],
     ["5", "Fund the children's future", P("A full financial life per child, tracked to 100% funded — Section 4.", "small")],
-    ["6", "Transfer values, not just assets", P("The Family Constitution, annual letters, the Summit — Section 10.", "small")],
+    ["6", "Transfer values, not just assets", P("The Family Constitution, annual letters, the Summit — Section 11.", "small")],
 ], [0.5 * inch, 2.2 * inch, 4.0 * inch]))
-story += [
-    Spacer(1, 6),
-    P("Each step rests on the one before it. The app always shows where we are on "
-      "this ladder — and the ladder, not the account balance, is the real scoreboard."),
-]
 
 # ================================================================ 2. USERS
 story += sec(2, "The family — who signs in, and what they see")
@@ -199,19 +219,22 @@ story += [
 
 # ================================================================ 3. PILLARS
 story += sec(3, "The nine pillars",
-    "Everything the app does falls under one of these. If a feature idea doesn't "
-    "fit a pillar, it doesn't go in. Pillar 9 is the destination the other eight "
-    "exist to serve.")
+    "Everything FamilyOS does falls under one of these — and nothing new gets "
+    "added (see the freeze, Section 14). Pillar 9 is the destination the other "
+    "eight exist to serve.")
 pillars = [
     ("1. Connected accounts",
      "Every bank account, credit card, loan, and investment account linked through "
      "Plaid (Section 6). Balances and transactions sync several times a day; manual "
      "accounts (cash, private loans, the business draw) added by hand. One screen = "
      "the whole picture."),
-    ("2. Missions — every dollar gets a job",
-     "The four buckets of v1.0 grow into named Missions: money assigned to a person "
-     "and a purpose (“Judah — Education”, “Emergency Fund”, “Property #1”). Income "
-     "flows through the waterfall (Section 6) until nothing floats unassigned."),
+    ("2. Goals — every dollar gets a job",
+     "Money assigned to a person and a purpose: “Judah › Education”, “Emergency "
+     "Fund”, “First Property”, “Retirement”, “Giving”, “Vacation”. Income flows "
+     "through the waterfall (Section 6) until nothing floats unassigned, and the "
+     "net-worth scoreboard shows every Goal's funding progress. (In the data model "
+     "these are Missions; on screen we only ever say <b>Goals</b> — less vocabulary, "
+     "less cognitive load.)"),
     ("3. Guardrails — “keep me in check”",
      "The conscience of the app: real-time rules that watch spending and respond on "
      "a ladder — nudge › alert › cool-down › witness. Built for a compulsive "
@@ -219,25 +242,26 @@ pillars = [
     ("4. Autopilot",
      "Transfers earn trust in stages: guided (we tap), bank-native rules (the app "
      "audits), app-initiated (capped + two-key). Section 6."),
-    ("5. Net worth & goals",
-     "The monthly scoreboard: assets minus debts, trend over time, and funding "
-     "progress on every Mission. The page we open at the monthly money meeting."),
+    ("5. The Decision Engine",
+     "The feature that makes this an operating system: every important decision — "
+     "a car, a job, a property, a school — runs through the same five lenses and "
+     "gets archived with its reasoning. Section 8."),
     ("6. The real-estate desk",
      "Allocation cap, a deal analyzer that forces day-one cash-flow math, and a "
-     "pipeline board. Real estate is a lane, not the whole road. Section 9."),
+     "pipeline board. Real estate is a lane, not the whole road. Section 10."),
     ("7. The Library & curriculum",
-     "The books and thinkers as a guided reading plan — now including the "
-     "behavioral-finance bench (Section 12) — plus a dedicated track on compulsive "
+     "The books and thinkers as a guided reading plan — including the "
+     "behavioral-finance bench (Section 13) — plus a dedicated track on compulsive "
      "spending and money psychology."),
     ("8. The AI Chief Financial Officer",
-     "Claude stops waiting for questions and takes on scheduled jobs: daily pulse, "
-     "weekly digest, monthly close, quarterly opportunities, annual review. "
-     "Section 8."),
+     "Claude doesn't wait for questions: daily pulse, weekly digest, monthly close, "
+     "quarterly opportunities, the annual review — and every January, Lessons "
+     "Learned, so the system gets wiser as we do. Section 9."),
     ("9. Family Legacy",
      "The destination. Every family member with a timeline, goals, accounts, "
      "letters, and memories; the Family Constitution; the Annual Summit; the Legacy "
      "Vault; the Family Strength Score. Net worth becomes life worth. Sections 4 "
-     "and 10-11."),
+     "and 11-12."),
 ]
 for t, d in pillars:
     story.append(KeepTogether([Paragraph(t, S["h2"]), P(d)]))
@@ -250,17 +274,17 @@ story.append(Paragraph("The family dashboard", S["h2"]))
 story.append(P(
     "One screen, four panels: <b>Family</b> (a card per person — Rachel, Shlomo, "
     "Judah, Baby #2, future children), <b>Timeline</b> (what's coming, below), "
-    "<b>Constitution</b> (Section 10), and <b>Vault</b> (Section 11). Each person's "
+    "<b>Constitution</b> (Section 11), and <b>Vault</b> (Section 12). Each person's "
     "card holds their age and life timeline, goals, accounts, insurance coverage, "
     "estate status, education plan, investment accounts, memories, and the annual "
     "letter written to them."))
 story.append(Paragraph("A full financial life per child — not one “kids fund”", S["h2"]))
 story.append(P(
-    "Each child gets a menu of Missions, opened over time. Every Mission carries a "
-    "goal amount, current balance, projected value at the target date, funding "
+    "Each child gets a menu of Goals, opened over time. Every Goal carries a "
+    "target amount, current balance, projected value at the target date, funding "
     "percentage, years remaining, and one AI recommendation."))
 story.append(tbl([
-    ["Life stage", "Missions (per child)"],
+    ["Life stage", "Goals (per child)"],
     ["Growing up", P("Education (529 · school · camp · college · seminary/yeshiva) · "
                      "birthday fund · travel fund", "small")],
     ["Launching", P("First car · wedding · first home · business fund · "
@@ -268,19 +292,19 @@ story.append(tbl([
     ["Protected", P("Emergency fund · medical reserve · life insurance · "
                     "inheritance (via the trust)", "small")],
     ["Formed", P("Investment account (they watch it grow) · giving fund (they choose "
-                 "where) — the two Missions that teach, not just fund", "small")],
+                 "where) — the two Goals that teach, not just fund", "small")],
 ], [1.2 * inch, 5.5 * inch]))
 story.append(Spacer(1, 8))
 story.append(KeepTogether([
     Paragraph("Opening a child's profile (illustrative numbers)", S["h2"]),
     tbl([
-        ["Judah — Mission", "Funded", "AI recommendation"],
+        ["Judah — Goal", "Funded", "AI recommendation"],
         ["Education", "72%", P("On pace. 529 auto-deposit continues.", "small")],
         ["First home", "41%", P("Ahead of schedule for his age — no change.", "small")],
         ["Wedding", "18%", P("Slightly behind the glide path.", "small")],
         ["Business fund", "0%", P("Not yet opened — decision D11.", "small")],
-        ["All missions", "—", P("“Increase monthly deposits by ~$110 and Judah "
-                                "reaches every goal by age 25.”", "small")],
+        ["All goals", "—", P("“Increase monthly deposits by ~$110 and Judah "
+                             "reaches every goal by age 25.”", "small")],
     ], [1.7 * inch, 0.8 * inch, 4.2 * inch]),
 ]))
 story.append(Spacer(1, 8))
@@ -296,14 +320,14 @@ story.append(tbl([
      P("Pre-arrival checklist: hospital costs, life-insurance update, new 529, "
        "estate/trust amendment, guardianship review.", "small")],
     ["Early years", "Preschool · camp",
-     P("Tuition Missions activate; monthly funding suggested from the waterfall.", "small")],
+     P("Tuition Goals activate; monthly funding suggested from the waterfall.", "small")],
     ["Age 13", "Bar mitzvah",
      P("Celebration fund with a per-month glide path — funded years out, never "
        "financed.", "small")],
     ["Age 18+", "College / seminary",
      P("529 drawdown plan; the AI CFO re-projects every year.", "small")],
     ["Adulthood", "Wedding · first home",
-     P("The long Missions everyone forgets until they're urgent. Here they're 20 "
+     P("The long Goals everyone forgets until they're urgent. Here they're 20 "
        "years of small deposits instead.", "small")],
 ], [0.95 * inch, 1.75 * inch, 4.0 * inch]))
 
@@ -347,7 +371,7 @@ story += [
            "“what triggered it?” Consistency is celebrated over perfection."),
     bullet("<b>An urge journal.</b> One tap logs “I wanted to buy ___ because ___.” "
            "Over months this becomes the trigger map."),
-    bullet("<b>The bigger yes.</b> Every blocked impulse shows the Mission it feeds "
+    bullet("<b>The bigger yes.</b> Every blocked impulse shows the Goal it feeds "
            "instead — “that $1,800 is a month of Judah's education fund.” Tradeoffs "
            "are framed as future gains, never as current losses."),
     bullet("<b>Beyond the app — named honestly.</b> Compulsive spending can be a real "
@@ -362,16 +386,16 @@ story += sec(6, "Every dollar gets a job — the income waterfall",
     "floats unassigned. The order is the priority. The dashboard's proudest line "
     "is: “Every dollar has been assigned.”")
 story.append(tbl([
-    ["Order", "Mission", "Rule"],
+    ["Order", "Goal", "Rule"],
     ["1", "Fixed expenses", P("Funded first, capped by R1.", "small")],
     ["2", "Emergency fund", P("Until 6 months of expenses (R4); then skipped.", "small")],
     ["3", "Retirement", P("Automatic index investing (R2).", "small")],
     ["4", "Brokerage", P("The flexible wealth engine.", "small")],
     ["5", "Real estate fund", P("Feeds the Desk, inside the R5 cap.", "small")],
-    ["6", "Kids — education", P("Each child's 529 and school Missions.", "small")],
-    ["7", "Kids — life funds", P("Wedding, first home, launch Missions.", "small")],
+    ["6", "Kids — education", P("Each child's 529 and school Goals.", "small")],
+    ["7", "Kids — life funds", P("Wedding, first home, launch Goals.", "small")],
     ["8", "Vacation / simchas", P("Named, dated, guilt-free when spent.", "small")],
-    ["9", "Giving / tzedakah", P("Planned like a Mission, not an afterthought (R12).", "small")],
+    ["9", "Giving / tzedakah", P("Planned like a Goal, not an afterthought (R12).", "small")],
     ["10", "Fun money", P("Protected, not just permitted (R3).", "small")],
     ["11", "Opportunity fund", P("Whatever is left. Dry powder for the deal, the "
                                  "moment, the mitzvah we didn't see coming.", "small")],
@@ -418,18 +442,58 @@ story.append(tbl([
     ["R9", "Any new debt besides a mortgage", "Two-key + 7 days"],
     ["R10", "Weekly money check-in (15 min) / monthly meeting (45 min)", "Sun / 1st of month"],
     ["R11", "Rental deals must cash-flow day one (after vacancy, mgmt, upkeep)", "DSCR 1.25+"],
-    ["R12", "Tzedakah / giving — a waterfall Mission, not an afterthought", "set together"],
+    ["R12", "Tzedakah / giving — a waterfall Goal, not an afterthought", "set together"],
     ["R13", "Raise rule: % of any raise saved before lifestyle expands", "50% min"],
-    ["R14", "Kids' Missions funded before parents' luxuries upgrade", "always"],
-    ["R15", "Every two-key decision is checked against the Constitution", "always"],
+    ["R14", "Kids' Goals funded before parents' luxuries upgrade", "always"],
+    ["R15", "Every two-key decision runs through the Decision Engine", "always"],
 ], [0.45 * inch, 4.35 * inch, 1.9 * inch]))
 story.append(Spacer(1, 6))
 story.append(P("The Rulebook lives on its own page in the app, signed by both of us, "
                "with a change history. Rules are the product; screens are just how we "
                "look at them.", "lead"))
 
-# ================================================================ 8. AI CFO
-story += sec(8, "The AI Chief Financial Officer",
+# ================================================================ 8. DECISION ENGINE
+story += sec(8, "The Decision Engine — five lenses, every time",
+    "The one feature that makes FamilyOS an operating system instead of a "
+    "dashboard. The app never answers a big question with yes or no. It walks "
+    "every important decision — a car, a job offer, a property, a school, a loan "
+    "to a friend — through the same five lenses, in the same order, and archives "
+    "the result.")
+story.append(Paragraph("Example: Rachel asks, “Should we buy this SUV?”", S["h2"]))
+story.append(tbl([
+    ["Lens", "The question", "What the app shows"],
+    ["1. Rulebook", P("Does it violate a rule?", "small"),
+     P("“$41,000 — this is a two-key purchase (R8) and new debt would trip R9. "
+       "Both keys required.”", "small")],
+    ["2. Constitution", P("Is this who we are?", "small"),
+     P("The one-page Constitution, side by side with the decision: does it fit "
+       "what we spend freely on, and what we never finance?", "small")],
+    ["3. Cash flow", P("Can we comfortably afford it?", "small"),
+     P("The real monthly cost (payment, insurance, gas, depreciation) laid over "
+       "the buckets: “fixed costs go from 54% to 58% of take-home.”", "small")],
+    ["4. Opportunity\ncost", P("Which Goal loses funding?", "small"),
+     P("“This is 14 months of Judah's education deposits, or 9% of the next "
+       "property's down payment.”", "small")],
+    ["5. AI\nrecommendation", P("What would the CFO do?", "small"),
+     P("A recommendation with reasoning, never a command: “Based on your goals, "
+       "I recommend waiting six months — here's what changes if you do.”", "small")],
+], [1.05 * inch, 1.6 * inch, 4.05 * inch]))
+story += [
+    Spacer(1, 8),
+    P("<b>The decision archive.</b> Every run is saved — the question, the five "
+      "lenses, what we chose, and why. Over twenty years this becomes the family's "
+      "decision journal: the raw material for Lessons Learned (Section 9), the "
+      "Summit, and someday the version-3 Board Meeting. The kids won't just inherit "
+      "assets; they'll inherit <i>how we decided</i>."),
+    P("<b>Scope:</b> anything over the two-key threshold (R8) must run through the "
+      "Engine — that's R15. Anything smaller may, with one tap from the want-to-buy "
+      "list. The Engine is also the front door for life decisions with money "
+      "inside them: a job offer re-plans the waterfall; a new child opens the "
+      "pre-arrival checklist; an estate update files to the Vault."),
+]
+
+# ================================================================ 9. AI CFO
+story += sec(9, "The AI Chief Financial Officer",
     "Claude doesn't wait to be asked. It holds scheduled jobs with named outputs, "
     "grounded in our live numbers, the Rulebook, the Constitution, and the "
     "Library's principles. Warm, direct, zero scolding.")
@@ -440,23 +504,40 @@ story.append(tbl([
     ["Weekly", P("The digest for the Sunday check-in (R10): buckets, wins, one "
                  "question to discuss.", "small"),
      P("“Your investment rate went up this week.”", "small")],
-    ["Monthly", P("The close: plan vs. actual, net worth move, Mission funding, "
+    ["Monthly", P("The close: plan vs. actual, net worth move, Goal funding, "
                   "one recommendation.", "small"),
      P("“You are on track to retire at 53.”", "small")],
     ["Quarterly", P("Opportunities: allocation drift, cash building up, rate "
                     "changes, the Desk.", "small"),
      P("“You'll have enough cash for another rental in ~19 months.”", "small")],
-    ["Annually", P("The Summit report (Section 10) and every child's re-projection.", "small"),
+    ["Annually", P("The Summit report (Section 11) and every child's re-projection.", "small"),
      P("“Judah's education fund is 8% behind — add $95/month to close it.”", "small")],
-], [0.85 * inch, 3.15 * inch, 2.7 * inch]))
-story.append(Spacer(1, 6))
-story.append(P("The CFO also runs the Family Timeline: it opens checklists for "
-               "upcoming life events months ahead, re-projects every Mission when "
-               "reality drifts from plan, and drafts — never sends — anything that "
-               "involves the outside world."))
+    ["Every January", P("Lessons Learned — the retrospective that makes the system "
+                        "wiser (below).", "small"),
+     P("“Here are the five biggest mistakes we made last year — and the three "
+       "best calls.”", "small")],
+], [1.0 * inch, 3.0 * inch, 2.7 * inch]))
+story += [
+    Spacer(1, 8),
+    Paragraph("Lessons Learned — the product gets smarter every year", S["h2"]),
+    P("Every January the CFO reads the year — every transaction, every guardrail "
+      "event, every Decision Engine run — and writes five lists:"),
+    bullet("The <b>five biggest financial mistakes</b> we made last year, with what "
+           "each one cost."),
+    bullet("The <b>three best decisions</b> we made, with what each one earned."),
+    bullet("The <b>habits that changed</b> — spending velocity, urge-journal "
+           "patterns, cool-downs that worked."),
+    bullet("The <b>Rules we never broke</b> — celebrated, because consistency is "
+           "the win."),
+    bullet("The <b>Rules we should modify</b> — each with a drafted amendment, "
+           "queued for the Summit. Nothing changes without both signatures."),
+    P("This is the flywheel: the family gets wiser, the Rulebook absorbs the "
+      "wisdom, and the app enforces the improved rules for another year. The "
+      "product compounds the same way the money does."),
+]
 
-# ================================================================ 9. RE DESK
-story += sec(9, "The real-estate desk",
+# ================================================================ 10. RE DESK
+story += sec(10, "The real-estate desk",
     "Real estate is a lane, not the whole road. The desk keeps it disciplined.")
 story += [
     bullet("<b>Allocation gauge.</b> Live view of real estate as % of net worth "
@@ -470,12 +551,13 @@ story += [
            "we even glance at gets a card, so urgency-sellers get answered with data."),
     bullet("<b>Owned-property P&amp;L.</b> Each property's true annual return — "
            "compared honestly against “what if this equity were in index funds.”"),
-    bullet("<b>The funding path.</b> The waterfall's real-estate Mission shows "
-           "time-to-down-payment at current pace."),
+    bullet("<b>The funding path.</b> The waterfall's real-estate Goal shows "
+           "time-to-down-payment at current pace. Buying itself is a Decision Engine "
+           "run — the Desk feeds lens 3 and 4 automatically."),
 ]
 
-# ================================================================ 10. CONSTITUTION & SUMMIT
-story += sec(10, "The Family Constitution & the Annual Summit",
+# ================================================================ 11. CONSTITUTION & SUMMIT
+story += sec(11, "The Family Constitution & the Annual Summit",
     "Step 6 of the ladder: transferring values, not just assets.")
 story.append(Paragraph("The Constitution — one page, signed by both of us", S["h2"]))
 story.append(P("Written together, revised only at a Summit. It answers six questions:"))
@@ -495,21 +577,21 @@ story.append(tbl([
      P("The sentence Judah reads someday and recognizes.", "small")],
 ], [2.5 * inch, 4.2 * inch]))
 story.append(Spacer(1, 6))
-story.append(P("Every two-key decision screen shows the Constitution next to the "
-               "numbers (R15). The question is never only “can we afford it?” — it's "
-               "“is this us?”"))
+story.append(P("The Constitution is lens 2 of every Decision Engine run (Section 8). "
+               "The question is never only “can we afford it?” — it's “is this us?”"))
 story.append(Paragraph("The Annual Family Summit", S["h2"]))
 story.append(P(
     "Once a year, a real sit-down. The app auto-generates the report pack — our "
     "family's Berkshire letter: net worth and returns, spending, taxes, giving, "
-    "each child's Missions and projections, estate and insurance status, real "
-    "estate, goals hit and missed, lessons learned, wins, mistakes, and next "
-    "year's goals. We add the human part: the annual letter to each child, and "
-    "this year's family video. The Summit closes with signatures: Constitution "
-    "reaffirmed or amended, Rulebook re-signed, next year's numbers set."))
+    "each child's Goals and projections, estate and insurance status, real "
+    "estate, the year's Decision Engine archive, and the January Lessons Learned "
+    "with its proposed Rule amendments. We add the human part: the annual letter "
+    "to each child, and this year's family video. The Summit closes with "
+    "signatures: Constitution reaffirmed or amended, Rulebook re-signed, next "
+    "year's numbers set."))
 
-# ================================================================ 11. VAULT & SCORE
-story += sec(11, "The Legacy Vault & the Family Strength Score")
+# ================================================================ 12. VAULT & SCORE
+story += sec(12, "The Legacy Vault & the Family Strength Score")
 story.append(Paragraph("The Legacy Vault", S["h2"]))
 story.append(P(
     "Encrypted storage for the documents and words that matter: wills, trusts, "
@@ -538,8 +620,8 @@ story.append(P("Weights are drafts (decision D13). Estate, insurance, and kids' 
                "funding deliberately outweigh spending: a perfectly-kept budget with "
                "no will is a weak family balance sheet.", "lead"))
 
-# ================================================================ 12. BEHAVIORAL + LIBRARY
-story += sec(12, "The behavioral bench & the Library",
+# ================================================================ 13. BEHAVIORAL + LIBRARY
+story += sec(13, "The behavioral bench & the Library",
     "The app quietly encodes the best of behavioral finance. These are the defaults "
     "under the hood; the Library teaches us why they work.")
 story += [
@@ -550,7 +632,7 @@ story += [
     bullet("<b>Friction only for impulse</b> — needs flow, wants wait (Kahneman: give "
            "System 2 time to show up)."),
     bullet("<b>Frame tradeoffs as future gains, not current losses</b> — every "
-           "blocked purchase shows the Mission it feeds (loss aversion, flipped)."),
+           "blocked purchase shows the Goal it feeds (loss aversion, flipped)."),
     bullet("<b>Celebrate consistency, not perfection</b> — habits compound like money "
            "(James Clear, <i>Atomic Habits</i>); a blown week gets a reset, not a "
            "streak-shaped funeral."),
@@ -567,8 +649,8 @@ story.append(P(
     "(<i>Millionaire Teacher</i>), and Nick True's mapped-out cash-flow method. One "
     "book a month, together; notes live in the Library."))
 
-# ================================================================ 13. ARCHITECTURE
-story += sec(13, "Architecture, security & running cost",
+# ================================================================ 14. ARCHITECTURE + FREEZE
+story += sec(14, "Architecture, security, cost — and the freeze",
     "Deliberately boring technology, matched to what already runs Armada — one "
     "person can maintain it. Fully separate from the business.")
 story.append(tbl([
@@ -579,8 +661,8 @@ story.append(tbl([
     ["Backend", P("Node.js + Express", "small"),
      P("Same stack as Armada — shared patterns.", "small")],
     ["Database", P("PostgreSQL, encrypted at rest; nightly encrypted backups with "
-                   "a tested restore.", "small"),
-     P("Accounts, transactions, Missions, rules, audit log.", "small")],
+                   "a tested restore. (Goals are modeled internally as Missions.)", "small"),
+     P("Accounts, transactions, Goals, rules, decisions, audit log.", "small")],
     ["Vault", P("Client-side encryption for vault files; keys held by us, not the "
                 "server.", "small"),
      P("The most personal data gets the strongest lock.", "small")],
@@ -588,7 +670,7 @@ story.append(tbl([
      P("No credentials ever touch our server.", "small")],
     ["AI", P("Claude API — claude-sonnet-5 as the CFO; Haiku for the transaction "
              "stream.", "small"),
-     P("Scheduled jobs + coaching grounded in our data.", "small")],
+     P("Scheduled jobs + the Decision Engine's fifth lens.", "small")],
     ["Notifications", P("Web push + SMS fallback (Twilio) for Witness-level alerts; "
                         "quiet hours honored (no pings on Shabbos).", "small"),
      P("Guardrails only work if they reach the phone in minutes.", "small")],
@@ -604,12 +686,19 @@ story += [
       "instantly · full data export (CSV/JSON) any time — the app never holds our "
       "life hostage."),
     P("<b>Running cost:</b> hosting + database ~$25-40/mo · Plaid ~$10-30/mo · "
-      "Claude API ~$10-25/mo with the CFO jobs · Twilio ~$5/mo. "
-      "<b>Total ~$50-100/month</b> — cheaper than one impulse purchase it prevents."),
+      "Claude API ~$10-25/mo · Twilio ~$5/mo. <b>Total ~$50-100/month</b> — cheaper "
+      "than one impulse purchase it prevents."),
+    Paragraph("The freeze", S["h2"]),
+    P("v3.0 is the last version that adds anything. From here, new feature ideas — "
+      "ours or anyone's — go to a <b>parking lot</b> reviewed once a year at the "
+      "Summit, and the bar for admission is the same question the Decision Engine "
+      "asks: does this make the core experience stronger, or just bigger? The "
+      "product should feel calm and inevitable. Calm products don't grow features; "
+      "they grow trust."),
 ]
 
-# ================================================================ 14. HONESTY
-story += sec(14, "What this app will not do",
+# ================================================================ 15. HONESTY
+story += sec(15, "What this app will not do",
     "Written down so the blueprint stays honest.")
 story += [
     bullet("It will not <b>replace the professionals</b>: the estate attorney does "
@@ -621,26 +710,32 @@ story += [
     bullet("It will not <b>pick investments or time markets.</b> The investing rule "
            "is a boring automatic index-fund transfer; the app's job is to make sure "
            "it fires."),
+    bullet("It will not <b>make decisions for us.</b> The Decision Engine structures "
+           "and remembers; the fifth lens recommends with reasoning. The choice — "
+           "and the responsibility — stays human, and two-key."),
     bullet("It will not <b>police Rachel</b> or become surveillance in either "
            "direction. Alerts are symmetric and every monitoring feature is one both "
            "partners agreed to in writing (this document)."),
     bullet("It will not <b>turn the kids into spreadsheets.</b> Judah sees goals, "
-           "growth, and a savings match — never guilt, never comparison. The "
-           "Missions fund a childhood; they don't gamify it."),
+           "growth, and a savings match — never guilt, never comparison. The Goals "
+           "fund a childhood; they don't gamify it."),
+    bullet("It will not <b>grow.</b> After v3.0, additions wait in the parking lot "
+           "for the Summit (Section 14). Execution and polish are the roadmap."),
 ]
 
-# ================================================================ 15. PHASES
-story += sec(15, "Build phases — Legacy is the destination",
+# ================================================================ 16. PHASES
+story += sec(16, "Build phases — Legacy is the destination",
     "Each phase is a complete, useful product, used for real before the next one "
     "starts. The app earns its next power by being right with the current one.")
 story.append(tbl([
     ["Phase", "What ships", "We know it works when..."],
     ["1 — The Cockpit\n(~2-3 wks)",
-     P("Logins + 2FA · manual accounts &amp; CSV import · Missions and plan vs. "
-       "actual · net worth &amp; goals · family profiles (Judah, Baby #2) · Rulebook "
-       "&amp; Constitution pages · Library · weekly digest email.", "small"),
-     P("We run one full monthly money meeting inside the app, and the Constitution "
-       "is signed.", "small")],
+     P("Logins + 2FA · manual accounts &amp; CSV import · Goals and plan vs. "
+       "actual · net worth · family profiles (Judah, Baby #2) · Rulebook &amp; "
+       "Constitution pages · Decision Engine (manual lenses, no AI yet) · Library · "
+       "weekly digest email.", "small"),
+     P("We run one full monthly money meeting inside the app, the Constitution is "
+       "signed, and one real decision has gone through the Engine.", "small")],
     ["2 — Live Data\n(~3-4 wks)",
      P("Plaid linking · auto-categorization · the guardrail ladder with push "
        "alerts · urge journal &amp; want-to-buy list · income detection with guided "
@@ -649,8 +744,8 @@ story.append(tbl([
        "transactions needs under 15 minutes of fixing.", "small")],
     ["3 — Autopilot\n(~3-4 wks)",
      P("Bank-rule auditor (Stage B) › app-initiated transfers (Stage C, capped, "
-       "two-key) · AI CFO daily/weekly/monthly jobs · cool-down &amp; witness "
-       "automation · raise rule.", "small"),
+       "two-key) · AI CFO daily/weekly/monthly jobs · the Engine's AI lens goes "
+       "live · cool-down &amp; witness automation · raise rule.", "small"),
      P("Three consecutive months of zero-touch saving with zero missed rules, and "
        "“every dollar assigned” shows green.", "small")],
     ["4 — The Desk\n(~2-3 wks)",
@@ -658,16 +753,29 @@ story.append(tbl([
        "opportunities job · advisor/CPA guest reports.", "small"),
      P("First property analyzed — or rightly rejected — inside the app.", "small")],
     ["5 — The Legacy\n(~3-4 wks)",
-     P("Full per-child Missions with projections &amp; glide paths · Family "
-       "Timeline with event checklists · Legacy Vault · Family Strength Score · "
-       "the Summit report pack · annual letters &amp; videos · kids' view.", "small"),
+     P("Full per-child Goals with projections &amp; glide paths · Family Timeline "
+       "with event checklists · Legacy Vault · Family Strength Score · the Summit "
+       "report pack · January Lessons Learned · annual letters &amp; videos · "
+       "kids' view.", "small"),
      P("We hold the first Annual Family Summit entirely from the app's report — "
        "and if something happened tomorrow, Rachel would know exactly where "
        "everything is.", "small")],
 ], [1.15 * inch, 3.2 * inch, 2.35 * inch]))
+story += [
+    Spacer(1, 8),
+    Paragraph("The version-3 horizon — saved on purpose", S["h2"]),
+    P("<b>The Family Board Meeting.</b> Once a month, the app generates the agenda "
+      "automatically — CFO report (5 min) · spending review (5 min) · goal progress "
+      "(10 min) · decisions needed (10 min) · wins (5 min) · next month (10 min) — "
+      "and everything gets recorded. Over twenty years that's an archive of how "
+      "this family decided, and how it evolved. It's a beautiful idea, which is "
+      "exactly why it waits: R10's simple weekly check-in and monthly meeting must "
+      "become an unbreakable habit first. The Board Meeting formalizes a ritual; "
+      "it cannot create one."),
+]
 
-# ================================================================ 16. DECISIONS
-story += sec(16, "Decisions to make before we build",
+# ================================================================ 17. DECISIONS
+story += sec(17, "Decisions to make before we build",
     "The blueprint is finished when every line below has an answer. This is the "
     "agenda for one sit-down between Shlomo and Rachel.")
 story.append(tbl([
@@ -680,11 +788,11 @@ story.append(tbl([
     ["D6", "Waterfall order & amounts, and starting stage (A/B/C)", "Section 6"],
     ["D7", "Estate checklist owner & deadline", "who books the attorney, by when"],
     ["D8", "Outside support", "therapist / DA meeting cadence — named, scheduled"],
-    ["D9", "App name & domain", "Family Money HQ is a placeholder"],
-    ["D10", "Draft the Constitution's six answers", "Section 10 — the one-page version"],
-    ["D11", "Each child's Mission menu & priorities", "which funds open now vs. later"],
+    ["D9", "Confirm the name: FamilyOS — and the domain", "adopted as working title in v3.0"],
+    ["D10", "Draft the Constitution's six answers", "Section 11 — the one-page version"],
+    ["D11", "Each child's Goal menu & priorities", "which funds open now vs. later"],
     ["D12", "Real dates for the Family Timeline", "birthdays, school years, Baby #2"],
-    ["D13", "Strength Score weights", "Section 11 has drafts"],
+    ["D13", "Strength Score weights", "Section 12 has drafts"],
     ["D14", "Vault contents & break-glass person", "who besides us can ever open it"],
     ["D15", "Summit date", "same week every year — pick the anchor"],
 ], [0.5 * inch, 2.9 * inch, 3.3 * inch]))
@@ -693,10 +801,11 @@ story += [
     Spacer(1, 16),
     HRFlowable(width="100%", thickness=1.2, color=GOLD),
     Spacer(1, 10),
-    P("<b>Next step:</b> read v2.0 together. If the six-step ladder, the waterfall "
-      "order, and the per-child Missions feel right, answer the D-list and the "
-      "blueprint is final. Then Phase 1 starts.", "lead"),
-    Paragraph("Family Money HQ · Blueprint v2.0 · Prepared July 2026 · "
+    P("<b>Next step:</b> answer the D-list together and sign this page. v3.0 is "
+      "the freeze — after the signatures, nothing gets added, and Phase 1 starts. "
+      "The next document anyone writes about FamilyOS is the Phase 1 build spec.",
+      "lead"),
+    Paragraph("FamilyOS · Blueprint v3.0 (freeze candidate) · Prepared July 2026 · "
               "Education and planning document — not legal, tax, or investment advice.",
               S["small"]),
 ]

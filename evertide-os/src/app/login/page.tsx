@@ -10,6 +10,7 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const params = useSearchParams();
+  const linkFailed = params.get("error") === "link";
 
   async function sendLink(e: React.FormEvent) {
     e.preventDefault();
@@ -49,6 +50,13 @@ function LoginForm() {
             </div>
           ) : (
             <form onSubmit={sendLink}>
+              {linkFailed && (
+                <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="alert">
+                  That sign-in link didn&apos;t work. Links are single-use, expire quickly, and must be opened in the{" "}
+                  <strong>same browser on the same device</strong> where you requested them. Request a fresh one below
+                  and open it here.
+                </p>
+              )}
               <label htmlFor="email" className="label">Work email</label>
               <input
                 id="email"

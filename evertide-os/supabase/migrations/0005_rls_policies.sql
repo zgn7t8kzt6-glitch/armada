@@ -270,8 +270,15 @@ create policy document_folders_write on public.document_folders
   for all using (app.is_admin_scoped(organization_id, site_id))
   with check (app.is_admin_scoped(organization_id, site_id));
 
+-- Owner/creator shortcuts must come before can_read_document(id): that
+-- function re-queries this table, and during INSERT ... RETURNING the new row
+-- is not yet visible to it, which would reject the insert.
 create policy documents_select on public.documents
-  for select using (app.can_read_document(id));
+  for select using (
+    owner_id = auth.uid()
+    or created_by = auth.uid()
+    or app.can_read_document(id)
+  );
 create policy documents_insert on public.documents
   for insert with check (app.can_write_scoped(organization_id, site_id) and created_by = auth.uid());
 create policy documents_update on public.documents

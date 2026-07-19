@@ -242,21 +242,21 @@ const VIEW_ROLES = {
   inventory:   ['Director of Operations','Catering / Dietary','Housekeeping','Nurse','Front Desk'],
   meals:       ['Director of Operations','Catering / Dietary','BHT / Tech'],
   // Clinical / care pages — the care team (+ Clinical Director)
-  clients:     [...CARE,'Front Desk','Director of Revenue Cycle Management','Director of Billing Compliance'],
-  journey:     [...CARE,'Front Desk','Director of Revenue Cycle Management','Director of Billing Compliance'],   // Front Desk can open a client's 360 from the Clients grid
+  clients:     [...CARE,'Front Desk','Director of Revenue Cycle Management','Director of Billing Compliance','Director of Nursing','House Supervisor'],
+  journey:     [...CARE,'Front Desk','Director of Revenue Cycle Management','Director of Billing Compliance','Director of Nursing','House Supervisor'],   // Front Desk can open a client's 360 from the Clients grid
   editor:      CARE,
-  records:     ['Nurse','Case Manager','Therapist','Clinical Director','Director of Revenue Cycle Management','Director of Billing Compliance'],
-  rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
-  roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
-  bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director'],
+  records:     ['Nurse','Case Manager','Therapist','Clinical Director','Director of Revenue Cycle Management','Director of Billing Compliance','Director of Nursing'],
+  rounds:      ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director','Director of Nursing','House Supervisor'],
+  roundscan:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director','Director of Nursing','House Supervisor'],
+  bedboard:    ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director','House Supervisor'],
   laundry:     ['BHT / Tech','Housekeeping','Nurse','Director of Operations','Clinical Director'],
   clientvoice: [...CARE,'Front Desk','Director of Operations'],
-  bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director','Front Desk'],
-  property:    ['BHT / Tech','Nurse','Case Manager','Front Desk','Clinical Director','Director of Operations'],
+  bedmap:      ['BHT / Tech','Nurse','Housekeeping','Director of Operations','Clinical Director','Front Desk','House Supervisor'],
+  property:    ['BHT / Tech','Nurse','Case Manager','Front Desk','Clinical Director','Director of Operations','House Supervisor'],
   workplace:   ['Executive Director','Director of Operations','Clinical Director'],
-  employees:   ['Executive Director','Director of Operations','Clinical Director'],
+  employees:   ['Executive Director','Director of Operations','Clinical Director','HR'],
   leadmirror:  ['Executive Director','Director of Operations','Clinical Director','Housing Director','HR'],
-  hiring:      ['Executive Director','Director of Operations','Clinical Director'],
+  hiring:      ['Executive Director','Director of Operations','Clinical Director','HR'],
   plan:        ['Executive Director','Director of Operations','Clinical Director'],
   excellence:  ['Executive Director','Director of Operations','Clinical Director'],
   onboarding:  ['Executive Director','Director of Operations','Clinical Director'],
@@ -266,9 +266,9 @@ const VIEW_ROLES = {
   program:     ['BHT / Tech','Therapist','Clinical Director'],
   casemgmt:    ['Case Manager','Therapist','Clinical Director'],
   continuum:   ['Case Manager','Clinical Director','Director of Revenue Cycle Management'],
-  retention:   CARE,
-  incidents:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director'],
-  compliance:  ['Nurse','Case Manager','Therapist','Clinical Director','Director of Billing Compliance'],
+  retention:   [...CARE,'Director of Nursing'],
+  incidents:   ['BHT / Tech','Nurse','Therapist','Case Manager','Clinical Director','Director of Nursing','House Supervisor'],
+  compliance:  ['Nurse','Case Manager','Therapist','Clinical Director','Director of Billing Compliance','Director of Nursing'],
   family:      ['Case Manager','Therapist','Clinical Director','Front Desk'],
   // Handoff — discharge & continuum (case management + clinical)
   dischargepage: ['Case Manager','Nurse','Clinical Director'],
@@ -278,7 +278,7 @@ const VIEW_ROLES = {
   referrals:   ['Front Desk','Case Manager','Clinical Director'],
   partners:    ['Front Desk','Case Manager','Clinical Director'],
   // Concierge requests — front desk + hands-on care
-  concierge:   ['Front Desk','BHT / Tech','Nurse','Clinical Director'],
+  concierge:   ['Front Desk','BHT / Tech','Nurse','Clinical Director','House Supervisor'],
 };
 // Recovery Housing is a separate world from clinical detox. Only housing staff
 // (and the owner/admin) ever see it; nobody on the detox/clinical side does.
@@ -367,7 +367,32 @@ const ROLE_MENU = {
   'Housing Director': ['housing','myrole','mygrowth','handbook','leadmirror','staffhub','voice','activities','residents','houses','housingstaff','housingoutcomes','rentrun','mytasks','messages'],
   'House Manager':    ['housing','myrole','mygrowth','handbook','staffhub','voice','activities','residents','houses','housingstaff','rentrun','mytasks','messages'],
   'Recovery Coach':   ['staffhub','myrole','mygrowth','handbook','housing','voice','activities','residents','houses','mytasks','messages'],
+  // ── Phase 1 lanes (Workflow Blueprint): the seven roles that used to fall
+  // through to the full ~100-item sidebar each get a focused lane, ordered by
+  // how the day flows. Leadership gets a lane too — "All pages" is one tap away.
+  'Therapist': ['dashboard','mystats','mygrowth','casemgmt','clients','records','program','engagement','retention','compliance','incidents','messages','team','training','handbook','library'],
+  'Catering / Dietary': ['dashboard','mystats','mygrowth','meals','inventory','messages','team','training','handbook','library'],
+  'Housekeeping': ['dashboard','mystats','mygrowth','bedboard','maintenance','laundry','bedmap','inventory','messages','team','training','handbook','library'],
+  'HR': ['dashboard','hcos','hiring','employees','leadmirror','mystats','mygrowth','messages','team','training','handbook','library'],
+  'Clinical Director': ['opscenter','dashboard','clients','retention','rounds','compliance','incidents','casemgmt','dischargepage','roster','outcomes','plan','employees','hiring','messages','team','training','handbook','library'],
+  // The Wave 1 leader roles (Akron pilot): home + their Leader Standard Work.
+  'Director of Nursing': ['dashboard','rounds','clients','records','compliance','retention','incidents','wave1','messages','team','training','handbook','library'],
+  'House Supervisor': ['dashboard','rounds','roundscan','bedmap','bedboard','clients','property','concierge','incidents','wave1','messages','team','training','handbook','library'],
+  'Executive Director': ['opscenter','dashboard','clients','wave1','lineup','outcomes','plan','employees','hiring','ownership','corphub','messages','team','training','handbook','library'],
+  'Director of Operations': ['opscenter','dashboard','schedule','coverage','weekgrid','roster','staffmodel','inventory','maintenance','operations','bedmap','outcomes','employees','hiring','messages','team','training','handbook','library'],
 };
+// The owner/admin lane — the decision cockpit, not the codebase map.
+const ADMIN_LANE = ['opscenter','dashboard','mydesk','command','clients','wave1','outcomes','ownership','proformas','corphub','hcos','plan','settings','users','messages','team','training','handbook','library'];
+// Who may flip between their focused lane and the full grouped sidebar.
+const LANE_TOGGLE_ROLES = ['Executive Director','Director of Operations','Clinical Director'];
+function navFull(){ try{ return localStorage.getItem('navFull')==='1'; }catch(_e){ return false; } }
+function laneToggleAvailable(){ return !!(ME && !PREVIEW_ROLE && !isHousingRole() && !isCorporateRole() && (ME.role==='admin' || LANE_TOGGLE_ROLES.includes(ME.job_role))); }
+function toggleNavFull(){
+  try{ localStorage.setItem('navFull', navFull()?'0':'1'); }catch(_e){}
+  renderGroups();
+  const cur=document.querySelector('.view.active');
+  selectGroup(cur ? (GROUP_OF[cur.id]||'stay') : 'today');
+}
 // Plain-language "how my shift flows" — the rhythm of the job in order, each step
 // linking to the tool. This is the train-a-new-hire-in-five-minutes layer.
 const SHIFT_FLOW = {
@@ -412,9 +437,10 @@ function flatMenu(){
   if(isHousingRole()) return ROLE_MENU[ME.job_role] ? ROLE_MENU[ME.job_role].filter(canSeeView) : null;
   // Corporate (Chava) gets a focused, corporate-only flat menu.
   if(isCorporateRole()) return ROLE_MENU['Executive Assistant'].filter(canSeeView);
-  // Admins + leadership keep the full grouped nav.
-  if(ME.role==='admin' || ME.job_role==='Director of Operations') return null;
-  if(ME.job_role==='Executive Director') return null;
+  // Leadership + the owner get a focused lane too — the full map stays one tap
+  // away ("⊞ All pages"). Chaos is opt-in now, never the default.
+  if(laneToggleAvailable() && navFull()) return null;
+  if(ME.role==='admin') return ADMIN_LANE.filter(canSeeView);
   return ROLE_MENU[ME.job_role] ? ROLE_MENU[ME.job_role].filter(canSeeView) : null;
 }
 function canManageStaffing(){ return !!(ME && (ME.role==='admin' || ME.job_role==='Director of Operations')); }
@@ -484,7 +510,8 @@ function renderToolsbar(){
   const acct=document.getElementById('topAccount');
   if(flat){
     shell.classList.add('flatnav');
-    bar.innerHTML = flat.filter(canSeeView).map(v=>{ const b=document.querySelector(`#nav button[data-view="${v}"]`); const label=b?(b.firstChild?b.firstChild.textContent.trim():b.textContent.trim()):v; return `<button data-tv="${v}" onclick="show('${v}')">${esc(label)}</button>`; }).join('');
+    bar.innerHTML = flat.filter(canSeeView).map(v=>{ const b=document.querySelector(`#nav button[data-view="${v}"]`); const label=b?(b.firstChild?b.firstChild.textContent.trim():b.textContent.trim()):v; return `<button data-tv="${v}" onclick="show('${v}')">${esc(label)}</button>`; }).join('')
+      + (laneToggleAvailable()?`<button onclick="toggleNavFull()" title="Show every page, grouped">⊞ All pages</button>`:'');
     bar.style.display='';
     if(acct){ acct.style.display='flex'; const w=document.getElementById('whoamiTop'); if(w&&ME) w.textContent=ME.name||''; }
   } else {
@@ -573,6 +600,7 @@ function renderGroups(){
       const secs=$('navSecs'); if(secs) secs.style.display='none';
       ['navPinned','navRecent','navFilterWrap'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
       flat.forEach(v=>{ const b=nav.querySelector(`button[data-view="${v}"]`); if(b) nav.appendChild(b); });
+      renderNavModeBtn();
     }
     renderBottomNav();
     return;
@@ -618,10 +646,26 @@ function renderGroups(){
     const st=b.querySelector('.pinbtn'); st.textContent=on?'★':'☆'; st.classList.toggle('on',on); st.title=on?'Unpin':'Pin to top';
   });
   applyNavVisibility();
+  renderNavModeBtn();
   renderBottomNav();
   // Build stamp — so "did it deploy?" is answered by looking at the sidebar.
   const bs=$('navBuild');
   if(bs&&!bs.textContent){ fetch('/sw.js').then(r=>r.text()).then(t=>{ const m=t.match(/armada-v(\d+)/); if(m) bs.textContent='build '+m[1]; }).catch(()=>{}); }
+}
+// The lane ↔ full-map switch (leadership + owner only): a focused lane by
+// default, the whole grouped sidebar one tap away — and one tap back.
+function renderNavModeBtn(){
+  const nav=$('nav'); if(!nav) return;
+  let btn=$('navModeBtn');
+  if(!laneToggleAvailable()){ if(btn) btn.remove(); return; }
+  if(!btn){
+    btn=document.createElement('button');
+    btn.id='navModeBtn'; btn.type='button'; btn.className='nav-modebtn sans';
+    btn.onclick=toggleNavFull;
+  }
+  btn.textContent = navFull() ? '◎ Back to my lane' : '⊞ All pages';
+  btn.title = navFull() ? 'Back to the focused menu for your role' : 'Show every page, grouped';
+  nav.appendChild(btn);
 }
 function selectGroup(g){
   const flat = flatMenu();
@@ -1832,7 +1876,7 @@ function renderStandard(){
 /* ---- playbook ---- */
 async function loadPlaybook(){
   const date=$('r_date').value||today(), shift=$('r_shift').value, role=$('r_role').value;
-  const data = await api(`/playbook?date=${date}&shift=${encodeURIComponent(shift)}&role=${encodeURIComponent(role)}`);
+  const data = await api(`/shift-playbook?date=${date}&shift=${encodeURIComponent(shift)}&role=${encodeURIComponent(role)}`);
   const names = data.assignees.map(a=>`${esc(a.name)} (${esc(a.job_role)})`).join(' · ');
   const coOpts = (data.staff||[]).map(s=>`<option value="${s.id}" ${data.crisisOwner===s.name?'selected':''}>${esc(s.name)}</option>`).join('');
   $('assignees').innerHTML = `${names?`On this shift: ${names}<br>`:''}<span class="no-print">🚨 Crisis Owner: <select class="sans" style="width:auto" onchange="setCrisisOwner(this.value)"><option value="">— name one —</option>${coOpts}</select></span>${data.crisisOwner?`<strong class="only-print">🚨 Crisis Owner: ${esc(data.crisisOwner)}</strong>`:''}`;
@@ -2213,7 +2257,7 @@ async function ensureReferralMeta(){
   return REFMETA;
 }
 async function refreshFacilityList(){
-  try{ const { facilities } = await api('/facilities'); window._FACS = facilities;
+  try{ const { facilities } = await api('/referral-partners'); window._FACS = facilities;
     $('rf_facility_list').innerHTML = facilities.map(f=>`<option data-id="${f.id}" value="${esc(f.name)}">`).join('');
   }catch(e){}
 }
@@ -2296,7 +2340,7 @@ async function loadPartners(){
 async function addPartner(){
   const name=$('pt_name').value.trim(); if(!name){ $('pt_msg').textContent='Name required.'; return; }
   $('pt_msg').textContent='Saving…';
-  try{ await api('/facilities',{method:'POST',body:JSON.stringify({name,type:$('pt_type').value,location:$('pt_location').value})});
+  try{ await api('/referral-partners',{method:'POST',body:JSON.stringify({name,type:$('pt_type').value,location:$('pt_location').value})});
     $('pt_msg').textContent='✓ Partner saved.'; setTimeout(()=>$('pt_msg').textContent='',2500); refreshFacilityList(); loadPartners();
   }catch(e){ $('pt_msg').innerHTML='<span style="color:var(--danger)">'+esc(e.message)+'</span>'; }
 }
@@ -4882,7 +4926,7 @@ async function planContinuum(id, name){
 }
 function pickFrom(title, opts){ const list=opts.map((o,i)=>`${i+1}. ${o}`).join('\n'); const p=prompt(`${title}:\n\n${list}\n\nEnter a number:`); if(p===null) return Promise.resolve(null); const i=parseInt(p,10); return Promise.resolve(opts[i-1]||null); }
 async function togglePartner(id, on){ try{ await api('/facilities/'+id+'/preferred',{method:'POST',body:JSON.stringify({preferred:on?1:0})}); loadApprovedPartners(); }catch(e){ alert(e.message); } }
-async function loadApprovedPartners(){ if(!$('ap_list')) return; try{ const {facilities}=await api('/facilities'); $('ap_list').innerHTML = facilities.length ? facilities.map(f=>`<label class="sans" style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${f.preferred?'var(--gold)':'var(--line)'};border-radius:8px;padding:6px 11px;margin:3px;cursor:pointer">${f.preferred?'✓ ':''}<input type="checkbox" ${f.preferred?'checked':''} onchange="togglePartner(${f.id}, this.checked)"/> ${esc(f.name)}</label>`).join('') : '<div class="hint">No facilities yet. Add one above, or they appear as you log outbound referrals.</div>'; }catch(e){} }
+async function loadApprovedPartners(){ if(!$('ap_list')) return; try{ const {facilities}=await api('/referral-partners'); $('ap_list').innerHTML = facilities.length ? facilities.map(f=>`<label class="sans" style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${f.preferred?'var(--gold)':'var(--line)'};border-radius:8px;padding:6px 11px;margin:3px;cursor:pointer">${f.preferred?'✓ ':''}<input type="checkbox" ${f.preferred?'checked':''} onchange="togglePartner(${f.id}, this.checked)"/> ${esc(f.name)}</label>`).join('') : '<div class="hint">No facilities yet. Add one above, or they appear as you log outbound referrals.</div>'; }catch(e){} }
 async function addApprovedPartner(){ const n=$('ap_new')?$('ap_new').value.trim():''; if(!n){ return; } try{ await api('/partners/approve',{method:'POST',body:JSON.stringify({name:n})}); $('ap_new').value=''; if($('ap_msg'))$('ap_msg').textContent='✓ Approved'; loadApprovedPartners(); }catch(e){ if($('ap_msg'))$('ap_msg').textContent=e.message; } }
 
 /* ---- Engagement: client engagement tracking + STAFF rewards ---- */

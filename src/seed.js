@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { db, getState } from './db.js';
+import { db, getState, setState } from './db.js';
 import { createUser } from './auth.js';
 
 // One-time import of the org-wide employee roster (name + entity/location). Job title
@@ -62,14 +62,24 @@ export function ensureCorporateUser({ quiet = false } = {}) {
 }
 
 // Demo staff + one fully-filled client, so a pilot has something to look at.
+// Demo logins belong on a FRESH install only: a live database gets no new demo
+// users, and any created by earlier boots are deactivated once (state-latched).
 export function ensureSampleData() {
+  const fresh = !db.prepare(`SELECT id FROM clients LIMIT 1`).get();
+  if (!fresh) {
+    if (getState('demo_staff_retired') !== 'done') {
+      db.prepare(`UPDATE users SET active = 0 WHERE username = 'maria' AND name = 'Maria Reyes'`).run();
+      db.prepare(`UPDATE users SET active = 0 WHERE username = 'david' AND name = 'David Okafor'`).run();
+      setState('demo_staff_retired', 'done');
+    }
+    return;
+  }
   for (const s of [
     { name: 'Maria Reyes', username: 'maria', password: 'staff123', role: 'staff', job_role: 'BHT / Tech' },
     { name: 'David Okafor', username: 'david', password: 'staff123', role: 'staff', job_role: 'Therapist' },
   ]) {
     if (!db.prepare(`SELECT id FROM users WHERE username = ?`).get(s.username)) createUser(s);
   }
-  if (db.prepare(`SELECT id FROM clients LIMIT 1`).get()) return;
 
   const info = db.prepare(`INSERT INTO clients (name, pref, room, program, admit, sober, touch, prefs, goals, triggers, safety, support)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(

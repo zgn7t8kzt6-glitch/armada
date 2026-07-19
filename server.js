@@ -132,7 +132,7 @@ function rlHit(key, windowMs) { rlState(key, windowMs).count += 1; }
 setInterval(() => { const now = Date.now(); for (const [k, v] of rlBuckets) if (now >= v.reset) rlBuckets.delete(k); }, 10 * 60 * 1000).unref?.();
 
 const SHIFTS = ['Morning', 'Day', 'Evening', 'Night'];
-const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Revenue Cycle Management', 'Director of Billing Compliance', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant', 'HR'];
+const JOB_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Nursing', 'House Supervisor', 'Director of Revenue Cycle Management', 'Director of Billing Compliance', 'BHT / Tech', 'Nurse', 'Therapist', 'Case Manager', 'Front Desk', 'Catering / Dietary', 'Housekeeping', 'Housing Director', 'House Manager', 'Recovery Coach', 'Executive Assistant', 'HR'];
 // ── Phase 2 access control: the role_permissions matrix is LIVE for the corporate
 // and HR modules (first per the rebuild order; clinical switches LAST). Grant paths
 // are additive per the Constitution (Evolve Without Breaking): a matrix row can
@@ -422,7 +422,7 @@ function facilityForEntity(name) {
 // ── OPERATIONS CENTER: "what's happening right now" — one drillable board ──────
 // Layer-5 architecture: Executive answers "right now"; Analytics answers "why".
 // Every tile is a count + a drill target; tiles that can't compute are skipped.
-function canSeeOps(user) { return !!user && (user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'HR', 'Executive Assistant'].includes(user.job_role)); }
+function canSeeOps(user) { return !!user && (user.role === 'admin' || ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Nursing', 'House Supervisor', 'HR', 'Executive Assistant'].includes(user.job_role)); }
 app.get('/api/opscenter', requireAuth, (req, res) => {
   if (!canSeeOps(req.user)) return res.status(403).json({ error: 'Leadership only.' });
   if (req.query.facility && !facilityAllowed(req.user, +req.query.facility)) return res.status(403).json({ error: 'No access to that facility.' });
@@ -7072,8 +7072,10 @@ function getOrCreateShift(date, name) {
   return s;
 }
 
-// The Shift Playbook: clients + the tasks for this shift/role, with completion state
-app.get('/api/playbook', requireAuth, (req, res) => {
+// The Shift Playbook: clients + the tasks for this shift/role, with completion state.
+// (Own path — this used to share '/api/playbook' with the leadership scorecard above,
+// which shadowed it: the everyone-facing Shift Playbook 403'd for non-leadership.)
+app.get('/api/shift-playbook', requireAuth, (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0, 10);
   const name = SHIFTS.includes(req.query.shift) ? req.query.shift : 'Morning';
   const role = req.query.role || 'All';
@@ -10071,7 +10073,11 @@ app.get('/api/referrals/meta', requireAuth, (req, res) => res.json({
   salesforce: sfConfigured(),
 }));
 
-app.get('/api/facilities', requireAuth, (req, res) => {
+// Referral-partner directory (the `facilities` table = EXTERNAL partner orgs).
+// Own path — these used to share '/api/facilities' with the outpatient facility-
+// config routes defined earlier, which shadowed them (Express first-match): the
+// partners list 403'd for Front Desk/CM and admins saw config rows as partners.
+app.get('/api/referral-partners', requireAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT f.*,
       (SELECT COUNT(*) FROM outbound_referrals o WHERE o.facility_id = f.id) AS sent,
@@ -10079,7 +10085,7 @@ app.get('/api/facilities', requireAuth, (req, res) => {
     FROM facilities f WHERE f.active = 1 ORDER BY f.name COLLATE NOCASE`).all();
   res.json({ facilities: rows });
 });
-app.post('/api/facilities', requireAuth, (req, res) => {
+app.post('/api/referral-partners', requireAuth, (req, res) => {
   const b = req.body || {}; const name = (b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Facility name required.' });
   const existing = db.prepare(`SELECT id FROM facilities WHERE name = ? COLLATE NOCASE`).get(name);

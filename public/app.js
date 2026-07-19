@@ -218,7 +218,7 @@ const GROUP_OF={
   // Facility — the building runs (ordering, maintenance, staffing)
   inventory:'facility',maintenance:'facility',operations:'facility',coverage:'facility',schedule:'facility',roster:'facility',weekgrid:'facility',assign:'facility',staffmodel:'facility',staffsignins:'facility',
   // Enterprise — the parent company: corporate, people, leadership programs
-  ownership:'enterprise',proformas:'enterprise',corphub:'enterprise',hcos:'enterprise',plan:'enterprise',excellence:'enterprise',onboarding:'enterprise',playbook:'enterprise',leadership:'enterprise',
+  ownership:'enterprise',proformas:'enterprise',corphub:'enterprise',hcos:'enterprise',wave1:'enterprise',plan:'enterprise',excellence:'enterprise',onboarding:'enterprise',playbook:'enterprise',leadership:'enterprise',
   // Insight — why it happened (Analytics answers "why"; Home answers "now")
   outcomes:'insight',analytics:'insight',scorecard:'insight','report-view':'insight',admitcheck:'insight',askai:'insight',
   // Admin — configuration & governance
@@ -707,6 +707,7 @@ function show(v){
   if(v==='authreg') loadAuthReg();
   if(v==='billingready') loadBillingReady();
   if(v==='los') loadLosView();
+  if(v==='wave1') loadWave1();
   if(v==='proformas') pfShow(window.PF_SITE||'dayton');
   if(v==='appts') loadAppts();
   if(v==='command') loadCommand();
@@ -9647,6 +9648,498 @@ async function loadAudit(){
   $('auditList').innerHTML = `<table class="tbl"><tr><th>When</th><th>User</th><th>Action</th><th>Entity</th><th>Detail</th></tr>${
     entries.map(e=>`<tr><td>${esc(e.at)}</td><td>${esc(e.username||'')}</td><td>${esc(e.action)}</td>
       <td>${esc(e.entity||'')} ${e.entity_id||''}</td><td>${esc(e.detail||'')}</td></tr>`).join('')}</table>`;
+}
+
+/* ---- Wave 1 (Akron pilot) — the five assets that put the system on the floor ----
+   Architecture is frozen; everything below is configuration. Content mirrors the
+   Wave 1 Implementation Pack; completion data lives in /api/wave1. */
+const WAVE1 = {
+  card: {
+    credo: 'We are ladies and gentlemen caring for people at the hardest moment of their lives. Our patients arrive afraid. They leave with a plan, their dignity intact, and proof that a place kept its word to them. We provide the safest medical care, the warmest human welcome, and a building that runs the same at 3 AM Sunday as 10 AM Tuesday.',
+    steps: [
+      'A warm greeting, by name. Every patient, every family member, every referent, every time.',
+      'Anticipate the need and comply. Notice before being asked. If you hear a need, you own it to resolution — never “that’s not my department.”',
+      'A warm farewell. Every discharge leaves with a plan, a naloxone kit, their belongings dual-signed, and an invitation back to the alumni family.',
+    ],
+    standards: [
+      'I greet every patient by name within 60 seconds of encountering them.',
+      'I own any problem I hear about until it is resolved, and I never pass a patient to a process.',
+      'I am empowered to spend up to $100 to fix a patient or family problem on the spot — no permission needed, logged after, celebrated in huddle.',
+      'Safety rounds are sacred. I sign only what I actually did, when I actually did it.',
+      'My documentation is complete before I clock out. My signature is my integrity.',
+      'I escalate immediately. Bad news travels fast here; only silence gets people in trouble.',
+      'I treat night shift, weekends, and holidays as the main event — because for our patients, they are.',
+      'I protect patient dignity in every word, including in the break room and in the chart.',
+      'I speak to families as if they are watching everything we do — because they are deciding whether their loved one stays.',
+      'A defect reported is a gift. I report defects without blame and without fear.',
+      'I look like Armada: sage green, name badge visible, first name large.',
+      'I recognize a colleague specifically and by name at least once every shift.',
+    ],
+    learn: [
+      ['Listen','fully, without defending.'],
+      ['Empathize','“I’d feel the same way.”'],
+      ['Apologize','sincerely, once, without excuses.'],
+      ['Resolve','now, using your $100 authority if needed.'],
+      ['Notify','log it in Helm so the system learns.'],
+    ],
+    ama: [
+      'Don’t argue. Sit down if they’re sitting. “Tell me what’s going on.”',
+      'Get the charge nurse now — while staying with the patient.',
+      'Never say “you can’t leave.” Say “you can — and before you decide, let’s fix what’s wrong right now.”',
+      'The next 30 minutes are the whole game. Comfort, food, a phone call to family, a plan they can repeat back.',
+    ],
+    dailyFive: ['Today’s Gold Standard','Today’s Service Story','Today’s Recognition','Today’s Defect','Today’s Win'],
+    motto: 'The building runs on the 95. You shine on the 5.',
+  },
+  huddle: {
+    when: '8:30 AM daily including weekends. 12 minutes, standing, phones down, run from the Helm Huddle screen. Weekday facilitator: ED (DON as backup). Weekend: House Supervisor. The facilitator’s job is pace and escalation — not solving.',
+    rules: [
+      'Starts at 8:30:00 whether everyone is present or not. Ends by 8:42.',
+      'Problems get named and assigned, never solved in huddle. Anything needing >30 seconds becomes an owner + a time (“You two, 10:00, report back tomorrow”).',
+      'Data is pre-filled from Helm. Nobody reads numbers that are on the screen; they say what they’re doing about them.',
+      'Every voice at least once a week. Facilitator tracks who hasn’t spoken.',
+      'No blame in huddle, ever. Defects are gifts (Standard 10).',
+    ],
+    script: [
+      { t: ':00–:01', from: 0, to: 1, k: 'Open', d: '“Good morning. Census is [34], [2] coming in, [3] going home. Let’s run it.”' },
+      { t: ':01–:03', from: 1, to: 3, k: 'Census & flow', d: 'Bed board on screen. Admits: transport status, bed assignment, who greets at the door. Discharges: meds in hand? Ride confirmed? Step-downs today and who has the conversation.' },
+      { t: ':03–:05', from: 3, to: 5, k: 'Red flags', d: 'Each flagged patient: risk drivers, protocol status, named owner for each open step, with a time. This is the most important two minutes of the day.' },
+      { t: ':05–:06', from: 5, to: 6, k: 'Staffing vs. grid', d: 'Gaps named, float/call-tree decision made on the spot, OT risk flagged.' },
+      { t: ':06–:07', from: 6, to: 7, k: 'Documentation & auths', d: 'Debt by owner (no shaming — just “when will it clear?”). Auths expiring 48h → UR sync attendance confirmed.' },
+      { t: ':07–:09', from: 7, to: 9, k: 'The Daily Five', d: 'Gold Standard read aloud by a rotating staff member (not a leader) + 30 seconds on what it means today. Service story. Recognition — specific, by name. Today’s defect (from the board). Today’s win.' },
+      { t: ':09–:11', from: 9, to: 11, k: 'Stuck items & escalations', d: 'Anything aging past SLA. Facilitator assigns or escalates; nothing is discussed twice without a new owner.' },
+      { t: ':11–:12', from: 11, to: 12, k: 'Close', d: '“Priorities are [the top 2]. See you tomorrow.” Tap complete — attendance and stuck items auto-log.' },
+    ],
+    failures: [
+      ['Huddle becomes a meeting','cut discussion at 30 seconds, assign.'],
+      ['Same people talk daily','cold-call kindly.'],
+      ['Numbers get read aloud','“it’s on the screen — what are we doing about it?”'],
+      ['Leaders skip weekends','the weekend huddle is audited in LSW; skipping it is a red LSW day.'],
+      ['Huddle runs without the Daily Five when busy','the Daily Five is the last thing cut, never the first; culture dies quietly on busy days.'],
+    ],
+  },
+  lsw: {
+    note: '“Nothing optional” means: an incomplete day requires a one-line reason, visible to the leader’s leader. Patterns of incompletion are a coaching conversation, not a mystery. Completion rolls into each leader’s ARI.',
+    roles: {
+      'Executive Director': { cadence: 'Daily', items: [
+        { id: 'ed1', t: 'Building walk with guest eyes', when: '7:45–8:15', p: 'Front door → dayroom → a patient wing. Smell, sound, light, first impressions. One photo of anything below standard → defect card.' },
+        { id: 'ed2', t: 'Run flash huddle', when: '8:30', p: 'Pace and escalation. The ED’s energy at 8:30 is the building’s energy at 2:00.' },
+        { id: 'ed3', t: 'Five employee rounds', when: 'Through the day', p: 'The 5 questions: what’s working · do you have what you need · who should I recognize · what could be better · one thing I’ll fix. The “one thing” becomes a Helm task that day — rounding that fixes nothing teaches people to stop talking.' },
+        { id: 'ed4', t: 'Two patient rounds', when: 'AM + PM', p: 'One detox, one residential. “How are we treating you? What’s one thing we could do better tonight?”' },
+        { id: 'ed5', t: 'Referral pipeline review', when: '~11:00', p: 'Salesforce: response-time clocks, disposition reports owed, one A-account personally touched.' },
+        { id: 'ed6', t: 'One recognition delivered', when: 'Any time', p: 'Specific, by name, tied to a standard. Handwritten note ≥2x/week.' },
+        { id: 'ed7', t: 'Bed board + ICR check', when: '~15:00', p: 'Tomorrow’s capacity, binding constraint, step-downs scripted for day-2 detox patients.' },
+        { id: 'ed8', t: 'End-of-day close in Helm', when: 'Before leaving', p: '3 lines: what moved, what’s stuck, tomorrow’s #1. Feeds the morning brief.' },
+      ]},
+      'Director of Nursing': { cadence: 'Daily', items: [
+        { id: 'don1', t: 'Two-chart clinical audit', when: 'Daily', p: 'Rotating: one detox, one residential, against the 10-point rubric — findings to the owner same day, patterns to the defect board.' },
+        { id: 'don2', t: 'Med room variance review', when: 'Daily', p: 'Last shift-change counts, any discrepancy escalated within the hour; refrigerator/destruction logs spot-checked weekly.' },
+        { id: 'don3', t: 'One coaching conversation', when: 'Daily', p: 'From rounding, audit findings, or observation. Console / coach / counsel; documented in one line.' },
+        { id: 'don4', t: 'Doc debt review with owners', when: 'Daily', p: 'Not “please finish your notes” but “what’s blocking you, and is the assignment load wrong?” Debt is usually a systems problem wearing a person costume.' },
+      ]},
+      'House Supervisor': { cadence: 'Every shift', items: [
+        { id: 'hs1', t: 'Safety walk', when: 'Each shift', p: 'Doors, cameras, ligature sweep, sharps, kitchen temps. Signed in Helm.' },
+        { id: 'hs2', t: 'Every red-flag patient personally seen', when: 'Each shift', p: 'Eyes on, brief words, protocol status verified. Non-delegable.' },
+        { id: 'hs3', t: 'Room readiness', when: 'Each shift', p: 'Every empty bed either READY or on the housekeeping clock with an ETA.' },
+        { id: 'hs4', t: 'Milieu temperature check', when: 'Peak hours', p: 'Dayroom at peak hours. Boredom, tension, cliques, staff engagement. Weekend afternoons get two checks; that’s when AMAs are born.' },
+        { id: 'hs5', t: 'Escalation queue cleared', when: 'Before shift end', p: 'Every escalation answered before shift end, even if the answer is “here’s who owns it and when.”' },
+      ]},
+    },
+  },
+  ari: {
+    definition: 'ARI measures execution consistency — how reliably the building runs its own standards. It is explicitly not an outcomes metric: a unit can carry brutal acuity and tough outcomes while executing at ARI 96, and that distinction is the point. Process and results are reported side by side, never blended.',
+    cadence: 'Scored monthly, per department (Nursing, Clinical, Admissions, Milieu/Dietary, EOC/Facilities) and per leader (LSW completion + audit results for their area). Published in the EOR. Site-level ARI = census-weighted department average.',
+    questions: [
+      'Was standard work followed as written?',
+      'If there was variation, was it justified and documented? (Justified variation scores yes — clinical judgment is the 5.)',
+      'Is the process documented in the Standard Work Library?',
+      'Is ownership clear (one name, not a role-in-general)?',
+      'Is the outcome measured somewhere that someone looks at?',
+      'Has the related defect stayed dead — no recurrence within 90 days?',
+      'Was the countermeasure verified (not just implemented)?',
+    ],
+    q8: 'Review question (not scored; feeds the improvement backlog): could this step be automated or error-proofed?',
+    scoring: 'Questions 1–7, binary, equal weight. ARI = (yes ÷ applicable) × 100. Bands: ≥95 green · 90–94 amber · <90 red. Red for two consecutive months → red-to-green plan at the EOR.',
+    sampling: 'Per department per month: 10 audited instances minimum, drawn randomly by Helm from completed work (rounds, charts, admits, med passes, turnovers, huddles), plus every Standards Audit Register observation for that department. Auditors rotate — no one audits their own department twice consecutively.',
+    antigaming: [
+      'Samples are drawn by Helm after the fact, never announced.',
+      'A “justified variation” requires a written reason — three identical justifications in a month is a standard-work problem, not three exceptions.',
+      'ARI is never used to rank individuals for discipline; it ranks systems for repair. The moment ARI becomes a whip, people optimize the audit instead of the work — and the number goes green while the building goes red.',
+    ],
+    multisite: 'Questions, sampling rules, and bands are identical at every Armada site. Configuration (which workflows, which owners) is local; the instrument is not. This is what makes Akron vs. Dayton vs. Spark vs. Wheatfield a real comparison — and what makes ARI the headline metric of any external turnaround engagement.',
+    depts: ['Nursing','Clinical','Admissions','Milieu/Dietary','EOC/Facilities'],
+  },
+  plan: {
+    note: 'Owner column uses roles; write names in before kickoff. Success is defined at day 30/60/90 — if a criterion is missed, the response is to fix the system, not extend the deadline silently.',
+    sections: [
+      { title: 'Days 1–14 — Installation', items: [
+        { id: 'd1a', d: 'Day 1', t: 'First flash huddle, full script, Daily Five included from day one. ED announces the freeze: “The system is built. Now we get good at it.”', o: 'ED' },
+        { id: 'd1b', d: 'Day 1', t: 'Gold Standards cards distributed hand-to-hand by ED with 10-minute credo talk. Per-diem/agency get theirs at next worked shift, no exceptions.', o: 'ED' },
+        { id: 'd2a', d: 'Day 2', t: 'LSW live for ED, DON, House Sups. First end-of-day close written.', o: 'All leaders' },
+        { id: 'd2b', d: 'Day 2', t: '$100 empowerment authority announced at huddle + posted. First use, whenever it happens, is celebrated by name next morning.', o: 'ED' },
+        { id: 'd3', d: 'Day 3', t: 'AMA risk flagging begins (manual until Kipu feed): charge nurse flags at each huddle using the driver list. 4-step protocol cards at the nurse station.', o: 'DON' },
+        { id: 'd4', d: 'Day 4', t: 'Defect board opens with exactly 3 seeded defects (weekend AMA, one documentation defect, one EOC defect) — each with owner and due date. Not ten. Three.', o: 'ED' },
+        { id: 'd5', d: 'Day 5', t: 'First Friday: weekend programming parity check — published Sat/Sun schedule reviewed line by line. Empty slots filled or escalated today, not Saturday morning.', o: 'House Sup' },
+        { id: 'd67', d: 'Days 6–7', t: 'First weekend under the system. House Sup runs weekend huddles; double milieu checks Sat/Sun afternoons; every red-flag patient seen every shift.', o: 'House Sup' },
+        { id: 'd8', d: 'Day 8', t: 'Week 1 retro (30 min): what did the huddle script get wrong? Fix the configuration — times, order, pre-fill — not the architecture.', o: 'ED' },
+        { id: 'd9', d: 'Day 9', t: 'Same-shift documentation standard announced with 2-week grace: debt visible daily, consequences begin day 21.', o: 'DON' },
+        { id: 'd10', d: 'Day 10', t: 'Standards Audit Register opens with 3 standards only: 60-second greeting · rounds signed in real time · discharge farewell complete (plan/naloxone/belongings). Audit methods assigned.', o: 'House Sup' },
+        { id: 'd11', d: 'Day 11', t: 'First DON two-chart audits; rubric calibrated with the ED on the first pair.', o: 'DON' },
+        { id: 'd12', d: 'Day 12', t: 'First AMA debrief under the 5-question form (or tabletop drill if no AMA occurred — run one anyway).', o: 'DON' },
+        { id: 'd1314', d: 'Days 13–14', t: 'Second weekend. Compare AMA count to trailing 4-weekend baseline at Monday huddle — say the number out loud either way.', o: 'ED' },
+      ]},
+      { title: 'Weeks 3–4', items: [
+        { id: 'w34a', t: 'Same-shift documentation enforced (day 21) — shift close-out blocked with unexplained debt.' },
+        { id: 'w34b', t: 'First countermeasure library entries written as seeded defects hit root cause.' },
+        { id: 'w34c', t: 'Rounding cadence at full rate (ED 5/day; every employee rounded on by someone within 30 days).' },
+        { id: 'w34d', t: 'Helm Phase 2 begins: Kipu read integration (census, notes, timestamps) → bed board, doc debt, and risk scoring go live-automated.' },
+        { id: 'w34e', t: 'First 10 patient day-2 pulses collected.' },
+      ]},
+      { title: 'Day 30 — Gate 1 (all must be true)', gate: true, rule: 'Miss a criterion → the Week-5 agenda is that criterion and nothing new.', items: [
+        { id: 'g1a', t: '20+ consecutive huddles held incl. weekends, ≥90% start-on-time.' },
+        { id: 'g1b', t: 'LSW completion ≥80% each leader (amber ok; invisible not ok).' },
+        { id: 'g1c', t: 'Every employee holds a card and can say Standard #2 in their own words.' },
+        { id: 'g1d', t: 'AMA protocol run on 100% of flags.' },
+        { id: 'g1e', t: '≥1 empowerment use celebrated.' },
+        { id: 'g1f', t: 'Doc debt at shift close trending toward zero.' },
+        { id: 'g1g', t: '3 seeded defects at countermeasure stage or beyond.' },
+      ]},
+      { title: 'Weeks 5–8', items: [
+        { id: 'w58a', t: 'Weekend parity audited monthly (schedule as published vs. as delivered).' },
+        { id: 'w58b', t: 'First monthly defect review board — one defect selected for permanent elimination.' },
+        { id: 'w58c', t: 'First drill (rotation begins: AMA-in-progress tabletop recommended first).' },
+        { id: 'w58d', t: 'Mission Control wall tablet live at nurse station.' },
+        { id: 'w58e', t: 'Standards Register grows to 6 standards.' },
+        { id: 'w58f', t: 'Salesforce disposition-report queue live with the 24-hour clock.' },
+        { id: 'w58g', t: 'High/middle/low calibration round one — the two highs are re-recruited that week.' },
+      ]},
+      { title: 'Day 60 — Gate 2', gate: true, items: [
+        { id: 'g2a', t: 'First defect verified permanently dead (30-day verification passed).' },
+        { id: 'g2b', t: 'Same-shift documentation ≥90%.' },
+        { id: 'g2c', t: 'Weekend AMA ≤1.5x weekday and falling.' },
+        { id: 'g2d', t: 'Helm Phase 2 data live and trusted (staff cite it unprompted in huddle).' },
+        { id: 'g2e', t: 'Referent disposition compliance ≥90%.' },
+      ]},
+      { title: 'Weeks 9–12', items: [
+        { id: 'w912a', t: 'First full ARI audit cycle (all five departments, 10 samples each) — baseline published without judgment; the first number is a mirror, not a grade.' },
+        { id: 'w912b', t: 'First Executive Operating Review, agenda auto-generated, 15/45 split honored.' },
+        { id: 'w912c', t: 'Mock survey against OhioMHAS + Joint Commission standards.' },
+        { id: 'w912d', t: '90-day plans written for every leader for the next cycle.' },
+        { id: 'w912e', t: 'Hoshin cascade drafted: Akron’s annual goals decomposed to department goals to LSW lines.' },
+      ]},
+      { title: 'Day 90 — Gate 3 (Wave 1 complete)', gate: true, rule: 'Then and only then: Wave 2 begins, and Helm becomes the template for Dayton.', items: [
+        { id: 'g3a', t: 'ARI baseline exists for every department.' },
+        { id: 'g3b', t: 'First EOR held with ≥3 dated decisions tracked.' },
+        { id: 'g3c', t: 'Weekend AMA at ≤1.3x weekday target.' },
+        { id: 'g3d', t: 'ICR baseline measured with day-2 step-down scripting audited.' },
+        { id: 'g3e', t: 'Countermeasure library ≥5 verified entries.' },
+        { id: 'g3f', t: 'A new employee hired in month 3 experiences the full Day-One sequence without anyone improvising.' },
+      ]},
+    ],
+    risks: [
+      ['Leader fade at week 3','The huddle gets delegated, the walk gets skipped “just today.” Countermeasure: LSW visibility to the leader’s leader, and the ED’s own LSW audited by Shlomo weekly for the first 60 days.'],
+      ['Tool worship','Waiting for Helm Phase 2 before running the system. The system runs on paper day one; software makes it cheaper, not possible.'],
+      ['Adding while installing','Every good idea from the floor goes to the Wave 2 parking lot, publicly visible, reviewed at the EOR. Honoring ideas without installing them is how you protect the install and the people offering them.'],
+    ],
+  },
+};
+
+let W1 = { tab: 'card', data: null, lswRole: null, lswShift: 'Day', timerT0: null, timerIv: null };
+
+async function loadWave1(){
+  const host = $('wave1Body'); if(!host) return;
+  if(!W1.data) host.innerHTML = '<div class="card">Loading Wave 1…</div>';
+  try { W1.data = await api('/wave1'); }
+  catch(e){ host.innerHTML = `<div class="card">Couldn’t load Wave 1 — ${esc(e.message)}</div>`; return; }
+  if(!W1.lswRole){
+    W1.lswRole = WAVE1.lsw.roles[ME?.job_role] ? ME.job_role : 'Executive Director';
+  }
+  const tabs = [['card','Gold Standards Card'],['huddle','Flash Huddle'],['lsw','Leader Standard Work'],['ari','ARI'],['plan','The First 90 Days']];
+  host.innerHTML = `
+    <div class="card" style="padding:14px 18px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">⚓ Wave 1 — Akron Pilot</h3>
+        <span class="hint">Architecture frozen · configuration editable</span>
+        <div class="itabs" style="margin-left:auto">${tabs.map(([k,l])=>`<button class="itab ${W1.tab===k?'active':''}" onclick="w1Tab('${k}')">${l}</button>`).join('')}</div>
+      </div>
+    </div>
+    <div id="w1Tab"></div>`;
+  w1RenderTab();
+}
+function w1Tab(t){ W1.tab = t; loadWave1(); }
+function w1RenderTab(){
+  const host = $('w1Tab'); if(!host) return;
+  if(W1.tab==='card') host.innerHTML = w1CardHtml();
+  else if(W1.tab==='huddle') host.innerHTML = w1HuddleHtml();
+  else if(W1.tab==='lsw') host.innerHTML = w1LswHtml();
+  else if(W1.tab==='ari') host.innerHTML = w1AriHtml();
+  else host.innerHTML = w1PlanHtml();
+}
+
+/* -- Asset 1: the Gold Standards card -- */
+function w1CardHtml(){
+  const c = WAVE1.card;
+  return `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">🟢 The Armada Gold Standards Card</h3>
+        <button class="btn btn-gold btn-sm sans no-print" style="margin-left:auto" onclick="w1PrintCard()">🖨 Print the card</button>
+      </div>
+      <div class="sub">Pocket card, tri-fold, sage green, carried by every employee including per-diem and agency. Handed personally by the ED in the first hour of Day One.</div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>The Credo</h3><p style="font-style:italic">${esc(c.credo)}</p></div>
+      <div class="card"><h3>The Three Steps of Service</h3><ol>${c.steps.map(s=>`<li style="margin-bottom:6px">${esc(s)}</li>`).join('')}</ol></div>
+    </div>
+    <div class="card"><h3>The Twelve Standards</h3><ol>${c.standards.map(s=>`<li style="margin-bottom:5px">${esc(s)}</li>`).join('')}</ol></div>
+    <div class="grid2">
+      <div class="card"><h3>Service Recovery — L.E.A.R.N.</h3>${c.learn.map(([k,v])=>`<div class="todo" style="display:block"><strong>${esc(k)}</strong> — ${esc(v)}</div>`).join('')}</div>
+      <div class="card"><h3>When a Patient Wants to Leave (AMA first response — any role)</h3><ol>${c.ama.map(s=>`<li style="margin-bottom:6px">${esc(s)}</li>`).join('')}</ol></div>
+    </div>
+    <div class="card"><h3>The Daily Five <span class="hint">(read at every huddle)</span></h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${c.dailyFive.map(s=>`<span class="chip">${esc(s)}</span>`).join('')}</div>
+      <p class="hint" style="margin-top:10px">“${esc(c.motto)}”</p>
+    </div>`;
+}
+function w1PrintCard(){
+  const c = WAVE1.card;
+  const panel = (t,b)=>`<div class="panel"><h2>${t}</h2>${b}</div>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Armada Gold Standards Card</title><style>
+    body{font-family:Georgia,serif;color:#1c2b26;margin:24px;max-width:720px}
+    h1{font-size:20px;margin:0 0 2px} .sub{color:#5a6b64;font-size:12px;margin-bottom:14px}
+    .panel{border:2px solid #9caf88;border-radius:10px;padding:12px 16px;margin-bottom:12px;background:#f4f7f1;page-break-inside:avoid}
+    h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px;color:#4a5d54}
+    p,li{font-size:12.5px;line-height:1.45} ol{margin:0;padding-left:18px} li{margin-bottom:4px}
+    .credo{font-style:italic} .motto{text-align:center;font-style:italic;margin-top:6px}
+  </style></head><body>
+    <h1>⚓ The Armada Gold Standards</h1><div class="sub">Carried by every employee. Sage green, name badge visible, first name large.</div>
+    ${panel('The Credo', `<p class="credo">${c.credo}</p>`)}
+    ${panel('The Three Steps of Service', `<ol>${c.steps.map(s=>`<li>${s}</li>`).join('')}</ol>`)}
+    ${panel('The Twelve Standards', `<ol>${c.standards.map(s=>`<li>${s}</li>`).join('')}</ol>`)}
+    ${panel('Service Recovery — L.E.A.R.N.', c.learn.map(([k,v])=>`<p><strong>${k}</strong> — ${v}</p>`).join(''))}
+    ${panel('When a Patient Wants to Leave (any role)', `<ol>${c.ama.map(s=>`<li>${s}</li>`).join('')}</ol>`)}
+    ${panel('The Daily Five (read at every huddle)', `<p>${c.dailyFive.join(' · ')}</p><p class="motto">“${c.motto}”</p>`)}
+  </body></html>`;
+  const w = window.open('','_blank'); w.document.write(html); w.document.close(); w.focus();
+  setTimeout(()=>w.print(), 300);
+}
+
+/* -- Asset 2: the 8:30 flash huddle -- */
+function w1HuddleHtml(){
+  const h = WAVE1.huddle, d = W1.data.huddle;
+  const today = d.today;
+  const tiles = `<div class="ret-cards">
+    <div class="ret-card"><div class="n">${today?'✓':'—'}</div><div class="l">Today ${today?'logged':'not logged yet'}</div></div>
+    <div class="ret-card"><div class="n">${d.streak}</div><div class="l">Consecutive days (incl. weekends)</div></div>
+    <div class="ret-card ${d.onTimePct!=null&&d.onTimePct<90?'rc-warn':''}"><div class="n">${d.onTimePct==null?'—':d.onTimePct+'%'}</div><div class="l">Start-on-time (30d) · Gate 1 needs ≥90%</div></div>
+    <div class="ret-card"><div class="n">${d.last30}</div><div class="l">Huddles in the last 30 days</div></div>
+  </div>`;
+  const scriptRows = h.script.map((s,i)=>`<div class="todo" id="w1seg${i}"><div class="txt"><strong>${esc(s.t)}</strong> · <strong>${esc(s.k)}</strong> — ${esc(s.d)}</div></div>`).join('');
+  const logForm = today
+    ? `<div class="hint">✓ Logged — facilitator ${esc(today.facilitator||'—')} · ${today.on_time?'started on time':'started late'}${today.attendance!=null?` · ${today.attendance} present`:''}${today.stuck?` · stuck: ${esc(today.stuck)}`:''}. <button class="btn btn-ghost btn-sm sans" onclick="w1HuddleEdit()">Edit</button></div>`
+    : w1HuddleFormHtml();
+  return `
+    <div class="card"><h3>⏱ Flash Huddle — 8:30, 12 minutes, standing</h3><div class="sub">${esc(h.when)}</div>${tiles}</div>
+    <div class="card"><h3>The Rules <span class="hint">(posted where the huddle happens)</span></h3><ol>${h.rules.map(r=>`<li style="margin-bottom:5px">${esc(r)}</li>`).join('')}</ol></div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">The Script <span class="hint">(timeboxes enforced)</span></h3>
+        <span id="w1Timer" class="hint" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
+        <button class="btn btn-gold btn-sm sans no-print" id="w1TimerBtn" onclick="w1TimerToggle()">▶ Run the 12 minutes</button></div>
+      ${scriptRows}
+    </div>
+    <div class="card"><h3>Log today’s huddle</h3><div id="w1HuddleLog">${logForm}</div></div>
+    <div class="card"><h3>Facilitator failure modes (and the fix)</h3>${h.failures.map(([k,v])=>`<div class="todo" style="display:block"><strong>${esc(k)}</strong> → ${esc(v)}</div>`).join('')}</div>`;
+}
+function w1HuddleFormHtml(){
+  const t = W1.data.huddle.today || {};
+  return `<div class="handoff-add" style="flex-wrap:wrap;gap:8px">
+      <input id="w1hFac" placeholder="Facilitator" value="${esc(t.facilitator || ME?.name || '')}" style="max-width:220px">
+      <label class="hint" style="align-self:center"><input type="checkbox" id="w1hOnTime" ${t.on_time==null||t.on_time?'checked':''}> started at 8:30:00</label>
+      <input id="w1hAtt" type="number" min="0" placeholder="# present" value="${t.attendance!=null?t.attendance:''}" style="max-width:110px">
+      <input id="w1hStuck" placeholder="Stuck items / escalations (optional)" value="${esc(t.stuck||'')}" style="flex:1;min-width:200px">
+      <button class="btn btn-gold btn-sm sans" onclick="w1HuddleLog()">✓ Complete huddle</button>
+    </div><div class="hint">Attendance and stuck items log here — this is the “tap complete in Helm” step.</div>`;
+}
+function w1HuddleEdit(){ $('w1HuddleLog').innerHTML = w1HuddleFormHtml(); }
+async function w1HuddleLog(){
+  try {
+    await api('/wave1/huddle',{method:'POST',body:JSON.stringify({
+      facilitator: $('w1hFac').value.trim(), on_time: $('w1hOnTime').checked,
+      attendance: $('w1hAtt').value===''?null:+$('w1hAtt').value, stuck: $('w1hStuck').value.trim() })});
+    await loadWave1();
+  } catch(e){ alert(e.message); }
+}
+function w1TimerToggle(){
+  if(W1.timerIv){ clearInterval(W1.timerIv); W1.timerIv=null; W1.timerT0=null;
+    const b=$('w1TimerBtn'); if(b) b.textContent='▶ Run the 12 minutes';
+    const t=$('w1Timer'); if(t) t.textContent='';
+    WAVE1.huddle.script.forEach((_,i)=>{ const r=$('w1seg'+i); if(r) r.style.background=''; });
+    return; }
+  W1.timerT0 = Date.now();
+  const b=$('w1TimerBtn'); if(b) b.textContent='■ Stop';
+  W1.timerIv = setInterval(()=>{
+    const sec = Math.floor((Date.now()-W1.timerT0)/1000), m = Math.floor(sec/60), s = sec%60;
+    const t=$('w1Timer'); if(!t){ w1TimerToggle(); return; }
+    t.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} of 12:00${m>=12?' — done, tap complete':''}`;
+    WAVE1.huddle.script.forEach((seg,i)=>{ const r=$('w1seg'+i); if(r) r.style.background = (m>=seg.from&&m<seg.to)?'rgba(156,175,136,.25)':''; });
+  }, 1000);
+}
+
+/* -- Asset 3: Leader Standard Work -- */
+function w1LswHtml(){
+  const roles = WAVE1.lsw.roles, role = W1.lswRole, def = roles[role];
+  const isHS = role==='House Supervisor';
+  const mine = (W1.data.lsw.mine||[]).find(r=>r.role===role && (!isHS || r.shift===W1.lswShift));
+  let done = []; try { done = JSON.parse(mine?.items||'[]'); } catch(_e){}
+  const doneSet = new Set(done);
+  const nDone = def.items.filter(i=>doneSet.has(i.id)).length;
+  const rows = def.items.map((i,ix)=>`
+    <div class="todo ${doneSet.has(i.id)?'done':''}">
+      <div class="box" onclick="w1LswToggle('${i.id}')" style="${doneSet.has(i.id)?'background:var(--navy);color:#fff;text-align:center':''}">${doneSet.has(i.id)?'✓':''}</div>
+      <div class="txt"><strong>${ix+1}. ${esc(i.t)}</strong> <span class="chip">${esc(i.when)}</span><div class="hint">${esc(i.p)}</div></div>
+    </div>`).join('');
+  const team = (W1.data.lsw.team||[]).map(r=>{
+    const n = WAVE1.lsw.roles[r.role]?.items.length||0; let k=0; try{ k=JSON.parse(r.items||'[]').length; }catch(_e){}
+    const full = k>=n;
+    return `<tr><td>${esc(r.name||'—')}</td><td>${esc(r.role)}${r.shift?` · ${esc(r.shift)}`:''}</td>
+      <td><span class="risk ${full?'risk-low':'risk-elev'}">${k} / ${n}</span></td>
+      <td>${r.close_note?'✓':'—'}</td><td class="hint">${esc(r.miss_reason||'')}</td></tr>`;
+  }).join('');
+  return `
+    <div class="card"><h3>📋 Leader Standard Work</h3><div class="sub">${esc(WAVE1.lsw.note)}</div>
+      <div class="toolbar" style="justify-content:flex-start">
+        <div class="itabs">${Object.keys(roles).map(r=>`<button class="itab ${r===role?'active':''}" onclick="w1LswRole('${r}')">${esc(r)}</button>`).join('')}</div>
+        ${isHS?`<div class="itabs">${['Day','Evening','Night'].map(s=>`<button class="itab ${s===W1.lswShift?'active':''}" onclick="w1LswShift('${s}')">${s}</button>`).join('')}</div>`:''}
+      </div></div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(role)} — ${esc(def.cadence)}</h3>
+        <span class="risk ${nDone===def.items.length?'risk-low':nDone?'risk-elev':'risk-high'}" style="margin-left:auto">${nDone} / ${def.items.length} today${isHS?` · ${esc(W1.lswShift)}`:''}</span></div>
+      ${rows}
+      <div style="margin-top:12px"><strong>End-of-day close</strong> <span class="hint">3 lines: what moved · what’s stuck · tomorrow’s #1</span>
+        <textarea id="w1Close" rows="3" style="width:100%;margin-top:4px">${esc(mine?.close_note||'')}</textarea>
+        <div class="handoff-add" style="margin-top:6px">
+          <input id="w1Miss" placeholder="${nDone<def.items.length?'Incomplete day — one-line reason (visible to your leader)':'One-line reason if anything was skipped (optional)'}" value="${esc(mine?.miss_reason||'')}">
+          <button class="btn btn-gold btn-sm sans" onclick="w1LswSave()">Save my day</button>
+        </div></div>
+    </div>
+    ${W1.data.canManage && team ? `<div class="card"><h3>Today across the leadership team</h3>
+      <table class="tbl"><tr><th>Leader</th><th>Role</th><th>Done</th><th>Close</th><th>Reason</th></tr>${team}</table></div>` : ''}`;
+}
+function w1LswRole(r){ W1.lswRole = r; w1RenderTab(); }
+function w1LswShift(s){ W1.lswShift = s; w1RenderTab(); }
+async function w1LswToggle(id){
+  const role = W1.lswRole, isHS = role==='House Supervisor';
+  const mine = (W1.data.lsw.mine||[]).find(r=>r.role===role && (!isHS || r.shift===W1.lswShift));
+  let items = []; try { items = JSON.parse(mine?.items||'[]'); } catch(_e){}
+  items = items.includes(id) ? items.filter(x=>x!==id) : [...items, id];
+  await w1LswPost(items);
+}
+async function w1LswSave(){
+  const role = W1.lswRole, isHS = role==='House Supervisor';
+  const mine = (W1.data.lsw.mine||[]).find(r=>r.role===role && (!isHS || r.shift===W1.lswShift));
+  let items = []; try { items = JSON.parse(mine?.items||'[]'); } catch(_e){}
+  await w1LswPost(items);
+}
+async function w1LswPost(items){
+  try {
+    await api('/wave1/lsw',{method:'POST',body:JSON.stringify({
+      role: W1.lswRole, shift: W1.lswShift, items,
+      close_note: $('w1Close')?.value.trim()||'', miss_reason: $('w1Miss')?.value.trim()||'' })});
+    W1.data = await api('/wave1'); w1RenderTab();
+  } catch(e){ alert(e.message); }
+}
+
+/* -- Asset 4: the Armada Reliability Index -- */
+function w1AriHtml(){
+  const a = WAVE1.ari, d = W1.data.ari;
+  const band = (v)=> v==null ? '<span class="hint">no audits yet</span>'
+    : v>=95 ? `<span class="risk risk-low">${v} · green</span>`
+    : v>=90 ? `<span class="risk risk-elev">${v} · amber</span>`
+    : `<span class="risk risk-high">${v} · red</span>`;
+  const summary = d.depts.map(r=>`<tr><td>${esc(r.dept)}</td><td>${r.instances}</td><td>${r.yes} / ${r.applicable}</td><td>${band(r.ari)}</td>
+    <td class="hint">${r.instances<10?`${10-r.instances} more to reach the monthly minimum`:'sample met'}</td></tr>`).join('');
+  const form = W1.data.canManage ? `
+    <div class="card"><h3>Score an audit instance <span class="hint">(${esc(d.month)})</span></h3>
+      <div class="handoff-add" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <select id="w1aDept">${a.depts.map(x=>`<option>${x}</option>`).join('')}</select>
+        <input id="w1aWf" placeholder="Workflow audited (round, chart, admit, med pass, turnover, huddle…)" style="flex:1;min-width:220px">
+      </div>
+      ${a.questions.map((q,i)=>`<div class="todo"><div class="txt">${i+1}. ${esc(q)}</div>
+        <span style="white-space:nowrap">
+          <label class="hint"><input type="radio" name="w1aq${i+1}" value="1"> yes</label>
+          <label class="hint"><input type="radio" name="w1aq${i+1}" value="0"> no</label>
+          <label class="hint"><input type="radio" name="w1aq${i+1}" value="na" checked> n/a</label>
+        </span></div>`).join('')}
+      <div class="handoff-add" style="flex-wrap:wrap;gap:8px;margin-top:8px">
+        <input id="w1aVar" placeholder="If variation was justified — the written reason" style="flex:1;min-width:200px">
+        <input id="w1aQ8" placeholder="Q8 (not scored): could this be automated or error-proofed?" style="flex:1;min-width:200px">
+        <button class="btn btn-gold btn-sm sans" onclick="w1AriSubmit()">Log audit</button>
+      </div></div>` : '';
+  const recent = (d.recent||[]).map(r=>{
+    let yes=0, app=0; ['q1','q2','q3','q4','q5','q6','q7'].forEach(q=>{ if(r[q]!=null){ app++; if(r[q]) yes++; } });
+    return `<tr><td>${esc(r.dept)}</td><td>${esc(r.workflow||'—')}</td><td>${yes} / ${app}</td><td class="hint">${esc(r.auditor_name||'')}</td><td class="hint">${esc((r.created_at||'').slice(0,10))}</td></tr>`;
+  }).join('');
+  return `
+    <div class="card"><h3>🧭 Armada Reliability Index — Specification v1.0</h3>
+      <p>${esc(a.definition)}</p><p class="hint">${esc(a.cadence)}</p></div>
+    <div class="card"><h3>${esc(d.month)} — by department</h3>
+      <table class="tbl"><tr><th>Department</th><th>Instances</th><th>Yes / applicable</th><th>ARI</th><th></th></tr>${summary}</table>
+      <p class="hint" style="margin-top:8px">${esc(a.scoring)}</p></div>
+    ${form}
+    ${recent?`<div class="card"><h3>Recent audits (${esc(d.month)})</h3><table class="tbl"><tr><th>Dept</th><th>Workflow</th><th>Score</th><th>Auditor</th><th>When</th></tr>${recent}</table></div>`:''}
+    <div class="grid2">
+      <div class="card"><h3>Sampling</h3><p>${esc(a.sampling)}</p><p class="hint">${esc(a.q8)}</p></div>
+      <div class="card"><h3>Anti-gaming provisions</h3><ol>${a.antigaming.map(x=>`<li style="margin-bottom:6px">${esc(x)}</li>`).join('')}</ol></div>
+    </div>
+    <div class="card"><h3>Multi-site clause</h3><p>${esc(a.multisite)}</p></div>`;
+}
+async function w1AriSubmit(){
+  const body = { dept: $('w1aDept').value, workflow: $('w1aWf').value.trim(),
+    variation_reason: $('w1aVar').value.trim(), q8_note: $('w1aQ8').value.trim() };
+  for(let i=1;i<=7;i++){ const v = document.querySelector(`input[name="w1aq${i}"]:checked`)?.value;
+    body['q'+i] = v==='1'?1:v==='0'?0:null; }
+  if(!Object.keys(body).some(k=>/^q\d$/.test(k)&&body[k]!=null)) return alert('Answer at least one question — an all-n/a audit scores nothing.');
+  try { await api('/wave1/ari',{method:'POST',body:JSON.stringify(body)}); W1.data = await api('/wave1'); w1RenderTab(); }
+  catch(e){ alert(e.message); }
+}
+
+/* -- Asset 5: the first 90 days -- */
+function w1PlanHtml(){
+  const p = WAVE1.plan, d = W1.data;
+  const doneMap = {}; (d.progress||[]).forEach(r=>{ doneMap[r.item_id]=r; });
+  const canDo = d.canManage;
+  const startBar = `
+    <div class="card"><h3>🗓 Wave 1 — The First 90 Days at Akron</h3><div class="sub">${esc(p.note)}</div>
+      <div class="handoff-add" style="max-width:460px">
+        <input id="w1Start" type="date" value="${esc(d.start||'2026-07-20')}" ${canDo?'':'disabled'}>
+        ${canDo?`<button class="btn btn-ghost btn-sm sans" onclick="w1SetStart()">Set Day 1</button>`:''}
+        <span class="hint" style="align-self:center">${d.start?(d.day>=1&&d.day<=90?`Day ${d.day} of 90`:d.day<1?`Starts in ${1-d.day} day(s)`:`Day ${d.day} — past the 90`):'Start date not set — Day 1 is Mon Jul 20 in the pack'}</span>
+      </div></div>`;
+  const sections = p.sections.map(sec=>{
+    const total = sec.items.length, done = sec.items.filter(i=>doneMap['w1-'+i.id]).length;
+    const rows = sec.items.map(i=>{
+      const pr = doneMap['w1-'+i.id];
+      return `<div class="todo ${pr?'done':''}">
+        <div class="box" ${canDo?`onclick="w1Prog('w1-${i.id}', ${pr?'false':'true'})"`:''} style="${pr?'background:var(--navy);color:#fff;text-align:center':''}${canDo?'':';cursor:default;opacity:.5'}">${pr?'✓':''}</div>
+        <div class="txt">${i.d?`<strong>${esc(i.d)}</strong> — `:''}${esc(i.t)}
+          ${i.o?` <span class="chip">${esc(i.o)}</span>`:''}
+          ${pr?`<div class="hint">✓ ${esc(pr.by_name||'')} · ${esc((pr.done_at||'').slice(0,10))}</div>`:''}</div>
+      </div>`;
+    }).join('');
+    return `<details class="card" ${sec.gate||done<total?'open':''}><summary><strong>${sec.gate?'🚪 ':''}${esc(sec.title)}</strong> <span class="risk ${done===total?'risk-low':done?'risk-elev':'risk-high'}">${done} / ${total}</span></summary>
+      ${sec.rule?`<div class="hint" style="margin:6px 0">${esc(sec.rule)}</div>`:''}${rows}</details>`;
+  }).join('');
+  const risks = `<div class="card"><h3>The three risks that kill implementations like this</h3>
+    ${p.risks.map(([k,v],i)=>`<div class="todo" style="display:block"><strong>${i+1}. ${esc(k)}.</strong> ${esc(v)}</div>`).join('')}</div>`;
+  return startBar + sections + risks;
+}
+async function w1Prog(id, done){
+  try { await api('/wave1/progress',{method:'POST',body:JSON.stringify({item_id:id, done})}); W1.data = await api('/wave1'); w1RenderTab(); }
+  catch(e){ alert(e.message); }
+}
+async function w1SetStart(){
+  try { await api('/wave1/start',{method:'POST',body:JSON.stringify({date:$('w1Start').value})}); W1.data = await api('/wave1'); w1RenderTab(); }
+  catch(e){ alert(e.message); }
 }
 
 /* ---- start ---- */

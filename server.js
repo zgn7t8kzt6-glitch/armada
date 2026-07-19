@@ -13638,6 +13638,111 @@ app.post('/api/lineup-log', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- Wave 1 (Akron pilot) — the five assets on the floor ----------------
+   Content (the card, the huddle script, LSW guides, ARI spec, the 90-day plan)
+   lives client-side in app.js; these routes carry the completion data: huddle
+   log, LSW check-offs, ARI audit instances, and playbook progress. */
+const WAVE1_LEADER_ROLES = ['Executive Director', 'Director of Operations', 'Clinical Director', 'Director of Nursing', 'House Supervisor'];
+const wave1CanManage = (u) => u.role === 'admin' || WAVE1_LEADER_ROLES.includes(u.job_role);
+const requireWave1Leader = (req, res, next) => { if (!wave1CanManage(req.user)) return res.status(403).json({ error: 'Leadership only.' }); next(); };
+const WAVE1_LSW_ROLES = ['Executive Director', 'Director of Nursing', 'House Supervisor'];
+const WAVE1_DEPTS = ['Nursing', 'Clinical', 'Admissions', 'Milieu/Dietary', 'EOC/Facilities'];
+
+app.get('/api/wave1', requireAuth, (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const start = getState('wave1_start') || null;
+  const day = start ? Math.floor((Date.parse(today) - Date.parse(start)) / 86400000) + 1 : null;
+  // Flash huddle: today + the trailing 30 days (count, on-time %, streak incl. weekends).
+  const hToday = db.prepare(`SELECT * FROM wave1_huddle WHERE date = ?`).get(today) || null;
+  const h30 = db.prepare(`SELECT date, on_time FROM wave1_huddle WHERE date >= date('now','-30 day') ORDER BY date DESC`).all();
+  let streak = 0;
+  { // consecutive calendar days logged, ending today or yesterday
+    const have = new Set(h30.map((r) => r.date));
+    let d = have.has(today) ? new Date(today) : new Date(Date.parse(today) - 86400000);
+    while (have.has(d.toISOString().slice(0, 10))) { streak++; d = new Date(d.getTime() - 86400000); }
+  }
+  const huddle = {
+    today: hToday,
+    last30: h30.length,
+    onTimePct: h30.length ? Math.round(h30.filter((r) => r.on_time).length / h30.length * 100) : null,
+    streak,
+  };
+  // LSW: my rows today + (leaders) everyone's rows today.
+  const mine = db.prepare(`SELECT * FROM wave1_lsw WHERE date = ? AND user_id = ?`).all(today, req.user.id);
+  const team = wave1CanManage(req.user)
+    ? db.prepare(`SELECT l.*, u.name FROM wave1_lsw l LEFT JOIN users u ON u.id = l.user_id WHERE l.date = ? ORDER BY l.role, l.shift`).all(today)
+    : [];
+  // ARI: month summary (?month=YYYY-MM, default current) — yes ÷ applicable per department.
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : today.slice(0, 7);
+  const ariRows = db.prepare(`SELECT * FROM wave1_ari WHERE month = ? ORDER BY created_at DESC`).all(month);
+  const ari = WAVE1_DEPTS.map((dept) => {
+    const rows = ariRows.filter((r) => r.dept === dept);
+    let yes = 0, applicable = 0;
+    rows.forEach((r) => { for (const q of ['q1','q2','q3','q4','q5','q6','q7']) { if (r[q] != null) { applicable++; if (r[q]) yes++; } } });
+    return { dept, instances: rows.length, yes, applicable, ari: applicable ? Math.round(yes / applicable * 1000) / 10 : null };
+  });
+  const progress = db.prepare(`SELECT item_id, note, by_name, done_at FROM wave1_progress`).all();
+  res.json({ start, day, huddle, lsw: { mine, team }, ari: { month, depts: ari, recent: ariRows.slice(0, 10) }, progress, canManage: wave1CanManage(req.user) });
+});
+
+// Log today's flash huddle (upsert — re-logging updates the details).
+app.post('/api/wave1/huddle', requireAuth, (req, res) => {
+  const b = req.body || {};
+  db.prepare(`INSERT INTO wave1_huddle (date, facilitator, on_time, attendance, stuck, by_id) VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT(date) DO UPDATE SET facilitator = excluded.facilitator, on_time = excluded.on_time, attendance = excluded.attendance, stuck = excluded.stuck, by_id = excluded.by_id`)
+    .run(new Date().toISOString().slice(0, 10), String(b.facilitator || req.user.name || '').slice(0, 120), b.on_time ? 1 : 0,
+         Number.isFinite(+b.attendance) && b.attendance !== '' && b.attendance != null ? Math.max(0, Math.round(+b.attendance)) : null,
+         String(b.stuck || '').slice(0, 2000), req.user.id);
+  res.json({ ok: true });
+});
+
+// Save my LSW day (check-offs + end-of-day close + reason if incomplete).
+app.post('/api/wave1/lsw', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!WAVE1_LSW_ROLES.includes(b.role)) return res.status(400).json({ error: 'Unknown LSW role.' });
+  const shift = b.role === 'House Supervisor' ? (['Day', 'Evening', 'Night'].includes(b.shift) ? b.shift : 'Day') : '';
+  const items = JSON.stringify(Array.isArray(b.items) ? b.items.map(String).slice(0, 30) : []);
+  db.prepare(`INSERT INTO wave1_lsw (date, role, shift, user_id, items, close_note, miss_reason) VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(date, role, shift, user_id) DO UPDATE SET items = excluded.items, close_note = excluded.close_note, miss_reason = excluded.miss_reason, updated_at = datetime('now')`)
+    .run(new Date().toISOString().slice(0, 10), b.role, shift, req.user.id, items, String(b.close_note || '').slice(0, 2000), String(b.miss_reason || '').slice(0, 500));
+  res.json({ ok: true });
+});
+
+// Score an ARI audit instance (leaders; q1–q7: 1 yes / 0 no / null n-a).
+app.post('/api/wave1/ari', requireAuth, requireWave1Leader, (req, res) => {
+  const b = req.body || {};
+  if (!WAVE1_DEPTS.includes(b.dept)) return res.status(400).json({ error: 'Unknown department.' });
+  const q = (v) => (v === 1 || v === true || v === '1' ? 1 : v === 0 || v === false || v === '0' ? 0 : null);
+  db.prepare(`INSERT INTO wave1_ari (month, dept, workflow, q1, q2, q3, q4, q5, q6, q7, variation_reason, q8_note, auditor_id, auditor_name)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(new Date().toISOString().slice(0, 7), b.dept, String(b.workflow || '').slice(0, 300),
+         q(b.q1), q(b.q2), q(b.q3), q(b.q4), q(b.q5), q(b.q6), q(b.q7),
+         String(b.variation_reason || '').slice(0, 500), String(b.q8_note || '').slice(0, 500), req.user.id, req.user.name);
+  audit({ user: req.user, action: 'WAVE1_ARI', entity: 'wave1_ari', detail: `${b.dept}: ${b.workflow || ''}`.slice(0, 200), ip: req.ip });
+  res.json({ ok: true });
+});
+
+// Check / uncheck a 90-day playbook item or gate criterion (leaders).
+app.post('/api/wave1/progress', requireAuth, requireWave1Leader, (req, res) => {
+  const id = String(req.body?.item_id || '').slice(0, 80);
+  if (!id) return res.status(400).json({ error: 'item_id required.' });
+  if (req.body?.done) {
+    db.prepare(`INSERT INTO wave1_progress (item_id, note, by_id, by_name) VALUES (?, ?, ?, ?)
+                ON CONFLICT(item_id) DO UPDATE SET note = excluded.note`).run(id, String(req.body?.note || '').slice(0, 500), req.user.id, req.user.name);
+  } else {
+    db.prepare(`DELETE FROM wave1_progress WHERE item_id = ?`).run(id);
+  }
+  res.json({ ok: true });
+});
+
+// Set (or clear) the Wave 1 start date — Day 1 of the 90 days.
+app.post('/api/wave1/start', requireAuth, requireWave1Leader, (req, res) => {
+  const d = String(req.body?.date || '');
+  if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ error: 'Date must be YYYY-MM-DD.' });
+  setState('wave1_start', d);
+  res.json({ ok: true });
+});
+
 /* ---------------- Excellence Scorecard (Standard §22) ---------------- */
 app.get('/api/scorecard', requireAuth, (req, res) => {
   const m = [];

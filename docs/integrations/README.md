@@ -29,11 +29,16 @@ alerts, and **no raw PHI in logs**. The SDK implementing this lands in Epic 5
 
 ## Status
 
-| Vendor | System of record for | Signed discovery | Code allowed today |
+| Vendor | System of record for | Signed discovery | Code today |
 |---|---|---|---|
-| Kipu | Clinical | ❌ not received | interface + mock only |
-| Salesforce | Growth/relationships | ❌ not received | interface + mock only |
-| CollaborateMD | Revenue cycle | ❌ not received | interface + mock only |
+| Kipu | Clinical | ❌ not received | `packages/connector-kipu` (mock only) |
+| Salesforce | Growth/relationships | ❌ not received | `packages/connector-salesforce` (mock only) |
+| CollaborateMD | Revenue cycle | ❌ not received | `packages/connector-collaboratemd` (mock only) |
+
+The SDK, canonical envelope, ingestion pipeline (quarantine, dead-letter,
+cursors, reconciliation, anomaly alerts), and contract-test kit live in
+`packages/integrations-core` (ADR-0010). A real adapter must pass the same
+`assertConnectorContract` assertions the mocks pass.
 
 Discovery templates to be completed with vendors are in
 [`../vendor-discovery/`](../vendor-discovery/). Phase 0 gate: **no production

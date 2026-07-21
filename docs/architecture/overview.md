@@ -1,9 +1,9 @@
 # Architecture Overview
 
 Status: Epics 1 (Foundation), 2 (Identity and access), 3 (Excellence
-content), and 4 (Work management) complete; everything else is
-specification, not code. The authoritative specification is
-[`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
+content), 4 (Work management), and 5 (Integration framework) complete;
+everything else is specification, not code. The authoritative specification
+is [`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
 
 ## System context
 
@@ -66,6 +66,8 @@ accelerates it but never gates it.
 | Authorization model | [`../security/authorization-model.md`](../security/authorization-model.md) | roles, matrix, reason codes |
 | Excellence content | `packages/excellence` | versioned Gold Standards / role cards / policies / constitution, approval workflow, search, printable + offline exports; ADR-0008 |
 | Work management | `packages/work` | work items with provenance, role ownership, escalation ladder, resolution codes, PHI-free notifications; ADR-0009 |
+| Integration framework | `packages/integrations-core` | §12 connector SDK, canonical envelope, idempotent pipeline (quarantine, DLQ, cursors, reconciliation, anomaly alerts); ADR-0010 |
+| Mock connectors | `packages/connector-{kipu,salesforce,collaboratemd}` | synthetic read-only mocks; real adapters forbidden until signed discovery |
 | API skeleton | `apps/api` | health/readiness + authenticated Epic 2 routes (me, facilities, patient summary, audit events, break-glass, access review) + Epic 3 Excellence library and authoring routes + Epic 4 work queues and notifications |
 | Worker skeleton | `apps/worker` | interval scheduler seam for Epic 5 jobs |
 | Web/admin stubs | `apps/web`, `apps/admin` | framework decision deferred (ADR-0003) |
@@ -86,8 +88,9 @@ accelerates it but never gates it.
 4. **Work management** ✅ — role-owned queues, due dates, overdue
    escalation ladder, resolution codes, PHI-free notifications. Per-rule
    escalation policies arrive with the rules engine.
-5. Integration framework — connector SDK, canonical envelope, mock connectors,
-   idempotent ingestion, dead-letter, reconciliation.
+5. **Integration framework** ✅ — connector SDK, canonical envelope, mock
+   connectors, idempotent ingestion, quarantine/dead-letter, cursors,
+   reconciliation with volume-anomaly work items.
 6–8. Vendor read connectors — **only after signed discovery documents.**
 9. Identity resolution — crosswalk, deterministic auto-link rules, human
    review queue.

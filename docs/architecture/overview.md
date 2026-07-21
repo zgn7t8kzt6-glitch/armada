@@ -1,9 +1,9 @@
 # Architecture Overview
 
 Status: Epics 1 (Foundation), 2 (Identity and access), 3 (Excellence
-content), 4 (Work management), and 5 (Integration framework) complete;
-everything else is specification, not code. The authoritative specification
-is [`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
+content), 4 (Work management), 5 (Integration framework), and 9 (Identity
+resolution) complete; everything else is specification, not code. The
+authoritative specification is [`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
 
 ## System context
 
@@ -68,6 +68,7 @@ accelerates it but never gates it.
 | Work management | `packages/work` | work items with provenance, role ownership, escalation ladder, resolution codes, PHI-free notifications; ADR-0009 |
 | Integration framework | `packages/integrations-core` | §12 connector SDK, canonical envelope, idempotent pipeline (quarantine, DLQ, cursors, reconciliation, anomaly alerts); ADR-0010 |
 | Mock connectors | `packages/connector-{kipu,salesforce,collaboratemd}` | synthetic read-only mocks; real adapters forbidden until signed discovery |
+| Identity resolution | `packages/identity` | deterministic-only auto-linking, crosswalks, human review queue, dual-confirmed merge + audited unmerge; ADR-0011 |
 | API skeleton | `apps/api` | health/readiness + authenticated Epic 2 routes (me, facilities, patient summary, audit events, break-glass, access review) + Epic 3 Excellence library and authoring routes + Epic 4 work queues and notifications |
 | Worker skeleton | `apps/worker` | interval scheduler seam for Epic 5 jobs |
 | Web/admin stubs | `apps/web`, `apps/admin` | framework decision deferred (ADR-0003) |
@@ -92,8 +93,10 @@ accelerates it but never gates it.
    connectors, idempotent ingestion, quarantine/dead-letter, cursors,
    reconciliation with volume-anomaly work items.
 6–8. Vendor read connectors — **only after signed discovery documents.**
-9. Identity resolution — crosswalk, deterministic auto-link rules, human
-   review queue.
+9. **Identity resolution** ✅ — crosswalks, deterministic-only auto-link
+   rules with hard-conflict veto, human review queue, dual-confirmed
+   merge and audited unmerge. (Built ahead of 6–8, which await vendor
+   discovery.)
 10. Role workspaces. 11. Daily lineup. 12. Metrics. 13. Privacy/consent.
 14. Compliance readiness.
 

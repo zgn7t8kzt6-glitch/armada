@@ -28,3 +28,4 @@ old one and link both directions.
 | [0008](0008-excellence-content-architecture.md) | Excellence content architecture (Epic 3) | Accepted |
 | [0009](0009-work-management-architecture.md) | Work management architecture (Epic 4) | Accepted |
 | [0010](0010-integration-framework.md) | Integration framework (Epic 5) | Accepted |
+| [0011](0011-identity-resolution.md) | Identity resolution (Epic 9) | Accepted |

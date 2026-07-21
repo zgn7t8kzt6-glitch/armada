@@ -13,6 +13,7 @@
     "@armada/feature-flags": "*",
     "@armada/observability": "*",
     "@armada/auth": "*",
-    "@armada/audit": "*"
+    "@armada/audit": "*",
+    "@armada/excellence": "*"
   }
 }

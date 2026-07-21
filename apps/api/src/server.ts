@@ -14,6 +14,14 @@ import {
   type UserRecord,
   type UserStore,
 } from '@armada/auth';
+import {
+  APPROVER_ROLES,
+  renderPrintableHtml,
+  searchPublished,
+  validateBody,
+  type ContentBody,
+  type ExcellenceContentService,
+} from '@armada/excellence';
 import { newRequestId, type Logger } from '@armada/observability';
 import type { Facility } from './seed.js';
 
@@ -37,6 +45,7 @@ export interface ApiContext {
   readonly idp?: IdentityProvider;
   readonly breakGlass: BreakGlassService;
   readonly audit: AuditLog;
+  readonly excellence: ExcellenceContentService;
   readonly facilities: readonly Facility[];
   readonly censusByFacility: ReadonlyMap<string, number>;
 }
@@ -54,9 +63,31 @@ interface AuthedContext extends RequestContext {
   readonly session: SessionRecord;
 }
 
-type Handler = (ctx: RequestContext) => Promise<void> | void;
+type Handler = (ctx: RequestContext, params: Readonly<Record<string, string>>) => Promise<void> | void;
 
-const MAX_BODY_BYTES = 16 * 1024;
+const MAX_BODY_BYTES = 64 * 1024;
+
+/** Match '/a/:x/b' patterns against a pathname; returns captured params. */
+function matchPath(
+  pattern: string,
+  pathname: string,
+): Readonly<Record<string, string>> | undefined {
+  const patternParts = pattern.split('/');
+  const pathParts = pathname.split('/');
+  if (patternParts.length !== pathParts.length) return undefined;
+  const params: Record<string, string> = {};
+  for (let i = 0; i < patternParts.length; i += 1) {
+    const patternPart = patternParts[i];
+    const pathPart = pathParts[i];
+    if (patternPart === undefined || pathPart === undefined) return undefined;
+    if (patternPart.startsWith(':')) {
+      params[patternPart.slice(1)] = decodeURIComponent(pathPart);
+    } else if (patternPart !== pathPart) {
+      return undefined;
+    }
+  }
+  return params;
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const data = JSON.stringify(body);
@@ -131,6 +162,26 @@ export function createApiServer(context: ApiContext): Server {
     return { ...ctx, user, session: verification.session };
   }
 
+  /**
+   * Excellence content is organization-wide reading material; the policy
+   * check binds it to the reader's own facility coverage (their first scoped
+   * facility, or org-wide for `all`-scope roles) so the standard engine rules
+   * — active user, org membership, role capability — still apply.
+   */
+  function excellenceResource(user: UserRecord): ResourceRef {
+    const scoped = user.assignments.find(
+      (a) => a.organizationId === context.organizationId && a.facilityScope !== 'all',
+    );
+    const facilityId =
+      scoped !== undefined && scoped.facilityScope !== 'all' ? scoped.facilityScope[0] : undefined;
+    return {
+      type: 'excellence_content',
+      classification: 'OPERATIONAL',
+      organizationId: context.organizationId,
+      ...(facilityId !== undefined ? { facilityId } : {}),
+    };
+  }
+
   /** Policy-check + audit a sensitive read/write. Returns the decision on ALLOW. */
   function authorize(
     ctx: AuthedContext,
@@ -141,6 +192,9 @@ export function createApiServer(context: ApiContext): Server {
       auditAction: string;
       subjectType: string;
       subjectId: string;
+      /** 'all' (default) audits every decision; 'deny-only' skips ALLOW
+       * records for non-sensitive reads like the Excellence library. */
+      auditMode?: 'all' | 'deny-only';
     },
   ): AccessDecision | undefined {
     const breakGlass =
@@ -154,19 +208,23 @@ export function createApiServer(context: ApiContext): Server {
       purpose: input.purpose,
       ...(breakGlass !== undefined ? { breakGlass } : {}),
     });
-    context.audit.append({
-      actorType: 'user',
-      actorId: ctx.user.id,
-      action: input.auditAction,
-      subjectType: input.subjectType,
-      subjectId: input.subjectId,
-      organizationId: input.resource.organizationId,
-      purpose: input.purpose,
-      requestId: ctx.requestId,
-      policyDecision: `${decision.decision}:${decision.reasonCodes.join(',')}`,
-      ...(input.resource.facilityId !== undefined ? { facilityId: input.resource.facilityId } : {}),
-      ...(breakGlass !== undefined ? { breakGlassReason: breakGlass.reason } : {}),
-    });
+    if ((input.auditMode ?? 'all') === 'all' || decision.decision !== 'ALLOW') {
+      context.audit.append({
+        actorType: 'user',
+        actorId: ctx.user.id,
+        action: input.auditAction,
+        subjectType: input.subjectType,
+        subjectId: input.subjectId,
+        organizationId: input.resource.organizationId,
+        purpose: input.purpose,
+        requestId: ctx.requestId,
+        policyDecision: `${decision.decision}:${decision.reasonCodes.join(',')}`,
+        ...(input.resource.facilityId !== undefined
+          ? { facilityId: input.resource.facilityId }
+          : {}),
+        ...(breakGlass !== undefined ? { breakGlassReason: breakGlass.reason } : {}),
+      });
+    }
     if (decision.decision !== 'ALLOW') {
       sendJson(ctx.res, 403, {
         error: 'forbidden',
@@ -182,6 +240,71 @@ export function createApiServer(context: ApiContext): Server {
       return undefined;
     }
     return decision;
+  }
+
+  function sendHtml(res: ServerResponse, status: number, html: string): void {
+    res.writeHead(status, {
+      'content-type': 'text/html; charset=utf-8',
+      'content-length': Buffer.byteLength(html),
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'no-referrer',
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+      'cache-control': 'no-store',
+    });
+    res.end(html);
+  }
+
+  function authorizeContentRead(ctx: AuthedContext): boolean {
+    return (
+      authorize(ctx, {
+        resource: excellenceResource(ctx.user),
+        action: 'read',
+        purpose: 'operations',
+        auditAction: 'excellence_content.read',
+        subjectType: 'excellence_content',
+        subjectId: 'library',
+        auditMode: 'deny-only',
+      }) !== undefined
+    );
+  }
+
+  function authorizeContentWrite(ctx: AuthedContext, auditAction: string, subjectId: string): boolean {
+    return (
+      authorize(ctx, {
+        resource: excellenceResource(ctx.user),
+        action: 'write',
+        purpose: 'operations',
+        auditAction,
+        subjectType: 'excellence_content',
+        subjectId,
+      }) !== undefined
+    );
+  }
+
+  /** Map service errors: unknown content → 404, validation/transition → 400. */
+  function sendServiceError(ctx: RequestContext, err: unknown): void {
+    const message = err instanceof Error ? err.message : 'invalid request';
+    if (message.startsWith('Unknown content')) {
+      sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+      return;
+    }
+    sendJson(ctx.res, 400, { error: 'invalid_request', message, requestId: ctx.requestId });
+  }
+
+  function parseContentBody(ctx: RequestContext, raw: unknown): ContentBody | undefined {
+    if (typeof raw !== 'object' || raw === null || typeof (raw as { kind?: unknown }).kind !== 'string') {
+      sendJson(ctx.res, 400, { error: 'invalid_body', requestId: ctx.requestId });
+      return undefined;
+    }
+    try {
+      const body = raw as ContentBody;
+      validateBody(body);
+      return body;
+    } catch (err) {
+      sendServiceError(ctx, err);
+      return undefined;
+    }
   }
 
   const routes: Record<string, Partial<Record<string, Handler>>> = {
@@ -423,7 +546,222 @@ export function createApiServer(context: ApiContext): Server {
         );
       },
     },
+
+    '/api/v1/excellence/gold-standards': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined || !authorizeContentRead(authed)) return;
+        sendJson(ctx.res, 200, { goldStandards: context.excellence.listPublished('gold_standard') });
+      },
+    },
+
+    '/api/v1/excellence/policies': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined || !authorizeContentRead(authed)) return;
+        sendJson(ctx.res, 200, { policies: context.excellence.listPublished('policy') });
+      },
+    },
+
+    '/api/v1/excellence/constitution': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined || !authorizeContentRead(authed)) return;
+        sendJson(ctx.res, 200, {
+          documents: context.excellence.listPublished('constitution_document'),
+        });
+      },
+    },
+
+    '/api/v1/excellence/search': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined || !authorizeContentRead(authed)) return;
+        const query = ctx.url.searchParams.get('q') ?? '';
+        sendJson(ctx.res, 200, {
+          query,
+          results: searchPublished(context.excellence.listPublished(), query),
+        });
+      },
+    },
+
+    '/api/v1/excellence/content': {
+      POST: async (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const payload = await readJsonBody(ctx);
+        if (payload === undefined) return;
+        if (!authorizeContentWrite(authed, 'excellence_content.created', 'new')) return;
+        const title = typeof payload['title'] === 'string' ? payload['title'] : '';
+        const body = parseContentBody(ctx, payload['body']);
+        if (body === undefined) return;
+        try {
+          const draft = context.excellence.createDraft({ title, body, authorId: authed.user.id });
+          sendJson(ctx.res, 201, { contentId: draft.contentId, version: draft.version, status: draft.status });
+        } catch (err) {
+          sendServiceError(ctx, err);
+        }
+      },
+    },
   };
+
+  const paramRoutes: readonly {
+    readonly pattern: string;
+    readonly methods: Partial<Record<string, Handler>>;
+  }[] = [
+    {
+      pattern: '/api/v1/excellence/role-cards/:role',
+      methods: {
+        GET: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined || !authorizeContentRead(authed)) return;
+          const card = context.excellence.findPublishedRoleCard(params['role'] ?? '');
+          if (card === undefined) {
+            sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+            return;
+          }
+          sendJson(ctx.res, 200, { roleCard: card });
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/excellence/content/:id',
+      methods: {
+        GET: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined || !authorizeContentRead(authed)) return;
+          const contentId = params['id'] ?? '';
+          const published = context.excellence.getPublished(contentId);
+          if (published === undefined) {
+            sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+            return;
+          }
+          let history: readonly { version: number; status: string }[] = [];
+          try {
+            history = context.excellence
+              .history(contentId)
+              .map((v) => ({ version: v.version, status: v.status }));
+          } catch {
+            history = [];
+          }
+          sendJson(ctx.res, 200, { content: published, history });
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/excellence/content/:id/print',
+      methods: {
+        GET: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined || !authorizeContentRead(authed)) return;
+          const published = context.excellence.getPublished(params['id'] ?? '');
+          if (published === undefined) {
+            sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+            return;
+          }
+          sendHtml(ctx.res, 200, renderPrintableHtml(published));
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/excellence/content/:id/edit',
+      methods: {
+        POST: async (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const payload = await readJsonBody(ctx);
+          if (payload === undefined) return;
+          const contentId = params['id'] ?? '';
+          if (!authorizeContentWrite(authed, 'excellence_content.edited', contentId)) return;
+          const body = payload['body'] !== undefined ? parseContentBody(ctx, payload['body']) : undefined;
+          if (payload['body'] !== undefined && body === undefined) return;
+          try {
+            const updated = context.excellence.editDraft(contentId, {
+              editorId: authed.user.id,
+              ...(typeof payload['title'] === 'string' ? { title: payload['title'] } : {}),
+              ...(body !== undefined ? { body } : {}),
+            });
+            sendJson(ctx.res, 200, { contentId, version: updated.version, status: updated.status });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/excellence/content/:id/submit',
+      methods: {
+        POST: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const contentId = params['id'] ?? '';
+          if (!authorizeContentWrite(authed, 'excellence_content.submitted', contentId)) return;
+          try {
+            const submitted = context.excellence.submitForReview(contentId, authed.user.id);
+            sendJson(ctx.res, 200, { contentId, version: submitted.version, status: submitted.status });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/excellence/content/:id/approve',
+      methods: {
+        POST: async (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const payload = await readJsonBody(ctx);
+          if (payload === undefined) return;
+          const contentId = params['id'] ?? '';
+          if (!authorizeContentWrite(authed, 'excellence_content.approved', contentId)) return;
+          const approverRole = authed.user.assignments
+            .map((a) => a.role)
+            .find((role) => APPROVER_ROLES.includes(role));
+          if (approverRole === undefined) {
+            sendJson(ctx.res, 403, {
+              error: 'forbidden',
+              message: 'User holds no content-approver role',
+              requestId: ctx.requestId,
+            });
+            return;
+          }
+          try {
+            const approved = context.excellence.approve(contentId, {
+              approverId: authed.user.id,
+              approverRole,
+              ...(typeof payload['note'] === 'string' ? { note: payload['note'] } : {}),
+            });
+            sendJson(ctx.res, 200, { contentId, version: approved.version, status: approved.status });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/excellence/content/:id/publish',
+      methods: {
+        POST: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const contentId = params['id'] ?? '';
+          if (!authorizeContentWrite(authed, 'excellence_content.published', contentId)) return;
+          try {
+            const published = context.excellence.publish(contentId);
+            sendJson(ctx.res, 200, {
+              contentId,
+              version: published.version,
+              status: published.status,
+              publishedAt: published.publishedAt,
+            });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+  ];
 
   return createServer((req: IncomingMessage, res: ServerResponse) => {
     const requestId = newRequestId();
@@ -431,17 +769,28 @@ export function createApiServer(context: ApiContext): Server {
     const url = new URL(req.url ?? '/', 'http://localhost');
     res.setHeader('x-request-id', requestId);
 
-    const route = routes[url.pathname];
-    if (route === undefined) {
+    let methods = routes[url.pathname];
+    let params: Readonly<Record<string, string>> = {};
+    if (methods === undefined) {
+      for (const candidate of paramRoutes) {
+        const matched = matchPath(candidate.pattern, url.pathname);
+        if (matched !== undefined) {
+          methods = candidate.methods;
+          params = matched;
+          break;
+        }
+      }
+    }
+    if (methods === undefined) {
       sendJson(res, 404, { error: 'not_found', requestId });
       return;
     }
-    const handler = route[req.method ?? 'GET'];
+    const handler = methods[req.method ?? 'GET'];
     if (handler === undefined) {
       sendJson(res, 405, { error: 'method_not_allowed', requestId });
       return;
     }
-    Promise.resolve(handler({ req, res, url, requestId, log })).catch((err: unknown) => {
+    Promise.resolve(handler({ req, res, url, requestId, log }, params)).catch((err: unknown) => {
       log.error('unhandled request error', { route: url.pathname, err });
       if (!res.headersSent) {
         sendJson(res, 500, { error: 'internal_error', requestId });

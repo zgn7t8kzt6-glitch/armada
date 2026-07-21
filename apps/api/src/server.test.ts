@@ -9,6 +9,7 @@ import {
   InMemoryUserStore,
   SessionManager,
 } from '@armada/auth';
+import { ExcellenceContentService, seedExcellenceContent } from '@armada/excellence';
 import { createLogger } from '@armada/observability';
 import { loadApiEnv } from './env.js';
 import { FAC_AKRON, FAC_COLUMBUS, seedSyntheticDirectory } from './seed.js';
@@ -27,6 +28,15 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
   const users = new InMemoryUserStore();
   const directory = seedSyntheticDirectory(users);
   const audit = new InMemoryAuditLog();
+  const excellence = new ExcellenceContentService();
+  const author = users.getByEmail('quality@dev.armada.example');
+  const approver = users.getByEmail('executive@dev.armada.example');
+  assert.ok(author && approver);
+  seedExcellenceContent(excellence, {
+    authorId: author.id,
+    approverId: approver.id,
+    approverRole: 'executive',
+  });
   const context: ApiContext = {
     logger: createLogger({ service: 'api-test', sink: () => {} }),
     serviceVersion: 'test',
@@ -44,6 +54,7 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
         }),
     breakGlass: new BreakGlassService({ audit }),
     audit,
+    excellence,
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
   };
@@ -219,7 +230,7 @@ test('access review: privacy admin gets the report; sysadmin is classification-b
     totals: { users: number };
     orgWideAssignments: unknown[];
   };
-  assert.equal(report.totals.users, 7);
+  assert.equal(report.totals.users, 9);
   assert.ok(report.orgWideAssignments.length >= 4);
 
   const sysadmin = await login('sysadmin@dev.armada.example');
@@ -298,6 +309,135 @@ test('without a dev IdP (production shape) the login route does not exist', asyn
   } finally {
     await prodShaped.close();
   }
+});
+
+test('excellence library: every role reads gold standards, role cards, constitution', async () => {
+  const bht = await login('bht.akron@dev.armada.example');
+  const standards = await get('/api/v1/excellence/gold-standards', bht);
+  assert.equal(standards.status, 200);
+  const list = (await standards.json()) as { goldStandards: { title: string }[] };
+  assert.equal(list.goldStandards.length, 3);
+
+  const card = await get('/api/v1/excellence/role-cards/bht_recovery_support', bht);
+  assert.equal(card.status, 200);
+  const cardBody = (await card.json()) as { roleCard: { title: string } };
+  assert.match(cardBody.roleCard.title, /BHT/);
+
+  assert.equal((await get('/api/v1/excellence/role-cards/provider', bht)).status, 404);
+
+  const constitution = await get('/api/v1/excellence/constitution', bht);
+  assert.equal(constitution.status, 200);
+  const docs = (await constitution.json()) as { documents: unknown[] };
+  assert.equal(docs.documents.length, 2);
+  assert.equal((await get('/api/v1/excellence/policies', bht)).status, 200);
+});
+
+test('excellence search finds the weekend AMA standard', async () => {
+  const nurse = await login('nurse.akron@dev.armada.example');
+  const res = await get('/api/v1/excellence/search?q=weekend%20AMA', nurse);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { results: { title: string; snippet: string }[] };
+  assert.equal(body.results[0]?.title, 'Safe and Ready Weekend');
+  assert.ok(body.results[0]!.snippet.length > 0);
+});
+
+test('printable view is standalone HTML with the uncontrolled-copy notice', async () => {
+  const nurse = await login('nurse.akron@dev.armada.example');
+  const listRes = await get('/api/v1/excellence/gold-standards', nurse);
+  const { goldStandards } = (await listRes.json()) as { goldStandards: { contentId: string }[] };
+  const contentId = goldStandards[0]?.contentId;
+  assert.ok(contentId);
+  const res = await get(`/api/v1/excellence/content/${contentId}/print`, nurse);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') ?? '', /text\/html/);
+  const html = await res.text();
+  assert.match(html, /^<!DOCTYPE html>/);
+  assert.match(html, /Printed copies are uncontrolled/);
+  assert.match(html, /Approved by role executive/);
+});
+
+test('authoring is write-gated: nurse denied, quality lead full workflow to publish', async () => {
+  const nurse = await login('nurse.akron@dev.armada.example');
+  const draftBody = {
+    title: 'Quiet Environment at Night',
+    body: {
+      kind: 'constitution_document',
+      docType: 'service_values',
+      text: 'Night shifts protect rest: low voices, dim lights, no avoidable noise.',
+    },
+  };
+  const deniedCreate = await post('/api/v1/excellence/content', nurse, draftBody);
+  assert.equal(deniedCreate.status, 403);
+  const denied = (await deniedCreate.json()) as { reasonCodes: string[] };
+  assert.deepEqual(denied.reasonCodes, ['ROLE_LACKS_CAPABILITY']);
+
+  const quality = await login('quality@dev.armada.example');
+  const created = await post('/api/v1/excellence/content', quality, draftBody);
+  assert.equal(created.status, 201);
+  const { contentId } = (await created.json()) as { contentId: string };
+
+  // Not visible in the published library while draft.
+  assert.equal((await get(`/api/v1/excellence/content/${contentId}`, quality)).status, 404);
+
+  const edited = await post(`/api/v1/excellence/content/${contentId}/edit`, quality, {
+    title: 'Quiet Environment at Night (v1)',
+  });
+  assert.equal(edited.status, 200);
+
+  assert.equal(
+    (await post(`/api/v1/excellence/content/${contentId}/submit`, quality, {})).status,
+    200,
+  );
+
+  // Author cannot approve their own content (separation of duties).
+  const selfApprove = await post(`/api/v1/excellence/content/${contentId}/approve`, quality, {});
+  assert.equal(selfApprove.status, 400);
+  assert.match(((await selfApprove.json()) as { message: string }).message, /separation of duties/);
+
+  const exec = await login('executive@dev.armada.example');
+  assert.equal(
+    (await post(`/api/v1/excellence/content/${contentId}/approve`, exec, { note: 'ok' })).status,
+    200,
+  );
+  assert.equal(
+    (await post(`/api/v1/excellence/content/${contentId}/publish`, exec, {})).status,
+    200,
+  );
+
+  const detail = await get(`/api/v1/excellence/content/${contentId}`, nurse);
+  assert.equal(detail.status, 200);
+  const detailBody = (await detail.json()) as { content: { status: string; title: string } };
+  assert.equal(detailBody.content.status, 'published');
+  assert.equal(detailBody.content.title, 'Quiet Environment at Night (v1)');
+
+  // The whole workflow left an audit trail.
+  for (const action of [
+    'excellence_content.created',
+    'excellence_content.submitted',
+    'excellence_content.approved',
+    'excellence_content.published',
+  ]) {
+    assert.ok(api.audit.query({ action }).length >= 1, action);
+  }
+});
+
+test('approve without an approver role is rejected even with write capability', async () => {
+  const quality = await login('quality@dev.armada.example');
+  const created = await post('/api/v1/excellence/content', quality, {
+    title: 'Draft for HR approval test',
+    body: {
+      kind: 'constitution_document',
+      docType: 'employee_promise',
+      text: 'We invest in your growth and never waste your effort.',
+    },
+  });
+  const { contentId } = (await created.json()) as { contentId: string };
+  await post(`/api/v1/excellence/content/${contentId}/submit`, quality, {});
+
+  // sysadmin lacks excellence write capability entirely → 403 from policy.
+  const sysadmin = await login('sysadmin@dev.armada.example');
+  const res = await post(`/api/v1/excellence/content/${contentId}/approve`, sysadmin, {});
+  assert.equal(res.status, 403);
 });
 
 test('api env schema: session defaults apply and weak overrides fail', () => {

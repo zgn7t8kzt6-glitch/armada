@@ -22,6 +22,9 @@
     },
     {
       "path": "../../packages/auth"
+    },
+    {
+      "path": "../../packages/excellence"
     }
   ]
 }

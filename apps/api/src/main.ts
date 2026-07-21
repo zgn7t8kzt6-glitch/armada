@@ -5,6 +5,7 @@ import {
   SessionManager,
 } from '@armada/auth';
 import { InMemoryAuditLog } from '@armada/audit';
+import { ExcellenceContentService, seedExcellenceContent } from '@armada/excellence';
 import { createLogger } from '@armada/observability';
 import { DEV_SESSION_SECRET_DEFAULT, loadApiEnv } from './env.js';
 import { createFlags } from './flags.js';
@@ -45,6 +46,21 @@ function main(): void {
         lookupByEmail: (email) => users.getByEmail(email),
       });
 
+  // Starter Excellence content ships only with the synthetic directory; real
+  // content is authored and approved through the workflow endpoints.
+  const excellence = new ExcellenceContentService();
+  if (!isProduction) {
+    const author = users.getByEmail('quality@dev.armada.example');
+    const approver = users.getByEmail('executive@dev.armada.example');
+    if (author !== undefined && approver !== undefined) {
+      seedExcellenceContent(excellence, {
+        authorId: author.id,
+        approverId: approver.id,
+        approverRole: 'executive',
+      });
+    }
+  }
+
   const server = createApiServer({
     logger,
     serviceVersion: SERVICE_VERSION,
@@ -55,6 +71,7 @@ function main(): void {
     ...(idp !== undefined ? { idp } : {}),
     breakGlass,
     audit,
+    excellence,
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
   });

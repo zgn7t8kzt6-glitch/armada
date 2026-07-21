@@ -40,6 +40,8 @@ export function seedSyntheticDirectory(users: UserStore): SyntheticDirectory {
     { email: 'nurse.akron@dev.armada.example', name: 'Synthetic Akron Nurse', role: 'nurse', scope: [FAC_AKRON] },
     { email: 'nurse.columbus@dev.armada.example', name: 'Synthetic Columbus Nurse', role: 'nurse', scope: [FAC_COLUMBUS] },
     { email: 'admissions.akron@dev.armada.example', name: 'Synthetic Akron Admissions', role: 'admissions', scope: [FAC_AKRON] },
+    { email: 'quality@dev.armada.example', name: 'Synthetic Quality Lead', role: 'quality_risk', scope: 'all' },
+    { email: 'bht.akron@dev.armada.example', name: 'Synthetic Akron BHT', role: 'bht_recovery_support', scope: [FAC_AKRON] },
   ] as const;
 
   for (const seed of seedUsers) {

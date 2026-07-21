@@ -26,3 +26,4 @@ old one and link both directions.
 | [0006](0006-identity-access-architecture.md) | Identity and access architecture (Epic 2) | Accepted |
 | [0007](0007-append-only-audit-log.md) | Append-only audit log with hash chaining | Accepted |
 | [0008](0008-excellence-content-architecture.md) | Excellence content architecture (Epic 3) | Accepted |
+| [0009](0009-work-management-architecture.md) | Work management architecture (Epic 4) | Accepted |

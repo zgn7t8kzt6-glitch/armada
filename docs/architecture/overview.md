@@ -1,8 +1,9 @@
 # Architecture Overview
 
-Status: Epics 1 (Foundation), 2 (Identity and access), and 3 (Excellence
-content) complete; everything else is specification, not code. The
-authoritative specification is [`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
+Status: Epics 1 (Foundation), 2 (Identity and access), 3 (Excellence
+content), and 4 (Work management) complete; everything else is
+specification, not code. The authoritative specification is
+[`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
 
 ## System context
 
@@ -64,7 +65,8 @@ accelerates it but never gates it.
 | Identity & access | `packages/auth` | PBAC engine, sessions, dev IdP, break-glass, access review; ADR-0006 |
 | Authorization model | [`../security/authorization-model.md`](../security/authorization-model.md) | roles, matrix, reason codes |
 | Excellence content | `packages/excellence` | versioned Gold Standards / role cards / policies / constitution, approval workflow, search, printable + offline exports; ADR-0008 |
-| API skeleton | `apps/api` | health/readiness + authenticated Epic 2 routes (me, facilities, patient summary, audit events, break-glass, access review) + Epic 3 Excellence library and authoring routes |
+| Work management | `packages/work` | work items with provenance, role ownership, escalation ladder, resolution codes, PHI-free notifications; ADR-0009 |
+| API skeleton | `apps/api` | health/readiness + authenticated Epic 2 routes (me, facilities, patient summary, audit events, break-glass, access review) + Epic 3 Excellence library and authoring routes + Epic 4 work queues and notifications |
 | Worker skeleton | `apps/worker` | interval scheduler seam for Epic 5 jobs |
 | Web/admin stubs | `apps/web`, `apps/admin` | framework decision deferred (ADR-0003) |
 | CI | `.github/workflows/ci.yml` | format, secrets, typecheck, tests, env schema, audit |
@@ -81,7 +83,9 @@ accelerates it but never gates it.
 3. **Excellence content** ✅ — versioned/approved Gold Standards, role
    cards, policies, constitution; search; printable + offline exports.
    Admin authoring UI arrives with the web app (Epic 10 framework decision).
-4. Work management — queues, ownership, escalation.
+4. **Work management** ✅ — role-owned queues, due dates, overdue
+   escalation ladder, resolution codes, PHI-free notifications. Per-rule
+   escalation policies arrive with the rules engine.
 5. Integration framework — connector SDK, canonical envelope, mock connectors,
    idempotent ingestion, dead-letter, reconciliation.
 6–8. Vendor read connectors — **only after signed discovery documents.**

@@ -9,6 +9,7 @@ import { createMockCollaborateMdConnector, collaborateMdMappingRegistrations } f
 import { createMockKipuConnector, kipuMappingRegistrations } from '@armada/connector-kipu';
 import { createMockSalesforceConnector, salesforceMappingRegistrations } from '@armada/connector-salesforce';
 import { ExcellenceContentService, seedExcellenceContent } from '@armada/excellence';
+import { IdentityService, seedIdentityScenarios } from '@armada/identity';
 import {
   IngestionPipeline,
   InMemoryIngestedRecordStore,
@@ -69,6 +70,14 @@ function main(): void {
         approverRole: 'executive',
       });
     }
+  }
+
+  const identity = new IdentityService({ audit });
+  if (!isProduction && directory.facilities.length >= 2) {
+    seedIdentityScenarios(identity, {
+      akron: directory.facilities[0]!.id,
+      columbus: directory.facilities[1]!.id,
+    });
   }
 
   const notifier = new InMemoryNotifier();
@@ -162,6 +171,7 @@ function main(): void {
     excellence,
     work,
     notifier,
+    identity,
     ...(integrations !== undefined ? { integrations } : {}),
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,

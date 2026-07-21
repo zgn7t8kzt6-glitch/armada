@@ -19,6 +19,7 @@
     "@armada/integrations-core": "*",
     "@armada/connector-kipu": "*",
     "@armada/connector-salesforce": "*",
-    "@armada/connector-collaboratemd": "*"
+    "@armada/connector-collaboratemd": "*",
+    "@armada/identity": "*"
   }
 }

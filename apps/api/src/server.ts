@@ -22,6 +22,7 @@ import {
   type ContentBody,
   type ExcellenceContentService,
 } from '@armada/excellence';
+import { ISSUE_ACTIONS, type IdentityService, type IssueAction, type IssueStatus } from '@armada/identity';
 import type {
   IngestionPipeline,
   InMemoryIngestedRecordStore,
@@ -65,6 +66,7 @@ export interface ApiContext {
   readonly excellence: ExcellenceContentService;
   readonly work: WorkItemService;
   readonly notifier: InMemoryNotifier;
+  readonly identity: IdentityService;
   /** Absent in production until real connectors are configured post-discovery. */
   readonly integrations?: {
     readonly pipeline: IngestionPipeline;
@@ -310,7 +312,7 @@ export function createApiServer(context: ApiContext): Server {
   /** Map service errors: unknown entity → 404, stale version → 409, else 400. */
   function sendServiceError(ctx: RequestContext, err: unknown): void {
     const message = err instanceof Error ? err.message : 'invalid request';
-    if (message.startsWith('Unknown content') || message.startsWith('Unknown work item')) {
+    if (/^Unknown (content|work item|issue|merge)/.test(message)) {
       sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
       return;
     }
@@ -752,6 +754,90 @@ export function createApiServer(context: ApiContext): Server {
       },
     },
 
+    '/api/v1/reconciliation/issues': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        // Identity signals are PHI: org-wide resource, every read audited.
+        const decision = authorize(authed, {
+          resource: {
+            type: 'identity_reconciliation',
+            classification: 'PHI',
+            organizationId: context.organizationId,
+          },
+          action: 'read',
+          purpose: 'operations',
+          auditAction: 'reconciliation_issues.read',
+          subjectType: 'reconciliation_queue',
+          subjectId: 'all',
+        });
+        if (decision === undefined) return;
+        const status = ctx.url.searchParams.get('status');
+        if (
+          status !== null &&
+          !['open', 'deferred', 'escalated', 'resolved'].includes(status)
+        ) {
+          sendJson(ctx.res, 400, { error: 'invalid_status', requestId: ctx.requestId });
+          return;
+        }
+        const issues = context.identity.issues(
+          status !== null ? { status: status as IssueStatus } : {},
+        );
+        // Console needs candidates side by side: embed candidate signals.
+        sendJson(ctx.res, 200, {
+          issues: issues.map((issue) => ({
+            ...issue,
+            candidates: issue.candidates.map((candidate) => ({
+              ...candidate,
+              signals: context.identity.personById(candidate.personId)?.signals ?? {},
+            })),
+          })),
+        });
+      },
+    },
+
+    '/api/v1/identity/merges': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const decision = authorize(authed, {
+          resource: {
+            type: 'identity_reconciliation',
+            classification: 'PHI',
+            organizationId: context.organizationId,
+          },
+          action: 'read',
+          purpose: 'operations',
+          auditAction: 'identity_merges.read',
+          subjectType: 'person_merge',
+          subjectId: 'all',
+        });
+        if (decision === undefined) return;
+        sendJson(ctx.res, 200, { merges: context.identity.merges() });
+      },
+      POST: async (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const payload = await readJsonBody(ctx);
+        if (payload === undefined) return;
+        if (!authorizeIdentityWrite(authed, 'identity.merge_request', 'new')) return;
+        try {
+          const merge = context.identity.requestMerge({
+            primaryPersonId: String(payload['primaryPersonId'] ?? ''),
+            duplicatePersonId: String(payload['duplicatePersonId'] ?? ''),
+            reason: String(payload['reason'] ?? ''),
+            requestedBy: authed.user.id,
+          });
+          sendJson(ctx.res, 201, {
+            merge,
+            notice: 'Merge is pending: a different reviewer must confirm (dual confirmation).',
+          });
+        } catch (err) {
+          sendServiceError(ctx, err);
+        }
+      },
+    },
+
     '/api/v1/integrations/health': {
       GET: async (ctx) => {
         const authed = authenticate(ctx);
@@ -863,6 +949,24 @@ export function createApiServer(context: ApiContext): Server {
     },
   };
 
+  /** Identity mutations: PHI write capability, org-wide scope, always audited. */
+  function authorizeIdentityWrite(ctx: AuthedContext, auditAction: string, subjectId: string): boolean {
+    return (
+      authorize(ctx, {
+        resource: {
+          type: 'identity_reconciliation',
+          classification: 'PHI',
+          organizationId: context.organizationId,
+        },
+        action: 'write',
+        purpose: 'operations',
+        auditAction,
+        subjectType: 'identity',
+        subjectId,
+      }) !== undefined
+    );
+  }
+
   /** Shared mutation wrapper for work-item actions at the item's facility. */
   function workItemAction(
     auditAction: string,
@@ -945,6 +1049,78 @@ export function createApiServer(context: ApiContext): Server {
           });
           sendJson(ctx.res, 200, { workItem: item });
         }),
+      },
+    },
+    {
+      pattern: '/api/v1/reconciliation/issues/:id/resolve',
+      methods: {
+        POST: async (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const payload = await readJsonBody(ctx);
+          if (payload === undefined) return;
+          const issueId = params['id'] ?? '';
+          if (!authorizeIdentityWrite(authed, 'reconciliation_issue.resolve', issueId)) return;
+          const action = String(payload['action'] ?? '');
+          if (!(ISSUE_ACTIONS as readonly string[]).includes(action)) {
+            sendJson(ctx.res, 400, {
+              error: 'invalid_action',
+              validActions: ISSUE_ACTIONS,
+              requestId: ctx.requestId,
+            });
+            return;
+          }
+          try {
+            const issue = context.identity.resolveIssue(issueId, {
+              action: action as IssueAction,
+              userId: authed.user.id,
+              ...(typeof payload['personId'] === 'string' ? { personId: payload['personId'] } : {}),
+              ...(typeof payload['note'] === 'string' ? { note: payload['note'] } : {}),
+            });
+            sendJson(ctx.res, 200, { issue });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/identity/merges/:id/confirm',
+      methods: {
+        POST: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const mergeId = params['id'] ?? '';
+          if (!authorizeIdentityWrite(authed, 'identity.merge_confirm', mergeId)) return;
+          try {
+            sendJson(ctx.res, 200, { merge: context.identity.confirmMerge(mergeId, authed.user.id) });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/identity/merges/:id/unmerge',
+      methods: {
+        POST: async (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const payload = await readJsonBody(ctx);
+          if (payload === undefined) return;
+          const mergeId = params['id'] ?? '';
+          if (!authorizeIdentityWrite(authed, 'identity.unmerge', mergeId)) return;
+          try {
+            sendJson(ctx.res, 200, {
+              merge: context.identity.unmerge(mergeId, {
+                userId: authed.user.id,
+                reason: String(payload['reason'] ?? ''),
+              }),
+            });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
       },
     },
     {

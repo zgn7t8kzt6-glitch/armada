@@ -40,6 +40,9 @@
     },
     {
       "path": "../../packages/connector-collaboratemd"
+    },
+    {
+      "path": "../../packages/identity"
     }
   ]
 }

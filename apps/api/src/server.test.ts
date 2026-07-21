@@ -13,6 +13,7 @@ import { collaborateMdMappingRegistrations, createMockCollaborateMdConnector } f
 import { createMockKipuConnector, kipuMappingRegistrations } from '@armada/connector-kipu';
 import { createMockSalesforceConnector, salesforceMappingRegistrations } from '@armada/connector-salesforce';
 import { ExcellenceContentService, seedExcellenceContent } from '@armada/excellence';
+import { IdentityService, seedIdentityScenarios } from '@armada/identity';
 import {
   IngestionPipeline,
   InMemoryIngestedRecordStore,
@@ -65,6 +66,8 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
   for (const connector of connectors) {
     await pipeline.run(connector);
   }
+  const identity = new IdentityService({ audit });
+  seedIdentityScenarios(identity, { akron: FAC_AKRON, columbus: FAC_COLUMBUS });
   const notifier = new InMemoryNotifier();
   const work = new WorkItemService({ audit, notifier });
   seedWorkItems(work, {
@@ -93,6 +96,7 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     excellence,
     work,
     notifier,
+    identity,
     integrations: { pipeline, connectors, store: ingestStore },
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
@@ -711,6 +715,118 @@ test('ingestion audit trail exists and is PHI-free', async () => {
   for (const event of runs) {
     assert.match(event.summary ?? '', /read=\d+ created=\d+/);
     assert.ok(!JSON.stringify(event).includes('"payload"'));
+  }
+});
+
+test('reconciliation console: gated read with candidates side by side', async () => {
+  const nurse = await login('nurse.akron@dev.armada.example');
+  assert.equal((await get('/api/v1/reconciliation/issues', nurse)).status, 403);
+
+  const privacy = await login('privacy@dev.armada.example');
+  const res = await get('/api/v1/reconciliation/issues?status=open', privacy);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    issues: {
+      id: string;
+      reason: string;
+      candidates: { personId: string; matchedFields: string[]; conflictingFields: string[]; signals: Record<string, string> }[];
+    }[];
+  };
+  assert.equal(body.issues.length, 2);
+  const multi = body.issues.find((i) => i.reason === 'multiple_candidates');
+  const conflict = body.issues.find((i) => i.reason === 'conflicting_identifiers');
+  assert.ok(multi && conflict);
+  assert.equal(multi.candidates.length, 2);
+  assert.ok(multi.candidates[0]!.matchedFields.includes('legalName'));
+  assert.ok(Object.keys(multi.candidates[0]!.signals).length > 0, 'side-by-side signals');
+  assert.ok(conflict.candidates[0]!.conflictingFields.includes('dateOfBirth'));
+  // Sensitive read is audited.
+  assert.ok(api.audit.query({ action: 'reconciliation_issues.read' }).length >= 1);
+});
+
+test('read-only auditor can view the queue but cannot resolve', async () => {
+  const auditor = await login('auditor@dev.armada.example');
+  const list = await get('/api/v1/reconciliation/issues', auditor);
+  assert.equal(list.status, 200);
+  const { issues } = (await list.json()) as { issues: { id: string }[] };
+  const denied = await post(`/api/v1/reconciliation/issues/${issues[0]!.id}/resolve`, auditor, {
+    action: 'defer',
+  });
+  assert.equal(denied.status, 403);
+});
+
+test('resolving an issue links the record and survives as a crosswalk', async () => {
+  const privacy = await login('privacy@dev.armada.example');
+  const list = await get('/api/v1/reconciliation/issues?status=open', privacy);
+  const { issues } = (await list.json()) as {
+    issues: { id: string; reason: string; candidates: { personId: string }[] }[];
+  };
+  const multi = issues.find((i) => i.reason === 'multiple_candidates');
+  assert.ok(multi);
+
+  // Bad action and unknown issue are rejected cleanly.
+  assert.equal(
+    (await post(`/api/v1/reconciliation/issues/${multi.id}/resolve`, privacy, { action: 'merge' }))
+      .status,
+    400,
+  );
+  assert.equal(
+    (await post('/api/v1/reconciliation/issues/nope/resolve', privacy, { action: 'defer' })).status,
+    404,
+  );
+
+  const resolved = await post(`/api/v1/reconciliation/issues/${multi.id}/resolve`, privacy, {
+    action: 'link',
+    personId: multi.candidates[0]!.personId,
+    note: 'Verified against payer portal (synthetic).',
+  });
+  assert.equal(resolved.status, 200);
+  const { issue } = (await resolved.json()) as { issue: { status: string } };
+  assert.equal(issue.status, 'resolved');
+  assert.ok(api.audit.query({ action: 'identity.review_resolved' }).length >= 1);
+});
+
+test('merge lifecycle over HTTP: dual confirmation enforced, unmerge audited', async () => {
+  const privacy = await login('privacy@dev.armada.example');
+  const list = await get('/api/v1/reconciliation/issues', privacy);
+  const { issues } = (await list.json()) as {
+    issues: { reason: string; candidates: { personId: string }[] }[];
+  };
+  const multi = issues.find((i) => i.reason === 'multiple_candidates');
+  assert.ok(multi && multi.candidates.length >= 2);
+  const [a, b] = [multi.candidates[0]!.personId, multi.candidates[1]!.personId];
+
+  const requested = await post('/api/v1/identity/merges', privacy, {
+    primaryPersonId: a,
+    duplicatePersonId: b,
+    reason: 'Duplicate registrations for the same synthetic person',
+  });
+  assert.equal(requested.status, 201);
+  const { merge } = (await requested.json()) as { merge: { id: string } };
+
+  // Requester cannot self-confirm.
+  const selfConfirm = await post(`/api/v1/identity/merges/${merge.id}/confirm`, privacy, {});
+  assert.equal(selfConfirm.status, 400);
+  assert.match(((await selfConfirm.json()) as { message: string }).message, /second reviewer/);
+
+  const quality = await login('quality@dev.armada.example');
+  const confirmed = await post(`/api/v1/identity/merges/${merge.id}/confirm`, quality, {});
+  assert.equal(confirmed.status, 200);
+  const confirmedBody = (await confirmed.json()) as { merge: { status: string } };
+  assert.equal(confirmedBody.merge.status, 'executed');
+
+  const unmerged = await post(`/api/v1/identity/merges/${merge.id}/unmerge`, quality, {
+    reason: 'Testing full reversal path end to end',
+  });
+  assert.equal(unmerged.status, 200);
+  const unmergedBody = (await unmerged.json()) as { merge: { status: string } };
+  assert.equal(unmergedBody.merge.status, 'unmerged');
+
+  const merges = await get('/api/v1/identity/merges', privacy);
+  const mergesBody = (await merges.json()) as { merges: { status: string }[] };
+  assert.ok(mergesBody.merges.some((m) => m.status === 'unmerged'));
+  for (const action of ['identity.merge_requested', 'identity.merge_confirmed', 'identity.unmerged']) {
+    assert.ok(api.audit.query({ action }).length >= 1, action);
   }
 });
 

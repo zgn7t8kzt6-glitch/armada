@@ -38,6 +38,9 @@
       "path": "packages/identity"
     },
     {
+      "path": "packages/metrics"
+    },
+    {
       "path": "apps/api"
     },
     {

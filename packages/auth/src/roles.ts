@@ -45,6 +45,7 @@ export const RESOURCE_TYPES = [
   'access_review',
   'admin_config',
   'excellence_content',
+  'identity_reconciliation',
 ] as const;
 
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
@@ -93,11 +94,13 @@ export const ROLE_CAPABILITY_MATRIX: Record<BaselineRole, RoleCapabilities> = {
   privacy_administrator: {
     audit_event: { read: 'PHI' },
     access_review: { read: 'PHI' },
+    identity_reconciliation: { read: 'PHI', write: 'PHI' },
     ...EXCELLENCE_READ,
   },
   compliance_administrator: {
     audit_event: { read: 'PHI' },
     access_review: { read: 'PHI' },
+    identity_reconciliation: { read: 'PHI', write: 'PHI' },
     ...EXCELLENCE_WRITE,
   },
   executive: {
@@ -133,6 +136,7 @@ export const ROLE_CAPABILITY_MATRIX: Record<BaselineRole, RoleCapabilities> = {
     patient_summary: { read: 'PHI' },
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
     audit_event: { read: 'PHI' },
+    identity_reconciliation: { read: 'PHI', write: 'PHI' },
     ...EXCELLENCE_WRITE,
   },
   hr_learning: {
@@ -147,6 +151,7 @@ export const ROLE_CAPABILITY_MATRIX: Record<BaselineRole, RoleCapabilities> = {
     audit_event: { read: 'PHI' },
     access_review: { read: 'PHI' },
     census_summary: { read: 'OPERATIONAL' },
+    identity_reconciliation: { read: 'PHI' },
     ...EXCELLENCE_READ,
   },
 };

@@ -1,14 +1,35 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/env" },
-    { "path": "packages/feature-flags" },
-    { "path": "packages/observability" },
-    { "path": "packages/audit" },
-    { "path": "packages/auth" },
-    { "path": "apps/api" },
-    { "path": "apps/worker" },
-    { "path": "apps/web" },
-    { "path": "apps/admin" }
+    {
+      "path": "packages/env"
+    },
+    {
+      "path": "packages/feature-flags"
+    },
+    {
+      "path": "packages/observability"
+    },
+    {
+      "path": "packages/audit"
+    },
+    {
+      "path": "packages/auth"
+    },
+    {
+      "path": "packages/excellence"
+    },
+    {
+      "path": "apps/api"
+    },
+    {
+      "path": "apps/worker"
+    },
+    {
+      "path": "apps/web"
+    },
+    {
+      "path": "apps/admin"
+    }
   ]
 }

@@ -1,0 +1,85 @@
+# Architecture Overview
+
+Status: Epic 1 (Foundation) complete; everything below the foundation row is
+specification, not code. The authoritative specification is
+[`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
+
+## System context
+
+```mermaid
+flowchart LR
+  subgraph Sources["Systems of record (read-only, Phase 1)"]
+    KIPU["Kipu\n(clinical)"]
+    SF["Salesforce\n(growth)"]
+    CMD["CollaborateMD\n(revenue cycle)"]
+  end
+
+  subgraph AIP["Armada Intelligence Platform (this repo)"]
+    WORKER["apps/worker\ningestion · reconciliation · alerts"]
+    API["apps/api\ndomain API"]
+    WEB["apps/web\nrole-based UX"]
+    ADMIN["apps/admin\ngovernance UI"]
+    DB[("PostgreSQL\ncanonical model + crosswalks")]
+  end
+
+  IDP["Identity provider\n(OIDC SSO, MFA)"]
+  STAFF["Facility staff\n(role-scoped)"]
+
+  KIPU -.->|"connector (mock until signed discovery)"| WORKER
+  SF -.->|"connector (mock until signed discovery)"| WORKER
+  CMD -.->|"connector (mock until signed discovery)"| WORKER
+  WORKER --> DB
+  API --> DB
+  WEB --> API
+  ADMIN --> API
+  IDP --> API
+  STAFF --> WEB
+```
+
+The Armada Excellence System (AES — Gold Standards, lineups, rounding, role
+cards) must remain deployable on paper without any of the boxes above; AIP
+accelerates it but never gates it.
+
+## Monorepo boundaries
+
+- `apps/*` — deployable units only; no business logic in UI, no logic in
+  entrypoints beyond wiring.
+- `packages/*` — shared libraries. Domain rules will live in
+  `packages/domain` (future), never in vendor adapters or UI.
+- Vendor adapters (`packages/connector-*`, future) map vendor payloads to
+  canonical envelopes and nothing else. They are read-only by default and
+  mock-only until signed vendor discovery lands in `docs/integrations/`.
+- Cross-package imports go through workspace package boundaries
+  (`@armada/...`), compiled with TypeScript project references.
+
+## What exists after Epic 1
+
+| Piece | Where | Notes |
+|---|---|---|
+| Strict TS + project references | `packages/config/tsconfig.base.json` | ADR-0004 |
+| Env validation | `packages/env` | fail-fast, secret-redacting; ADR-0005 |
+| Feature flags | `packages/feature-flags` | default off; high-risk locked in prod; ADR-0005 |
+| PHI-safe logging | `packages/observability` | deny-list redaction, JSON lines; ADR-0005 |
+| API skeleton | `apps/api` | health/readiness only, secure headers, request IDs |
+| Worker skeleton | `apps/worker` | interval scheduler seam for Epic 5 jobs |
+| Web/admin stubs | `apps/web`, `apps/admin` | framework decision deferred (ADR-0003) |
+| CI | `.github/workflows/ci.yml` | format, secrets, typecheck, tests, env schema, audit |
+| Dev environment | `.devcontainer/`, `infrastructure/docker/` | Node 22 + Postgres 16 + Redis 7 |
+| Repo checks | `scripts/` | dependency-free format/secret/env gates |
+
+## Epic roadmap (blueprint §27)
+
+1. **Foundation** — this document's scope. ✅
+2. Identity and access — OIDC abstraction, policy engine, break-glass.
+3. Excellence content — Gold Standards, role cards, versioning/approval.
+4. Work management — queues, ownership, escalation.
+5. Integration framework — connector SDK, canonical envelope, mock connectors,
+   idempotent ingestion, dead-letter, reconciliation.
+6–8. Vendor read connectors — **only after signed discovery documents.**
+9. Identity resolution — crosswalk, deterministic auto-link rules, human
+   review queue.
+10. Role workspaces. 11. Daily lineup. 12. Metrics. 13. Privacy/consent.
+14. Compliance readiness.
+
+Each epic starts with an ADR + checklist and ends with `npm run verify` green
+and a completion report.

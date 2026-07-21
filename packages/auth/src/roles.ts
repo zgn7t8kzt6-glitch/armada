@@ -44,6 +44,7 @@ export const RESOURCE_TYPES = [
   'audit_event',
   'access_review',
   'admin_config',
+  'excellence_content',
 ] as const;
 
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
@@ -60,10 +61,22 @@ export interface Capability {
 
 export type RoleCapabilities = Partial<Record<ResourceType, Capability>>;
 
+/** Every role can read the Excellence library — Gold Standards, role cards,
+ * and policies are for the whole workforce (blueprint §15). */
+const EXCELLENCE_READ: RoleCapabilities = {
+  excellence_content: { read: 'OPERATIONAL' },
+};
+
+/** Content-governance roles may author/edit Excellence content. */
+const EXCELLENCE_WRITE: RoleCapabilities = {
+  excellence_content: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+};
+
 const CLINICAL_CORE: RoleCapabilities = {
   patient_summary: { read: 'PHI' },
   census_summary: { read: 'OPERATIONAL' },
   work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+  ...EXCELLENCE_READ,
 };
 
 /**
@@ -75,54 +88,65 @@ export const ROLE_CAPABILITY_MATRIX: Record<BaselineRole, RoleCapabilities> = {
   system_administrator: {
     admin_config: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
     audit_event: { read: 'OPERATIONAL' },
+    ...EXCELLENCE_READ,
   },
   privacy_administrator: {
     audit_event: { read: 'PHI' },
     access_review: { read: 'PHI' },
+    ...EXCELLENCE_READ,
   },
   compliance_administrator: {
     audit_event: { read: 'PHI' },
     access_review: { read: 'PHI' },
+    ...EXCELLENCE_WRITE,
   },
   executive: {
     census_summary: { read: 'OPERATIONAL' },
     work_item: { read: 'OPERATIONAL' },
+    ...EXCELLENCE_WRITE,
   },
   facility_administrator: {
     census_summary: { read: 'OPERATIONAL' },
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+    ...EXCELLENCE_WRITE,
   },
   medical_director: CLINICAL_CORE,
   provider: CLINICAL_CORE,
-  nursing_director: CLINICAL_CORE,
+  nursing_director: { ...CLINICAL_CORE, ...EXCELLENCE_WRITE },
   nurse: CLINICAL_CORE,
-  clinical_director: CLINICAL_CORE,
+  clinical_director: { ...CLINICAL_CORE, ...EXCELLENCE_WRITE },
   therapist_counselor: CLINICAL_CORE,
   case_manager: CLINICAL_CORE,
   bht_recovery_support: {
     census_summary: { read: 'OPERATIONAL' },
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+    ...EXCELLENCE_READ,
   },
   admissions: CLINICAL_CORE,
   utilization_review: CLINICAL_CORE,
   revenue_cycle: {
     patient_summary: { read: 'PHI' },
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+    ...EXCELLENCE_READ,
   },
   quality_risk: {
     patient_summary: { read: 'PHI' },
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
     audit_event: { read: 'PHI' },
+    ...EXCELLENCE_WRITE,
   },
   hr_learning: {
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+    ...EXCELLENCE_WRITE,
   },
   facilities_environmental_services: {
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+    ...EXCELLENCE_READ,
   },
   read_only_auditor: {
     audit_event: { read: 'PHI' },
     access_review: { read: 'PHI' },
     census_summary: { read: 'OPERATIONAL' },
+    ...EXCELLENCE_READ,
   },
 };

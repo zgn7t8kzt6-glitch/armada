@@ -1,0 +1,16 @@
+{
+  "name": "@armada/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "start": "node dist/main.js",
+    "test": "node --test './dist/**/*.test.js'"
+  },
+  "dependencies": {
+    "@armada/env": "*",
+    "@armada/feature-flags": "*",
+    "@armada/observability": "*"
+  }
+}

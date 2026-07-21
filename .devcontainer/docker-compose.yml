@@ -1,0 +1,19 @@
+# Devcontainer overlay: adds the app workspace container alongside the shared
+# local services defined in infrastructure/docker/docker-compose.dev.yml.
+services:
+  app:
+    build:
+      context: ../infrastructure/docker
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://armada:armada_dev_only@postgres:5432/armada_dev
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

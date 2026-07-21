@@ -1,0 +1,30 @@
+{
+  "name": "armada-excellence-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Armada Excellence Operating System — AES (culture and standards) + AIP (secure operational intelligence platform). Phase-one foundation.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "typecheck": "tsc --build --force",
+    "test": "npm run build && npm run test --workspaces --if-present",
+    "lint": "node scripts/check-format.mjs && node scripts/check-secrets.mjs",
+    "format:check": "node scripts/check-format.mjs",
+    "secrets:check": "node scripts/check-secrets.mjs",
+    "env:check": "npm run build && node scripts/check-env.mjs",
+    "verify": "npm run lint && npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.0"
+  }
+}

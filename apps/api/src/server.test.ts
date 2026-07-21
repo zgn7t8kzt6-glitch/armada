@@ -22,6 +22,7 @@ import {
 import { InMemoryNotifier, WorkItemService, seedWorkItems } from '@armada/work';
 import { createLogger } from '@armada/observability';
 import { loadApiEnv } from './env.js';
+import { wireMetrics } from './metricsSetup.js';
 import { FAC_AKRON, FAC_COLUMBUS, seedSyntheticDirectory } from './seed.js';
 import { createApiServer, type ApiContext } from './server.js';
 
@@ -76,6 +77,13 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     columbusFacilityId: FAC_COLUMBUS,
     createdBy: author.id,
   });
+  const metrics = wireMetrics({
+    audit,
+    work,
+    ingestStore,
+    facilities: directory.facilities,
+    seedActors: { definedBy: author.id, approvedBy: approver.id },
+  });
   const context: ApiContext = {
     logger: createLogger({ service: 'api-test', sink: () => {} }),
     serviceVersion: 'test',
@@ -97,6 +105,7 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     work,
     notifier,
     identity,
+    metrics,
     integrations: { pipeline, connectors, store: ingestStore },
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
@@ -828,6 +837,80 @@ test('merge lifecycle over HTTP: dual confirmation enforced, unmerge audited', a
   for (const action of ['identity.merge_requested', 'identity.merge_confirmed', 'identity.unmerged']) {
     assert.ok(api.audit.query({ action }).length >= 1, action);
   }
+});
+
+test('executive scorecard: live values, definitions, provenance, honest no_data', async () => {
+  const exec = await login('executive@dev.armada.example');
+  const res = await get('/api/v1/scorecards/executive-daily', exec);
+  assert.equal(res.status, 200);
+  const view = (await res.json()) as {
+    generatedAt: string;
+    sections: {
+      title: string;
+      entries: {
+        metricId: string;
+        status: string;
+        observation: { value: number; provenance: { sourceSystem: string; asOf: string }[] } | null;
+        definition: { businessQuestion: string; formula: string; ownerRole: string; version: number };
+      }[];
+    }[];
+  };
+  const entries = view.sections.flatMap((s) => s.entries);
+  const occupancy = entries.find((e) => e.metricId === 'census.occupancy_rate');
+  assert.ok(occupancy !== undefined && occupancy.observation !== null, 'occupancy computed');
+  assert.equal(occupancy.observation.provenance[0]?.sourceSystem, 'mock-kipu');
+  assert.ok(occupancy.definition.businessQuestion.length > 0, 'definition tooltip present');
+
+  const denial = entries.find((e) => e.metricId === 'revenue.denial_rate');
+  assert.ok(denial !== undefined && denial.observation !== null, 'denial rate computed');
+  assert.ok(denial.observation.value > 0);
+
+  const overdue = entries.find((e) => e.metricId === 'work.overdue_items');
+  assert.ok(overdue !== undefined && overdue.observation !== null);
+  assert.ok(overdue.observation.value >= 1, 'seeded overdue claim item counted');
+
+  const ama = entries.find((e) => e.metricId === 'ama.weekend_rate');
+  assert.equal(ama?.status, 'no_data', 'unavailable source shown honestly');
+  assert.equal(ama?.observation, null);
+});
+
+test('scorecard facility isolation and metrics-list gating', async () => {
+  const nurse = await login('nurse.akron@dev.armada.example');
+  // Org-wide rollup needs org-wide scope.
+  assert.equal((await get('/api/v1/scorecards/executive-daily', nurse)).status, 403);
+  // Own facility is fine; the other facility is not.
+  assert.equal(
+    (await get(`/api/v1/scorecards/executive-daily?facilityId=${FAC_AKRON}`, nurse)).status,
+    200,
+  );
+  assert.equal(
+    (await get(`/api/v1/scorecards/executive-daily?facilityId=${FAC_COLUMBUS}`, nurse)).status,
+    403,
+  );
+  // Privacy admin has no census capability → no metrics surface.
+  const privacy = await login('privacy@dev.armada.example');
+  assert.equal((await get('/api/v1/metrics', privacy)).status, 403);
+  assert.equal((await get('/api/v1/scorecards/executive-daily', privacy)).status, 403);
+
+  const exec = await login('executive@dev.armada.example');
+  const list = await get('/api/v1/metrics', exec);
+  assert.equal(list.status, 200);
+  const body = (await list.json()) as { definitions: { id: string }[]; scorecards: { id: string }[] };
+  assert.equal(body.definitions.length, 5);
+  assert.equal(body.scorecards[0]?.id, 'executive-daily');
+
+  assert.equal((await get('/api/v1/scorecards/nope', exec)).status, 404);
+});
+
+test('scorecard CSV export for offline/downtime use', async () => {
+  const exec = await login('executive@dev.armada.example');
+  const res = await get('/api/v1/scorecards/executive-daily?format=csv', exec);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') ?? '', /text\/csv/);
+  const csv = await res.text();
+  assert.match(csv, /metric_id,metric_name,value/);
+  assert.match(csv, /census\.occupancy_rate/);
+  assert.match(csv, /no_data/);
 });
 
 test('api env schema: session defaults apply and weak overrides fail', () => {

@@ -43,6 +43,9 @@
     },
     {
       "path": "../../packages/identity"
+    },
+    {
+      "path": "../../packages/metrics"
     }
   ]
 }

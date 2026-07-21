@@ -19,6 +19,7 @@ import {
 import { createLogger } from '@armada/observability';
 import { InMemoryNotifier, WorkItemService, seedWorkItems } from '@armada/work';
 import { DEV_SESSION_SECRET_DEFAULT, loadApiEnv } from './env.js';
+import { wireMetrics } from './metricsSetup.js';
 import { createFlags } from './flags.js';
 import { seedSyntheticDirectory } from './seed.js';
 import { createApiServer } from './server.js';
@@ -158,6 +159,17 @@ function main(): void {
     integrations = { pipeline, connectors, store: ingestStore };
   }
 
+  const metrics = wireMetrics({
+    audit,
+    work,
+    ...(integrations !== undefined ? { ingestStore: integrations.store } : {}),
+    facilities: directory.facilities,
+    seedActors: {
+      definedBy: users.getByEmail('quality@dev.armada.example')?.id ?? 'governance',
+      approvedBy: users.getByEmail('executive@dev.armada.example')?.id ?? 'executive-sponsor',
+    },
+  });
+
   const server = createApiServer({
     logger,
     serviceVersion: SERVICE_VERSION,
@@ -172,6 +184,7 @@ function main(): void {
     work,
     notifier,
     identity,
+    metrics,
     ...(integrations !== undefined ? { integrations } : {}),
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,

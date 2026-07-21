@@ -28,6 +28,7 @@ import type {
   InMemoryIngestedRecordStore,
   SourceConnector,
 } from '@armada/integrations-core';
+import { renderScorecardCsv, type MetricsService } from '@armada/metrics';
 import { newRequestId, type Logger } from '@armada/observability';
 import {
   PRIORITIES,
@@ -67,6 +68,7 @@ export interface ApiContext {
   readonly work: WorkItemService;
   readonly notifier: InMemoryNotifier;
   readonly identity: IdentityService;
+  readonly metrics: MetricsService;
   /** Absent in production until real connectors are configured post-discovery. */
   readonly integrations?: {
     readonly pipeline: IngestionPipeline;
@@ -754,6 +756,32 @@ export function createApiServer(context: ApiContext): Server {
       },
     },
 
+    '/api/v1/metrics': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        // Metric definitions are operational metadata gated by census_summary
+        // read, bound to the reader's own facility coverage.
+        const decision = authorize(authed, {
+          resource: {
+            ...excellenceResource(authed.user),
+            type: 'census_summary',
+          },
+          action: 'read',
+          purpose: 'operations',
+          auditAction: 'metric_definitions.read',
+          subjectType: 'metric_registry',
+          subjectId: 'all',
+          auditMode: 'deny-only',
+        });
+        if (decision === undefined) return;
+        sendJson(ctx.res, 200, {
+          definitions: context.metrics.definitions(),
+          scorecards: context.metrics.scorecards().map((s) => ({ id: s.id, name: s.name })),
+        });
+      },
+    },
+
     '/api/v1/reconciliation/issues': {
       GET: (ctx) => {
         const authed = authenticate(ctx);
@@ -1049,6 +1077,57 @@ export function createApiServer(context: ApiContext): Server {
           });
           sendJson(ctx.res, 200, { workItem: item });
         }),
+      },
+    },
+    {
+      pattern: '/api/v1/scorecards/:id',
+      methods: {
+        GET: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const facilityId = ctx.url.searchParams.get('facilityId');
+          // Facility isolation applies: an org-wide scorecard needs org-wide
+          // scope; a facility scorecard needs coverage of that facility.
+          const decision = authorize(authed, {
+            resource: {
+              type: 'census_summary',
+              classification: 'OPERATIONAL',
+              organizationId: context.organizationId,
+              ...(facilityId !== null ? { facilityId } : {}),
+            },
+            action: 'read',
+            purpose: 'operations',
+            auditAction: 'scorecard.read',
+            subjectType: 'scorecard',
+            subjectId: params['id'] ?? '',
+            auditMode: 'deny-only',
+          });
+          if (decision === undefined) return;
+          try {
+            const view = context.metrics.scorecardView(params['id'] ?? '', {
+              organizationId: context.organizationId,
+              ...(facilityId !== null ? { facilityId } : {}),
+            });
+            if (ctx.url.searchParams.get('format') === 'csv') {
+              const csv = renderScorecardCsv(view);
+              ctx.res.writeHead(200, {
+                'content-type': 'text/csv; charset=utf-8',
+                'content-length': Buffer.byteLength(csv),
+                'x-content-type-options': 'nosniff',
+                'cache-control': 'no-store',
+              });
+              ctx.res.end(csv);
+              return;
+            }
+            sendJson(ctx.res, 200, view);
+          } catch (err) {
+            if (err instanceof Error && err.message.startsWith('Unknown scorecard')) {
+              sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+              return;
+            }
+            sendServiceError(ctx, err);
+          }
+        },
       },
     },
     {

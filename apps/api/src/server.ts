@@ -22,6 +22,11 @@ import {
   type ContentBody,
   type ExcellenceContentService,
 } from '@armada/excellence';
+import type {
+  IngestionPipeline,
+  InMemoryIngestedRecordStore,
+  SourceConnector,
+} from '@armada/integrations-core';
 import { newRequestId, type Logger } from '@armada/observability';
 import {
   PRIORITIES,
@@ -60,6 +65,12 @@ export interface ApiContext {
   readonly excellence: ExcellenceContentService;
   readonly work: WorkItemService;
   readonly notifier: InMemoryNotifier;
+  /** Absent in production until real connectors are configured post-discovery. */
+  readonly integrations?: {
+    readonly pipeline: IngestionPipeline;
+    readonly connectors: readonly SourceConnector[];
+    readonly store: InMemoryIngestedRecordStore;
+  };
   readonly facilities: readonly Facility[];
   readonly censusByFacility: ReadonlyMap<string, number>;
 }
@@ -737,6 +748,59 @@ export function createApiServer(context: ApiContext): Server {
             userId: authed.user.id,
             facilityIds: hasOrgWide ? 'all' : coveredFacilityIds(authed.user),
           }),
+        });
+      },
+    },
+
+    '/api/v1/integrations/health': {
+      GET: async (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const decision = authorize(authed, {
+          resource: {
+            type: 'admin_config',
+            classification: 'OPERATIONAL',
+            organizationId: context.organizationId,
+          },
+          action: 'read',
+          purpose: 'operations',
+          auditAction: 'integrations_health.read',
+          subjectType: 'integrations',
+          subjectId: 'all',
+          auditMode: 'deny-only',
+        });
+        if (decision === undefined) return;
+        if (context.integrations === undefined) {
+          sendJson(ctx.res, 200, {
+            connectors: [],
+            note: 'No connectors configured. Real connectors require signed vendor discovery (docs/integrations/).',
+          });
+          return;
+        }
+        const { pipeline, connectors, store } = context.integrations;
+        const statuses = await Promise.all(
+          connectors.map(async (connector) => {
+            const [capabilities, health] = await Promise.all([
+              connector.capabilities(),
+              connector.healthCheck(),
+            ]);
+            return {
+              name: connector.name,
+              sourceSystem: capabilities.sourceSystem,
+              entityTypes: capabilities.entityTypes,
+              mock: capabilities.mock,
+              supportsWrite: capabilities.supportsWrite,
+              health,
+              lastRun: pipeline.lastRun(connector.name) ?? null,
+              deadLetterCount: pipeline.deadLetters(connector.name).length,
+              quarantineCount: pipeline.quarantine(connector.name).length,
+              cursor: pipeline.cursor(connector.name),
+            };
+          }),
+        );
+        sendJson(ctx.res, 200, {
+          connectors: statuses,
+          recordCountsByEntityType: store.countsByEntityType(),
         });
       },
     },

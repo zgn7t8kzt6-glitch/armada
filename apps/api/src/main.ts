@@ -5,7 +5,16 @@ import {
   SessionManager,
 } from '@armada/auth';
 import { InMemoryAuditLog } from '@armada/audit';
+import { createMockCollaborateMdConnector, collaborateMdMappingRegistrations } from '@armada/connector-collaboratemd';
+import { createMockKipuConnector, kipuMappingRegistrations } from '@armada/connector-kipu';
+import { createMockSalesforceConnector, salesforceMappingRegistrations } from '@armada/connector-salesforce';
 import { ExcellenceContentService, seedExcellenceContent } from '@armada/excellence';
+import {
+  IngestionPipeline,
+  InMemoryIngestedRecordStore,
+  MappingRegistry,
+  type SourceConnector,
+} from '@armada/integrations-core';
 import { createLogger } from '@armada/observability';
 import { InMemoryNotifier, WorkItemService, seedWorkItems } from '@armada/work';
 import { DEV_SESSION_SECRET_DEFAULT, loadApiEnv } from './env.js';
@@ -76,6 +85,70 @@ function main(): void {
     }
   }
 
+  // Mock connectors + ingestion pipeline: development only. Production gets
+  // real connectors after signed vendor discovery (docs/integrations/).
+  let integrations:
+    | {
+        pipeline: IngestionPipeline;
+        connectors: readonly SourceConnector[];
+        store: InMemoryIngestedRecordStore;
+      }
+    | undefined;
+  if (!isProduction) {
+    const mappings = new MappingRegistry();
+    for (const registration of [
+      ...kipuMappingRegistrations(),
+      ...salesforceMappingRegistrations(),
+      ...collaborateMdMappingRegistrations(),
+    ]) {
+      mappings.register(registration);
+    }
+    const ingestStore = new InMemoryIngestedRecordStore();
+    const pipeline = new IngestionPipeline({
+      audit,
+      store: ingestStore,
+      mappings,
+      onAnomaly: (run, previousReads) => {
+        // Volume anomalies become owned, explained work items (§25).
+        work.create({
+          type: 'integration.volume_anomaly',
+          title: `Ingestion volume anomaly on ${run.connectorName}`,
+          explanation:
+            'Record volume changed sharply versus the previous run; source outage, cursor fault, or upstream change may be corrupting operational data.',
+          organizationId: directory.organizationId,
+          facilityId: directory.facilities[0]?.id ?? 'org',
+          subjectType: 'ingestion_run',
+          subjectId: run.runId,
+          priority: 'high',
+          dueAt: new Date(Date.now() + 4 * 3_600_000).toISOString(),
+          ownerRole: 'system_administrator',
+          sourceFacts: [
+            {
+              label: 'Records read this run',
+              value: String(run.counts.read),
+              sourceSystem: run.connectorName,
+              sourceTimestamp: run.finishedAt,
+            },
+            {
+              label: 'Records read previous run',
+              value: String(previousReads),
+              sourceSystem: run.connectorName,
+              sourceTimestamp: run.startedAt,
+            },
+          ],
+          requiredAction: 'Check connector health and reconcile counts before trusting dashboards.',
+          createdBy: 'ingestion-pipeline',
+        });
+      },
+    });
+    const connectors: readonly SourceConnector[] = [
+      createMockKipuConnector({ facilityIds: directory.facilities.map((f) => f.id) }),
+      createMockSalesforceConnector(),
+      createMockCollaborateMdConnector(),
+    ];
+    integrations = { pipeline, connectors, store: ingestStore };
+  }
+
   const server = createApiServer({
     logger,
     serviceVersion: SERVICE_VERSION,
@@ -89,6 +162,7 @@ function main(): void {
     excellence,
     work,
     notifier,
+    ...(integrations !== undefined ? { integrations } : {}),
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
   });
@@ -102,6 +176,29 @@ function main(): void {
       flags: flags.snapshot().map((f) => ({ name: f.definition.name, enabled: f.enabled })),
     });
   });
+
+  // Mock ingestion: initial run at boot, then refresh on an interval.
+  // Moves to apps/worker once services share durable storage (database epic).
+  let ingestTimer: NodeJS.Timeout | undefined;
+  if (integrations !== undefined) {
+    const { pipeline, connectors } = integrations;
+    const runAll = (): void => {
+      void Promise.all(connectors.map((connector) => pipeline.run(connector))).then((runs) => {
+        logger.info('ingestion cycle complete', {
+          runs: runs.map((r) => ({
+            connector: r.connectorName,
+            status: r.status,
+            read: r.counts.read,
+            created: r.counts.created,
+            quarantined: r.counts.quarantined,
+          })),
+        });
+      });
+    };
+    runAll();
+    ingestTimer = setInterval(runAll, 5 * 60_000);
+    ingestTimer.unref();
+  }
 
   // Escalation sweep: overdue work items climb the role ladder every minute.
   // Moves to apps/worker once services share durable storage (database epic).
@@ -119,6 +216,7 @@ function main(): void {
   const shutdown = (signal: string): void => {
     logger.info('shutting down', { signal });
     clearInterval(sweep);
+    if (ingestTimer !== undefined) clearInterval(ingestTimer);
     server.close(() => process.exit(0));
     // Do not hang forever on stuck connections.
     setTimeout(() => process.exit(1), 10_000).unref();

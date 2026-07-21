@@ -15,6 +15,10 @@
     "@armada/auth": "*",
     "@armada/audit": "*",
     "@armada/excellence": "*",
-    "@armada/work": "*"
+    "@armada/work": "*",
+    "@armada/integrations-core": "*",
+    "@armada/connector-kipu": "*",
+    "@armada/connector-salesforce": "*",
+    "@armada/connector-collaboratemd": "*"
   }
 }

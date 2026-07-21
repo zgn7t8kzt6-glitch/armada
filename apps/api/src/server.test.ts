@@ -9,7 +9,15 @@ import {
   InMemoryUserStore,
   SessionManager,
 } from '@armada/auth';
+import { collaborateMdMappingRegistrations, createMockCollaborateMdConnector } from '@armada/connector-collaboratemd';
+import { createMockKipuConnector, kipuMappingRegistrations } from '@armada/connector-kipu';
+import { createMockSalesforceConnector, salesforceMappingRegistrations } from '@armada/connector-salesforce';
 import { ExcellenceContentService, seedExcellenceContent } from '@armada/excellence';
+import {
+  IngestionPipeline,
+  InMemoryIngestedRecordStore,
+  MappingRegistry,
+} from '@armada/integrations-core';
 import { InMemoryNotifier, WorkItemService, seedWorkItems } from '@armada/work';
 import { createLogger } from '@armada/observability';
 import { loadApiEnv } from './env.js';
@@ -39,6 +47,24 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     approverId: approver.id,
     approverRole: 'executive',
   });
+  const mappings = new MappingRegistry();
+  for (const registration of [
+    ...kipuMappingRegistrations(),
+    ...salesforceMappingRegistrations(),
+    ...collaborateMdMappingRegistrations(),
+  ]) {
+    mappings.register(registration);
+  }
+  const ingestStore = new InMemoryIngestedRecordStore();
+  const pipeline = new IngestionPipeline({ audit, store: ingestStore, mappings });
+  const connectors = [
+    createMockKipuConnector({ facilityIds: [FAC_AKRON, FAC_COLUMBUS] }),
+    createMockSalesforceConnector(),
+    createMockCollaborateMdConnector(),
+  ];
+  for (const connector of connectors) {
+    await pipeline.run(connector);
+  }
   const notifier = new InMemoryNotifier();
   const work = new WorkItemService({ audit, notifier });
   seedWorkItems(work, {
@@ -67,6 +93,7 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     excellence,
     work,
     notifier,
+    integrations: { pipeline, connectors, store: ingestStore },
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
   };
@@ -633,6 +660,58 @@ test('manual escalation and PHI-free notifications reach the right roles', async
     notifications: { recipientRole: string }[];
   };
   assert.ok(nurseView.notifications.every((n) => n.recipientRole === 'nurse'));
+});
+
+test('integrations health: sysadmin sees mock connectors with run summaries', async () => {
+  const sysadmin = await login('sysadmin@dev.armada.example');
+  const res = await get('/api/v1/integrations/health', sysadmin);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    connectors: {
+      name: string;
+      mock: boolean;
+      supportsWrite: boolean;
+      health: { healthy: boolean };
+      lastRun: { status: string; counts: { read: number; created: number } } | null;
+      deadLetterCount: number;
+      quarantineCount: number;
+      cursor: string | null;
+    }[];
+    recordCountsByEntityType: Record<string, number>;
+  };
+  assert.deepEqual(
+    body.connectors.map((c) => c.name).sort(),
+    ['mock-collaboratemd', 'mock-kipu', 'mock-salesforce'],
+  );
+  for (const connector of body.connectors) {
+    assert.equal(connector.mock, true);
+    assert.equal(connector.supportsWrite, false, 'writes stay disabled');
+    assert.equal(connector.health.healthy, true);
+    assert.equal(connector.lastRun?.status, 'succeeded');
+    assert.ok(connector.lastRun !== null && connector.lastRun.counts.read > 0);
+    assert.equal(connector.deadLetterCount, 0);
+    assert.equal(connector.quarantineCount, 0);
+    assert.ok(connector.cursor !== null, 'cursor checkpoint persisted');
+  }
+  // Provenance-bearing records landed in the canonical store.
+  assert.ok((body.recordCountsByEntityType['census_snapshot'] ?? 0) > 0);
+  assert.ok((body.recordCountsByEntityType['claim_summary'] ?? 0) > 0);
+});
+
+test('integrations health is admin-gated: nurse and executive are denied', async () => {
+  const nurse = await login('nurse.akron@dev.armada.example');
+  assert.equal((await get('/api/v1/integrations/health', nurse)).status, 403);
+  const exec = await login('executive@dev.armada.example');
+  assert.equal((await get('/api/v1/integrations/health', exec)).status, 403);
+});
+
+test('ingestion audit trail exists and is PHI-free', async () => {
+  const runs = api.audit.query({ action: 'ingestion.run_completed' });
+  assert.ok(runs.length >= 3);
+  for (const event of runs) {
+    assert.match(event.summary ?? '', /read=\d+ created=\d+/);
+    assert.ok(!JSON.stringify(event).includes('"payload"'));
+  }
 });
 
 test('api env schema: session defaults apply and weak overrides fail', () => {

@@ -23,6 +23,18 @@
       "path": "packages/work"
     },
     {
+      "path": "packages/integrations-core"
+    },
+    {
+      "path": "packages/connector-kipu"
+    },
+    {
+      "path": "packages/connector-salesforce"
+    },
+    {
+      "path": "packages/connector-collaboratemd"
+    },
+    {
       "path": "apps/api"
     },
     {

@@ -7,6 +7,7 @@ import {
 import { InMemoryAuditLog } from '@armada/audit';
 import { ExcellenceContentService, seedExcellenceContent } from '@armada/excellence';
 import { createLogger } from '@armada/observability';
+import { InMemoryNotifier, WorkItemService, seedWorkItems } from '@armada/work';
 import { DEV_SESSION_SECRET_DEFAULT, loadApiEnv } from './env.js';
 import { createFlags } from './flags.js';
 import { seedSyntheticDirectory } from './seed.js';
@@ -61,6 +62,20 @@ function main(): void {
     }
   }
 
+  const notifier = new InMemoryNotifier();
+  const work = new WorkItemService({ audit, notifier });
+  if (!isProduction) {
+    const creator = users.getByEmail('quality@dev.armada.example');
+    if (creator !== undefined && directory.facilities.length >= 2) {
+      seedWorkItems(work, {
+        organizationId: directory.organizationId,
+        akronFacilityId: directory.facilities[0]!.id,
+        columbusFacilityId: directory.facilities[1]!.id,
+        createdBy: creator.id,
+      });
+    }
+  }
+
   const server = createApiServer({
     logger,
     serviceVersion: SERVICE_VERSION,
@@ -72,6 +87,8 @@ function main(): void {
     breakGlass,
     audit,
     excellence,
+    work,
+    notifier,
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
   });
@@ -86,8 +103,22 @@ function main(): void {
     });
   });
 
+  // Escalation sweep: overdue work items climb the role ladder every minute.
+  // Moves to apps/worker once services share durable storage (database epic).
+  const sweep = setInterval(() => {
+    const escalated = work.sweepEscalations();
+    if (escalated.length > 0) {
+      logger.info('work items escalated', {
+        count: escalated.length,
+        ids: escalated.map((i) => i.id),
+      });
+    }
+  }, 60_000);
+  sweep.unref();
+
   const shutdown = (signal: string): void => {
     logger.info('shutting down', { signal });
+    clearInterval(sweep);
     server.close(() => process.exit(0));
     // Do not hang forever on stuck connections.
     setTimeout(() => process.exit(1), 10_000).unref();

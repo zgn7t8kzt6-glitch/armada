@@ -14,6 +14,7 @@
     "@armada/observability": "*",
     "@armada/auth": "*",
     "@armada/audit": "*",
-    "@armada/excellence": "*"
+    "@armada/excellence": "*",
+    "@armada/work": "*"
   }
 }

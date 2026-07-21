@@ -10,6 +10,7 @@ import {
   SessionManager,
 } from '@armada/auth';
 import { ExcellenceContentService, seedExcellenceContent } from '@armada/excellence';
+import { InMemoryNotifier, WorkItemService, seedWorkItems } from '@armada/work';
 import { createLogger } from '@armada/observability';
 import { loadApiEnv } from './env.js';
 import { FAC_AKRON, FAC_COLUMBUS, seedSyntheticDirectory } from './seed.js';
@@ -21,6 +22,7 @@ interface TestApi {
   server: Server;
   baseUrl: string;
   audit: InMemoryAuditLog;
+  work: WorkItemService;
   close(): Promise<void>;
 }
 
@@ -36,6 +38,14 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     authorId: author.id,
     approverId: approver.id,
     approverRole: 'executive',
+  });
+  const notifier = new InMemoryNotifier();
+  const work = new WorkItemService({ audit, notifier });
+  seedWorkItems(work, {
+    organizationId: directory.organizationId,
+    akronFacilityId: FAC_AKRON,
+    columbusFacilityId: FAC_COLUMBUS,
+    createdBy: author.id,
   });
   const context: ApiContext = {
     logger: createLogger({ service: 'api-test', sink: () => {} }),
@@ -55,6 +65,8 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     breakGlass: new BreakGlassService({ audit }),
     audit,
     excellence,
+    work,
+    notifier,
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
   };
@@ -65,6 +77,7 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     server,
     baseUrl: `http://127.0.0.1:${address.port}`,
     audit,
+    work,
     close: () =>
       new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
   };
@@ -230,7 +243,7 @@ test('access review: privacy admin gets the report; sysadmin is classification-b
     totals: { users: number };
     orgWideAssignments: unknown[];
   };
-  assert.equal(report.totals.users, 9);
+  assert.equal(report.totals.users, 10);
   assert.ok(report.orgWideAssignments.length >= 4);
 
   const sysadmin = await login('sysadmin@dev.armada.example');
@@ -438,6 +451,188 @@ test('approve without an approver role is rejected even with write capability', 
   const sysadmin = await login('sysadmin@dev.armada.example');
   const res = await post(`/api/v1/excellence/content/${contentId}/approve`, sysadmin, {});
   assert.equal(res.status, 403);
+});
+
+test('work queue: facility isolation and role-based visibility', async () => {
+  const nurse = await login('nurse.akron@dev.armada.example');
+  const akron = await get(`/api/v1/work-items?facilityId=${FAC_AKRON}`, nurse);
+  assert.equal(akron.status, 200);
+  const akronItems = (await akron.json()) as { workItems: { facilityId: string; priority: string }[] };
+  assert.ok(akronItems.workItems.length >= 2);
+  assert.ok(akronItems.workItems.every((i) => i.facilityId === FAC_AKRON));
+
+  // Facility isolation: Akron nurse cannot list the Columbus queue.
+  assert.equal((await get(`/api/v1/work-items?facilityId=${FAC_COLUMBUS}`, nurse)).status, 403);
+
+  // Aggregate listing quietly limits to covered facilities.
+  const aggregate = await get('/api/v1/work-items', nurse);
+  const aggregateItems = (await aggregate.json()) as { workItems: { facilityId: string }[] };
+  assert.ok(aggregateItems.workItems.every((i) => i.facilityId === FAC_AKRON));
+
+  // Org-wide executive sees both facilities, sorted by priority then due.
+  const exec = await login('executive@dev.armada.example');
+  const all = await get('/api/v1/work-items', exec);
+  const allItems = (await all.json()) as { workItems: { facilityId: string }[] };
+  assert.ok(new Set(allItems.workItems.map((i) => i.facilityId)).size === 2);
+
+  // mine=1 narrows to the caller's role ownership.
+  const ur = await login('ur.akron@dev.armada.example');
+  const mine = await get('/api/v1/work-items?mine=1', ur);
+  const mineItems = (await mine.json()) as { workItems: { type: string }[] };
+  assert.ok(mineItems.workItems.some((i) => i.type === 'ur.authorization_expiring'));
+  assert.ok(!mineItems.workItems.some((i) => i.type === 'facilities.room_turn'));
+});
+
+test('work item lifecycle over HTTP: acknowledge, conflict, resolve, audit', async () => {
+  const ur = await login('ur.akron@dev.armada.example');
+  const list = await get(`/api/v1/work-items?facilityId=${FAC_AKRON}`, ur);
+  const { workItems } = (await list.json()) as {
+    workItems: { id: string; type: string; version: number; explanation: string }[];
+  };
+  const item = workItems.find((i) => i.type === 'ur.authorization_expiring');
+  assert.ok(item);
+  assert.ok(item.explanation.length > 0, 'every alert explains itself');
+
+  const acked = await post(`/api/v1/work-items/${item.id}/acknowledge`, ur, {
+    expectedVersion: item.version,
+  });
+  assert.equal(acked.status, 200);
+  const ackedItem = (await acked.json()) as { workItem: { status: string; ownerUserId: string } };
+  assert.equal(ackedItem.workItem.status, 'acknowledged');
+
+  // Stale version → 409.
+  const stale = await post(`/api/v1/work-items/${item.id}/resolve`, ur, {
+    code: 'completed',
+    expectedVersion: item.version,
+  });
+  assert.equal(stale.status, 409);
+
+  // Exception code without a note → 400.
+  const noNote = await post(`/api/v1/work-items/${item.id}/resolve`, ur, {
+    code: 'unable_to_complete',
+  });
+  assert.equal(noNote.status, 400);
+
+  const resolved = await post(`/api/v1/work-items/${item.id}/resolve`, ur, {
+    code: 'completed',
+    note: 'Concurrent review submitted.',
+  });
+  assert.equal(resolved.status, 200);
+  assert.ok(api.audit.query({ action: 'work_item.acknowledged' }).length >= 1);
+  assert.ok(api.audit.query({ action: 'work_item.resolved' }).length >= 1);
+
+  // Unknown item → 404.
+  assert.equal((await post('/api/v1/work-items/wi-nope/acknowledge', ur, {})).status, 404);
+});
+
+test('write gating: executive can read queues but cannot resolve or create', async () => {
+  const exec = await login('executive@dev.armada.example');
+  const list = await get(`/api/v1/work-items?facilityId=${FAC_COLUMBUS}`, exec);
+  const { workItems } = (await list.json()) as { workItems: { id: string }[] };
+  const target = workItems[0];
+  assert.ok(target);
+  const denied = await post(`/api/v1/work-items/${target.id}/resolve`, exec, { code: 'completed' });
+  assert.equal(denied.status, 403);
+  const deniedCreate = await post('/api/v1/work-items', exec, { facilityId: FAC_COLUMBUS });
+  assert.equal(deniedCreate.status, 403);
+});
+
+test('creating a work item requires explanation, source facts, and valid shape', async () => {
+  const quality = await login('quality@dev.armada.example');
+  const missing = await post('/api/v1/work-items', quality, {
+    type: 'quality.audit_prep',
+    title: 'Prepare tracer documents for room rm-akron-3',
+    facilityId: FAC_AKRON,
+    subjectType: 'room',
+    subjectId: 'rm-akron-3',
+    priority: 'medium',
+    dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+    ownerRole: 'quality_risk',
+    sourceFacts: [],
+    requiredAction: 'Assemble the tracer binder.',
+    explanation: 'Survey readiness requires tracer documents staged in advance.',
+  });
+  assert.equal(missing.status, 400);
+  assert.match(((await missing.json()) as { message: string }).message, /source fact/);
+
+  const created = await post('/api/v1/work-items', quality, {
+    type: 'quality.audit_prep',
+    title: 'Prepare tracer documents for room rm-akron-3',
+    facilityId: FAC_AKRON,
+    subjectType: 'room',
+    subjectId: 'rm-akron-3',
+    priority: 'medium',
+    dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+    ownerRole: 'quality_risk',
+    sourceFacts: [
+      {
+        label: 'Audit calendar entry',
+        value: 'tracer scheduled (synthetic)',
+        sourceSystem: 'synthetic-fixture',
+        sourceTimestamp: new Date().toISOString(),
+      },
+    ],
+    requiredAction: 'Assemble the tracer binder.',
+    explanation: 'Survey readiness requires tracer documents staged in advance.',
+  });
+  assert.equal(created.status, 201);
+  const body = (await created.json()) as { workItem: { escalationLevel: number; status: string } };
+  assert.equal(body.workItem.status, 'open');
+  assert.equal(body.workItem.escalationLevel, 0);
+});
+
+test('manual escalation and PHI-free notifications reach the right roles', async () => {
+  const ur = await login('ur.akron@dev.armada.example');
+  const created = await post('/api/v1/work-items', ur, {
+    type: 'ur.peer_to_peer_deadline',
+    title: 'Peer-to-peer deadline approaching for episode ep-akron-2001',
+    facilityId: FAC_AKRON,
+    subjectType: 'treatment_episode',
+    subjectId: 'ep-akron-2001',
+    priority: 'critical',
+    dueAt: new Date(Date.now() + 2 * 3_600_000).toISOString(),
+    ownerRole: 'utilization_review',
+    backupRole: 'clinical_director',
+    sourceFacts: [
+      {
+        label: 'Peer-to-peer deadline',
+        value: 'tomorrow 12:00 (synthetic)',
+        sourceSystem: 'synthetic-fixture',
+        sourceTimestamp: new Date().toISOString(),
+      },
+    ],
+    requiredAction: 'Schedule the peer-to-peer call with the payer medical director.',
+    explanation: 'Missing the peer-to-peer window forfeits the appeal path for continued stay.',
+  });
+  assert.equal(created.status, 201);
+  const { workItem } = (await created.json()) as { workItem: { id: string } };
+
+  const escalated = await post(`/api/v1/work-items/${workItem.id}/escalate`, ur, {
+    note: 'Payer unresponsive after two attempts',
+  });
+  assert.equal(escalated.status, 200);
+  const escBody = (await escalated.json()) as {
+    workItem: { escalationLevel: number; escalations: { notifiedRole: string }[] };
+  };
+  assert.equal(escBody.workItem.escalationLevel, 1);
+
+  const notifications = await get('/api/v1/notifications', ur);
+  assert.equal(notifications.status, 200);
+  const { notifications: list } = (await notifications.json()) as {
+    notifications: Record<string, unknown>[];
+  };
+  assert.ok(list.length >= 1);
+  const serialized = JSON.stringify(list);
+  assert.ok(!serialized.includes('Peer-to-peer deadline approaching'), 'no titles in notifications');
+  assert.ok(!serialized.includes('forfeits the appeal path'), 'no explanations in notifications');
+  assert.ok(serialized.includes('ur.peer_to_peer_deadline'), 'type is present');
+
+  // The nurse (different role, same facility) does not see UR notifications.
+  const nurse = await login('nurse.akron@dev.armada.example');
+  const nurseView = (await (await get('/api/v1/notifications', nurse)).json()) as {
+    notifications: { recipientRole: string }[];
+  };
+  assert.ok(nurseView.notifications.every((n) => n.recipientRole === 'nurse'));
 });
 
 test('api env schema: session defaults apply and weak overrides fail', () => {

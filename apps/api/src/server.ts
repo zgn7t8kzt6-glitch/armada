@@ -23,6 +23,18 @@ import {
   type ExcellenceContentService,
 } from '@armada/excellence';
 import { newRequestId, type Logger } from '@armada/observability';
+import {
+  PRIORITIES,
+  PRIORITY_RANK,
+  RESOLUTION_CODES,
+  type InMemoryNotifier,
+  type Priority,
+  type ResolutionCode,
+  type SourceFact,
+  type SourceLink,
+  type WorkItemService,
+  type WorkItemStatus,
+} from '@armada/work';
 import type { Facility } from './seed.js';
 
 /**
@@ -46,6 +58,8 @@ export interface ApiContext {
   readonly breakGlass: BreakGlassService;
   readonly audit: AuditLog;
   readonly excellence: ExcellenceContentService;
+  readonly work: WorkItemService;
+  readonly notifier: InMemoryNotifier;
   readonly facilities: readonly Facility[];
   readonly censusByFacility: ReadonlyMap<string, number>;
 }
@@ -282,14 +296,73 @@ export function createApiServer(context: ApiContext): Server {
     );
   }
 
-  /** Map service errors: unknown content → 404, validation/transition → 400. */
+  /** Map service errors: unknown entity → 404, stale version → 409, else 400. */
   function sendServiceError(ctx: RequestContext, err: unknown): void {
     const message = err instanceof Error ? err.message : 'invalid request';
-    if (message.startsWith('Unknown content')) {
+    if (message.startsWith('Unknown content') || message.startsWith('Unknown work item')) {
       sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
       return;
     }
+    if (message.startsWith('Version conflict')) {
+      sendJson(ctx.res, 409, { error: 'version_conflict', message, requestId: ctx.requestId });
+      return;
+    }
     sendJson(ctx.res, 400, { error: 'invalid_request', message, requestId: ctx.requestId });
+  }
+
+  /** Facilities this user covers (scope 'all' → every org facility). */
+  function coveredFacilityIds(user: UserRecord): readonly string[] {
+    const ids = new Set<string>();
+    for (const a of user.assignments) {
+      if (a.organizationId !== context.organizationId) continue;
+      if (a.facilityScope === 'all') {
+        for (const f of context.facilities) ids.add(f.id);
+      } else {
+        for (const id of a.facilityScope) ids.add(id);
+      }
+    }
+    return [...ids];
+  }
+
+  /** Quiet per-facility work-item policy filter for aggregate listings. */
+  function workReadAllowed(user: UserRecord, facilityId: string): boolean {
+    return (
+      evaluateAccess({
+        user,
+        resource: {
+          type: 'work_item',
+          classification: 'OPERATIONAL',
+          organizationId: context.organizationId,
+          facilityId,
+        },
+        action: 'read',
+        purpose: 'operations',
+      }).decision === 'ALLOW'
+    );
+  }
+
+  /** Authorize a work-item mutation at the item's facility (audited). */
+  function authorizeWorkWrite(
+    ctx: AuthedContext,
+    facilityId: string,
+    auditAction: string,
+    subjectId: string,
+  ): boolean {
+    return (
+      authorize(ctx, {
+        resource: {
+          type: 'work_item',
+          classification: 'OPERATIONAL',
+          organizationId: context.organizationId,
+          facilityId,
+        },
+        action: 'write',
+        purpose: 'operations',
+        auditAction,
+        subjectType: 'work_item',
+        subjectId,
+      }) !== undefined
+    );
   }
 
   function parseContentBody(ctx: RequestContext, raw: unknown): ContentBody | undefined {
@@ -547,6 +620,127 @@ export function createApiServer(context: ApiContext): Server {
       },
     },
 
+    '/api/v1/work-items': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const facilityId = ctx.url.searchParams.get('facilityId');
+        const status = ctx.url.searchParams.get('status');
+        if (status !== null && !['open', 'acknowledged', 'resolved', 'cancelled'].includes(status)) {
+          sendJson(ctx.res, 400, { error: 'invalid_status', requestId: ctx.requestId });
+          return;
+        }
+        // Single-facility requests go through the audited authorize path;
+        // aggregate listings quietly filter to facilities the user may read.
+        let targets: readonly string[];
+        if (facilityId !== null) {
+          const decision = authorize(authed, {
+            resource: {
+              type: 'work_item',
+              classification: 'OPERATIONAL',
+              organizationId: context.organizationId,
+              facilityId,
+            },
+            action: 'read',
+            purpose: 'operations',
+            auditAction: 'work_items.read',
+            subjectType: 'work_queue',
+            subjectId: facilityId,
+            auditMode: 'deny-only',
+          });
+          if (decision === undefined) return;
+          targets = [facilityId];
+        } else {
+          targets = coveredFacilityIds(authed.user).filter((fid) =>
+            workReadAllowed(authed.user, fid),
+          );
+        }
+        const mine = ctx.url.searchParams.get('mine') === '1';
+        const overdue = ctx.url.searchParams.get('overdue') === '1';
+        const roles = authed.user.assignments.map((a) => a.role);
+        const items = targets
+          .flatMap((fid) =>
+            context.work.listQueue({
+              facilityId: fid,
+              ...(status !== null ? { status: status as WorkItemStatus } : {}),
+              ...(overdue ? { overdueOnly: true } : {}),
+            }),
+          )
+          .filter(
+            (item) =>
+              !mine || item.ownerUserId === authed.user.id || roles.includes(item.ownerRole),
+          )
+          .sort(
+            (a, b) =>
+              PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] ||
+              Date.parse(a.dueAt) - Date.parse(b.dueAt),
+          );
+        sendJson(ctx.res, 200, { workItems: items });
+      },
+      POST: async (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const payload = await readJsonBody(ctx);
+        if (payload === undefined) return;
+        const facilityId = typeof payload['facilityId'] === 'string' ? payload['facilityId'] : '';
+        if (!context.facilities.some((f) => f.id === facilityId)) {
+          sendJson(ctx.res, 400, { error: 'unknown_facility', requestId: ctx.requestId });
+          return;
+        }
+        if (!authorizeWorkWrite(authed, facilityId, 'work_item.create_requested', 'new')) return;
+        try {
+          const item = context.work.create({
+            type: String(payload['type'] ?? ''),
+            title: String(payload['title'] ?? ''),
+            explanation: String(payload['explanation'] ?? ''),
+            organizationId: context.organizationId,
+            facilityId,
+            subjectType: String(payload['subjectType'] ?? ''),
+            subjectId: String(payload['subjectId'] ?? ''),
+            priority: (PRIORITIES as readonly string[]).includes(String(payload['priority']))
+              ? (payload['priority'] as Priority)
+              : ('medium' as Priority),
+            dueAt: String(payload['dueAt'] ?? ''),
+            ownerRole: payload['ownerRole'] as never,
+            ...(typeof payload['backupRole'] === 'string'
+              ? { backupRole: payload['backupRole'] as never }
+              : {}),
+            sourceFacts: Array.isArray(payload['sourceFacts'])
+              ? (payload['sourceFacts'] as SourceFact[])
+              : [],
+            ...(Array.isArray(payload['sourceLinks'])
+              ? { sourceLinks: payload['sourceLinks'] as SourceLink[] }
+              : {}),
+            ...(typeof payload['standardRef'] === 'string'
+              ? { standardRef: payload['standardRef'] }
+              : {}),
+            requiredAction: String(payload['requiredAction'] ?? ''),
+            createdBy: authed.user.id,
+          });
+          sendJson(ctx.res, 201, { workItem: item });
+        } catch (err) {
+          sendServiceError(ctx, err);
+        }
+      },
+    },
+
+    '/api/v1/notifications': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const hasOrgWide = authed.user.assignments.some(
+          (a) => a.organizationId === context.organizationId && a.facilityScope === 'all',
+        );
+        sendJson(ctx.res, 200, {
+          notifications: context.notifier.listFor({
+            roles: authed.user.assignments.map((a) => a.role),
+            userId: authed.user.id,
+            facilityIds: hasOrgWide ? 'all' : coveredFacilityIds(authed.user),
+          }),
+        });
+      },
+    },
+
     '/api/v1/excellence/gold-standards': {
       GET: (ctx) => {
         const authed = authenticate(ctx);
@@ -605,10 +799,90 @@ export function createApiServer(context: ApiContext): Server {
     },
   };
 
+  /** Shared mutation wrapper for work-item actions at the item's facility. */
+  function workItemAction(
+    auditAction: string,
+    act: (
+      ctx: AuthedContext,
+      itemId: string,
+      payload: Record<string, unknown>,
+    ) => void,
+  ): Handler {
+    return async (ctx, params) => {
+      const authed = authenticate(ctx);
+      if (authed === undefined) return;
+      const payload = await readJsonBody(ctx);
+      if (payload === undefined) return;
+      const itemId = params['id'] ?? '';
+      const item = context.work.get(itemId);
+      if (item === undefined) {
+        sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+        return;
+      }
+      if (!authorizeWorkWrite(authed, item.facilityId, auditAction, itemId)) return;
+      try {
+        act(authed, itemId, payload);
+      } catch (err) {
+        sendServiceError(ctx, err);
+      }
+    };
+  }
+
   const paramRoutes: readonly {
     readonly pattern: string;
     readonly methods: Partial<Record<string, Handler>>;
   }[] = [
+    {
+      pattern: '/api/v1/work-items/:id/acknowledge',
+      methods: {
+        POST: workItemAction('work_item.acknowledge_requested', (ctx, itemId, payload) => {
+          const item = context.work.acknowledge(itemId, {
+            userId: ctx.user.id,
+            ...(typeof payload['expectedVersion'] === 'number'
+              ? { expectedVersion: payload['expectedVersion'] }
+              : {}),
+          });
+          sendJson(ctx.res, 200, { workItem: item });
+        }),
+      },
+    },
+    {
+      pattern: '/api/v1/work-items/:id/resolve',
+      methods: {
+        POST: workItemAction('work_item.resolve_requested', (ctx, itemId, payload) => {
+          const code = String(payload['code'] ?? '');
+          if (!(RESOLUTION_CODES as readonly string[]).includes(code)) {
+            sendJson(ctx.res, 400, {
+              error: 'invalid_resolution_code',
+              validCodes: RESOLUTION_CODES,
+              requestId: ctx.requestId,
+            });
+            return;
+          }
+          const item = context.work.resolve(itemId, {
+            userId: ctx.user.id,
+            code: code as ResolutionCode,
+            ...(typeof payload['note'] === 'string' ? { note: payload['note'] } : {}),
+            ...(typeof payload['expectedVersion'] === 'number'
+              ? { expectedVersion: payload['expectedVersion'] }
+              : {}),
+          });
+          sendJson(ctx.res, 200, { workItem: item });
+        }),
+      },
+    },
+    {
+      pattern: '/api/v1/work-items/:id/escalate',
+      methods: {
+        POST: workItemAction('work_item.escalate_requested', (ctx, itemId, payload) => {
+          const item = context.work.escalate(itemId, {
+            byUserId: ctx.user.id,
+            ...(typeof payload['note'] === 'string' ? { note: payload['note'] } : {}),
+          });
+          sendJson(ctx.res, 200, { workItem: item });
+        }),
+      },
+    },
     {
       pattern: '/api/v1/excellence/role-cards/:role',
       methods: {

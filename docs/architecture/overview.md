@@ -1,8 +1,8 @@
 # Architecture Overview
 
-Status: Epics 1 (Foundation) and 2 (Identity and access) complete; everything
-else is specification, not code. The authoritative specification is
-[`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
+Status: Epics 1 (Foundation), 2 (Identity and access), and 3 (Excellence
+content) complete; everything else is specification, not code. The
+authoritative specification is [`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
 
 ## System context
 
@@ -63,7 +63,8 @@ accelerates it but never gates it.
 | Audit log | `packages/audit` | append-only, hash-chained; ADR-0007 |
 | Identity & access | `packages/auth` | PBAC engine, sessions, dev IdP, break-glass, access review; ADR-0006 |
 | Authorization model | [`../security/authorization-model.md`](../security/authorization-model.md) | roles, matrix, reason codes |
-| API skeleton | `apps/api` | health/readiness + authenticated Epic 2 routes (me, facilities, patient summary, audit events, break-glass, access review) |
+| Excellence content | `packages/excellence` | versioned Gold Standards / role cards / policies / constitution, approval workflow, search, printable + offline exports; ADR-0008 |
+| API skeleton | `apps/api` | health/readiness + authenticated Epic 2 routes (me, facilities, patient summary, audit events, break-glass, access review) + Epic 3 Excellence library and authoring routes |
 | Worker skeleton | `apps/worker` | interval scheduler seam for Epic 5 jobs |
 | Web/admin stubs | `apps/web`, `apps/admin` | framework decision deferred (ADR-0003) |
 | CI | `.github/workflows/ci.yml` | format, secrets, typecheck, tests, env schema, audit |
@@ -77,7 +78,9 @@ accelerates it but never gates it.
    engine, sessions with immediate revocation, break-glass, access review.
    Real OIDC SSO (Entra ID + MFA) remains open pending tenant setup and a
    library ADR.
-3. Excellence content — Gold Standards, role cards, versioning/approval.
+3. **Excellence content** ✅ — versioned/approved Gold Standards, role
+   cards, policies, constitution; search; printable + offline exports.
+   Admin authoring UI arrives with the web app (Epic 10 framework decision).
 4. Work management — queues, ownership, escalation.
 5. Integration framework — connector SDK, canonical envelope, mock connectors,
    idempotent ingestion, dead-letter, reconciliation.

@@ -35,6 +35,9 @@
       "path": "packages/connector-collaboratemd"
     },
     {
+      "path": "packages/identity"
+    },
+    {
       "path": "apps/api"
     },
     {

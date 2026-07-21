@@ -20,6 +20,9 @@
       "path": "packages/excellence"
     },
     {
+      "path": "packages/work"
+    },
+    {
       "path": "apps/api"
     },
     {

@@ -23,3 +23,5 @@ old one and link both directions.
 | [0003](0003-minimal-dependency-toolchain.md) | Minimal-dependency toolchain: npm workspaces, tsc, node:test | Accepted |
 | [0004](0004-strict-typescript-configuration.md) | Single strict TypeScript configuration | Accepted |
 | [0005](0005-foundation-guardrails.md) | Foundation guardrails: env validation, feature flags, PHI-safe logging | Accepted |
+| [0006](0006-identity-access-architecture.md) | Identity and access architecture (Epic 2) | Accepted |
+| [0007](0007-append-only-audit-log.md) | Append-only audit log with hash chaining | Accepted |

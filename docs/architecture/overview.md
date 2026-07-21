@@ -1,7 +1,7 @@
 # Architecture Overview
 
-Status: Epic 1 (Foundation) complete; everything below the foundation row is
-specification, not code. The authoritative specification is
+Status: Epics 1 (Foundation) and 2 (Identity and access) complete; everything
+else is specification, not code. The authoritative specification is
 [`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
 
 ## System context
@@ -60,7 +60,10 @@ accelerates it but never gates it.
 | Env validation | `packages/env` | fail-fast, secret-redacting; ADR-0005 |
 | Feature flags | `packages/feature-flags` | default off; high-risk locked in prod; ADR-0005 |
 | PHI-safe logging | `packages/observability` | deny-list redaction, JSON lines; ADR-0005 |
-| API skeleton | `apps/api` | health/readiness only, secure headers, request IDs |
+| Audit log | `packages/audit` | append-only, hash-chained; ADR-0007 |
+| Identity & access | `packages/auth` | PBAC engine, sessions, dev IdP, break-glass, access review; ADR-0006 |
+| Authorization model | [`../security/authorization-model.md`](../security/authorization-model.md) | roles, matrix, reason codes |
+| API skeleton | `apps/api` | health/readiness + authenticated Epic 2 routes (me, facilities, patient summary, audit events, break-glass, access review) |
 | Worker skeleton | `apps/worker` | interval scheduler seam for Epic 5 jobs |
 | Web/admin stubs | `apps/web`, `apps/admin` | framework decision deferred (ADR-0003) |
 | CI | `.github/workflows/ci.yml` | format, secrets, typecheck, tests, env schema, audit |
@@ -69,8 +72,11 @@ accelerates it but never gates it.
 
 ## Epic roadmap (blueprint §27)
 
-1. **Foundation** — this document's scope. ✅
-2. Identity and access — OIDC abstraction, policy engine, break-glass.
+1. **Foundation** ✅
+2. **Identity and access** ✅ — OIDC abstraction + dev IdP, PBAC policy
+   engine, sessions with immediate revocation, break-glass, access review.
+   Real OIDC SSO (Entra ID + MFA) remains open pending tenant setup and a
+   library ADR.
 3. Excellence content — Gold Standards, role cards, versioning/approval.
 4. Work management — queues, ownership, escalation.
 5. Integration framework — connector SDK, canonical envelope, mock connectors,

@@ -28,6 +28,14 @@ import type {
   InMemoryIngestedRecordStore,
   SourceConnector,
 } from '@armada/integrations-core';
+import type { ComplianceService, EvidenceType } from '@armada/compliance';
+import {
+  LINEUP_APPROVER_ROLES,
+  LINEUP_SECTIONS,
+  renderLineupHtml,
+  type LineupSection,
+  type LineupService,
+} from '@armada/lineup';
 import { renderScorecardCsv, type MetricsService } from '@armada/metrics';
 import { newRequestId, type Logger } from '@armada/observability';
 import {
@@ -69,6 +77,8 @@ export interface ApiContext {
   readonly notifier: InMemoryNotifier;
   readonly identity: IdentityService;
   readonly metrics: MetricsService;
+  readonly lineup: LineupService;
+  readonly compliance: ComplianceService;
   /** Absent in production until real connectors are configured post-discovery. */
   readonly integrations?: {
     readonly pipeline: IngestionPipeline;
@@ -314,7 +324,7 @@ export function createApiServer(context: ApiContext): Server {
   /** Map service errors: unknown entity → 404, stale version → 409, else 400. */
   function sendServiceError(ctx: RequestContext, err: unknown): void {
     const message = err instanceof Error ? err.message : 'invalid request';
-    if (/^Unknown (content|work item|issue|merge)/.test(message)) {
+    if (/^Unknown (content|work item|issue|merge|lineup|requirement|corrective action)/.test(message)) {
       sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
       return;
     }
@@ -756,6 +766,107 @@ export function createApiServer(context: ApiContext): Server {
       },
     },
 
+    '/api/v1/lineups/today': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const facilityId = ctx.url.searchParams.get('facilityId');
+        if (facilityId === null || !context.facilities.some((f) => f.id === facilityId)) {
+          sendJson(ctx.res, 400, { error: 'facilityId_required', requestId: ctx.requestId });
+          return;
+        }
+        const decision = authorize(authed, {
+          resource: {
+            type: 'daily_lineup',
+            classification: 'OPERATIONAL',
+            organizationId: context.organizationId,
+            facilityId,
+          },
+          action: 'read',
+          purpose: 'operations',
+          auditAction: 'lineup.read',
+          subjectType: 'daily_lineup',
+          subjectId: facilityId,
+          auditMode: 'deny-only',
+        });
+        if (decision === undefined) return;
+        const today = new Date().toISOString().slice(0, 10);
+        sendJson(ctx.res, 200, {
+          lineup: context.lineup.getOrGenerate(context.organizationId, facilityId, today),
+        });
+      },
+    },
+
+    '/api/v1/compliance/requirements': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        if (!authorizeCompliance(authed, 'read', 'compliance_requirements.read')) return;
+        sendJson(ctx.res, 200, {
+          requirements: context.compliance.requirements(),
+          auditCalendar: context.compliance.auditCalendar(),
+        });
+      },
+    },
+
+    '/api/v1/compliance/readiness': {
+      GET: (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        if (!authorizeCompliance(authed, 'read', 'compliance_readiness.read')) return;
+        sendJson(ctx.res, 200, {
+          readiness: context.compliance.readinessSummary(),
+          correctiveActions: context.compliance.correctiveActions(),
+        });
+      },
+    },
+
+    '/api/v1/compliance/evidence': {
+      POST: async (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const payload = await readJsonBody(ctx);
+        if (payload === undefined) return;
+        if (!authorizeCompliance(authed, 'write', 'compliance_evidence.record')) return;
+        try {
+          const evidence = context.compliance.recordEvidence({
+            requirementId: String(payload['requirementId'] ?? ''),
+            type: String(payload['type'] ?? '') as EvidenceType,
+            reference: String(payload['reference'] ?? ''),
+            description: String(payload['description'] ?? ''),
+            collectedBy: authed.user.id,
+          });
+          sendJson(ctx.res, 201, { evidence });
+        } catch (err) {
+          sendServiceError(ctx, err);
+        }
+      },
+    },
+
+    '/api/v1/compliance/corrective-actions': {
+      POST: async (ctx) => {
+        const authed = authenticate(ctx);
+        if (authed === undefined) return;
+        const payload = await readJsonBody(ctx);
+        if (payload === undefined) return;
+        if (!authorizeCompliance(authed, 'write', 'corrective_action.open')) return;
+        try {
+          const action = context.compliance.openCorrectiveAction({
+            findingSummary: String(payload['findingSummary'] ?? ''),
+            ownerRole: payload['ownerRole'] as never,
+            dueDate: String(payload['dueDate'] ?? ''),
+            openedBy: authed.user.id,
+            ...(typeof payload['requirementId'] === 'string'
+              ? { requirementId: payload['requirementId'] }
+              : {}),
+          });
+          sendJson(ctx.res, 201, { correctiveAction: action });
+        } catch (err) {
+          sendServiceError(ctx, err);
+        }
+      },
+    },
+
     '/api/v1/metrics': {
       GET: (ctx) => {
         const authed = authenticate(ctx);
@@ -995,6 +1106,48 @@ export function createApiServer(context: ApiContext): Server {
     );
   }
 
+  /** Compliance registry: org-wide operational resource, mutations audited. */
+  function authorizeCompliance(
+    ctx: AuthedContext,
+    action: 'read' | 'write',
+    auditAction: string,
+  ): boolean {
+    return (
+      authorize(ctx, {
+        resource: {
+          type: 'compliance_registry',
+          classification: 'OPERATIONAL',
+          organizationId: context.organizationId,
+        },
+        action,
+        purpose: 'operations',
+        auditAction,
+        subjectType: 'compliance_registry',
+        subjectId: 'all',
+        auditMode: action === 'read' ? 'deny-only' : 'all',
+      }) !== undefined
+    );
+  }
+
+  /** Lineup mutations: daily_lineup write at the lineup's facility. */
+  function authorizeLineupWrite(ctx: AuthedContext, facilityId: string, auditAction: string, subjectId: string): boolean {
+    return (
+      authorize(ctx, {
+        resource: {
+          type: 'daily_lineup',
+          classification: 'OPERATIONAL',
+          organizationId: context.organizationId,
+          facilityId,
+        },
+        action: 'write',
+        purpose: 'operations',
+        auditAction,
+        subjectType: 'daily_lineup',
+        subjectId,
+      }) !== undefined
+    );
+  }
+
   /** Shared mutation wrapper for work-item actions at the item's facility. */
   function workItemAction(
     auditAction: string,
@@ -1077,6 +1230,153 @@ export function createApiServer(context: ApiContext): Server {
           });
           sendJson(ctx.res, 200, { workItem: item });
         }),
+      },
+    },
+    {
+      pattern: '/api/v1/lineups/:id/items',
+      methods: {
+        POST: async (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const payload = await readJsonBody(ctx);
+          if (payload === undefined) return;
+          const lineup = context.lineup.getById(params['id'] ?? '');
+          if (lineup === undefined) {
+            sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+            return;
+          }
+          if (!authorizeLineupWrite(authed, lineup.facilityId, 'lineup.edit', lineup.id)) return;
+          const section = String(payload['section'] ?? '');
+          if (!(LINEUP_SECTIONS as readonly string[]).includes(section)) {
+            sendJson(ctx.res, 400, {
+              error: 'invalid_section',
+              validSections: LINEUP_SECTIONS,
+              requestId: ctx.requestId,
+            });
+            return;
+          }
+          try {
+            const updated = context.lineup.editItem(lineup.id, {
+              section: section as LineupSection,
+              title: String(payload['title'] ?? ''),
+              body: String(payload['body'] ?? ''),
+              editorId: authed.user.id,
+            });
+            sendJson(ctx.res, 200, { lineup: updated });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/lineups/:id/approve',
+      methods: {
+        POST: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const lineup = context.lineup.getById(params['id'] ?? '');
+          if (lineup === undefined) {
+            sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+            return;
+          }
+          if (!authorizeLineupWrite(authed, lineup.facilityId, 'lineup.approve', lineup.id)) return;
+          const approverRole = authed.user.assignments
+            .map((a) => a.role)
+            .find((role) => LINEUP_APPROVER_ROLES.includes(role));
+          if (approverRole === undefined) {
+            sendJson(ctx.res, 403, {
+              error: 'forbidden',
+              message: 'User holds no lineup-approver role',
+              requestId: ctx.requestId,
+            });
+            return;
+          }
+          try {
+            sendJson(ctx.res, 200, {
+              lineup: context.lineup.approve(lineup.id, {
+                approvedBy: authed.user.id,
+                approverRole,
+              }),
+            });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/lineups/:id/publish',
+      methods: {
+        POST: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const lineup = context.lineup.getById(params['id'] ?? '');
+          if (lineup === undefined) {
+            sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+            return;
+          }
+          if (!authorizeLineupWrite(authed, lineup.facilityId, 'lineup.publish', lineup.id)) return;
+          try {
+            sendJson(ctx.res, 200, { lineup: context.lineup.publish(lineup.id, authed.user.id) });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/lineups/:id/print',
+      methods: {
+        GET: (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const lineup = context.lineup.getById(params['id'] ?? '');
+          if (lineup === undefined) {
+            sendJson(ctx.res, 404, { error: 'not_found', requestId: ctx.requestId });
+            return;
+          }
+          const decision = authorize(authed, {
+            resource: {
+              type: 'daily_lineup',
+              classification: 'OPERATIONAL',
+              organizationId: context.organizationId,
+              facilityId: lineup.facilityId,
+            },
+            action: 'read',
+            purpose: 'operations',
+            auditAction: 'lineup.print',
+            subjectType: 'daily_lineup',
+            subjectId: lineup.id,
+            auditMode: 'deny-only',
+          });
+          if (decision === undefined) return;
+          const facilityName =
+            context.facilities.find((f) => f.id === lineup.facilityId)?.name ?? lineup.facilityId;
+          sendHtml(ctx.res, 200, renderLineupHtml(lineup, facilityName));
+        },
+      },
+    },
+    {
+      pattern: '/api/v1/compliance/corrective-actions/:id/close',
+      methods: {
+        POST: async (ctx, params) => {
+          const authed = authenticate(ctx);
+          if (authed === undefined) return;
+          const payload = await readJsonBody(ctx);
+          if (payload === undefined) return;
+          if (!authorizeCompliance(authed, 'write', 'corrective_action.close')) return;
+          try {
+            sendJson(ctx.res, 200, {
+              correctiveAction: context.compliance.closeCorrectiveAction(params['id'] ?? '', {
+                closedBy: authed.user.id,
+                closureNote: String(payload['closureNote'] ?? ''),
+              }),
+            });
+          } catch (err) {
+            sendServiceError(ctx, err);
+          }
+        },
       },
     },
     {

@@ -21,6 +21,9 @@
     "@armada/connector-salesforce": "*",
     "@armada/connector-collaboratemd": "*",
     "@armada/identity": "*",
-    "@armada/metrics": "*"
+    "@armada/metrics": "*",
+    "@armada/lineup": "*",
+    "@armada/compliance": "*",
+    "@armada/consent": "*"
   }
 }

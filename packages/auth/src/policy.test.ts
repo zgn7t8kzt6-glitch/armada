@@ -93,6 +93,30 @@ test('Part 2 data is default-deny for every role, purpose, and break-glass', () 
   assert.deepEqual(decision.reasonCodes, ['PART2_CONSENT_UNAVAILABLE']);
 });
 
+test('Part 2 with consent-service ALLOW proceeds through role/facility checks', () => {
+  const allowed = decide({
+    resource: resource({ classification: 'PART2' }),
+    consentDecision: 'ALLOW',
+  });
+  assert.equal(allowed.decision, 'ALLOW');
+  assert.ok(allowed.reasonCodes.includes('PART2_CONSENT_APPLIED'));
+  // Consent does not bypass facility isolation.
+  const wrongFacility = decide({
+    resource: resource({ classification: 'PART2', facilityId: COLUMBUS }),
+    consentDecision: 'ALLOW',
+  });
+  assert.equal(wrongFacility.decision, 'DENY');
+  // REQUIRE_REVIEW and DENY both keep the gate closed.
+  for (const consentDecision of ['REQUIRE_REVIEW', 'DENY'] as const) {
+    const denied = decide({
+      resource: resource({ classification: 'PART2' }),
+      consentDecision,
+    });
+    assert.equal(denied.decision, 'DENY');
+    assert.deepEqual(denied.reasonCodes, ['PART2_CONSENT_UNAVAILABLE']);
+  }
+});
+
 test('role without capability is denied: nurse cannot read audit events', () => {
   const decision = decide({ resource: resource({ type: 'audit_event' }) });
   assert.equal(decision.decision, 'DENY');

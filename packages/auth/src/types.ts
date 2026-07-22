@@ -76,6 +76,13 @@ export interface AccessRequest {
   readonly purpose: PurposeOfUse;
   /** Active break-glass grant for this user, if any. */
   readonly breakGlass?: BreakGlassActivation;
+  /**
+   * Outcome of the consent decision service (Epic 13) for this request.
+   * PART2 resources are denied unless this is exactly 'ALLOW' — and the
+   * consent service itself cannot say ALLOW until the legally approved
+   * decision matrix ships, so Part 2 stays fail-closed end to end.
+   */
+  readonly consentDecision?: 'ALLOW' | 'DENY' | 'REQUIRE_REVIEW';
 }
 
 export type AccessReasonCode =
@@ -87,6 +94,7 @@ export type AccessReasonCode =
   | 'CLASSIFICATION_EXCEEDS_ROLE'
   | 'PURPOSE_INVALID'
   | 'ROLE_CAPABILITY_MATCH'
+  | 'PART2_CONSENT_APPLIED'
   | 'BREAK_GLASS_APPLIED'
   | 'BREAK_GLASS_INAPPLICABLE';
 

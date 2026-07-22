@@ -101,11 +101,18 @@ export function evaluateAccess(request: AccessRequest, options: PolicyOptions = 
     return deny(['ORGANIZATION_MISMATCH'], now);
   }
 
-  // Part 2 stays default-deny until the consent decision service (Epic 13)
-  // provides a legally approved ALLOW — no role or break-glass overrides this.
-  if (resource.classification === 'PART2') {
+  // Part 2 requires an explicit ALLOW from the consent decision service
+  // (Epic 13). Anything else — absent, DENY, or REQUIRE_REVIEW — denies
+  // here; no role or break-glass overrides it. With consent granted, the
+  // remaining checks treat the resource at the PHI ceiling.
+  const part2Consented =
+    resource.classification === 'PART2' && request.consentDecision === 'ALLOW';
+  if (resource.classification === 'PART2' && !part2Consented) {
     return deny(['PART2_CONSENT_UNAVAILABLE'], now);
   }
+  const effectiveResource: ResourceRef = part2Consented
+    ? { ...resource, classification: 'PHI' }
+    : resource;
 
   // Purpose 'break_glass' is only coherent alongside an applicable grant.
   const breakGlassActive = breakGlassApplies(request.breakGlass, request, now);
@@ -113,7 +120,7 @@ export function evaluateAccess(request: AccessRequest, options: PolicyOptions = 
     return deny(['PURPOSE_INVALID', 'BREAK_GLASS_INAPPLICABLE'], now);
   }
 
-  const covering = orgAssignments.filter((a) => coversFacility(a, resource));
+  const covering = orgAssignments.filter((a) => coversFacility(a, effectiveResource));
   if (covering.length === 0) {
     if (breakGlassActive) {
       return allow(['BREAK_GLASS_APPLIED'], now, [
@@ -126,11 +133,14 @@ export function evaluateAccess(request: AccessRequest, options: PolicyOptions = 
 
   let sawCapability = false;
   for (const assignment of covering) {
-    const ceiling = capabilityCeiling(assignment, resource.type, action);
+    const ceiling = capabilityCeiling(assignment, effectiveResource.type, action);
     if (ceiling === undefined) continue;
     sawCapability = true;
-    if (CLASSIFICATION_RANK[ceiling] >= CLASSIFICATION_RANK[resource.classification]) {
-      return allow(['ROLE_CAPABILITY_MATCH'], now);
+    if (CLASSIFICATION_RANK[ceiling] >= CLASSIFICATION_RANK[effectiveResource.classification]) {
+      return allow(
+        part2Consented ? ['ROLE_CAPABILITY_MATCH', 'PART2_CONSENT_APPLIED'] : ['ROLE_CAPABILITY_MATCH'],
+        now,
+      );
     }
   }
 

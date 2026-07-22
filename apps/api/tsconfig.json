@@ -46,6 +46,15 @@
     },
     {
       "path": "../../packages/metrics"
+    },
+    {
+      "path": "../../packages/lineup"
+    },
+    {
+      "path": "../../packages/compliance"
+    },
+    {
+      "path": "../../packages/consent"
     }
   ]
 }

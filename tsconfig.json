@@ -41,6 +41,15 @@
       "path": "packages/metrics"
     },
     {
+      "path": "packages/lineup"
+    },
+    {
+      "path": "packages/consent"
+    },
+    {
+      "path": "packages/compliance"
+    },
+    {
       "path": "apps/api"
     },
     {

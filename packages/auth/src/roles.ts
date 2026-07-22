@@ -46,6 +46,8 @@ export const RESOURCE_TYPES = [
   'admin_config',
   'excellence_content',
   'identity_reconciliation',
+  'daily_lineup',
+  'compliance_registry',
 ] as const;
 
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
@@ -77,7 +79,13 @@ const CLINICAL_CORE: RoleCapabilities = {
   patient_summary: { read: 'PHI' },
   census_summary: { read: 'OPERATIONAL' },
   work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+  daily_lineup: { read: 'OPERATIONAL' },
   ...EXCELLENCE_READ,
+};
+
+/** Leadership roles that run the daily lineup (edit, approve, publish). */
+const LINEUP_LEAD: RoleCapabilities = {
+  daily_lineup: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
 };
 
 /**
@@ -101,28 +109,33 @@ export const ROLE_CAPABILITY_MATRIX: Record<BaselineRole, RoleCapabilities> = {
     audit_event: { read: 'PHI' },
     access_review: { read: 'PHI' },
     identity_reconciliation: { read: 'PHI', write: 'PHI' },
+    compliance_registry: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
     ...EXCELLENCE_WRITE,
   },
   executive: {
     census_summary: { read: 'OPERATIONAL' },
     work_item: { read: 'OPERATIONAL' },
+    compliance_registry: { read: 'OPERATIONAL' },
+    ...LINEUP_LEAD,
     ...EXCELLENCE_WRITE,
   },
   facility_administrator: {
     census_summary: { read: 'OPERATIONAL' },
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+    ...LINEUP_LEAD,
     ...EXCELLENCE_WRITE,
   },
   medical_director: CLINICAL_CORE,
   provider: CLINICAL_CORE,
-  nursing_director: { ...CLINICAL_CORE, ...EXCELLENCE_WRITE },
+  nursing_director: { ...CLINICAL_CORE, ...LINEUP_LEAD, ...EXCELLENCE_WRITE },
   nurse: CLINICAL_CORE,
-  clinical_director: { ...CLINICAL_CORE, ...EXCELLENCE_WRITE },
+  clinical_director: { ...CLINICAL_CORE, ...LINEUP_LEAD, ...EXCELLENCE_WRITE },
   therapist_counselor: CLINICAL_CORE,
   case_manager: CLINICAL_CORE,
   bht_recovery_support: {
     census_summary: { read: 'OPERATIONAL' },
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+    daily_lineup: { read: 'OPERATIONAL' },
     ...EXCELLENCE_READ,
   },
   admissions: CLINICAL_CORE,
@@ -137,6 +150,8 @@ export const ROLE_CAPABILITY_MATRIX: Record<BaselineRole, RoleCapabilities> = {
     work_item: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
     audit_event: { read: 'PHI' },
     identity_reconciliation: { read: 'PHI', write: 'PHI' },
+    compliance_registry: { read: 'OPERATIONAL', write: 'OPERATIONAL' },
+    ...LINEUP_LEAD,
     ...EXCELLENCE_WRITE,
   },
   hr_learning: {
@@ -152,6 +167,8 @@ export const ROLE_CAPABILITY_MATRIX: Record<BaselineRole, RoleCapabilities> = {
     access_review: { read: 'PHI' },
     census_summary: { read: 'OPERATIONAL' },
     identity_reconciliation: { read: 'PHI' },
+    daily_lineup: { read: 'OPERATIONAL' },
+    compliance_registry: { read: 'OPERATIONAL' },
     ...EXCELLENCE_READ,
   },
 };

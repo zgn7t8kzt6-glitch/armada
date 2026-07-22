@@ -21,7 +21,10 @@ import {
 } from '@armada/integrations-core';
 import { InMemoryNotifier, WorkItemService, seedWorkItems } from '@armada/work';
 import { createLogger } from '@armada/observability';
+import { ComplianceService, seedComplianceRequirements } from '@armada/compliance';
+import { LineupService } from '@armada/lineup';
 import { loadApiEnv } from './env.js';
+import { createLineupFacts } from './lineupSetup.js';
 import { wireMetrics } from './metricsSetup.js';
 import { FAC_AKRON, FAC_COLUMBUS, seedSyntheticDirectory } from './seed.js';
 import { createApiServer, type ApiContext } from './server.js';
@@ -84,6 +87,12 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     facilities: directory.facilities,
     seedActors: { definedBy: author.id, approvedBy: approver.id },
   });
+  const lineup = new LineupService({
+    audit,
+    facts: createLineupFacts({ excellence, work, ingestStore }),
+  });
+  const compliance = new ComplianceService({ audit });
+  seedComplianceRequirements(compliance, author.id);
   const context: ApiContext = {
     logger: createLogger({ service: 'api-test', sink: () => {} }),
     serviceVersion: 'test',
@@ -106,6 +115,8 @@ async function startApi(options: { devIdp?: boolean } = {}): Promise<TestApi> {
     notifier,
     identity,
     metrics,
+    lineup,
+    compliance,
     integrations: { pipeline, connectors, store: ingestStore },
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,
@@ -911,6 +922,151 @@ test('scorecard CSV export for offline/downtime use', async () => {
   assert.match(csv, /metric_id,metric_name,value/);
   assert.match(csv, /census\.occupancy_rate/);
   assert.match(csv, /no_data/);
+});
+
+test('daily lineup: generated from live sources, edited, approved, published, printed', async () => {
+  const bht = await login('bht.akron@dev.armada.example');
+  const res = await get(`/api/v1/lineups/today?facilityId=${FAC_AKRON}`, bht);
+  assert.equal(res.status, 200);
+  const { lineup } = (await res.json()) as {
+    lineup: {
+      id: string;
+      status: string;
+      items: { section: string; body: string; generated: boolean; source?: { sourceSystem: string } }[];
+    };
+  };
+  assert.equal(lineup.status, 'draft');
+  const standard = lineup.items.find((i) => i.section === 'gold_standard');
+  assert.ok(standard && standard.body.length > 0, 'gold standard from Excellence library');
+  const census = lineup.items.find((i) => i.section === 'census');
+  assert.equal(census?.source?.sourceSystem, 'mock-kipu');
+  const authRisks = lineup.items.find((i) => i.section === 'authorization_risks');
+  assert.match(authRisks?.body ?? '', /ep-akron-/, 'UR work item surfaces in lineup');
+
+  // BHT can read but not edit/approve/publish.
+  assert.equal(
+    (
+      await post(`/api/v1/lineups/${lineup.id}/items`, bht, {
+        section: 'recognition',
+        title: 'Recognition',
+        body: 'x',
+      })
+    ).status,
+    403,
+  );
+
+  // Facility isolation: Akron UR staff cannot read the Columbus lineup.
+  // (nurse.columbus holds an active break-glass grant for Akron from an
+  // earlier test, so they are correctly ALLOWED there — use a clean user.)
+  const akronUr = await login('ur.akron@dev.armada.example');
+  assert.equal((await get(`/api/v1/lineups/today?facilityId=${FAC_COLUMBUS}`, akronUr)).status, 403);
+
+  const quality = await login('quality@dev.armada.example');
+  const edited = await post(`/api/v1/lineups/${lineup.id}/items`, quality, {
+    section: 'recognition',
+    title: 'Recognition',
+    body: 'Night team kept a tough weekend calm and safe — thank you.',
+  });
+  assert.equal(edited.status, 200);
+  assert.equal(
+    (await post(`/api/v1/lineups/${lineup.id}/items`, quality, { section: 'nope', title: 'x', body: 'y' })).status,
+    400,
+  );
+  // Publish before approval fails.
+  assert.equal((await post(`/api/v1/lineups/${lineup.id}/publish`, quality, {})).status, 400);
+  assert.equal((await post(`/api/v1/lineups/${lineup.id}/approve`, quality, {})).status, 200);
+  const published = await post(`/api/v1/lineups/${lineup.id}/publish`, quality, {});
+  assert.equal(published.status, 200);
+  const pubBody = (await published.json()) as { lineup: { status: string } };
+  assert.equal(pubBody.lineup.status, 'published');
+
+  const print = await get(`/api/v1/lineups/${lineup.id}/print`, bht);
+  assert.equal(print.status, 200);
+  assert.match(print.headers.get('content-type') ?? '', /text\/html/);
+  const html = await print.text();
+  assert.match(html, /Daily Lineup — Akron Residential/);
+  assert.match(html, /Night team kept a tough weekend calm/);
+  for (const action of ['lineup.generated', 'lineup.edited', 'lineup.approved', 'lineup.published']) {
+    assert.ok(api.audit.query({ action }).length >= 1, action);
+  }
+});
+
+test('compliance workspace: requirements, evidence, corrective actions, readiness', async () => {
+  const nurse = await login('nurse.akron@dev.armada.example');
+  assert.equal((await get('/api/v1/compliance/requirements', nurse)).status, 403);
+
+  const quality = await login('quality@dev.armada.example');
+  const reqRes = await get('/api/v1/compliance/requirements', quality);
+  assert.equal(reqRes.status, 200);
+  const { requirements } = (await reqRes.json()) as {
+    requirements: { id: string; authority: string; citation: string }[];
+  };
+  assert.equal(requirements.length, 4);
+  assert.ok(requirements.some((r) => r.citation === 'OAC 5122-29-09'));
+
+  const hipaa = requirements.find((r) => r.authority === 'HIPAA');
+  assert.ok(hipaa);
+  const evidence = await post('/api/v1/compliance/evidence', quality, {
+    requirementId: hipaa.id,
+    type: 'audit_event',
+    reference: 'audit-log-integrity-check',
+    description: 'Hash-chain verification green in CI (synthetic evidence)',
+  });
+  assert.equal(evidence.status, 201);
+
+  const action = await post('/api/v1/compliance/corrective-actions', quality, {
+    findingSummary: 'Mock tracer: two handoffs missing documented escalation path',
+    ownerRole: 'nursing_director',
+    dueDate: '2026-08-15',
+    requirementId: requirements[0]!.id,
+  });
+  assert.equal(action.status, 201);
+  const { correctiveAction } = (await action.json()) as { correctiveAction: { id: string } };
+
+  const readiness = await get('/api/v1/compliance/readiness', quality);
+  assert.equal(readiness.status, 200);
+  const readinessBody = (await readiness.json()) as {
+    readiness: {
+      byAuthority: { authority: string; withEvidence: number; highRiskWithoutEvidence: number }[];
+      correctiveActions: { open: number };
+    };
+  };
+  const hipaaRow = readinessBody.readiness.byAuthority.find((a) => a.authority === 'HIPAA');
+  assert.equal(hipaaRow?.withEvidence, 1);
+  const part2Row = readinessBody.readiness.byAuthority.find((a) => a.authority === 'Part2');
+  assert.equal(part2Row?.highRiskWithoutEvidence, 1, 'gaps surface honestly');
+  assert.equal(readinessBody.readiness.correctiveActions.open, 1);
+
+  // Close requires a real note.
+  assert.equal(
+    (
+      await post(`/api/v1/compliance/corrective-actions/${correctiveAction.id}/close`, quality, {
+        closureNote: 'ok',
+      })
+    ).status,
+    400,
+  );
+  const closed = await post(
+    `/api/v1/compliance/corrective-actions/${correctiveAction.id}/close`,
+    quality,
+    { closureNote: 'Retrained handoff standard work; verified two clean tracers.' },
+  );
+  assert.equal(closed.status, 200);
+
+  // Executive can read readiness but not write evidence.
+  const exec = await login('executive@dev.armada.example');
+  assert.equal((await get('/api/v1/compliance/readiness', exec)).status, 200);
+  assert.equal(
+    (
+      await post('/api/v1/compliance/evidence', exec, {
+        requirementId: hipaa.id,
+        type: 'document',
+        reference: 'x',
+        description: 'y',
+      })
+    ).status,
+    403,
+  );
 });
 
 test('api env schema: session defaults apply and weak overrides fail', () => {

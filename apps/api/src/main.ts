@@ -18,7 +18,10 @@ import {
 } from '@armada/integrations-core';
 import { createLogger } from '@armada/observability';
 import { InMemoryNotifier, WorkItemService, seedWorkItems } from '@armada/work';
+import { ComplianceService, seedComplianceRequirements } from '@armada/compliance';
+import { LineupService } from '@armada/lineup';
 import { DEV_SESSION_SECRET_DEFAULT, loadApiEnv } from './env.js';
+import { createLineupFacts } from './lineupSetup.js';
 import { wireMetrics } from './metricsSetup.js';
 import { createFlags } from './flags.js';
 import { seedSyntheticDirectory } from './seed.js';
@@ -170,6 +173,23 @@ function main(): void {
     },
   });
 
+  const lineup = new LineupService({
+    audit,
+    facts: createLineupFacts({
+      excellence,
+      work,
+      ...(integrations !== undefined ? { ingestStore: integrations.store } : {}),
+    }),
+  });
+
+  const compliance = new ComplianceService({ audit });
+  if (!isProduction) {
+    const complianceLead = users.getByEmail('quality@dev.armada.example');
+    if (complianceLead !== undefined) {
+      seedComplianceRequirements(compliance, complianceLead.id);
+    }
+  }
+
   const server = createApiServer({
     logger,
     serviceVersion: SERVICE_VERSION,
@@ -185,6 +205,8 @@ function main(): void {
     notifier,
     identity,
     metrics,
+    lineup,
+    compliance,
     ...(integrations !== undefined ? { integrations } : {}),
     facilities: directory.facilities,
     censusByFacility: directory.censusByFacility,

@@ -22,7 +22,8 @@
     "secrets:check": "node scripts/check-secrets.mjs",
     "env:check": "npm run build && node scripts/check-env.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test",
-    "dev": "npm run build && node scripts/dev.mjs"
+    "dev": "npm run build && node scripts/dev.mjs",
+    "start": "npm run build && node scripts/start.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

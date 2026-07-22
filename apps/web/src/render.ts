@@ -276,9 +276,29 @@ ${input.content}
 `;
 }
 
-export function renderLogin(error?: string): string {
+export interface DemoUser {
+  readonly email: string;
+  readonly label: string;
+}
+
+export function renderLogin(error?: string, demoUsers?: readonly DemoUser[]): string {
   const alert =
     error !== undefined ? `<p class="notice" role="alert">${escapeHtml(error)}</p>` : '';
+  // One-tap demo sign-in (no JavaScript: each button is its own tiny form).
+  const demo =
+    demoUsers !== undefined && demoUsers.length > 0
+      ? `<div class="demo-block">
+  <p class="meta" style="margin:1.3rem 0 0.5rem"><strong>Demo accounts</strong> — tap to sign in as a role:</p>
+  ${demoUsers
+    .map(
+      (u) => `<form method="post" action="/login" class="demo-form">
+    <input type="hidden" name="email" value="${escapeHtml(u.email)}">
+    <button type="submit" class="demo-btn">${escapeHtml(u.label)}</button>
+  </form>`,
+    )
+    .join('\n')}
+</div>`
+      : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -286,7 +306,11 @@ export function renderLogin(error?: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in — Armada Recovery</title>
 <link rel="icon" href="data:image/svg+xml,${FAVICON}">
-<style>${BASE_CSS}</style>
+<style>${BASE_CSS}
+  .demo-form { display: inline-block; margin: 0.2rem 0.25rem 0 0; }
+  .demo-btn { margin: 0; padding: 0.45rem 0.85rem; background: var(--line-soft); color: var(--pine-deep); border: 1px solid var(--line); font-weight: 500; }
+  .demo-btn:hover { background: #e9f2f0; border-color: var(--lagoon); }
+</style>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -296,9 +320,10 @@ export function renderLogin(error?: string): string {
     <h1 class="login-brand">Armada</h1>
     <p class="login-sub">RECOVERY</p>
     ${alert}
+    ${demo}
     <form class="stack" method="post" action="/login">
       <label for="email">Work email</label>
-      <input id="email" name="email" type="email" required autocomplete="username" placeholder="you@armadarecovery.com">
+      <input id="email" name="email" type="email" required autocomplete="username" placeholder="name@dev.armada.example">
       <button type="submit" style="width:100%">Sign in</button>
     </form>
     <p class="meta" style="margin-top:1.1rem">Development identity provider — synthetic users only.<br>Production sign-in uses the organization's SSO with MFA.</p>

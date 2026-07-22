@@ -102,3 +102,14 @@ test('login page renders the dev-idp notice and empty queue is honest', () => {
   assert.match(renderWorkTable([], 'nothing here'), /No work items/);
   assert.equal(escapeHtml(`<>&"'`), '&lt;&gt;&amp;&quot;&#39;');
 });
+
+test('demo accounts render as one-tap forms only when provided', () => {
+  const withDemo = renderLogin(undefined, [
+    { email: 'executive@dev.armada.example', label: 'Executive' },
+  ]);
+  assert.match(withDemo, /Demo accounts/);
+  assert.match(withDemo, /name="email" value="executive@dev.armada.example"/);
+  assert.match(withDemo, /<button type="submit" class="demo-btn">Executive<\/button>/);
+  const withoutDemo = renderLogin();
+  assert.ok(!withoutDemo.includes('Demo accounts'), 'production login shows no demo shortcuts');
+});

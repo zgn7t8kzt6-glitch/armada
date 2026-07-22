@@ -1,0 +1,36 @@
+# Render Blueprint — Armada Excellence OS (staging demo).
+#
+# This deployment runs the NEW platform (apps/api + apps/web) with synthetic
+# data only. True production mode is gated on the blueprint §35 readiness
+# checklist and is refused by scripts/start.mjs until that gate is signed.
+#
+# The service name matches the original "armada-care" service so applying
+# this blueprint updates the existing service (and keeps its URL). The
+# legacy prototype's blueprint is preserved at legacy/render.yaml; its
+# database file remains untouched on the persistent disk below.
+services:
+  - type: web
+    name: armada-care
+    runtime: node
+    plan: standard
+    region: oregon
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: staging
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: LOG_LEVEL
+        value: info
+    # Keep the legacy disk attached so the old app's database file survives
+    # (reference only; the new platform does not read or write it).
+    disk:
+      name: armada-data
+      mountPath: /var/data
+      sizeGB: 1

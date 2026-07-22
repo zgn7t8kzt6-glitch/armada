@@ -98,10 +98,13 @@ after(async () => {
   await new Promise<void>((r) => apiServer.close(() => r()));
 });
 
-test('unauthenticated home redirects to sign-in', async () => {
+test('unauthenticated landing page serves sign-in with 200; inner pages redirect', async () => {
   const res = await fetch(`${webUrl}/`, { redirect: 'manual' });
-  assert.equal(res.status, 303);
-  assert.equal(res.headers.get('location'), '/login');
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /Sign in/);
+  const inner = await fetch(`${webUrl}/work`, { redirect: 'manual' });
+  assert.equal(inner.status, 303);
+  assert.equal(inner.headers.get('location'), '/login');
 });
 
 test('login flow: bad identity re-renders form, good identity sets HttpOnly cookie', async () => {

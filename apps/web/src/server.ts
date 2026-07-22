@@ -162,6 +162,12 @@ export function createWebServer(context: WebContext): Server {
 
     '/': {
       GET: async (req, res) => {
+        // No session yet → the landing page IS the sign-in page (200, so
+        // host health checks pointed at / stay green).
+        if (cookieToken(req) === undefined) {
+          sendHtml(res, 200, renderLogin());
+          return;
+        }
         const authed = await requireMe(req, res);
         if (authed === undefined) return;
         const [workRes, notifRes] = await Promise.all([

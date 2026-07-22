@@ -9,9 +9,23 @@ import {
   renderLogin,
   renderWorkTable,
   statusBadge,
+  type DemoUser,
   type MeView,
   type WorkItemView,
 } from './render.js';
+
+/** Synthetic directory shortcuts shown on the demo sign-in page (matches
+ * the API seed; hidden entirely in production, where real SSO takes over). */
+const DEMO_USERS: readonly DemoUser[] = [
+  { email: 'executive@dev.armada.example', label: 'Executive' },
+  { email: 'quality@dev.armada.example', label: 'Quality & Compliance' },
+  { email: 'nurse.akron@dev.armada.example', label: 'Nurse (Akron)' },
+  { email: 'ur.akron@dev.armada.example', label: 'Utilization Review' },
+  { email: 'bht.akron@dev.armada.example', label: 'BHT (Akron)' },
+  { email: 'admissions.akron@dev.armada.example', label: 'Admissions' },
+  { email: 'privacy@dev.armada.example', label: 'Privacy Admin' },
+  { email: 'sysadmin@dev.armada.example', label: 'System Admin' },
+];
 
 /**
  * Role-based web workspaces (Epic 10, ADR-0016).
@@ -81,6 +95,7 @@ async function readForm(req: IncomingMessage): Promise<Record<string, string>> {
 
 export function createWebServer(context: WebContext): Server {
   const secureCookie = context.nodeEnv === 'production' ? '; Secure' : '';
+  const demoUsers = context.nodeEnv !== 'production' ? DEMO_USERS : undefined;
 
   async function api(
     token: string | undefined,
@@ -132,7 +147,7 @@ export function createWebServer(context: WebContext): Server {
     },
 
     '/login': {
-      GET: (_req, res) => sendHtml(res, 200, renderLogin()),
+      GET: (_req, res) => sendHtml(res, 200, renderLogin(undefined, demoUsers)),
       POST: async (req, res) => {
         const form = await readForm(req);
         const result = await api(undefined, '/auth/dev/login', {
@@ -140,7 +155,7 @@ export function createWebServer(context: WebContext): Server {
           body: { email: form['email'] ?? '' },
         });
         if (result.status !== 200) {
-          sendHtml(res, 401, renderLogin('Sign-in failed. Check the address or contact your administrator.'));
+          sendHtml(res, 401, renderLogin('Sign-in failed — that address is not one of the demo accounts. Tap a demo role below, or wait for production SSO to sign in with your real email.', demoUsers));
           return;
         }
         const token = (result.body as { token: string }).token;
@@ -165,7 +180,7 @@ export function createWebServer(context: WebContext): Server {
         // No session yet → the landing page IS the sign-in page (200, so
         // host health checks pointed at / stay green).
         if (cookieToken(req) === undefined) {
-          sendHtml(res, 200, renderLogin());
+          sendHtml(res, 200, renderLogin(undefined, demoUsers));
           return;
         }
         const authed = await requireMe(req, res);

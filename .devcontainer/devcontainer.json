@@ -1,0 +1,27 @@
+{
+  "name": "Armada Excellence OS",
+  "dockerComposeFile": [
+    "../infrastructure/docker/docker-compose.dev.yml",
+    "docker-compose.yml"
+  ],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "postCreateCommand": "npm ci",
+  "forwardPorts": [3000, 5432, 6379],
+  "portsAttributes": {
+    "3000": { "label": "api" },
+    "5432": { "label": "postgres (dev)" },
+    "6379": { "label": "redis (dev)" }
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "typescript.tsdk": "node_modules/typescript/lib",
+        "files.insertFinalNewline": true,
+        "files.trimTrailingWhitespace": true
+      },
+      "extensions": ["editorconfig.editorconfig"]
+    }
+  },
+  "remoteUser": "node"
+}

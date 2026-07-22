@@ -1,22 +1,18 @@
-# Armada OS — Governing Documents
+# Documentation
 
-Armada OS is the operating system for behavioral healthcare: enterprise
-management, facility operations, clinical workflows, and workforce management
-in one platform. These documents govern how it evolves. Read them in this
-order; when they conflict, the Constitution wins.
+| Area | Contents |
+|---|---|
+| [BUILD_BLUEPRINT.md](BUILD_BLUEPRINT.md) | The authoritative A-to-Z build specification |
+| [architecture/](architecture/overview.md) | System context, boundaries, epic roadmap |
+| [adr/](adr/README.md) | Architecture decision records and the ADR process |
+| [security/](security/secure-development.md) | Secure development practices; threat model grows here |
+| [privacy/](privacy/data-handling.md) | PHI / 42 CFR Part 2 handling principles |
+| [integrations/](integrations/README.md) | Connector contract; vendor docs land here when signed |
+| [vendor-discovery/](vendor-discovery/) | Capability-matrix templates awaiting signed vendor findings |
+| [compliance/](compliance/sources.md) | Authoritative regulatory source register |
+| [data-dictionary/](data-dictionary/README.md) | Canonical model definitions (starts with the database epic) |
+| [runbooks/](runbooks/README.md) | Operational runbooks (grow with each capability) |
+| [user-guides/](user-guides/README.md) | Role-facing guides (grow with each workspace) |
 
-| # | Document | What it settles |
-|---|---|---|
-| 1 | [ARMADA-CONSTITUTION.md](ARMADA-CONSTITUTION.md) | **The law** (v1.1). Sixteen principles across four articles, the Platform Contract, the Operational Intelligence signature, five gates, the Armada OS product map, the ten-question Review, and the amendment rule. Every PR answers to it. |
-| 2 | [ARMADA-AUDIT.md](ARMADA-AUDIT.md) | What exists — the honest inventory of every module, table, route, and workflow as found. |
-| 3 | [ARMADA-MASTER-APP-MAP.md](ARMADA-MASTER-APP-MAP.md) | Audit × target: keep/adapt/rebuild dispositions, owner decisions, phases, and the high-risk register. |
-| 4 | [ARMADA-DOMAIN-ARCHITECTURE.md](ARMADA-DOMAIN-ARCHITECTURE.md) | The business domains (31 + MDM), independent of how the code is organized. |
-| 5 | [ARMADA-PLATFORM-ARCHITECTURE.md](ARMADA-PLATFORM-ARCHITECTURE.md) | The five platform layers, the capability & event model, and the build order. |
-| 6 | [ARMADA-DESIGN-SYSTEM.md](ARMADA-DESIGN-SYSTEM.md) | How it looks and behaves: tokens, layout patterns, components, role homepages, UX law. |
-
-Operational compliance material lives alongside: [HIPAA-GO-LIVE.md](HIPAA-GO-LIVE.md).
-
-Standing rules that bear repeating outside any document: no PHI in this
-repository, ever; vault data (cards, portal credentials, bank details) flows
-upload → database only and never through git; migrations are additive and the
-app must boot on both an empty database and yesterday's.
+The legacy prototype's documentation was preserved at `legacy/docs/` and is
+historical reference only.

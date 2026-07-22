@@ -1,0 +1,15 @@
+{
+  "name": "@armada/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "start": "node dist/main.js",
+    "test": "node --test './dist/**/*.test.js'"
+  },
+  "dependencies": {
+    "@armada/env": "*",
+    "@armada/observability": "*"
+  }
+}

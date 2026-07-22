@@ -1,0 +1,60 @@
+{
+  "extends": "../../packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../packages/env"
+    },
+    {
+      "path": "../../packages/feature-flags"
+    },
+    {
+      "path": "../../packages/observability"
+    },
+    {
+      "path": "../../packages/audit"
+    },
+    {
+      "path": "../../packages/auth"
+    },
+    {
+      "path": "../../packages/excellence"
+    },
+    {
+      "path": "../../packages/work"
+    },
+    {
+      "path": "../../packages/integrations-core"
+    },
+    {
+      "path": "../../packages/connector-kipu"
+    },
+    {
+      "path": "../../packages/connector-salesforce"
+    },
+    {
+      "path": "../../packages/connector-collaboratemd"
+    },
+    {
+      "path": "../../packages/identity"
+    },
+    {
+      "path": "../../packages/metrics"
+    },
+    {
+      "path": "../../packages/lineup"
+    },
+    {
+      "path": "../../packages/compliance"
+    },
+    {
+      "path": "../../packages/consent"
+    }
+  ]
+}

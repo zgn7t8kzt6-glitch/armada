@@ -1,0 +1,12 @@
+# Development workspace image used by .devcontainer. Not a production image.
+FROM node:22-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# The devcontainer bind-mounts the repository; keep the container alive for
+# the editor to attach.
+CMD ["sleep", "infinity"]

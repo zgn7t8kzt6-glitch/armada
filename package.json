@@ -2,7 +2,7 @@
   "name": "armada-excellence-os",
   "version": "0.1.0",
   "private": true,
-  "description": "Armada Excellence Operating System — AES (culture and standards) + AIP (secure operational intelligence platform). Phase-one foundation.",
+  "description": "Armada Excellence Operating System \u2014 AES (culture and standards) + AIP (secure operational intelligence platform). Phase-one foundation.",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
@@ -21,7 +21,8 @@
     "format:check": "node scripts/check-format.mjs",
     "secrets:check": "node scripts/check-secrets.mjs",
     "env:check": "npm run build && node scripts/check-env.mjs",
-    "verify": "npm run lint && npm run typecheck && npm run test"
+    "verify": "npm run lint && npm run typecheck && npm run test",
+    "dev": "npm run build && node scripts/dev.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

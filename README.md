@@ -12,6 +12,8 @@ The full specification lives in [`docs/BUILD_BLUEPRINT.md`](docs/BUILD_BLUEPRINT
 ```bash
 # Node >= 22.11 (see .node-version)
 npm ci
+npm run dev      # builds and starts the API + web app together
+# then open http://localhost:3100 and sign in as executive@dev.armada.example
 npm run verify   # format check + secret scan + strict typecheck + tests
 ```
 

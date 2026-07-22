@@ -1,18 +1,19 @@
-# Render Blueprint — Armada Excellence OS (staging demo).
+# Render Blueprint — Armada Excellence OS (staging demo, its own service).
 #
-# This deployment runs the NEW platform (apps/api + apps/web) with synthetic
-# data only. True production mode is gated on the blueprint §35 readiness
-# checklist and is refused by scripts/start.mjs until that gate is signed.
+# Creates a NEW service ("armada-excellence") on its own URL, leaving the
+# original armada-care service and its data completely alone. This runs the
+# new platform (apps/api + apps/web) with synthetic data only; true
+# production mode is refused by scripts/start.mjs until the blueprint §35
+# readiness gate is signed.
 #
-# The service name matches the original "armada-care" service so applying
-# this blueprint updates the existing service (and keeps its URL). The
-# legacy prototype's blueprint is preserved at legacy/render.yaml; its
-# database file remains untouched on the persistent disk below.
+# To go live: Render dashboard → New + → Blueprint → connect this repo →
+# Apply. Render creates the service from this file and gives it a URL like
+# https://armada-excellence.onrender.com
 services:
   - type: web
-    name: armada-care
+    name: armada-excellence
     runtime: node
-    plan: standard
+    plan: starter            # plenty for a synthetic-data demo; upgrade with real use
     region: oregon
     branch: main
     buildCommand: npm ci
@@ -28,9 +29,3 @@ services:
         generateValue: true
       - key: LOG_LEVEL
         value: info
-    # Keep the legacy disk attached so the old app's database file survives
-    # (reference only; the new platform does not read or write it).
-    disk:
-      name: armada-data
-      mountPath: /var/data
-      sizeGB: 1

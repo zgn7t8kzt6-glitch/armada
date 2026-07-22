@@ -135,7 +135,7 @@ test('authenticated home renders role, work items, and notification count', asyn
   assert.match(html, /Synthetic Akron Nurse/);
   assert.match(html, /ep-akron-1042/);
   assert.match(html, /Next action: Complete the concurrent review\./);
-  assert.match(html, /2 notification\(s\)/);
+  assert.match(html, /<div class="n">2<\/div><div class="l">notification\(s\)<\/div>/);
   assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'none'/);
 });
 

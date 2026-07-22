@@ -49,7 +49,8 @@ function sendHtml(res: ServerResponse, status: number, html: string, headers: Re
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'DENY',
     'referrer-policy': 'no-referrer',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+    'content-security-policy':
+      "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'",
     'cache-control': 'no-store',
     ...headers,
   });
@@ -255,7 +256,7 @@ export function createWebServer(context: WebContext): Server {
                   e.observation !== null
                     ? `${escapeHtml(e.observation.provenance[0]?.sourceSystem ?? '')} · ${escapeHtml(e.observation.asOf.slice(0, 16).replace('T', ' '))}`
                     : 'source unavailable';
-                return `<tr><td><strong>${escapeHtml(e.name)}</strong><br><span class="meta">${escapeHtml(e.definition.businessQuestion)} · ${escapeHtml(e.definition.formula)} · owner: ${escapeHtml(e.definition.ownerRole)}</span></td><td>${value}</td><td>${statusBadge(e.status)}</td><td class="meta">${source}</td></tr>`;
+                return `<tr><td><strong>${escapeHtml(e.name)}</strong><details class="def"><summary>What is this?</summary><p>${escapeHtml(e.definition.businessQuestion)}<br>Formula: ${escapeHtml(e.definition.formula)}<br>Owner: ${escapeHtml(e.definition.ownerRole.replaceAll('_', ' '))}</p></details></td><td><strong>${value}</strong></td><td>${statusBadge(e.status)}</td><td class="meta">${source}</td></tr>`;
               })
               .join('')}</tbody></table></section>`,
           )

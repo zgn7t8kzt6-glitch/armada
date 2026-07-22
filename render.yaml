@@ -1,19 +1,115 @@
-# Render Blueprint — Armada Excellence OS (staging demo, its own service).
+# Render Blueprint — BOTH services, side by side.
 #
-# Creates a NEW service ("armada-excellence") on its own URL, leaving the
-# original armada-care service and its data completely alone. This runs the
-# new platform (apps/api + apps/web) with synthetic data only; true
-# production mode is refused by scripts/start.mjs until the blueprint §35
-# readiness gate is signed.
+#  1. armada-care        — the ORIGINAL legacy app, exactly as before, on its
+#                          existing URL and branch. Restored verbatim from
+#                          legacy/render.yaml so a blueprint sync returns this
+#                          service to the legacy configuration. Its data disk
+#                          is preserved.
+#  2. armada-excellence  — the NEW Armada Excellence OS platform on its own
+#                          URL (staging demo, synthetic data only; production
+#                          mode is refused until the §35 readiness gate).
 #
-# To go live: Render dashboard → New + → Blueprint → connect this repo →
-# Apply. Render creates the service from this file and gives it a URL like
-# https://armada-excellence.onrender.com
+# If the dashboard shows a pending blueprint change, approve it; then
+# Manual Deploy armada-care if it doesn't redeploy on its own.
 services:
+  # ── Legacy app (unchanged, keep running) ──────────────────────────────
+  - type: web
+    name: armada-care
+    runtime: node
+    plan: standard
+    region: oregon
+    branch: claude/sober-living-software-my0gfm
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: ARMADA_DB
+        value: /var/data/armada.db
+      - key: SEED_SAMPLE
+        value: "false"
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASS
+        sync: false
+      - key: SL_KIOSK_CODE
+        sync: false
+      - key: AI_PROVIDER
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: BEDROCK_MODEL_ID
+        sync: false
+      - key: AI_DEIDENTIFY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: CENSUS_EMAIL_TO
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: REPORT_TO
+        sync: false
+      - key: TWILIO_SID
+        sync: false
+      - key: TWILIO_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
+      - key: SF_INSTANCE_URL
+        sync: false
+      - key: SF_CLIENT_ID
+        sync: false
+      - key: SF_CLIENT_SECRET
+        sync: false
+      - key: SF_INBOUND_SOQL
+        sync: false
+      - key: KIPU_ACCESS_ID
+        sync: false
+      - key: KIPU_SECRET_KEY
+        sync: false
+      - key: KIPU_APP_ID
+        sync: false
+      - key: WH_SERVER
+        sync: false
+      - key: WH_DATABASE
+        sync: false
+      - key: WH_USER
+        sync: false
+      - key: WH_PASSWORD
+        sync: false
+      - key: WH_CENSUS_SQL
+        sync: false
+      - key: WH_NOTES_SQL
+        sync: false
+    disk:
+      name: armada-data
+      mountPath: /var/data
+      sizeGB: 1
+
+  # ── New platform (own URL, synthetic-data staging demo) ───────────────
   - type: web
     name: armada-excellence
     runtime: node
-    plan: starter            # plenty for a synthetic-data demo; upgrade with real use
+    plan: starter
     region: oregon
     branch: main
     buildCommand: npm ci

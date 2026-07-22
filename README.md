@@ -5,7 +5,7 @@ Two coordinated products under one program, never combined in their delivery dep
 - **Armada Excellence System (AES)** — the culture, standards, role guidance, daily management, compliance-readiness, and continuous-improvement system. Deployable on paper, without software.
 - **Armada Intelligence Platform (AIP)** — the secure data orchestration, dashboard, task, exception-management, and integration platform that accelerates AES.
 
-The full specification lives in [`docs/BUILD_BLUEPRINT.md`](docs/BUILD_BLUEPRINT.md). Coding rules for AI-assisted development live in [`CLAUDE.md`](CLAUDE.md). **Status: Epic 1 (Foundation). No vendor integrations, no production PHI.**
+The full specification lives in [`docs/BUILD_BLUEPRINT.md`](docs/BUILD_BLUEPRINT.md). Coding rules for AI-assisted development live in [`CLAUDE.md`](CLAUDE.md). **Status: Epics 1–5 and 9–14 complete (foundation, identity/access, Excellence content, work management, integration framework, identity resolution, workspaces, lineup, metrics, consent stub, compliance). Epics 6–8 await signed vendor discovery. Mock integrations and synthetic data only — no production PHI.**
 
 ## Quick start
 

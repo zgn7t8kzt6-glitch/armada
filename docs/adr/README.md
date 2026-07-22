@@ -30,3 +30,7 @@ old one and link both directions.
 | [0010](0010-integration-framework.md) | Integration framework (Epic 5) | Accepted |
 | [0011](0011-identity-resolution.md) | Identity resolution (Epic 9) | Accepted |
 | [0012](0012-metrics-and-scorecards.md) | Metrics registry and scorecards (Epic 12) | Accepted |
+| [0013](0013-daily-lineup.md) | Daily lineup generator (Epic 11) | Accepted |
+| [0014](0014-consent-decision-service.md) | Consent decision service — fail-closed stub (Epic 13) | Accepted |
+| [0015](0015-compliance-readiness.md) | Compliance readiness registry (Epic 14) | Accepted |
+| [0016](0016-server-rendered-web-ui.md) | Dependency-free server-rendered web UI (Epic 10) | Accepted |

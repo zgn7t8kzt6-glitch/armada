@@ -1,10 +1,11 @@
 # Architecture Overview
 
-Status: Epics 1 (Foundation), 2 (Identity and access), 3 (Excellence
-content), 4 (Work management), 5 (Integration framework), 9 (Identity
-resolution), and 12 (Metrics) complete; everything else is specification,
-not code. The authoritative specification is
-[`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md).
+Status: Epics 1–5 and 9–14 complete. Epics 6–8 (real vendor read
+connectors) remain blocked on signed vendor discovery, and two governance
+inputs remain open: the legally approved Part 2 consent matrix (ADR-0014)
+and real metric targets/SLAs. The authoritative specification is
+[`../BUILD_BLUEPRINT.md`](../BUILD_BLUEPRINT.md); the live API surface is
+in [`../api/endpoints.md`](../api/endpoints.md).
 
 ## System context
 
@@ -71,9 +72,13 @@ accelerates it but never gates it.
 | Mock connectors | `packages/connector-{kipu,salesforce,collaboratemd}` | synthetic read-only mocks; real adapters forbidden until signed discovery |
 | Identity resolution | `packages/identity` | deterministic-only auto-linking, crosswalks, human review queue, dual-confirmed merge + audited unmerge; ADR-0011 |
 | Metrics | `packages/metrics` | governed metric registry, provenance-bearing observations, scorecards with honest no_data, CSV export; ADR-0012 |
+| Daily lineup | `packages/lineup` | generated + human sections, degrade-per-section, approve/publish, printable; ADR-0013 |
+| Consent | `packages/consent` | §10 directive model + fail-closed decision service (no Part 2 ALLOW without approved legal matrix); ADR-0014 |
+| Compliance | `packages/compliance` | requirement registry, evidence, corrective actions, tracer readiness; ADR-0015 |
+| Web workspaces | `apps/web` | dependency-free server-rendered role pages over the API; ADR-0016 |
 | API skeleton | `apps/api` | health/readiness + authenticated Epic 2 routes (me, facilities, patient summary, audit events, break-glass, access review) + Epic 3 Excellence library and authoring routes + Epic 4 work queues and notifications |
-| Worker skeleton | `apps/worker` | interval scheduler seam for Epic 5 jobs |
-| Web/admin stubs | `apps/web`, `apps/admin` | framework decision deferred (ADR-0003) |
+| Worker skeleton | `apps/worker` | interval scheduler seam; takes over ingestion/sweeps with the database epic |
+| Admin stub | `apps/admin` | reserved; governance surfaces currently live in the web app + API |
 | CI | `.github/workflows/ci.yml` | format, secrets, typecheck, tests, env schema, audit |
 | Dev environment | `.devcontainer/`, `infrastructure/docker/` | Node 22 + Postgres 16 + Redis 7 |
 | Repo checks | `scripts/` | dependency-free format/secret/env gates |
@@ -99,12 +104,25 @@ accelerates it but never gates it.
    rules with hard-conflict veto, human review queue, dual-confirmed
    merge and audited unmerge. (Built ahead of 6–8, which await vendor
    discovery.)
-10. Role workspaces. 11. Daily lineup.
+10. **Role workspaces** ✅ — server-rendered role-aware pages (home/my
+    work, scorecard, lineup, library, identity review, compliance,
+    integrations); rich client deferred (ADR-0016).
+11. **Daily lineup** ✅ — generated facts + human sections, approval,
+    publication, printable view; survives source outages.
 12. **Metrics** ✅ — governed registry, calculation service with
     provenance, executive scorecard computed from live synthetic sources,
     CSV export. Real targets and freshness SLAs await governance + vendor
     discovery.
-13. Privacy/consent. 14. Compliance readiness.
+13. **Privacy/consent** ✅ (fail-closed stub) — directive model, §10.2
+    decision shape, auth-engine integration; Part 2 ALLOW impossible until
+    counsel approves the decision matrix.
+14. **Compliance readiness** ✅ — requirement registry, evidence,
+    corrective actions, audit calendar, readiness rollup.
+
+Remaining before Phase 1 acceptance (§28): Epics 6–8 after signed vendor
+discovery; real OIDC SSO + MFA (ADR-0006); durable PostgreSQL storage
+behind the existing service contracts; the approved consent matrix; and
+the production-readiness gate items (§35).
 
 Each epic starts with an ADR + checklist and ends with `npm run verify` green
 and a completion report.

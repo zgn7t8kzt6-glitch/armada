@@ -1,0 +1,28 @@
+/* Shared styles for Windward legal & utility pages */
+:root{
+  --ink:#182136;--ink-soft:#3e4759;--ink-faint:#8b93a3;
+  --paper:#fcfbf8;--line:#e7e2d8;--gold:#d9a13d;--flame:#e64f28;
+  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --sans:"Jost","Futura","Century Gothic","Avenir Next",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--paper);color:var(--ink-soft);font-family:var(--serif);font-size:17.5px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:0 28px}
+header{border-bottom:1px solid var(--line);padding:18px 0}
+.brand{display:inline-block;text-decoration:none}
+.brand span{display:block;font-family:var(--sans);font-weight:800;font-size:18px;letter-spacing:.26em;line-height:1;color:var(--ink)}
+.brand em{display:block;font-style:normal;font-family:var(--mono);font-size:8.5px;font-weight:600;letter-spacing:.42em;text-transform:uppercase;color:var(--gold);margin-top:4px}
+main{padding:70px 0 100px}
+.kicker{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.28em;text-transform:uppercase;color:var(--gold)}
+h1{font-family:var(--sans);color:var(--ink);font-weight:800;font-size:clamp(28px,4.5vw,40px);line-height:1.15;margin:16px 0 10px}
+.updated{font-family:var(--mono);font-size:12.5px;color:var(--ink-faint);margin-bottom:44px}
+h2{font-family:var(--sans);color:var(--ink);font-weight:700;font-size:21px;margin:44px 0 14px}
+p{margin:0 0 16px}
+ul{margin:0 0 16px 22px}
+li{margin-bottom:8px}
+a{color:var(--flame)}
+.back{display:inline-block;margin-top:48px;font-family:var(--sans);font-weight:700;font-size:13px;letter-spacing:.18em;text-transform:uppercase;text-decoration:none;color:var(--ink);border:1.5px solid var(--line);border-radius:3px;padding:13px 22px}
+.back:hover{border-color:var(--flame);color:var(--flame)}
+footer{border-top:1px solid var(--line);padding:36px 0 48px}
+footer p{font-family:var(--mono);font-size:12px;color:var(--ink-faint);margin:0}

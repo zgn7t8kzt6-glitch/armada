@@ -289,6 +289,46 @@
   .faq .a{padding:0 28px 28px;max-width:680px;font-size:17px}
   .faq .a p + p{margin-top:14px}
 
+  /* ── deal criteria ─────────────────────────────────────── */
+  .criteria{border:1px solid var(--line);border-radius:16px;background:var(--card);margin-top:56px;box-shadow:var(--shadow);overflow:hidden}
+  .criteria .chead{
+    padding:22px 36px;border-bottom:1px solid var(--line);background:var(--paper-2);
+    font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);
+  }
+  .crow{display:grid;grid-template-columns:220px 1fr;gap:24px;padding:24px 36px;border-top:1px solid var(--line)}
+  .crow:first-of-type{border-top:none}
+  .crow .k{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);padding-top:4px}
+  .crow p{font-size:17px}
+  .criteria-note{margin-top:30px}
+
+  /* ── proof of funds strip ──────────────────────────────── */
+  .pof{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:52px}
+  .pof-card{border:1px solid var(--line-dark);border-radius:12px;padding:26px 24px;background:rgba(255,255,255,.04)}
+  .pof-card .t{font-family:var(--sans);font-weight:700;font-size:17px;color:#fff;letter-spacing:.02em}
+  .pof-card p{font-size:15.5px;margin-top:10px;color:#aab3c6;line-height:1.6}
+  .pof-note{margin-top:24px}
+
+  /* ── intake form ───────────────────────────────────────── */
+  .intake{margin-top:56px;border:1px solid var(--line-dark);border-radius:16px;padding:44px 40px;background:rgba(255,255,255,.04)}
+  .intake h3{font-size:22px;color:#fff;margin-bottom:8px}
+  .intake .sub{font-size:16px;color:#aab3c6;margin-bottom:30px}
+  .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .field{display:flex;flex-direction:column;gap:8px}
+  .field.wide{grid-column:1 / -1}
+  .field label{font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold-soft)}
+  .field input,.field select,.field textarea{
+    font-family:var(--serif);font-size:16.5px;color:#fff;
+    background:rgba(255,255,255,.06);border:1px solid var(--line-dark);border-radius:8px;
+    padding:14px 16px;transition:border-color .2s;
+  }
+  .field select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23d9a13d' stroke-width='2' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center}
+  .field select option{color:var(--ink);background:#fff}
+  .field textarea{min-height:110px;resize:vertical}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--gold)}
+  .field input::placeholder,.field textarea::placeholder{color:#6b7690}
+  .intake .actions{margin-top:30px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+  .intake button{border:none;cursor:pointer}
+
   /* ── selectivity ───────────────────────────────────────── */
   .decline{border:1px solid var(--line);border-radius:16px;background:var(--card);margin-top:56px;overflow:hidden;box-shadow:var(--shadow)}
   .decline .dhead{
@@ -323,6 +363,9 @@
   .foot{display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
   .foot .brand span{color:#fff}
   footer p{font-family:var(--mono);font-size:12.5px;line-height:2.1;color:#8792a8;text-align:right}
+  footer .legal{font-family:var(--mono);font-size:12.5px;color:#8792a8;margin-top:18px;text-align:right}
+  footer .legal a{color:#aab3c6;text-decoration:none}
+  footer .legal a:hover{color:#fff}
 
   /* ── reveal on scroll (html.js set by script; no-JS stays visible) ── */
   html.js .rv{opacity:0;transform:translateY(22px);transition:opacity .8s cubic-bezier(.2,.6,.2,1),transform .8s cubic-bezier(.2,.6,.2,1)}
@@ -721,8 +764,28 @@
     </div>
   </section>
 
+  <!-- ── DEAL CRITERIA ────────────────────────────────────── -->
+  <section id="criteria" class="band-wash">
+    <div class="wrap">
+      <p class="kicker rv">What We Look For</p>
+      <h2 class="rv">The facilities we're built for</h2>
+      <p class="lede rv">So you — and the brokers, attorneys, and advisors who send us deals — can qualify us in thirty seconds. If this looks like your facility, the call is worth having.</p>
+
+      <div class="criteria rv">
+        <div class="chead">Deal criteria — Windward Operating Partners</div>
+        <div class="crow"><span class="k">Levels of care</span><p>Detox, residential/RTC, PHP/IOP — substance use disorder and mental health</p></div>
+        <div class="crow"><span class="k">Size</span><p>Roughly 24–120 beds and $2M–$20M in revenue</p></div>
+        <div class="crow"><span class="k">Financial state</span><p>Breakeven-to-distressed EBITDA. Distress is the point, not a disqualifier — a facility that's already healthy doesn't need us.</p></div>
+        <div class="crow"><span class="k">Situation</span><p>Stacked advances, slipping census, payroll pressure, referral concentration — any or all of them</p></div>
+        <div class="crow"><span class="k">Licensure</span><p>Licensed and operating; accreditation (Joint Commission / CARF) preferred</p></div>
+        <div class="crow"><span class="k">Ownership</span><p>An owner who wants to stay on as a partner and will grant verified access to census, billing, payroll, and the full debt schedule</p></div>
+      </div>
+      <p class="mono-note criteria-note">Outside these ranges? Write anyway. Criteria are a compass, not a fence — the evaluation is free either way.</p>
+    </div>
+  </section>
+
   <!-- ── SELECTIVITY ──────────────────────────────────────── -->
-  <section id="selectivity" class="band-wash">
+  <section id="selectivity">
     <div class="wrap">
       <p class="kicker rv">Selectivity</p>
       <h2 class="rv">We decline most partnerships. That's the model working.</h2>
@@ -745,6 +808,22 @@
       <h2 class="rv">The evaluation is free.<br>The honesty is included.</h2>
       <p class="lede rv">Here is exactly what happens — and what doesn't — when you reach out:</p>
 
+      <div class="pof rv">
+        <div class="pof-card">
+          <p class="t">Our own capital</p>
+          <p>No fund, no LPs, no investment committee. The money that closes your deal is ours, and it's already there.</p>
+        </div>
+        <div class="pof-card">
+          <p class="t">No financing contingency</p>
+          <p>When we sign, we fund. There is no lender behind us who can change their mind, and no approval we're waiting on.</p>
+        </div>
+        <div class="pof-card">
+          <p class="t">On-site in days</p>
+          <p>Payroll problems don't wait for a quarter-end. We move at the speed the situation calls for — proof of funds available on request.</p>
+        </div>
+      </div>
+      <p class="mono-note pof-note">The four steps below are the deliberate part. Once both sides say yes, closing is the fast part.</p>
+
       <div class="steps rv">
         <div class="step"><span class="n">01</span><p><b>A 30-minute confidential call.</b> Levels of care, bed count, payer mix, what's owed and to whom, and what's keeping you up at night. Under NDA if you prefer — we'll send ours or sign yours.</p></div>
         <div class="step"><span class="n">02</span><p><b>A 2-day onsite review.</b> We walk the units, sit with charge nurses and intake, and review 12 months of census, AMA, turnover, and collections data — plus the complete debt picture. No entourage, no slide deck.</p></div>
@@ -752,9 +831,65 @@
         <div class="step"><span class="n">04</span><p><b>A decision — by both sides.</b> If we believe in the turnaround, you get proposed terms: capital, valuation, equity split, operating authority, and timeline. If we don't, we tell you plainly and part as friends. Total cost to you so far: zero.</p></div>
       </div>
 
-      <div class="contact rv">
-        <a class="btn btn-ondark" href="mailto:engage@windwardoperating.com?subject=Confidential%20call%20request">Start With the 30-Minute Call</a>
-        <p class="mono-note"><a href="mailto:engage@windwardoperating.com">engage@windwardoperating.com</a> &nbsp;·&nbsp; Confidential. NDA available on request.</p>
+      <div class="intake rv">
+        <h3>Request the 30-minute call</h3>
+        <p class="sub">Goes straight to the founder's desk — nobody else sees it. Don't include any patient information; the first call needs none of it, and an NDA is available before you share anything sensitive.</p>
+        <form name="confidential-intake" method="POST" action="/thanks.html" data-netlify="true" netlify-honeypot="bot-field">
+          <input type="hidden" name="form-name" value="confidential-intake">
+          <p style="display:none"><label>Don't fill this out: <input name="bot-field"></label></p>
+          <div class="fgrid">
+            <div class="field">
+              <label for="f-name">Your name</label>
+              <input id="f-name" name="name" type="text" autocomplete="name" required>
+            </div>
+            <div class="field">
+              <label for="f-email">Email</label>
+              <input id="f-email" name="email" type="email" autocomplete="email" required>
+            </div>
+            <div class="field">
+              <label for="f-phone">Phone <span style="text-transform:none;letter-spacing:0;color:#6b7690">(optional)</span></label>
+              <input id="f-phone" name="phone" type="tel" autocomplete="tel">
+            </div>
+            <div class="field">
+              <label for="f-state">Facility state</label>
+              <input id="f-state" name="state" type="text" placeholder="e.g. Ohio">
+            </div>
+            <div class="field">
+              <label for="f-loc">Levels of care</label>
+              <input id="f-loc" name="levels_of_care" type="text" placeholder="e.g. detox + residential">
+            </div>
+            <div class="field">
+              <label for="f-beds">Bed count</label>
+              <select id="f-beds" name="beds">
+                <option value="" selected>Select…</option>
+                <option>Under 24</option>
+                <option>24–48</option>
+                <option>49–80</option>
+                <option>81–120</option>
+                <option>120+</option>
+              </select>
+            </div>
+            <div class="field wide">
+              <label for="f-pressure">What's the pressure right now?</label>
+              <select id="f-pressure" name="pressure">
+                <option value="" selected>Select…</option>
+                <option>Stacked advances / MCA debits</option>
+                <option>Payroll is getting tight</option>
+                <option>Census is slipping</option>
+                <option>Considering selling — exploring options</option>
+                <option>Something else</option>
+              </select>
+            </div>
+            <div class="field wide">
+              <label for="f-msg">Anything else worth knowing <span style="text-transform:none;letter-spacing:0;color:#6b7690">(optional — no patient information)</span></label>
+              <textarea id="f-msg" name="message" placeholder="Whatever's keeping you up at night."></textarea>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-ondark" type="submit">Request the Confidential Call</button>
+            <p class="mono-note" style="margin:0">Prefer email? <a href="mailto:engage@windwardoperating.com">engage@windwardoperating.com</a></p>
+          </div>
+        </form>
       </div>
     </div>
   </section>
@@ -766,7 +901,10 @@
     <a class="brand" href="#top" aria-label="Windward home">
       <span>WINDWARD<em>Operating Partners</em></span>
     </a>
-    <p>© 2026 Windward Operating Partners LLC<br>Capital and operating partnerships for behavioral health</p>
+    <div>
+      <p>© 2026 Windward Operating Partners LLC<br>Capital and operating partnerships for behavioral health</p>
+      <p class="legal"><a href="/privacy.html">Privacy</a> &nbsp;·&nbsp; <a href="/terms.html">Terms</a> &nbsp;·&nbsp; <a href="mailto:engage@windwardoperating.com">engage@windwardoperating.com</a></p>
+    </div>
   </div>
 </footer>
 

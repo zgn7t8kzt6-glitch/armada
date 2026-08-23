@@ -5,233 +5,357 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Windward Operating Partners — We fund the turnaround. We run the turnaround. You keep a stake in it.</title>
 <meta name="description" content="Windward recapitalizes struggling behavioral health and addiction treatment facilities with its own capital and its own operators — no loans, no daily debits, no consulting fees. The owner stays on as an equity partner and shares the upside of the recovery.">
+<meta property="og:title" content="Windward Operating Partners">
+<meta property="og:description" content="We fund the turnaround. We run the turnaround. You keep a stake in it.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 22'%3E%3Cpath d='M2 20 L13 2 L18 10 Z' fill='%231b2437'/%3E%3Cpath d='M14 20 L21 8 L28 20 Z' fill='%23d9a13d'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@500;600;700;800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --ink:#1b2437;          /* deep navy — headings */
-    --ink-soft:#3d4658;     /* body text */
-    --ink-faint:#8a91a0;    /* muted */
-    --paper:#fdfcfa;        /* page background */
-    --paper-2:#f7f5f1;      /* card wash */
-    --line:#e6e2da;         /* hairlines */
-    --flame:#e8502a;        /* orange-red — the promise */
+    --ink:#182136;          /* deep navy — headings */
+    --ink-2:#232e47;        /* navy panel */
+    --ink-soft:#3e4759;     /* body text */
+    --ink-faint:#8b93a3;    /* muted */
+    --paper:#fcfbf8;        /* page background */
+    --paper-2:#f5f2ec;      /* washed band */
+    --card:#ffffff;
+    --line:#e7e2d8;         /* hairlines */
+    --line-dark:rgba(255,255,255,.14);
+    --flame:#e64f28;        /* orange-red — the promise */
+    --flame-deep:#c93e1c;
     --gold:#d9a13d;         /* amber — labels & marks */
+    --gold-soft:#e8c98d;
     --good:#3fae6a;         /* green — board arrows */
-    --serif:"Source Serif Pro",Georgia,"Times New Roman",serif;
-    --sans:"Futura","Century Gothic","Avenir Next","Trebuchet MS",system-ui,sans-serif;
-    --mono:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+    --sans:"Jost","Futura","Century Gothic","Avenir Next",system-ui,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --shadow:0 1px 2px rgba(24,33,54,.05),0 18px 44px -26px rgba(24,33,54,.28);
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html{scroll-behavior:smooth}
   body{
     background:var(--paper);color:var(--ink-soft);
-    font-family:var(--serif);font-size:19px;line-height:1.65;
-    -webkit-font-smoothing:antialiased;
+    font-family:var(--serif);font-size:19px;line-height:1.7;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
   }
-  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  .wrap{max-width:880px;margin:0 auto;padding:0 28px}
+  a:focus-visible,summary:focus-visible,button:focus-visible{outline:2px solid var(--flame);outline-offset:3px;border-radius:2px}
 
-  h1,h2,h3{font-family:var(--sans);color:var(--ink);font-weight:700;letter-spacing:.02em}
+  h1,h2,h3{font-family:var(--sans);color:var(--ink);font-weight:700;letter-spacing:.015em;text-wrap:balance}
   .kicker{
-    font-family:var(--mono);font-size:13px;font-weight:700;
-    letter-spacing:.28em;text-transform:uppercase;color:var(--gold);
+    display:flex;align-items:center;gap:14px;
+    font-family:var(--mono);font-size:12.5px;font-weight:600;
+    letter-spacing:.30em;text-transform:uppercase;color:var(--gold);
   }
+  .kicker::before{content:"";flex:0 0 30px;height:2px;background:currentColor;opacity:.8}
+  .kicker.bare::before{display:none}
   .kicker.flame{color:var(--flame)}
-  .mono-note{font-family:var(--mono);font-size:13.5px;line-height:1.7;color:var(--ink-faint)}
+  .mono-note{font-family:var(--mono);font-size:13px;line-height:1.8;color:var(--ink-faint)}
 
   /* ── header ─────────────────────────────────────────────── */
   header{
     position:sticky;top:0;z-index:50;
-    background:rgba(253,252,250,.92);backdrop-filter:blur(8px);
+    background:rgba(252,251,248,.9);backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line);
   }
-  .nav{display:flex;align-items:center;justify-content:space-between;padding:20px 28px;max-width:860px;margin:0 auto}
-  .brand{display:flex;align-items:center;gap:12px;text-decoration:none}
+  .nav{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;max-width:1160px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:13px;text-decoration:none}
   .brand svg{display:block}
-  .brand span{font-family:var(--sans);font-weight:800;font-size:19px;letter-spacing:.22em;color:var(--ink)}
+  .brand span{font-family:var(--sans);font-weight:800;font-size:20px;letter-spacing:.26em;color:var(--ink)}
   .nav a.cta{
-    font-family:var(--sans);font-weight:700;font-size:13px;letter-spacing:.22em;
-    text-transform:uppercase;color:var(--ink-faint);text-decoration:none;transition:color .2s;
+    font-family:var(--sans);font-weight:700;font-size:13px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--ink);text-decoration:none;
+    border:1.5px solid var(--line);padding:11px 20px;border-radius:3px;transition:all .25s;
   }
-  .nav a.cta:hover{color:var(--flame)}
+  .nav a.cta:hover{border-color:var(--flame);color:var(--flame)}
 
   /* ── hero ───────────────────────────────────────────────── */
-  .hero{padding:110px 0 70px}
-  .hero h1{font-size:clamp(36px,6vw,54px);line-height:1.1;margin:20px 0 30px;color:var(--ink)}
-  .hero h1 .flame{color:var(--flame)}
-  .hero p{max-width:620px;font-size:20px}
-  .hero-ctas{display:flex;flex-wrap:wrap;gap:16px;margin-top:44px}
-  .btn{
-    display:inline-block;font-family:var(--sans);font-weight:700;font-size:14px;
-    letter-spacing:.18em;text-transform:uppercase;text-decoration:none;
-    padding:17px 30px;transition:all .2s;
+  .hero{position:relative;padding:120px 0 84px;overflow:hidden}
+  .hero::before{ /* warm wash, top right */
+    content:"";position:absolute;top:-260px;right:-200px;width:760px;height:760px;border-radius:50%;
+    background:radial-gradient(closest-side,rgba(217,161,61,.13),rgba(217,161,61,0));pointer-events:none;
   }
-  .btn-primary{background:var(--ink);color:#fff}
-  .btn-primary:hover{background:var(--flame)}
-  .btn-ghost{border:1px solid var(--line);color:var(--ink-faint)}
+  .hero::after{ /* wind gusts */
+    content:"";position:absolute;top:150px;right:6%;width:190px;height:70px;pointer-events:none;opacity:.5;
+    background:
+      linear-gradient(var(--gold),var(--gold)) 0 8px/130px 2px no-repeat,
+      linear-gradient(var(--gold),var(--gold)) 34px 32px/156px 2px no-repeat,
+      linear-gradient(var(--gold),var(--gold)) 12px 56px/104px 2px no-repeat;
+  }
+  .hero h1{font-size:clamp(34px,5vw,52px);line-height:1.08;margin:26px 0 30px;font-weight:800}
+  .hero h1 .flame{color:var(--flame)}
+  .hero p.sub{max-width:640px;font-size:20.5px}
+  .hero-ctas{display:flex;flex-wrap:wrap;gap:16px;margin-top:46px}
+  .btn{
+    display:inline-block;font-family:var(--sans);font-weight:700;font-size:13.5px;
+    letter-spacing:.18em;text-transform:uppercase;text-decoration:none;
+    padding:18px 32px;border-radius:3px;transition:all .25s;
+  }
+  .btn-primary{background:var(--flame);color:#fff;box-shadow:0 10px 26px -12px rgba(230,79,40,.55)}
+  .btn-primary:hover{background:var(--ink);box-shadow:0 10px 26px -14px rgba(24,33,54,.6)}
+  .btn-ghost{border:1.5px solid var(--line);color:var(--ink-soft)}
   .btn-ghost:hover{border-color:var(--ink);color:var(--ink)}
+  .btn-ondark{background:var(--flame);color:#fff}
+  .btn-ondark:hover{background:#fff;color:var(--ink)}
 
   /* ── operating board ───────────────────────────────────── */
-  .board{border-top:1px solid var(--line);margin-top:70px;padding-top:26px}
-  .board-head{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;
-    font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
-  .board-grid{display:grid;grid-template-columns:1fr 1fr;margin-top:34px;border-top:1px solid var(--line)}
-  .tile{padding:28px 26px;border-bottom:1px solid var(--line)}
+  .board{margin-top:84px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+  .board-head{
+    display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center;
+    padding:20px 30px;border-bottom:1px solid var(--line);background:var(--paper-2);
+    font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);
+  }
+  .board-head .live{display:flex;align-items:center;gap:9px}
+  .board-head .live i{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 4px rgba(63,174,106,.15)}
+  .board-grid{display:grid;grid-template-columns:1fr 1fr}
+  .tile{padding:30px 30px 26px;border-bottom:1px solid var(--line)}
   .tile:nth-child(odd){border-right:1px solid var(--line)}
-  .tile .metric{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
-  .tile .dir{display:flex;align-items:center;gap:9px;margin:12px 0 8px;
-    font-family:var(--sans);font-weight:800;font-size:30px;letter-spacing:.06em;color:var(--ink)}
-  .tile .dir .arrow{color:var(--good);font-size:16px}
-  .tile .sub{font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
-  .board-note{margin-top:26px}
+  .tile:nth-last-child(-n+2){border-bottom:none}
+  .tile .metric{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+  .tile .row{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin:14px 0 10px}
+  .tile .dir{display:flex;align-items:center;gap:10px;font-family:var(--sans);font-weight:800;font-size:31px;letter-spacing:.05em;color:var(--ink)}
+  .tile .dir .arrow{color:var(--good);font-size:15px}
+  .tile svg{flex:0 0 auto}
+  .tile .sub{font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+  .board-note{padding:20px 30px;border-top:1px solid var(--line)}
 
-  /* ── sections ──────────────────────────────────────────── */
-  section{padding:90px 0}
-  section h2{font-size:clamp(28px,4.4vw,38px);line-height:1.18;margin:16px 0 22px}
-  .lede{max-width:620px;font-size:20px}
+  /* ── sections & bands ──────────────────────────────────── */
+  section{padding:100px 0}
+  section h2{font-size:clamp(30px,4.6vw,44px);line-height:1.14;margin:20px 0 24px;font-weight:800}
+  .lede{max-width:630px;font-size:20.5px}
+  .band-wash{background:var(--paper-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .band-navy{background:linear-gradient(165deg,var(--ink) 0%,var(--ink-2) 100%);color:#c6cddc}
+  .band-navy h2,.band-navy h3{color:#fff}
+  .band-navy .lede{color:#c6cddc}
+  .band-navy .kicker{color:var(--gold-soft)}
+  .band-navy .mono-note{color:#8792a8}
 
   /* ── the three doors ───────────────────────────────────── */
-  .doors{display:grid;grid-template-columns:1fr 1fr 1fr;gap:26px;margin-top:56px}
-  .door{border:1px solid var(--line);border-radius:10px;background:#fff;padding:34px 28px;display:flex;flex-direction:column}
-  .door .kicker{font-size:11.5px;letter-spacing:.22em;color:var(--flame)}
-  .door h3{font-size:21px;line-height:1.3;margin:16px 0 14px}
-  .door p{font-size:16.5px;line-height:1.6}
-  .door .stat{
-    border-top:1px solid var(--line);margin-top:auto;padding-top:18px;
-    font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--ink-faint);
+  .doors{display:grid;grid-template-columns:1fr 1fr 1fr;gap:26px;margin-top:60px}
+  .door{
+    position:relative;border:1px solid var(--line);border-radius:16px;background:var(--card);
+    padding:36px 30px 30px;display:flex;flex-direction:column;box-shadow:var(--shadow);
+    transition:transform .3s,border-color .3s;overflow:hidden;
   }
-  .door .stat b{color:var(--flame);font-weight:700}
-  .doors-note{margin-top:30px}
+  .door:hover{transform:translateY(-4px);border-color:#dcd4c4}
+  .door::before{
+    content:attr(data-n);position:absolute;top:6px;right:16px;
+    font-family:var(--sans);font-weight:800;font-size:74px;line-height:1;color:var(--ink);opacity:.055;
+  }
+  .door .kicker{font-size:11px;letter-spacing:.24em;color:var(--flame)}
+  .door .kicker::before{flex-basis:20px}
+  .door h3{font-size:22px;line-height:1.25;margin:18px 0 14px}
+  .door p{font-size:16.5px;line-height:1.65}
+  .door .stat{
+    margin-top:auto;padding:16px 18px;border-radius:10px;background:var(--paper-2);
+    font-family:var(--mono);font-size:12.5px;line-height:1.75;color:var(--ink-faint);
+  }
+  .door .stat b{color:var(--flame);font-weight:600}
+  .door p + .stat{margin-top:22px}
+  .doors-note{margin-top:32px}
 
   /* ── ledger (the partnership) ──────────────────────────── */
-  .ledger{border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:52px;padding:56px 46px}
-  .ledger h3{font-size:26px;letter-spacing:.03em}
-  .ledger h3.earn{color:#7d8494}
-  .ledger-rows{margin:26px 0 0}
-  .lrow{display:flex;gap:22px;align-items:baseline;padding:20px 0;border-top:1px solid var(--line)}
-  .lrow .mark{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--gold);flex:0 0 42px}
-  .lrow .mark.pct{color:var(--flame)}
-  .ledger .mono-note{margin-top:30px}
-  .ledger-gap{height:64px}
-
-  /* ── straight talk ─────────────────────────────────────── */
-  .straight{
-    border-left:3px solid var(--flame);margin-top:56px;padding:10px 0 10px 30px;
+  .ledger{border:1px solid var(--line);border-radius:16px;background:var(--card);margin-top:56px;padding:60px 52px;box-shadow:var(--shadow)}
+  .ledger h3{font-size:27px;letter-spacing:.02em;display:inline-block;border-bottom:3px solid var(--gold);padding-bottom:10px}
+  .ledger h3.earn{border-bottom-color:var(--flame)}
+  .ledger-rows{margin:30px 0 0}
+  .lrow{display:flex;gap:24px;align-items:flex-start;padding:22px 0;border-top:1px solid var(--line)}
+  .lrow .mark{
+    flex:0 0 40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-weight:600;font-size:16px;color:var(--gold);background:rgba(217,161,61,.12);
   }
-  .straight p{max-width:640px;font-size:20px;color:var(--ink)}
-  .straight p + p{margin-top:18px}
+  .lrow .mark.pct{color:var(--flame);background:rgba(230,79,40,.1)}
+  .lrow p{padding-top:5px}
+  .ledger .mono-note{margin-top:32px}
+  .ledger-gap{height:66px}
 
-  /* ── the math ──────────────────────────────────────────── */
-  .math{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:52px}
-  .math-card{border:1px solid var(--line);border-radius:10px;background:#fff;padding:36px 32px}
-  .math-card.today{background:var(--paper-2)}
-  .math-card .kicker{font-size:11.5px}
-  .math-card.today .kicker{color:var(--ink-faint)}
-  .math-card h3{font-size:21px;margin:14px 0 6px}
-  .mrow{display:flex;justify-content:space-between;gap:16px;padding:14px 0;border-top:1px solid var(--line);font-size:16.5px}
-  .mrow:first-of-type{margin-top:18px}
-  .mrow .v{font-family:var(--mono);font-size:14.5px;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
-  .math-card.today .mrow .v{color:var(--ink-faint)}
-  .mrow.total{border-top:2px solid var(--ink)}
-  .mrow.total .v{font-weight:700}
+  /* ── straight talk — navy card ─────────────────────────── */
+  .straight{
+    margin-top:60px;border-radius:16px;padding:52px 52px;
+    background:linear-gradient(160deg,var(--ink) 0%,var(--ink-2) 100%);
+    box-shadow:0 24px 60px -30px rgba(24,33,54,.55);position:relative;overflow:hidden;
+  }
+  .straight::after{
+    content:"";position:absolute;right:-60px;bottom:-80px;width:320px;height:320px;border-radius:50%;
+    background:radial-gradient(closest-side,rgba(230,79,40,.16),transparent);pointer-events:none;
+  }
+  .straight .kicker{color:var(--gold-soft);margin-bottom:22px}
+  .straight p{max-width:660px;font-size:20.5px;line-height:1.7;color:#e8ebf2}
+  .straight p + p{margin-top:20px}
+  .straight b{color:#fff;font-weight:600}
+
+  /* ── the math (navy band) ──────────────────────────────── */
+  .math{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:60px}
+  .math-arrow{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+    width:52px;height:52px;border-radius:50%;background:var(--flame);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-family:var(--sans);font-weight:800;font-size:22px;
+    box-shadow:0 8px 24px -8px rgba(230,79,40,.7);
+  }
+  .math-card{border-radius:16px;padding:40px 36px}
+  .math-card .kicker{font-size:11px}
+  .math-card h3{font-size:22px;margin:16px 0 8px}
+  .math-card.today{background:rgba(255,255,255,.05);border:1px dashed rgba(255,255,255,.25);color:#aab3c6}
+  .math-card.today h3{color:#d4dae6}
+  .math-card.today .kicker{color:#8792a8}
+  .math-card.rebuilt{background:var(--card);color:var(--ink-soft);box-shadow:0 30px 70px -30px rgba(0,0,0,.55)}
+  .math-card.rebuilt .kicker{color:var(--gold)}
+  .math-card.rebuilt h3{color:var(--ink)}
+  .mrow{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:15px 0;font-size:16.5px}
+  .math-card.today .mrow{border-top:1px solid rgba(255,255,255,.12)}
+  .math-card.rebuilt .mrow{border-top:1px solid var(--line)}
+  .mrow:first-of-type{margin-top:20px}
+  .mrow .v{font-family:var(--mono);font-size:14px;text-align:right;font-variant-numeric:tabular-nums}
+  .math-card.today .mrow .v{color:#98a2b6}
+  .math-card.rebuilt .mrow .v{color:var(--ink)}
+  .mrow.total{border-top-width:2px !important}
+  .math-card.rebuilt .mrow.total{border-top-color:var(--ink) !important}
+  .mrow.total .v{font-weight:600;font-size:15.5px}
   .math-card.rebuilt .mrow.total .v{color:var(--flame)}
-  .math-note{margin-top:28px}
+  .math-note{margin-top:34px}
 
-  /* ── model phases ──────────────────────────────────────── */
-  .phase{border-top:1px solid var(--line);padding:52px 0 14px;margin-top:44px}
-  .phase:first-of-type{margin-top:56px}
-  .phase h3{font-size:25px;margin:20px 0 16px;letter-spacing:.02em}
-  .phase p{max-width:640px}
+  /* ── model phases — timeline rail ──────────────────────── */
+  .phases{margin-top:64px}
+  .phase{position:relative;padding:0 0 56px 64px}
+  .phase::before{ /* node */
+    content:"";position:absolute;left:0;top:4px;width:18px;height:18px;border-radius:50%;
+    background:var(--paper);border:3px solid var(--gold);
+  }
+  .phase::after{ /* rail */
+    content:"";position:absolute;left:8px;top:30px;bottom:6px;width:2px;
+    background:linear-gradient(var(--line) 60%,rgba(231,226,216,0));
+  }
+  .phase:last-child{padding-bottom:0}
+  .phase:last-child::after{display:none}
+  .phase:last-child::before{border-color:var(--flame)}
+  .phase .kicker{font-size:11.5px}
+  .phase h3{font-size:25px;margin:18px 0 14px;letter-spacing:.015em}
+  .phase p{max-width:620px}
 
   /* ── what we fix cards ─────────────────────────────────── */
-  .fix-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:56px}
-  .fix{border:1px solid var(--line);border-radius:10px;background:#fff;padding:34px 30px}
-  .fix .kicker{font-size:11.5px;letter-spacing:.22em}
-  .fix h3{font-size:22px;line-height:1.3;margin:16px 0 14px}
-  .fix p{font-size:17px;line-height:1.6}
+  .fix-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:60px}
+  .fix{
+    border:1px solid var(--line);border-radius:16px;background:var(--card);padding:36px 32px;
+    box-shadow:var(--shadow);border-top:3px solid var(--gold);transition:transform .3s;
+  }
+  .fix:hover{transform:translateY(-3px)}
+  .fix .kicker{font-size:11px;letter-spacing:.22em}
+  .fix .kicker::before{flex-basis:18px}
+  .fix h3{font-size:22px;line-height:1.28;margin:18px 0 14px}
+  .fix p{font-size:16.5px;line-height:1.65}
 
   /* ── why windward ──────────────────────────────────────── */
-  blockquote{
-    border-left:3px solid var(--gold);margin:38px 0;padding:6px 0 6px 26px;
-    font-style:italic;font-size:21px;line-height:1.55;color:var(--ink);
+  .quote{position:relative;margin:46px 0;padding:8px 0 8px 34px;border-left:3px solid var(--gold)}
+  .quote p{font-style:italic;font-size:23px;line-height:1.55;color:var(--ink);max-width:640px}
+  .quote::before{
+    content:"\201C";position:absolute;left:26px;top:-38px;font-family:var(--serif);
+    font-size:110px;line-height:1;color:var(--gold);opacity:.35;
   }
-  .record{border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:56px;padding:50px 44px}
-  .record h3{font-family:var(--sans);font-size:16px;letter-spacing:.18em;text-transform:uppercase}
-  .rrow{display:flex;gap:22px;align-items:baseline;padding:20px 0;border-top:1px solid var(--line)}
-  .rrow:first-of-type{margin-top:26px}
-  .rrow .num{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--gold);flex:0 0 76px;text-align:right}
-  .rrow p{font-size:17.5px}
-  .record .mono-note{margin-top:30px}
+  .record{border-radius:16px;background:var(--card);border:1px solid var(--line);margin-top:60px;padding:54px 48px;box-shadow:var(--shadow)}
+  .record h3{font-family:var(--sans);font-size:15px;letter-spacing:.22em;text-transform:uppercase;display:flex;align-items:center;gap:16px}
+  .record h3::after{content:"";flex:1;height:1px;background:var(--line)}
+  .rrow{display:flex;gap:26px;align-items:baseline;padding:21px 0;border-top:1px solid var(--line)}
+  .rrow:first-of-type{margin-top:30px;border-top:none}
+  .rrow .num{font-family:var(--mono);font-weight:600;font-size:19px;color:var(--gold);flex:0 0 84px;text-align:right}
+  .rrow p{font-size:17px}
+  .record .mono-note{margin-top:32px}
 
   /* ── field notes ───────────────────────────────────────── */
-  .note-card{border:1px solid var(--line);border-radius:10px;background:#fff;padding:44px 38px;margin-top:34px}
-  .note-card:first-of-type{margin-top:56px}
-  .note-card .kicker{font-size:11.5px}
-  .note-card h3{font-size:24px;line-height:1.3;margin:18px 0 18px}
+  .note-card{
+    border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:16px;
+    background:var(--card);padding:46px 42px;margin-top:34px;box-shadow:var(--shadow);
+  }
+  .note-card:first-of-type{margin-top:60px}
+  .note-card .kicker{font-size:11px}
+  .note-card h3{font-size:25px;line-height:1.28;margin:20px 0 18px}
   .note-card .lesson{
-    border-top:1px solid var(--line);margin-top:28px;padding-top:22px;
-    font-family:var(--mono);font-size:13.5px;line-height:1.7;color:var(--gold);
+    margin-top:30px;padding:16px 20px;border-radius:10px;background:var(--paper-2);
+    font-family:var(--mono);font-size:13px;line-height:1.75;color:var(--gold);
   }
 
   /* ── faq ───────────────────────────────────────────────── */
-  .faq{margin-top:48px;border-bottom:1px solid var(--line)}
-  .faq details{border-top:1px solid var(--line)}
+  .faq{margin-top:52px}
+  .faq details{border:1px solid var(--line);border-radius:12px;background:var(--card);margin-bottom:14px;transition:border-color .25s}
+  .faq details[open]{border-color:#d8cfbe;box-shadow:var(--shadow)}
   .faq summary{
     display:flex;justify-content:space-between;align-items:center;gap:20px;
-    cursor:pointer;list-style:none;padding:26px 2px;
-    font-family:var(--sans);font-weight:700;font-size:19px;color:var(--ink);letter-spacing:.02em;
+    cursor:pointer;list-style:none;padding:24px 28px;
+    font-family:var(--sans);font-weight:600;font-size:19px;color:var(--ink);letter-spacing:.015em;
   }
   .faq summary::-webkit-details-marker{display:none}
-  .faq summary .plus{color:var(--gold);font-family:var(--mono);font-weight:700;font-size:20px;flex:0 0 auto;transition:transform .2s}
+  .faq summary .plus{color:var(--gold);font-family:var(--mono);font-weight:600;font-size:21px;flex:0 0 auto;transition:transform .25s}
   .faq details[open] summary .plus{transform:rotate(45deg)}
-  .faq .a{padding:0 2px 28px;max-width:660px;font-size:17.5px}
+  .faq .a{padding:0 28px 28px;max-width:680px;font-size:17px}
   .faq .a p + p{margin-top:14px}
 
   /* ── selectivity ───────────────────────────────────────── */
-  .decline{border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:52px;overflow:hidden}
+  .decline{border:1px solid var(--line);border-radius:16px;background:var(--card);margin-top:56px;overflow:hidden;box-shadow:var(--shadow)}
   .decline .dhead{
-    padding:22px 34px;border-bottom:1px solid var(--line);background:var(--paper-2);
-    font-family:var(--mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);
+    padding:22px 36px;border-bottom:1px solid var(--line);background:var(--paper-2);
+    font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);
   }
-  .drow{display:flex;gap:20px;align-items:baseline;padding:24px 34px;border-top:1px solid var(--line)}
+  .drow{display:flex;gap:22px;align-items:flex-start;padding:26px 36px;border-top:1px solid var(--line)}
   .drow:first-of-type{border-top:none}
-  .drow .x{color:var(--flame);font-family:var(--mono);font-weight:700;flex:0 0 auto}
-  .drow p{font-size:17.5px}
+  .drow .x{
+    flex:0 0 30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    color:var(--flame);background:rgba(230,79,40,.1);font-family:var(--mono);font-weight:600;font-size:14px;margin-top:2px;
+  }
+  .drow p{font-size:17px}
 
-  /* ── request evaluation ────────────────────────────────── */
-  .steps{margin-top:52px}
-  .step{display:flex;gap:26px;padding:26px 0;border-top:1px solid var(--line)}
+  /* ── request evaluation (navy band) ────────────────────── */
+  .steps{margin-top:56px}
+  .step{display:flex;gap:28px;padding:28px 0;border-top:1px solid var(--line-dark)}
   .step:first-child{border-top:none}
-  .step .n{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--gold);flex:0 0 34px;padding-top:3px}
-  .step p{max-width:600px;font-size:18px}
-  .step p b{color:var(--ink)}
-  .contact{margin-top:44px}
-  .contact .mono-note{margin-top:30px;font-size:14.5px;color:var(--ink-soft)}
-  .contact .mono-note a{color:var(--ink-soft)}
+  .step .n{
+    font-family:var(--mono);font-weight:600;font-size:15px;color:var(--gold-soft);
+    flex:0 0 44px;height:44px;border:1px solid var(--line-dark);border-radius:50%;
+    display:flex;align-items:center;justify-content:center;margin-top:2px;
+  }
+  .step p{max-width:620px;font-size:18px;color:#c6cddc}
+  .step p b{color:#fff;font-weight:600}
+  .contact{margin-top:48px}
+  .contact .mono-note{margin-top:30px;font-size:14px;color:#aab3c6}
+  .contact .mono-note a{color:#e8ebf2}
 
   /* ── footer ────────────────────────────────────────────── */
-  footer{border-top:1px solid var(--line);padding:56px 0 72px}
-  footer p{font-family:var(--mono);font-size:13px;line-height:2.2;color:var(--ink-faint)}
+  footer{background:var(--ink);border-top:1px solid var(--line-dark);padding:52px 0 64px}
+  .foot{display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
+  .foot .brand span{color:#fff}
+  footer p{font-family:var(--mono);font-size:12.5px;line-height:2.1;color:#8792a8;text-align:right}
 
   /* ── reveal on scroll (html.js set by script; no-JS stays visible) ── */
-  html.js .rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
+  html.js .rv{opacity:0;transform:translateY(22px);transition:opacity .8s cubic-bezier(.2,.6,.2,1),transform .8s cubic-bezier(.2,.6,.2,1)}
   html.js .rv.in{opacity:1;transform:none}
   @media (prefers-reduced-motion:reduce){
     html.js .rv{opacity:1;transform:none;transition:none}
+    .door:hover,.fix:hover{transform:none}
     html{scroll-behavior:auto}
   }
 
-  @media (max-width:760px){
+  @media (max-width:860px){
     .doors{grid-template-columns:1fr}
     .math{grid-template-columns:1fr}
+    .math-arrow{position:static;transform:rotate(90deg);margin:-6px auto}
   }
   @media (max-width:680px){
     body{font-size:17.5px}
+    .hero{padding:84px 0 60px}
+    .hero::after{display:none}
     .board-grid{grid-template-columns:1fr}
     .tile:nth-child(odd){border-right:none}
+    .tile:nth-last-child(-n+2){border-bottom:1px solid var(--line)}
+    .tile:last-child{border-bottom:none}
     .fix-grid{grid-template-columns:1fr}
-    .ledger,.record{padding:36px 26px}
-    .note-card{padding:32px 24px}
-    section{padding:66px 0}
-    .rrow .num{flex-basis:60px}
+    .ledger,.record,.straight{padding:38px 28px}
+    .note-card{padding:34px 26px}
+    .math-card{padding:32px 26px}
+    section{padding:70px 0}
+    .rrow .num{flex-basis:64px}
+    .phase{padding-left:48px}
+    .drow{padding:22px 26px}
+    .faq summary{padding:20px 22px}
+    .faq .a{padding:0 22px 24px}
   }
 </style>
 </head>
@@ -240,8 +364,8 @@
 <header>
   <div class="nav">
     <a class="brand" href="#top" aria-label="Windward home">
-      <svg width="30" height="22" viewBox="0 0 30 22" fill="none" aria-hidden="true">
-        <path d="M2 20 L13 2 L18 10 Z" fill="#1b2437"/>
+      <svg width="34" height="25" viewBox="0 0 30 22" fill="none" aria-hidden="true">
+        <path d="M2 20 L13 2 L18 10 Z" fill="#182136"/>
         <path d="M14 20 L21 8 L28 20 Z" fill="#d9a13d"/>
       </svg>
       <span>WINDWARD</span>
@@ -253,43 +377,69 @@
 <main id="top">
 
   <!-- ── HERO ─────────────────────────────────────────────── -->
-  <div class="hero wrap">
-    <p class="kicker flame rv">Capital + Operating Partners &nbsp;·&nbsp; Behavioral Health &amp; Addiction Treatment</p>
-    <h1 class="rv">We fund the turnaround.<br>We run the turnaround.<br><span class="flame">You keep a stake in it.</span></h1>
-    <p class="rv">Windward recapitalizes struggling treatment facilities with our own capital and our own operators. Not a loan — no daily debits, no personal guarantee, no liens. Not a fire sale — you stay on as an equity partner. We buy into the facility at today's honest value, put money to work inside it, run the turnaround shoulder to shoulder with your team, and share the upside of what it becomes.</p>
-    <div class="hero-ctas rv">
-      <a class="btn btn-primary" href="#evaluation">Request a Confidential Call</a>
-      <a class="btn btn-ghost" href="#model">See How the Partnership Works</a>
-    </div>
+  <div class="hero">
+    <div class="wrap">
+      <p class="kicker flame rv">Capital + Operating Partners &nbsp;·&nbsp; Behavioral Health &amp; Addiction Treatment</p>
+      <h1 class="rv">We fund the turnaround.<br>We run the turnaround.<br><span class="flame">You keep a stake in it.</span></h1>
+      <p class="sub rv">Windward recapitalizes struggling treatment facilities with our own capital and our own operators. Not a loan — no daily debits, no personal guarantee, no liens. Not a fire sale — you stay on as an equity partner. We buy into the facility at today's honest value, put money to work inside it, run the turnaround shoulder to shoulder with your team, and share the upside of what it becomes.</p>
+      <div class="hero-ctas rv">
+        <a class="btn btn-primary" href="#evaluation">Request a Confidential Call</a>
+        <a class="btn btn-ghost" href="#model">How the Partnership Works</a>
+      </div>
 
-    <div class="board rv">
-      <div class="board-head">
-        <span>The operating board — what we manage to</span>
-        <span>Locked baseline · verified from your systems</span>
+      <div class="board rv">
+        <div class="board-head">
+          <span class="live"><i></i>The operating board — what we manage to</span>
+          <span>Locked baseline · verified from your systems</span>
+        </div>
+        <div class="board-grid">
+          <div class="tile">
+            <div class="metric">Census vs. Capacity</div>
+            <div class="row">
+              <div class="dir"><span class="arrow">▲</span> UP</div>
+              <svg width="96" height="30" viewBox="0 0 96 30" fill="none" aria-hidden="true">
+                <polyline points="2,24 18,21 34,23 50,15 66,17 82,8 92,6" stroke="#3fae6a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="92" cy="6" r="3" fill="#3fae6a"/>
+              </svg>
+            </div>
+            <div class="sub">avg daily census, trailing 90</div>
+          </div>
+          <div class="tile">
+            <div class="metric">AMA / ACA Rate</div>
+            <div class="row">
+              <div class="dir"><span class="arrow">▼</span> DOWN</div>
+              <svg width="96" height="30" viewBox="0 0 96 30" fill="none" aria-hidden="true">
+                <polyline points="2,6 18,9 34,7 50,15 66,13 82,22 92,24" stroke="#3fae6a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="92" cy="24" r="3" fill="#3fae6a"/>
+              </svg>
+            </div>
+            <div class="sub">incl. weekend differential</div>
+          </div>
+          <div class="tile">
+            <div class="metric">Frontline Turnover</div>
+            <div class="row">
+              <div class="dir"><span class="arrow">▼</span> DOWN</div>
+              <svg width="96" height="30" viewBox="0 0 96 30" fill="none" aria-hidden="true">
+                <polyline points="2,5 18,10 34,8 50,14 66,18 82,20 92,25" stroke="#3fae6a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="92" cy="25" r="3" fill="#3fae6a"/>
+              </svg>
+            </div>
+            <div class="sub">clinical &amp; nursing, annualized</div>
+          </div>
+          <div class="tile">
+            <div class="metric">Net Collections / Bed</div>
+            <div class="row">
+              <div class="dir"><span class="arrow">▲</span> UP</div>
+              <svg width="96" height="30" viewBox="0 0 96 30" fill="none" aria-hidden="true">
+                <polyline points="2,25 18,22 34,24 50,17 66,12 82,11 92,5" stroke="#3fae6a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="92" cy="5" r="3" fill="#3fae6a"/>
+              </svg>
+            </div>
+            <div class="sub">payer-mix adjusted</div>
+          </div>
+        </div>
+        <p class="mono-note board-note">Every partnership runs on a board like this one. Our capital is in the facility — if the board doesn't move, our money is stuck in it right next to yours.</p>
       </div>
-      <div class="board-grid">
-        <div class="tile">
-          <div class="metric">Census vs. Capacity</div>
-          <div class="dir"><span class="arrow">▲</span> UP</div>
-          <div class="sub">avg daily census, trailing 90</div>
-        </div>
-        <div class="tile">
-          <div class="metric">AMA / ACA Rate</div>
-          <div class="dir"><span class="arrow">▼</span> DOWN</div>
-          <div class="sub">incl. weekend differential</div>
-        </div>
-        <div class="tile">
-          <div class="metric">Frontline Turnover</div>
-          <div class="dir"><span class="arrow">▼</span> DOWN</div>
-          <div class="sub">clinical &amp; nursing, annualized</div>
-        </div>
-        <div class="tile">
-          <div class="metric">Net Collections / Bed</div>
-          <div class="dir"><span class="arrow">▲</span> UP</div>
-          <div class="sub">payer-mix adjusted</div>
-        </div>
-      </div>
-      <p class="mono-note board-note">Every partnership runs on a board like this one. Our capital is in the facility — if the board doesn't move, our money is stuck in it right next to yours.</p>
     </div>
   </div>
 
@@ -301,20 +451,20 @@
       <p class="lede rv">Distress attracts a very specific kind of money. By the time census slips and payroll gets tight, your inbox is full of offers — and every one of them is priced against your desperation. Three doors keep getting opened for owners like you:</p>
 
       <div class="doors">
-        <div class="door rv">
-          <p class="kicker">Door 1 · The Advance</p>
+        <div class="door rv" data-n="01">
+          <p class="kicker">The Advance</p>
           <h3>Fast money that eats the facility</h3>
           <p>Merchant cash advances and "revenue-based financing" wire funds in days — then take them back through automatic daily debits from your operating account. Struggling operators stack them: a second advance to survive the first, a third to survive the second, with blanket UCC liens filed against everything and a confession of judgment waiting in the fine print.</p>
           <p class="stat">Typical factor rates of 1.2–1.5 work out to effective APRs from <b>40% to over 300%</b>. Stacked advances routinely consume <b>30–60% of gross revenue</b> in daily debits.</p>
         </div>
-        <div class="door rv">
-          <p class="kicker">Door 2 · The Fire Sale</p>
+        <div class="door rv" data-n="02">
+          <p class="kicker">The Fire Sale</p>
           <h3>Selling at your worst number</h3>
           <p>Distressed facilities trade at the bottom of the market — a few turns of a depressed EBITDA — while stabilized platforms command multiples several times higher. Selling under pressure means your hardest twelve months become the price of everything you built. The buyer gets the recovery. You watch it from the outside.</p>
           <p class="stat">Struggling programs trade near <b>3–4x</b> a depressed EBITDA. Healthy platforms with a full continuum command <b>9–12x</b>. Distress hands that entire spread to the buyer.</p>
         </div>
-        <div class="door rv">
-          <p class="kicker">Door 3 · The Slow Bleed</p>
+        <div class="door rv" data-n="03">
+          <p class="kicker">The Slow Bleed</p>
           <h3>Cutting until there's nothing left to save</h3>
           <p>The quietest door: stretch vendors, thin the clinical schedule, ride the receivables, hope census turns on its own. Every cut pushes census lower — and census is the thing that pays for everything. Treatment facilities across the country have closed exactly this way. Not from one blow. From eighteen months of them.</p>
           <p class="stat">Cuts to the frontline read as decline to referents, staff, and patients — <b>the death spiral is operational before it's financial</b>.</p>
@@ -325,7 +475,7 @@
   </section>
 
   <!-- ── THE PARTNERSHIP ──────────────────────────────────── -->
-  <section id="partnership">
+  <section id="partnership" class="band-wash">
     <div class="wrap">
       <p class="kicker rv">The Fourth Door</p>
       <h2 class="rv">We'd rather own part of the recovery than lend against the collapse.</h2>
@@ -351,15 +501,15 @@
       </div>
 
       <div class="straight rv">
-        <p class="kicker flame" style="margin-bottom:18px">Straight Talk</p>
-        <p>Yes — we are buying in low. Distress is why the price is low; capital and operations are what make it worth more. That's our upside, and we won't pretend otherwise.</p>
+        <p class="kicker bare">Straight Talk</p>
+        <p><b>Yes — we are buying in low.</b> Distress is why the price is low; capital and operations are what make it worth more. That's our upside, and we won't pretend otherwise.</p>
         <p>Here's yours: capital without debt, an operating team without fees, and a real stake in a recovery that actually happens. If we do our job, your retained equity in the rebuilt facility can be worth more than the whole facility was the day we met. If we don't, we're the ones holding a stake in a facility that didn't recover — right next to you.</p>
       </div>
     </div>
   </section>
 
-  <!-- ── THE MATH ─────────────────────────────────────────── -->
-  <section id="math">
+  <!-- ── THE MATH (navy band) ─────────────────────────────── -->
+  <section id="math" class="band-navy">
     <div class="wrap">
       <p class="kicker rv">The Math</p>
       <h2 class="rv">Why keeping 40% can beat keeping everything.</h2>
@@ -367,7 +517,7 @@
 
       <div class="math">
         <div class="math-card today rv">
-          <p class="kicker">Today · 100% Yours</p>
+          <p class="kicker bare">Today · 100% Yours</p>
           <h3>The facility as it stands</h3>
           <div class="mrow"><span>Census</span><span class="v">~60% and slipping</span></div>
           <div class="mrow"><span>EBITDA</span><span class="v">~breakeven</span></div>
@@ -375,8 +525,9 @@
           <div class="mrow"><span>What buyers offer</span><span class="v">a distressed multiple<br>of your worst year</span></div>
           <div class="mrow total"><span>Your 100%</span><span class="v">the offer you refuse<br>to say out loud</span></div>
         </div>
+        <div class="math-arrow" aria-hidden="true">→</div>
         <div class="math-card rebuilt rv">
-          <p class="kicker">Rebuilt · Your Retained Stake</p>
+          <p class="kicker bare">Rebuilt · Your Retained Stake</p>
           <h3>The same facility, turned</h3>
           <div class="mrow"><span>Census</span><span class="v">85%+ and stable</span></div>
           <div class="mrow"><span>EBITDA</span><span class="v">$1.5M–2M</span></div>
@@ -395,34 +546,36 @@
       <p class="kicker rv">The Model</p>
       <h2 class="rv">How a partnership runs</h2>
 
-      <div class="phase rv">
-        <p class="kicker">Phase 01 &nbsp;·&nbsp; Weeks 1–2</p>
-        <h3>Evaluation &amp; honest valuation</h3>
-        <p>We come on site. We walk the units, sit with charge nurses, ride the intake calls, and pull twelve months of census, AMA, turnover, and collections data — plus the complete debt picture, advances included. Then two numbers get locked in writing: the operating baseline we'll be measured against, and the valuation we buy in at, with the work shown. If we don't believe the facility can be turned, we say so and leave. No charge either way.</p>
-      </div>
+      <div class="phases">
+        <div class="phase rv">
+          <p class="kicker bare">Phase 01 &nbsp;·&nbsp; Weeks 1–2</p>
+          <h3>Evaluation &amp; honest valuation</h3>
+          <p>We come on site. We walk the units, sit with charge nurses, ride the intake calls, and pull twelve months of census, AMA, turnover, and collections data — plus the complete debt picture, advances included. Then two numbers get locked in writing: the operating baseline we'll be measured against, and the valuation we buy in at, with the work shown. If we don't believe the facility can be turned, we say so and leave. No charge either way.</p>
+        </div>
 
-      <div class="phase rv">
-        <p class="kicker">Phase 02 &nbsp;·&nbsp; Weeks 2–6</p>
-        <h3>Recapitalization &amp; stabilization</h3>
-        <p>Capital closes and goes to work in a fixed order: payroll secured first, existing advances retired or negotiated, critical vendors brought current, and the state's change-of-ownership and payer-enrollment requirements handled properly so the license, the contracts, and the census never skip a beat. The bleeding stops before the rebuilding starts.</p>
-      </div>
+        <div class="phase rv">
+          <p class="kicker bare">Phase 02 &nbsp;·&nbsp; Weeks 2–6</p>
+          <h3>Recapitalization &amp; stabilization</h3>
+          <p>Capital closes and goes to work in a fixed order: payroll secured first, existing advances retired or negotiated, critical vendors brought current, and the state's change-of-ownership and payer-enrollment requirements handled properly so the license, the contracts, and the census never skip a beat. The bleeding stops before the rebuilding starts.</p>
+        </div>
 
-      <div class="phase rv">
-        <p class="kicker">Phase 03 &nbsp;·&nbsp; Months 1–9</p>
-        <h3>Embedded operations</h3>
-        <p>We don't advise from a conference room. We install a daily operating rhythm, put real authority and clear ownership at the frontline, rebuild the intake-to-bed process, and start the culture work that everything else depends on — with your existing team, not a replacement one. The board is measured monthly, verified from your own source systems. Your staff usually has the answers already. Nobody ever asked them.</p>
-      </div>
+        <div class="phase rv">
+          <p class="kicker bare">Phase 03 &nbsp;·&nbsp; Months 1–9</p>
+          <h3>Embedded operations</h3>
+          <p>We don't advise from a conference room. We install a daily operating rhythm, put real authority and clear ownership at the frontline, rebuild the intake-to-bed process, and start the culture work that everything else depends on — with your existing team, not a replacement one. The board is measured monthly, verified from your own source systems. Your staff usually has the answers already. Nobody ever asked them.</p>
+        </div>
 
-      <div class="phase rv">
-        <p class="kicker">Phase 04 &nbsp;·&nbsp; Ongoing</p>
-        <h3>The upside, together</h3>
-        <p>As the board moves, the facility's value follows. We hold together and grow together — and if the day comes to sell, we decide together, with you sharing the exit at the rebuilt valuation instead of the distressed one you were offered at the bottom. A turnaround that collapses when the operator leaves wasn't a turnaround; ours stays, because we own it with you.</p>
+        <div class="phase rv">
+          <p class="kicker bare">Phase 04 &nbsp;·&nbsp; Ongoing</p>
+          <h3>The upside, together</h3>
+          <p>As the board moves, the facility's value follows. We hold together and grow together — and if the day comes to sell, we decide together, with you sharing the exit at the rebuilt valuation instead of the distressed one you were offered at the bottom. A turnaround that collapses when the operator leaves wasn't a turnaround; ours stays, because we own it with you.</p>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- ── WHAT WE FIX ──────────────────────────────────────── -->
-  <section id="fix">
+  <section id="fix" class="band-wash">
     <div class="wrap">
       <p class="kicker rv">What We Fix</p>
       <h2 class="rv">The problems that quietly kill treatment facilities</h2>
@@ -470,7 +623,7 @@
       <h2 class="rv">Built by an operator who is still operating</h2>
       <p class="lede rv">Windward wasn't founded by a fund manager or a career consultant. It was founded by a working operator currently running a multi-site behavioral health and addiction treatment platform — detox through outpatient, hundreds of beds, Joint Commission accredited — who has personally led the turnarounds this model is built on: facilities pulled back from operating losses, clinical teams retained through direct intervention, referral pipelines rebuilt from single-source dependency. When we invest, the team that shows up is the team that runs facilities for a living.</p>
 
-      <blockquote class="rv">"Excellence isn't a training. It's a system you run every day — and the frontline can tell within a week whether leadership actually means it."</blockquote>
+      <div class="quote rv"><p>"Excellence isn't a training. It's a system you run every day — and the frontline can tell within a week whether leadership actually means it."</p></div>
 
       <p class="lede rv">Our methodology draws on the service-culture discipline of Horst Schulze, the hardwired-execution frameworks of Quint Studer, and the Baldrige Health Care Criteria — applied not academically, but in live facilities, on real censuses, with our own money at stake.</p>
 
@@ -488,7 +641,7 @@
   </section>
 
   <!-- ── FIELD NOTES ──────────────────────────────────────── -->
-  <section id="field-notes">
+  <section id="field-notes" class="band-wash">
     <div class="wrap">
       <p class="kicker rv">Field Notes</p>
       <h2 class="rv">Three turnarounds from inside our own platform</h2>
@@ -567,7 +720,7 @@
   </section>
 
   <!-- ── SELECTIVITY ──────────────────────────────────────── -->
-  <section id="selectivity">
+  <section id="selectivity" class="band-wash">
     <div class="wrap">
       <p class="kicker rv">Selectivity</p>
       <h2 class="rv">We decline most partnerships. That's the model working.</h2>
@@ -583,10 +736,10 @@
     </div>
   </section>
 
-  <!-- ── REQUEST A CALL ───────────────────────────────────── -->
-  <section id="evaluation">
+  <!-- ── REQUEST A CALL (navy band) ───────────────────────── -->
+  <section id="evaluation" class="band-navy">
     <div class="wrap">
-      <p class="kicker flame rv">Request an Evaluation</p>
+      <p class="kicker rv">Request an Evaluation</p>
       <h2 class="rv">The evaluation is free.<br>The honesty is included.</h2>
       <p class="lede rv">Here is exactly what happens — and what doesn't — when you reach out:</p>
 
@@ -598,7 +751,7 @@
       </div>
 
       <div class="contact rv">
-        <a class="btn btn-primary" href="mailto:engage@windwardoperating.com?subject=Confidential%20call%20request">Start With the 30-Minute Call</a>
+        <a class="btn btn-ondark" href="mailto:engage@windwardoperating.com?subject=Confidential%20call%20request">Start With the 30-Minute Call</a>
         <p class="mono-note"><a href="mailto:engage@windwardoperating.com">engage@windwardoperating.com</a> &nbsp;·&nbsp; Confidential. NDA available on request.</p>
       </div>
     </div>
@@ -607,7 +760,14 @@
 </main>
 
 <footer>
-  <div class="wrap">
+  <div class="wrap foot">
+    <a class="brand" href="#top" aria-label="Windward home">
+      <svg width="30" height="22" viewBox="0 0 30 22" fill="none" aria-hidden="true">
+        <path d="M2 20 L13 2 L18 10 Z" fill="#ffffff"/>
+        <path d="M14 20 L21 8 L28 20 Z" fill="#d9a13d"/>
+      </svg>
+      <span>WINDWARD</span>
+    </a>
     <p>© 2026 Windward Operating Partners LLC<br>Capital and operating partnerships for behavioral health</p>
   </div>
 </footer>

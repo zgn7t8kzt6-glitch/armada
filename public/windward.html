@@ -380,25 +380,97 @@
     .doors{grid-template-columns:1fr}
     .math{grid-template-columns:1fr}
     .math-arrow{position:static;transform:rotate(90deg);margin:-6px auto}
+    .pof{grid-template-columns:1fr;gap:14px}
   }
   @media (max-width:680px){
-    body{font-size:17.5px}
-    .hero{padding:84px 0 60px}
+    body{font-size:17px}
+    .wrap{padding:0 20px}
+    .nav{padding:14px 20px}
+    .brand span{font-size:17px}
+    .brand em{font-size:8px}
+    .nav a.cta{font-size:11.5px;padding:9px 14px;letter-spacing:.14em}
+    .hero{padding:64px 0 52px}
     .hero::after{display:none}
+    .hero p.sub{font-size:18px}
+    .hero-ctas{margin-top:36px}
+    .kicker{letter-spacing:.22em;font-size:11.5px;gap:10px}
+    .kicker::before{flex-basis:20px}
+    .lede{font-size:18px}
+    section{padding:64px 0}
+    section h2{margin:16px 0 20px}
+    .board{margin-top:60px;border-radius:12px}
+    .board-head{padding:16px 20px;gap:8px}
     .board-grid{grid-template-columns:1fr}
+    .tile{padding:22px 20px 18px}
     .tile:nth-child(odd){border-right:none}
     .tile:nth-last-child(-n+2){border-bottom:1px solid var(--line)}
     .tile:last-child{border-bottom:none}
-    .fix-grid{grid-template-columns:1fr}
-    .ledger,.record,.straight{padding:38px 28px}
-    .note-card{padding:34px 26px}
-    .math-card{padding:32px 26px}
-    section{padding:70px 0}
-    .rrow .num{flex-basis:64px}
-    .phase{padding-left:48px}
-    .drow{padding:22px 26px}
-    .faq summary{padding:20px 22px}
-    .faq .a{padding:0 22px 24px}
+    .tile .dir{font-size:26px}
+    .board-note{padding:16px 20px}
+    .doors{gap:18px;margin-top:44px}
+    .door{padding:28px 22px 24px;border-radius:12px}
+    .door::before{font-size:58px;right:12px}
+    .fix-grid{grid-template-columns:1fr;gap:18px;margin-top:44px}
+    .fix{padding:28px 22px;border-radius:12px}
+    .ledger{padding:34px 22px;border-radius:12px;margin-top:44px}
+    .ledger h3{font-size:22px}
+    .lrow{gap:16px;padding:18px 0}
+    .lrow .mark{flex-basis:34px;height:34px;font-size:14px}
+    .ledger-gap{height:44px}
+    .straight{padding:34px 24px;border-radius:12px;margin-top:44px}
+    .straight p{font-size:18px}
+    .record{padding:34px 22px;border-radius:12px;margin-top:44px}
+    .record h3{font-size:13.5px;letter-spacing:.16em}
+    .rrow{gap:16px;padding:17px 0}
+    .rrow .num{flex-basis:56px;font-size:16px}
+    .rrow p{font-size:16px}
+    .note-card{padding:30px 22px;border-radius:12px;margin-top:22px}
+    .note-card:first-of-type{margin-top:44px}
+    .note-card h3{font-size:21px}
+    .math{margin-top:44px;gap:18px}
+    .math-card{padding:28px 20px;border-radius:12px}
+    .math-arrow{width:44px;height:44px;font-size:19px}
+    .mrow{font-size:15.5px;padding:13px 0}
+    .mrow .v{font-size:13px}
+    .phases{margin-top:44px}
+    .phase{padding:0 0 44px 42px}
+    .phase::before{width:15px;height:15px;border-width:2.5px}
+    .phase::after{left:7px}
+    .phase h3{font-size:22px}
+    .quote{padding-left:22px;margin:34px 0}
+    .quote p{font-size:19.5px}
+    .quote::before{font-size:80px;top:-26px;left:16px}
+    .faq{margin-top:38px}
+    .faq summary{padding:18px 18px;font-size:17px;gap:14px}
+    .faq .a{padding:0 18px 22px;font-size:16px}
+    .criteria{margin-top:44px;border-radius:12px}
+    .criteria .chead{padding:16px 22px}
+    .crow{grid-template-columns:1fr;gap:6px;padding:18px 22px}
+    .crow .k{padding-top:0}
+    .crow p{font-size:16px}
+    .decline{margin-top:44px;border-radius:12px}
+    .decline .dhead{padding:16px 22px}
+    .drow{padding:18px 22px;gap:14px}
+    .drow .x{flex-basis:26px;height:26px;font-size:12px}
+    .drow p{font-size:16px}
+    .pof{margin-top:40px}
+    .pof-card{padding:20px 20px;border-radius:10px}
+    .steps{margin-top:40px}
+    .step{gap:16px;padding:22px 0}
+    .step .n{flex-basis:36px;height:36px;font-size:13px}
+    .step p{font-size:16.5px}
+    .intake{padding:28px 18px;border-radius:12px;margin-top:44px}
+    .intake h3{font-size:20px}
+    .fgrid{grid-template-columns:1fr;gap:16px}
+    .intake .actions{flex-direction:column;align-items:stretch;gap:16px;text-align:center}
+    .foot{flex-direction:column;align-items:flex-start;gap:20px}
+    footer p,footer .legal{text-align:left}
+  }
+  @media (max-width:480px){
+    .hero-ctas{flex-direction:column;align-items:stretch}
+    .btn{text-align:center;padding:16px 20px;letter-spacing:.14em}
+    .board-head{flex-direction:column;align-items:flex-start}
+    .tile .row svg{width:72px}
   }
 </style>
 </head>

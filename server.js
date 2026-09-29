@@ -4461,6 +4461,33 @@ app.get('/api/command/overview', requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+// Census history: average daily census by LOC since the first recorded day.
+app.get('/api/command/census-history', requireAuth, requireAdmin, (req, res) => {
+  const overall = db.prepare(`
+    SELECT AVG(census) avg, MIN(date) first_date, MAX(date) last_date, COUNT(*) days, MAX(census) peak
+    FROM daily_metrics WHERE census IS NOT NULL AND census > 0
+  `).get();
+
+  const byLoc = db.prepare(`
+    SELECT loc, ROUND(AVG(cnt),1) avg, MIN(date) first_date, MAX(date) last_date, COUNT(*) days
+    FROM (SELECT date, loc, COUNT(*) cnt FROM revenue_days WHERE loc IS NOT NULL AND loc != '' GROUP BY date, loc)
+    GROUP BY loc ORDER BY avg DESC
+  `).all();
+
+  const detoxRow = db.prepare(`
+    SELECT ROUND(AVG(cnt),1) avg, MIN(date) first_date, MAX(date) last_date, COUNT(*) days
+    FROM (SELECT date, COUNT(*) cnt FROM revenue_days WHERE loc LIKE '3.7%' GROUP BY date)
+  `).get();
+
+  const monthly = db.prepare(`
+    SELECT substr(date,1,7) month, ROUND(AVG(census),1) avg, COUNT(*) days
+    FROM daily_metrics WHERE census IS NOT NULL AND census > 0 AND date >= date('now','-12 months')
+    GROUP BY substr(date,1,7) ORDER BY month
+  `).all();
+
+  res.json({ overall: overall || null, byLoc, detox: detoxRow || null, monthly, today: appToday() });
+});
+
 // Period summary since a given date (default: 1st of the current month).
 // Pure Kipu/Salesforce data — scheduled, admitted, discharged, AMA + the
 // discharge breakdown and an AMA drill-down list (reason + link to notes).

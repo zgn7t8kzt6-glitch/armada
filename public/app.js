@@ -3544,10 +3544,53 @@ async function loadCmdRevenue(){
       ${d.unrated?`<div class="ret-card rc-warn"><div class="n">${d.unrated}</div><div class="l">No rate set</div></div>`:''}
     </div></div>`;
 }
+async function loadCmdCensusHistory(){
+  const el=$('cmdCensusHistory'); if(!el) return;
+  if(!(ME && ME.role==='admin')){ el.innerHTML=''; return; }
+  let d; try{ d=await api('/command/census-history'); }catch(e){ el.innerHTML=''; return; }
+  if(!d || (!d.overall && !d.byLoc?.length)){ el.innerHTML=''; return; }
+  const fmt1=(n)=>n!=null?Number(n).toFixed(1):'—';
+  const locRows=(d.byLoc||[]).map(r=>{
+    const color=/3\.[2-9].*WM|3\.7/i.test(r.loc||'')?'#1a6b7a':'#235056';
+    return `<div class="ret-card" style="border-top:3px solid ${color}">
+      <div class="n" style="font-size:22px">${fmt1(r.avg)}</div>
+      <div class="l">${esc(r.loc)}</div>
+      <div class="hint" style="font-size:11px;margin-top:3px">${r.days} days tracked</div></div>`;
+  }).join('');
+  const months=d.monthly||[]; const maxAvg=Math.max(...months.map(m=>m.avg||0),1);
+  const spark=months.map(m=>{
+    const h=Math.round((m.avg/maxAvg)*48);
+    const mo=(m.month||'').slice(5);
+    const label=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+mo]||mo;
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">
+      <div style="font-size:10px;color:var(--muted)">${fmt1(m.avg)}</div>
+      <div style="width:100%;max-width:28px;height:${h}px;background:var(--aqua);border-radius:3px 3px 0 0;min-height:2px"></div>
+      <div style="font-size:10px;color:var(--muted)">${label}</div></div>`;
+  }).join('');
+  const dateRange=d.overall?`${(d.overall.first_date||'').slice(0,7)} → ${(d.overall.last_date||'').slice(0,7)}`:'';
+  el.innerHTML=`<div class="card" style="border-left:4px solid var(--aqua)">
+    <div class="cmd-hero-row">
+      <div><h3 style="margin:0">Census history <span class="hint" style="font-weight:400">· since day one</span></h3>
+        <p class="sub sans" style="margin:2px 0 0">${dateRange}${d.overall?.days?' · '+d.overall.days+' days recorded':''}</p></div>
+    </div>
+    <div class="ret-cards" style="margin-top:10px">
+      <div class="ret-card" style="border-top:3px solid var(--aqua)">
+        <div class="n">${fmt1(d.overall?.avg)}</div><div class="l">All LOC avg/day</div>
+        <div class="hint" style="font-size:11px;margin-top:3px">Peak ${d.overall?.peak??'—'}</div></div>
+      <div class="ret-card" style="border-top:3px solid #1a6b7a">
+        <div class="n">${fmt1(d.detox?.avg)}</div><div class="l">Detox avg/day</div>
+        <div class="hint" style="font-size:11px;margin-top:3px">${d.detox?.days??'—'} days</div></div>
+      ${locRows}
+    </div>
+    ${spark?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">
+      <div class="hint" style="margin-bottom:6px;font-size:11px">Monthly avg census · last 12 months</div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:68px">${spark}</div></div>`:''}
+  </div>`;
+}
 async function loadCommand(){
   let d; try{ d = await api('/command/overview'); }catch(e){ $('cmdFlow').innerHTML='<div class="card"><div class="empty">Command Center is available to leadership.</div></div>'; return; }
   COMMAND_DATA=d;
-  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning(); loadCmdRevenue(); loadAlertScore();
+  loadMoments(); loadVoice(); loadMealCount(); loadCmdSurveys(); loadPlanMorning(); loadCmdRevenue(); loadCmdCensusHistory(); loadAlertScore();
   if($('cmdFlowDetail')){ $('cmdFlowDetail').style.display='none'; $('cmdFlowDetail').removeAttribute('data-key'); }
   loadCommandPeriod();
   $('cmdAsOf').textContent = 'as of '+new Date(d.asOf).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
